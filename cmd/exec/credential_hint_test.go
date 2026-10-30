@@ -39,10 +39,6 @@ func TestIsCommandInlineCredentialError(t *testing.T) {
 	})
 }
 
-// TestCredentialInlineHint asserts the hint points at --env, quotes the command
-// the caller actually ran, and never echoes a credential value (there is nothing
-// to echo—the example is fixed—but this guards against a future edit that starts
-// interpolating the rejected line).
 // hintedRefusal is a coded refusal carrying the server's hint.
 type hintedRefusal struct{ code, hint string }
 
@@ -63,6 +59,8 @@ func TestCodedRefusalHint_ServerHintReplacesTheLocalOne(t *testing.T) {
 	assert.Equal(t, local, codedRefusalHint(hintedRefusal{code: "command_inline_credential"}, local))
 }
 
+// TestCredentialInlineHint pins the --env hint, which never echoes a credential value. Its example
+// is fixed, so this guards against an edit that starts interpolating the rejected line.
 func TestCredentialInlineHint(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -200,10 +198,9 @@ func TestExecInlineCredentialDenialTablePrintsHint(t *testing.T) {
 	assert.NotContains(t, out, "-pSecret", "the rejected command line must never be echoed back")
 }
 
-// TestExecNonInlineCredentialErrorFallsThroughUnchanged is a non-regression
-// check: a submission failure with a different (or no) error code must still
-// hit the pre-existing generic failure path (plain "Error: ..." line, no
-// credential hint), not the new branch.
+// TestExecNonInlineCredentialErrorFallsThroughUnchanged pins that a submission failure with
+// another code, or none, takes the generic failure path: a plain "Error: ..." line and no
+// credential hint.
 func TestExecNonInlineCredentialErrorFallsThroughUnchanged(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

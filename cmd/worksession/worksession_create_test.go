@@ -106,9 +106,8 @@ func TestPollForApproval_APIFailureIsNotTerminal(t *testing.T) {
 	assert.NotErrorAs(t, err, &terminal)
 }
 
-// The session is created and pending when the polls run out, so giving up must
-// exit on the pending contract like the timeout does: exit 1 reads as retryable
-// and an agent answers it with a second session and a second approval request.
+// Giving up on failed polls leaves the session pending, so it exits on the pending contract:
+// exit 1 reads as retryable and gets answered with a second session.
 func TestPollForApproval_GivingUpIsPending(t *testing.T) {
 	requests := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -222,10 +221,8 @@ func TestPollForApproval_TimeoutIsNotTerminal(t *testing.T) {
 	assert.ErrorAs(t, err, &pending)
 }
 
-// A 429 must not starve the wait: the session may still be pending, only the
-// status GET refused. Without the deadline extension, the third 429 (arriving
-// right at the original deadline) would end the wait with "timed out" before
-// the fourth request—the one that finally reports "approved"—ever fires.
+// Without the deadline extension, the third 429, at the original deadline, would end the wait
+// before the fourth poll reports "approved".
 func TestPollForApproval_ThrottleExtendsTheDeadline(t *testing.T) {
 	const timeout = 30 * time.Millisecond
 	const interval = 10 * time.Millisecond
@@ -255,9 +252,8 @@ func TestPollForApproval_ThrottleExtendsTheDeadline(t *testing.T) {
 	assert.GreaterOrEqual(t, elapsed, timeout, "the throttle extension must carry the wait past the original deadline")
 }
 
-// A run of 429s must not end the wait through the failed-poll cap. That cap is
-// for a server the CLI cannot reach; a 429 is the server answering, and the
-// throttle budget plus the deadline are what bound it.
+// The failed-poll cap is for a server the CLI cannot reach; a 429 is the server answering, bounded
+// by the throttle budget and the deadline instead.
 func TestPollForApproval_SustainedThrottleDoesNotTripTheFailureCap(t *testing.T) {
 	const timeout = 150 * time.Millisecond
 	const interval = 2 * time.Millisecond
@@ -345,10 +341,8 @@ func TestPollForApproval_ThrottleWarnsOnce(t *testing.T) {
 	assert.NotContains(t, stderr, "Poll failed")
 }
 
-// The progress line reports how long the caller has been waiting, so a 429 that
-// pushes the deadline out must not make it shrink. Deriving it from what is left
-// before a moving deadline did exactly that: six throttled polls buy ~1.26s of
-// extension, and the wait then reported 0s elapsed after 1.26s of waiting.
+// The progress line's elapsed time must not shrink when a 429 pushes the deadline out, as it did
+// when derived from the time left before a moving deadline.
 func TestPollForApproval_ElapsedTracksWallClockAcrossAThrottleExtension(t *testing.T) {
 	const timeout = 2 * time.Second
 	const interval = 20 * time.Millisecond
@@ -776,10 +770,9 @@ func TestWorkSessionCreateWaitRejectedJSONCarriesTheSessionID(t *testing.T) {
 	}`, stderr)
 }
 
-// The refusal's follow-ups are read by an agent that runs them, so every one of
-// them has to be a command the session can still take. RunUseSession is the seam
-// that decides: it refuses anything but an active session, and none of the five
-// statuses behind a terminalWaitError can become active again.
+// An agent runs the refusal's follow-ups, so each must be a command the session can still take.
+// RunUseSession refuses anything but an active session, which no terminalWaitError status can
+// reach.
 func TestRunUseSessionRefusesASettledSession(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -829,8 +822,6 @@ func TestPollForApproval_EveryEndedStatusHasACase(t *testing.T) {
 	}
 }
 
-// A wait that times out on a run of refusals keeps the last one behind the
-// timeout: still pending (exit 4), with the refusal's hint for the output.
 func TestPollForApproval_TimeoutOnARefusalKeepsTheHint(t *testing.T) {
 	t.Parallel()
 	const hint = "Too many requests were made in a short time; wait, then retry."
@@ -855,7 +846,6 @@ func TestPollForApproval_TimeoutOnARefusalKeepsTheHint(t *testing.T) {
 	assert.Zero(t, utils.HTTPStatusCode(err))
 }
 
-// A plain timeout carries no hint.
 func TestPollForApproval_PlainTimeoutCarriesNoHint(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

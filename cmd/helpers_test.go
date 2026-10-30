@@ -18,7 +18,7 @@ import (
 // waits out go test's own timeout and the child outlives the test binary.
 const helperProcessTimeout = 60 * time.Second
 
-func homeEnvVar() string { // A test that sets only HOME points the Windows run at the real user's home, so the config it wrote under t.TempDir() is never the one being read.
+func homeEnvVar() string { // setting only HOME points a Windows run at the real user's home
 	if runtime.GOOS == "windows" {
 		return "USERPROFILE"
 	}
@@ -55,7 +55,7 @@ func runHelperProcess(t *testing.T, helperTest, marker string, args []string, en
 	return stdoutBuf.String(), stderrBuf.String(), exitCode
 }
 
-func helperArgsAfter(args []string, marker string) ([]string, bool) { // Skips past the -test flags a re-executed test binary still carries in its own argv.
+func helperArgsAfter(args []string, marker string) ([]string, bool) { // skips the -test flags the re-executed binary still carries
 	if i := slices.Index(args, marker); i >= 0 {
 		return args[i+1:], true
 	}

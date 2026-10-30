@@ -162,7 +162,6 @@ func TestValidateExpiry(t *testing.T) {
 	assert.ErrorContains(t, validateExpiry("2026-10-25T12:00:00Z"), "not in the future")
 }
 
-// A listing fetches names only for what its entries reference.
 func TestWorkspaceNames_FetchesOnlyWhatTheEntriesNeed(t *testing.T) {
 	tests := []struct {
 		name      string

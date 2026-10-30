@@ -201,10 +201,9 @@ func TestExecIntentDeviationPrintsSelfServiceHintAfterWaitTimeout(t *testing.T) 
 	assert.Contains(t, stderr, "work-session update [SESSION_ID] --title")
 }
 
-// TestExecWaitTimeoutCarriesTheApprovalRequestID drives a real --wait-approval
-// timeout through the subprocess and checks that the request id the wait loop
-// picked up while polling reaches the JSON envelope, not just the in-process
-// RunExecWithApprovalWait return value (TestRunExecWithApprovalWait_TimeoutCarriesTheApprovalRequestID).
+// TestExecWaitTimeoutCarriesTheApprovalRequestID checks through a subprocess that the request id
+// the wait loop picked up while polling reaches the JSON envelope, not only the in-process return
+// value that TestRunExecWithApprovalWait_TimeoutCarriesTheApprovalRequestID checks.
 func TestExecWaitTimeoutCarriesTheApprovalRequestID(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

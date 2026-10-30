@@ -73,7 +73,6 @@ func requestServerActionWithMFA(serverName, action string, force bool) error {
 	return err
 }
 
-// busyGuardMessage returns the busy-guard refusal text, tailored to whether --force was already used.
 func busyGuardMessage(serverName string, force bool) string {
 	if force {
 		return fmt.Sprintf("Server '%s' is still busy with active user work "+

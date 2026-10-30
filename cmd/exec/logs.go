@@ -46,10 +46,8 @@ Run the command again later to check for completion.`,
 			fmt.Fprintln(os.Stderr, line)
 		}
 
-		// Ahead of the approval hold: a parked command has no approval request,
-		// so reporting one would name a queue it is not in. This is the detach
-		// path's only sight of the demand—SubmitCommand returns before
-		// the verdict, so --detach cannot see it at submission time.
+		// A parked command has no approval request, so this precedes the approval hold. This is the
+		// detach path's only sight of the demand: SubmitCommand returns before the verdict.
 		if event.IsAwaitingPurposeStatus(details.Status) {
 			utils.PrintPurposeDemand(
 				utils.PurposeDemandLead, details.ID, details.PurposeExpiresAt,
@@ -67,9 +65,8 @@ Run the command again later to check for completion.`,
 			os.Exit(utils.ExitCodePendingApproval)
 		}
 
-		// Exit 6 rather than 1, and through the envelope so --output json answers
-		// this refusal the way exec and work-session create do: retrying only
-		// files another approval request.
+		// Exit 6 through the envelope, as exec and work-session create do: retrying only files
+		// another approval request.
 		if event.IsRejectedStatus(details.Status) {
 			rejected := &event.CommandRejectedError{CommandID: details.ID, Cause: details.RejectionCause}
 			// The gate refused a script body on the command line: the reviewer
@@ -84,12 +81,10 @@ Run the command again later to check for completion.`,
 			return
 		}
 
-		// Only the statuses whose outcome prints the output are worth a fetch, for
-		// two different reasons. A status-only failure answers with a line of its
-		// own and an empty stdoutLine, so the round trip buys nothing and a chunk
-		// store that hangs costs the wait. A running status needs the skip to stay
-		// correct: its outcome exits 0, so a read error would take the
-		// exitCode == 0 gate below and bury the "still running" line.
+		// Fetch output only for statuses whose outcome prints it. A status-only failure prints a
+		// line of its own, so a hanging chunk store would only cost the wait; a running status
+		// exits 0, so a read error would take the exitCode == 0 gate below and bury the "still
+		// running" line.
 		var readErr error
 		if !event.IsRunningStatus(details.Status) && !event.IsStatusOnlyFailure(details.Status) {
 			output, oerr := event.ResolveCommandOutput(alpaconClient, jobID, details.Result)
@@ -100,10 +95,9 @@ Run the command again later to check for completion.`,
 			}
 		}
 
-		// What the requester said the command was for, ahead of the outcome and
-		// on stderr so stdout stays the command's own output. Sanitized here
-		// and not at the API boundary: this is text one principal wrote that
-		// now reaches another principal's terminal (#364).
+		// The stated purpose goes to stderr ahead of the outcome, keeping stdout the command's
+		// output. Sanitized here: text one principal wrote now reaches another principal's
+		// terminal.
 		if details.Purpose != "" {
 			fmt.Fprintf(os.Stderr, "Stated purpose: %s\n",
 				utils.SanitizeTerminalText(details.Purpose))
@@ -163,10 +157,9 @@ func logsAccountFlags(details event.EventDetails) (flags []string, note string) 
 // awaiting_purpose demand, the awaiting_approval hold, nor a rejection reaches
 // here: the caller answers all three on their own contracts first.
 func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine string, exitCode int) {
-	// These lines are written raw, outside the Cli* sanitizing helpers (#364). A
-	// Status that reached one of these branches equals the literal it was compared
-	// against, so it needs no strip; the ID, an unknown phase, and the
-	// unrecognised-status fallback carry the server's own text and do.
+	// These lines are written raw, outside the Cli* helpers. A Status that reached a branch equals
+	// the literal it was compared against and needs no strip; the ID, an unknown phase and the
+	// unrecognized-status fallback carry the server's own text and do.
 	if event.IsRunningStatus(details.Status) {
 		stderrLine = fmt.Sprintf(
 			"command is still running (status: %s).\nRun `alpacon exec logs %s` again to check later.\n",
@@ -205,7 +198,8 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 		return details.Result, "", 0
 	}
 
-	// Success nil on a known-success status means alpamon did not report failure (success=(exitCode==0) contract).
+	// A nil Success on a known-success status means Alpamon reported no failure: it sends
+	// success=(exitCode==0).
 	if details.Status == "completed" || details.Status == "success" {
 		return details.Result, "", 0
 	}

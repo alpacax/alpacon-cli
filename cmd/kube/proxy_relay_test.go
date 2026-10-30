@@ -911,8 +911,6 @@ func TestConnectRelayCloseCancelsPendingDial(t *testing.T) {
 	case <-time.After(relayTestTimeout):
 		t.Fatal("Serve did not return after Close")
 	}
-	// No tunnel opened: the client sees no established line, only the end
-	// of the connection, possibly after a refusal.
 	got, _ := io.ReadAll(conn)
 	assert.NotContains(t, string(got), connectEstablished)
 }
@@ -937,9 +935,6 @@ func TestConnectRelayServeReportsListenerClosedElsewhere(t *testing.T) {
 	assert.NoError(t, relay.Close())
 }
 
-// The header deadline bounds reading the CONNECT request only: an upstream
-// that takes longer than it to reach, through a slow proxy say, still gets
-// the tunnel established instead of a dropped connection.
 func TestConnectRelaySlowDialOutlastsTheHeaderDeadline(t *testing.T) {
 	t.Parallel()
 	target := listenTCP(t, func(conn net.Conn) {

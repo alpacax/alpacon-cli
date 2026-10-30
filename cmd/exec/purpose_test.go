@@ -176,8 +176,8 @@ func TestExecPurposeTrimsBeforeSending(t *testing.T) {
 	assert.Equal(t, "clock skew", sent["purpose"])
 }
 
-// TestExecLogsShowsTheStatedPurpose gives EventDetails.Purpose its reader. A
-// field parsed into nothing is a promise no surface keeps.
+// TestExecLogsShowsTheStatedPurpose pins that exec logs prints EventDetails.Purpose, sanitized, on
+// stderr.
 func TestExecLogsShowsTheStatedPurpose(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +189,7 @@ func TestExecLogsShowsTheStatedPurpose(t *testing.T) {
 				"success": true,
 				"result":  "ok",
 				// Server-supplied text written by one principal, printed to
-				// another's terminal—so the escape must not survive (#364).
+				// another's terminal, so the escape must not survive.
 				"purpose": "chronyd drifted 40s\x1b[31m",
 			})
 			return

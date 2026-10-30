@@ -89,7 +89,6 @@ func stubSigner(t *testing.T, status int, body string) *[]string {
 	return &auths
 }
 
-// testTarget is the signer the code under test would talk to right now.
 func testTarget() config.SignerTarget {
 	return config.SignerTarget{URL: client.SignerURL(), Audience: client.SignerAudience()}
 }

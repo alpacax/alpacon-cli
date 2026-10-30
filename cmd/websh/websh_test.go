@@ -323,7 +323,7 @@ func executeTestCommand(t *testing.T, args []string) (string, string, string, []
 	username := parsed.Username
 	serverName := parsed.ServerName
 
-	// Parse SSH-like syntax for user@host (same logic as in the main command)
+	// Same user@host parsing as Run.
 	if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
 		sshTarget := utils.ParseSSHTarget(serverName)
 		if username == "" && sshTarget.User != "" {
@@ -382,7 +382,6 @@ func TestSanitizeRecord(t *testing.T) {
 	in := "\x1b[31mdocker\x1b[0m ps\n  -a\tfoo"
 	assert.Equal(t, "docker ps -a foo", sanitizeRecord(in, 100))
 
-	// Truncation applies after cleaning.
 	assert.Equal(t, "docke...", sanitizeRecord("docker ps", 5))
 
 	// OSC window-title sequences are stripped, not leaked into output.
@@ -423,10 +422,8 @@ func TestPrintWatchHeader_StripsControlSequences(t *testing.T) {
 	assert.Contains(t, got, "Username: alice\n")
 }
 
-// TestBuildRemoteExecArgsPinsWebshInvocation pins InvokedAs to WebshInvocation:
-// the one line that makes a refusal hint render websh syntax instead of exec's.
-// Without it every field still flows and the whole suite stays green, so this
-// is the only guard against a refactor dropping the field.
+// TestBuildRemoteExecArgsPinsWebshInvocation is the only guard on InvokedAs: without it a refusal
+// hint renders exec syntax while every other field still flows and the suite stays green.
 func TestBuildRemoteExecArgsPinsWebshInvocation(t *testing.T) {
 	parsed := WebshArgs{
 		Groupname:     "devs",

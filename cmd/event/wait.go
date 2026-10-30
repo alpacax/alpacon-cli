@@ -112,15 +112,11 @@ func runWait(cmd *cobra.Command, _ []string) {
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	// Covers the plain-return path (no signal ever arrived); harmless and idempotent
-	// alongside the Stop call below.
 	defer signal.Stop(sigChan)
 	go func() {
 		<-sigChan
-		// Disarmed here, not only in the deferred call above: waiter.Stop can hang closing
-		// the WebSocket, and every exit path below it uses os.Exit, which skips defers—so
-		// this goroutine is the only place a second Ctrl+C is guaranteed to restore the
-		// default terminate disposition before the (possibly stuck) Stop call.
+		// Disarmed here too: waiter.Stop can hang closing the WebSocket and every exit below uses
+		// os.Exit, which skips defers, so only this goroutine lets a second Ctrl+C terminate.
 		signal.Stop(sigChan)
 		waiter.Stop()
 	}()

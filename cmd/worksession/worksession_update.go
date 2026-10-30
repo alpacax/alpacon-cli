@@ -174,7 +174,8 @@ func updateTargetSession(ac *client.AlpaconClient, args []string) string {
 	return resolved
 }
 
-// scopes is the effective scope list: req.Scopes when --scope replaces the list, else the session's current scopes.
+// validateSessionForSudoUpdate checks that session can take sudo policies. scopes is the effective
+// scope list: req.Scopes when --scope replaces the list, else the session's current scopes.
 func validateSessionForSudoUpdate(session *wsapi.WorkSession, scopes []string) error {
 	if session.Status == wsapi.StatusPending {
 		return fmt.Errorf(
@@ -203,7 +204,8 @@ func validateSessionForTimeUpdate(session *wsapi.WorkSession, req wsapi.WorkSess
 	return errors.New(msg)
 }
 
-// sudo_policies is PUT-style: echo existing policies back so adding doesn't delete them.
+// applyWorkSessionUpdate sends req. sudo_policies replaces the whole set, so existing policies are
+// sent back with newSudo, or adding would delete them.
 func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsapi.WorkSessionUpdateRequest, newSudo []wsapi.SudoPolicyInline) (*wsapi.WorkSession, error) {
 	checkTime := req.StartsAt != "" || req.ExpiresAt != ""
 	if len(newSudo) == 0 && !checkTime {

@@ -106,8 +106,8 @@ func TestPrintGuideCommand(t *testing.T) {
 	}
 }
 
-// Every command the guide echoes has to go through the same door; a new one
-// added to the response and printed straight would slip past unnoticed.
+// Every command the guide echoes must be sanitized; one added to the response and
+// printed directly would slip past unnoticed.
 func TestDisplayAnsibleGuideFromJSON_WarnsOnEveryAlteredField(t *testing.T) {
 	fields := []struct {
 		name  string

@@ -50,9 +50,8 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 			return
 		}
 
-		// Only a service token can be an application principal. Service tokens have no
-		// user profile, so resolve identity via whoami and return without falling
-		// through to the user-only IAM endpoint, which would always fail for them.
+		// Only a service token can be an application principal. It has no user profile,
+		// so identity comes from whoami and the user-only IAM endpoint is skipped.
 		if config.IsServiceToken(cfg.Token) {
 			who, whoErr := auth.GetWhoami(ac)
 			switch {
@@ -187,7 +186,6 @@ func getExpiresAt(cfg config.Config) string {
 	return ""
 }
 
-// applyApplicationPrincipal fills out's application fields from an application-principal whoami response.
 func applyApplicationPrincipal(out whoamiOutput, who *auth.WhoamiResponse) whoamiOutput {
 	out.PrincipalType = auth.PrincipalTypeApplication
 	if who.Application != nil {
@@ -209,10 +207,8 @@ func getRole(isStaff, isSuperuser bool) string {
 	return "user"
 }
 
-// getAuthClassification returns the machine-readable auth classification for cfg.
-// It delegates to GetAuthMethod + authClassificationFromMethod so the auth-method
-// buckets live in exactly one place (config.GetAuthMethod) rather than being
-// re-derived here.
+// getAuthClassification returns the machine-readable auth classification for cfg. The
+// buckets live only in config.GetAuthMethod and are not re-derived here.
 func getAuthClassification(cfg config.Config) string {
 	return authClassificationFromMethod(config.GetAuthMethod(cfg))
 }

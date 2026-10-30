@@ -16,14 +16,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The reported failure, end to end: an access token that expires while a human
-// is deciding. It is deterministic rather than transient—the longer the approval
-// takes, the more certain the 401—so --wait used to be least reliable exactly
-// when it mattered most.
-//
-// Nothing below the CLI's own HTTP client is stubbed here: the fake workspace
-// serves the auth env and the token endpoint too, so the renewal that keeps the
-// wait alive is the real one.
+// An access token that expires while a human decides: the longer the approval takes, the more
+// certain the 401. Nothing below the CLI's HTTP client is stubbed; the fake workspace serves the
+// auth env and the token endpoint too, so the renewal under test is the real one.
 func TestPollForApproval_SurvivesATokenExpiryMidWait(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

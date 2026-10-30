@@ -25,8 +25,8 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 			if len(args) > 0 {
 				utils.CliUsageErrorEnvelopeWithExit(opUnset, "--unset cannot be combined with a SESSION_ID argument")
 			}
-			// Treat missing config / no active workspace / empty entry as already-unset
-			// so --unset is a true no-op and never surfaces a confusing config error.
+			// A missing config, workspace, or entry counts as already unset, so --unset never fails
+			// on it.
 			if cur, err := config.GetActiveWorkSession(); err != nil || cur == "" {
 				if utils.OutputFormat == utils.OutputFormatJSON {
 					printWorkSessionMutationJSON(workSessionMutationOutput{
@@ -96,23 +96,20 @@ func RunUseSession(ac *client.AlpaconClient, uuid string) (*wsapi.WorkSession, e
 	if ws.Status != wsapi.StatusActive {
 		return nil, fmt.Errorf("work-session %s is in '%s' state and cannot be used", ws.ID, ws.Status)
 	}
-	// Agent sessions are not workspace-attachable (mirrors the create --use guard):
-	// they run non-interactively via their assigned token, not the interactive
-	// current-session path. Attaching one would let interactive exec/websh run
-	// against it and fail opaquely, so reject it here with a clear message.
+	// Agent sessions run non-interactively through their own token; attaching one would let
+	// interactive exec or websh run against it and fail opaquely. Mirrors the create --use guard.
 	if ws.RequesterType == "agent" {
 		return nil, fmt.Errorf("work-session %s is an agent session and is not workspace-attachable; agent sessions run non-interactively via their assigned token", ws.ID)
 	}
-	// Persist the canonical ID from the API rather than the raw argument so config
-	// stays consistent with server-side canonicalization and the printed JSON fields.
+	// Store the server's canonical ID rather than the raw argument, matching the printed JSON.
 	if err := config.SetActiveWorkSessionFor(ac.WorkspaceName, ws.ID); err != nil {
 		return nil, err
 	}
 	return ws, nil
 }
 
-// RunUnset clears the active work-session for the current workspace.
-// Idempotent — no error when nothing is set.
+// RunUnset clears the active work-session for the current workspace; it is a no-op when nothing
+// is set.
 func RunUnset() error {
 	return config.SetActiveWorkSession("")
 }

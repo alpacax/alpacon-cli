@@ -223,7 +223,6 @@ func (r *connectRelay) track(conn net.Conn) bool {
 	return true
 }
 
-// forget closes conn and stops tracking it.
 func (r *connectRelay) forget(conn net.Conn) {
 	_ = conn.Close()
 	r.mu.Lock()
@@ -323,7 +322,6 @@ type closeWriter interface {
 	CloseWrite() error
 }
 
-// closeWrite half-closes conn, or closes it outright when it cannot.
 func closeWrite(conn net.Conn) error {
 	if cw, ok := conn.(closeWriter); ok {
 		return cw.CloseWrite()
