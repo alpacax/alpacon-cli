@@ -389,7 +389,6 @@ func TestFetchCursorPages_PausesBeforeARestart(t *testing.T) {
 	assert.GreaterOrEqual(t, elapsed, tick)
 }
 
-// Serial: the subject is a timing window, and noRestartDelay's seam is what it writes.
 func TestFetchCursorPages_RestartHonorsRetryAfter(t *testing.T) {
 	t.Parallel()
 	rec := &requestRecorder{}
