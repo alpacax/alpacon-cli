@@ -18,16 +18,16 @@ func TestReadFromServer_IdleWarningUsesStderrAndLocalTime(t *testing.T) {
 	local := time.Local
 	time.Local = time.FixedZone("test", 9*60*60)
 	t.Cleanup(func() { time.Local = local })
-	closesAt := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	closesAt := time.Date(time.Now().Year()+1, time.January, 2, 6, 4, 5, 0, time.UTC)
 
 	_, stdout, stderr := readIdleFrames(t, idleWarningFrame(closesAt))
 
 	assert.Empty(t, stdout)
-	assert.Equal(t, idleNotice(closesAt), stderr)
+	assert.Equal(t, "[Idle: this session closes at 15:04:05 unless you type something.]\r\n", stderr)
 }
 
 func TestReadFromServer_IdleWarningPreservesReplay(t *testing.T) {
-	closesAt := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	closesAt := time.Date(time.Now().Year()+1, time.January, 2, 15, 4, 5, 0, time.Local)
 	warning := idleWarningFrame(closesAt)
 	for _, tc := range []struct {
 		name   string
@@ -51,60 +51,56 @@ func TestReadFromServer_IdleWarningPreservesReplay(t *testing.T) {
 			} else {
 				assert.Empty(t, stdout)
 			}
-			assert.Equal(t, idleNotice(closesAt), stderr)
+			assert.Equal(t, "[Idle: this session closes at 15:04:05 unless you type something.]\r\n", stderr)
 		})
 	}
 }
 
 func TestReadFromServer_IdleWarningIgnoresInvalidDeadlines(t *testing.T) {
-	closesAt := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	closesAt := time.Date(time.Now().Year()+1, time.January, 2, 15, 4, 5, 0, time.Local)
 	for _, tc := range []struct {
 		name string
 		body string
 	}{
 		{"missing", `{"type":"idle_warning"}`},
+		{"null", `{"type":"idle_warning","closes_at":null}`},
 		{"invalid", `{"type":"idle_warning","closes_at":"not-a-time"}`},
 		{"past", idleWarningFrame(time.Now().Add(-time.Hour)).body},
 		{"unknown type", `{"type":"future_control","closes_at":"` + closesAt.Format(time.RFC3339) + `"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, stdout, stderr := readIdleFrames(t, replayFrame{websocket.TextMessage, tc.body})
+			_, stdout, stderr := readIdleFrames(t,
+				replayFrame{websocket.TextMessage, tc.body}, idleWarningFrame(closesAt),
+			)
 			assert.Empty(t, stdout)
-			assert.Empty(t, stderr)
-			// A valid frame proves the reader is handling warnings rather than dropping all text.
-			_, stdout, stderr = readIdleFrames(t, idleWarningFrame(closesAt))
-			assert.Empty(t, stdout)
-			assert.Equal(t, idleNotice(closesAt), stderr)
+			assert.Equal(t, "[Idle: this session closes at 15:04:05 unless you type something.]\r\n", stderr)
 		})
 	}
 }
 
 func TestReadFromServer_IdleWarningPrintsOncePerDeadline(t *testing.T) {
-	first := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	first := time.Date(time.Now().Year()+1, time.January, 2, 15, 4, 5, 0, time.Local)
 	second := first.Add(time.Minute)
 	_, stdout, stderr := readIdleFrames(t,
 		idleWarningFrame(first), idleWarningFrame(first), idleWarningFrame(second), idleWarningFrame(first),
 	)
 	assert.Empty(t, stdout)
-	assert.Equal(t, idleNotice(first)+idleNotice(second), stderr)
+	assert.Equal(t, "[Idle: this session closes at 15:04:05 unless you type something.]\r\n"+
+		"[Idle: this session closes at 15:05:05 unless you type something.]\r\n", stderr)
 }
 
 func TestReadFromServer_IdleWarningStaysDeduplicatedOnReconnect(t *testing.T) {
-	closesAt := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	closesAt := time.Date(time.Now().Year()+1, time.January, 2, 15, 4, 5, 0, time.Local)
 	_, stdout, notices := runReplaySession(t,
 		replayRound{frames: []replayFrame{idleWarningFrame(closesAt)}, closeCode: websocket.CloseServiceRestart},
 		replayRound{frames: []replayFrame{idleWarningFrame(closesAt)}},
 	)
 	assert.Empty(t, stdout)
-	assert.Equal(t, idleNotice(closesAt)+"\r\nConnection lost, reconnecting...\r\n", notices)
+	assert.Equal(t, "[Idle: this session closes at 15:04:05 unless you type something.]\r\n\r\nConnection lost, reconnecting...\r\n", notices)
 }
 
 func idleWarningFrame(closesAt time.Time) replayFrame {
 	return replayFrame{websocket.TextMessage, fmt.Sprintf(`{"type":"idle_warning","closes_at":%q,"message":"untrusted server text"}`, closesAt.Format(time.RFC3339))}
-}
-
-func idleNotice(closesAt time.Time) string {
-	return "[Idle: this session closes at " + closesAt.Local().Format("15:04:05") + " unless you type something.]\r\n"
 }
 
 func readIdleFrames(t *testing.T, frames ...replayFrame) (*connection, string, string) {
