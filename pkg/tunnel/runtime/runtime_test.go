@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api"
 	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
@@ -376,6 +377,24 @@ func TestValidatePorts(t *testing.T) {
 			}
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestStartRefusesABlankServerNameAsAUsageError(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, server string }{
+		{name: "empty", server: ""},
+		{name: "spaces", server: "  "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			rt, err := Start(StartOptions{ServerName: tc.server, RemotePort: "5432"})
+
+			require.ErrorIs(t, err, api.ErrBlankName)
+			assert.True(t, utils.IsUsageError(err), "err: %v", err)
+			assert.Nil(t, rt)
 		})
 	}
 }

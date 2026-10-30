@@ -239,6 +239,10 @@ func TestCommandsExitTwoWhenTheyRefuseAnIDOrNameBeforeAnyRequest(t *testing.T) {
 		{name: "note delete with a dot-dot ID under json output", args: []string{"note", "delete", "..", "--yes"}, wantExit: usage, wantStderr: "must be a single path segment", wantCode: utils.ErrorCodeUsage},
 		{name: "user role grant with a blank role", args: []string{"user", "role", "grant", "alice", " "}, wantExit: usage, wantStderr: "role name is required"},
 		{name: "user role grant with a blank role under json output", args: []string{"user", "role", "grant", "alice", " "}, wantExit: usage, wantStderr: "role name is required", wantCode: utils.ErrorCodeUsage},
+		{name: "tunnel with a blank server", args: []string{"tunnel", " ", "-l", "0", "-r", "8082"}, wantExit: usage, wantStderr: "server name is required"},
+		{name: "tunnel with a blank server under json output", args: []string{"tunnel", " ", "-l", "0", "-r", "8082"}, wantExit: usage, wantStderr: "server name is required", wantCode: utils.ErrorCodeUsage},
+		{name: "tunnel with an empty server", args: []string{"tunnel", "", "-l", "0", "-r", "8082"}, wantExit: usage, wantStderr: "server name is required"},
+		{name: "tunnel with an empty server under json output", args: []string{"tunnel", "", "-l", "0", "-r", "8082"}, wantExit: usage, wantStderr: "server name is required", wantCode: utils.ErrorCodeUsage},
 	})
 }
 
