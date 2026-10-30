@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -32,6 +33,8 @@ func swapDownloadRetryDelays(initial, max time.Duration) func() {
 	initialDownloadRetryDelay, maxDownloadRetryDelay = initial, max
 	return func() { initialDownloadRetryDelay, maxDownloadRetryDelay = oi, om }
 }
+
+const testPollTick = 5 * time.Millisecond
 
 func createTestZip(t *testing.T, files map[string]string) []byte {
 	t.Helper()
@@ -90,7 +93,7 @@ func TestPollTransferStatus(t *testing.T) {
 				BaseURL:    ts.URL,
 			}
 
-			success, message, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, pollTick)
+			success, message, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, testPollTick)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantSuccess, success)
 			assert.Equal(t, tt.wantMessage, message)
@@ -429,7 +432,7 @@ func TestDownloadBulk(t *testing.T) {
 		"file2.txt": "world",
 	})
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		switch {
@@ -461,17 +464,14 @@ func TestDownloadBulk(t *testing.T) {
 				Message: "completed",
 			})
 		}
-	}))
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{
-		HTTPClient: ts.Client(),
-		BaseURL:    ts.URL,
-	}
-
+	})
+	ac := &client.AlpaconClient{HTTPClient: testutil.HandlerClient(handler), BaseURL: testutil.StubBaseURL}
 	dest := t.TempDir()
 
-	err := downloadBulk(ac, []string{"/path/file1.txt", "/path/file2.txt"}, dest, "server-id", "admin", "developers", "")
+	var err error
+	synctest.Test(t, func(t *testing.T) {
+		err = downloadBulk(ac, []string{"/path/file1.txt", "/path/file2.txt"}, dest, "server-id", "admin", "developers", "")
+	})
 	require.NoError(t, err)
 
 	// Verify request body
@@ -500,7 +500,7 @@ func TestDownloadBulk_PreservesExistingArchiveName(t *testing.T) {
 		"file.txt": "downloaded",
 	})
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		switch {
@@ -526,19 +526,17 @@ func TestDownloadBulk_PreservesExistingArchiveName(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{
-		HTTPClient: ts.Client(),
-		BaseURL:    ts.URL,
-	}
+	})
+	ac := &client.AlpaconClient{HTTPClient: testutil.HandlerClient(handler), BaseURL: testutil.StubBaseURL}
 
 	dest := t.TempDir()
 	archivePath := filepath.Join(dest, "archive.zip")
 	require.NoError(t, os.WriteFile(archivePath, []byte("existing-archive"), 0644))
 
-	err := downloadBulk(ac, []string{"/path/file.txt"}, dest, "server-id", "admin", "developers", "")
+	var err error
+	synctest.Test(t, func(t *testing.T) {
+		err = downloadBulk(ac, []string{"/path/file.txt"}, dest, "server-id", "admin", "developers", "")
+	})
 	require.NoError(t, err)
 
 	content, readErr := os.ReadFile(archivePath)
@@ -797,8 +795,7 @@ func TestPollTransferStatus_Timeout(t *testing.T) {
 		BaseURL:    ts.URL,
 	}
 
-	// Use a very short timeout to make the test fast
-	success, _, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 1*time.Second, pollTick)
+	success, _, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 50*time.Millisecond, testPollTick)
 	require.Error(t, err)
 	assert.False(t, success)
 	assert.Contains(t, err.Error(), "timed out")
@@ -1311,7 +1308,7 @@ func TestDownloadFile_WorkSession(t *testing.T) {
 
 func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 	t.Parallel()
-	// Success=null twice, then success: two pollTick gaps.
+	// Success=null twice, then success: two tick gaps.
 	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := calls.Add(1)
@@ -1327,14 +1324,14 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	start := time.Now()
-	success, message, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, pollTick)
+	success, message, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, testPollTick)
 	elapsed := time.Since(start)
 
 	require.NoError(t, err)
 	assert.True(t, success)
 	assert.Equal(t, "done", message)
 	assert.Equal(t, int32(3), calls.Load())
-	assert.GreaterOrEqual(t, elapsed, 2*pollTick, "two waits should sum to at least two ticks")
+	assert.GreaterOrEqual(t, elapsed, 2*testPollTick, "two waits should sum to at least two ticks")
 }
 
 func TestPollTransferStatus_PollsWhileSuccessIsNull(t *testing.T) {
@@ -1357,7 +1354,7 @@ func TestPollTransferStatus_PollsWhileSuccessIsNull(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	success, message, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, pollTick)
+	success, message, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, testPollTick)
 
 	require.NoError(t, err)
 	assert.False(t, success)
@@ -1378,7 +1375,7 @@ func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	success, _, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, pollTick)
+	success, _, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, testPollTick)
 
 	require.Error(t, err)
 	assert.False(t, success)
@@ -1404,7 +1401,7 @@ func TestPollTransferStatus_ThrottleMidTransferDoesNotEndWait(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	success, message, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, pollTick)
+	success, message, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, testPollTick)
 
 	require.NoError(t, err)
 	assert.True(t, success)
@@ -1549,7 +1546,7 @@ func TestPollTransferStatus_ParseFailureReturnsEmptyMessage(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	success, message, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, pollTick)
+	success, message, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, testPollTick)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse transfer status response")
@@ -1594,17 +1591,20 @@ func TestFetchFromURLToFile_RetriesRetryableStatuses(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var calls atomic.Int32
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			httpClient := testutil.HandlerClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				if calls.Add(1) == 1 {
 					w.WriteHeader(tt.firstStatus)
 					return
 				}
 				_, _ = w.Write([]byte("payload"))
 			}))
-			defer ts.Close()
 
 			path := filepath.Join(t.TempDir(), "out")
-			written, err := fetchFromURLToFile(ts.Client(), ts.URL, path, 3)
+			var written int64
+			var err error
+			synctest.Test(t, func(t *testing.T) {
+				written, err = fetchFromURLToFile(httpClient, testutil.StubBaseURL, path, 3)
+			})
 
 			require.NoError(t, err)
 			assert.Equal(t, int64(len("payload")), written)
