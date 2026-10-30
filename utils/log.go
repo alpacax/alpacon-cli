@@ -88,7 +88,7 @@ func CliUsageErrorWithExit(msg string, args ...any) {
 }
 
 // CliArgumentErrorWithExit refuses a bad argument with exit 1 and error_code usage_error, for the
-// commands whose bad input exited 1 before exit 2 was defined.
+// exec and websh argument checks and Cobra parse errors, which still exit 1.
 func CliArgumentErrorWithExit(msg string, args ...any) {
 	CliErrorWithCode(ExitCodeGeneralError, ErrorCodeUsage, msg, args...)
 }

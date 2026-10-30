@@ -55,7 +55,7 @@ This repository is public, and so is everything in it: comments, test fixtures, 
 
 - `0` success
 - `1` general error
-- `2` usage error—a flag or argument the command rejected in its own validation, so editing the command line fixes it (`utils.ExitCodeUsageError`); Cobra parse errors still exit `1`. These prompts check for a terminal first and exit `2` in a non-interactive run: `--yes`, `server create`'s `--platform` and `--token`, `user invite`'s email, `login`'s HOST, the `work-session create` and `extend` flags, `edit`'s `--force`; any other prompt reads stdin and exits `1` on no input, even where a flag would have answered it. Report a usage error with `utils.CliUsageErrorWithExit`
+- `2` usage error—a flag or argument the command rejected in its own validation, so editing the command line fixes it (`utils.ExitCodeUsageError`); Cobra parse errors and the `exec` and `websh` argument checks still exit `1`, with `error_code` `usage_error` under `--output json`. These prompts check for a terminal first and exit `2` in a non-interactive run: `--yes`, `server create`'s `--platform` and `--token`, `user invite`'s email, `login`'s HOST, the `work-session create` and `extend` flags, `edit`'s `--force`; any other prompt reads stdin and exits `1` on no input, even where a flag would have answered it. Report a usage error with `utils.CliUsageErrorWithExit`
 - `3` WorkSession gate denied (`utils.ExitCodeWorkSessionDenied`)
 - `4` Pending human approval, outcome still open (`utils.ExitCodePendingApproval`)
 - `5` Server busy with active user work (`utils.ExitCodeServerBusy`)
