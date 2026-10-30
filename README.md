@@ -336,7 +336,7 @@ $ alpacon tunnel prod-k8s -l 6443 -r 6443 -- kubectl --server=https://127.0.0.1:
 
 `--` separates the tunnel command from the inner command. `alpacon tunnel` does not auto-detect app ports—pass `127.0.0.1:<LOCAL_PORT>` explicitly.
 
-When one side of a forwarded connection finishes sending and half-closes it, as `nc` does when its input ends, the other direction keeps carrying data for up to five minutes. Past that, the tunnel resets the connection and says so on stderr.
+When one side of a forwarded connection finishes sending and half-closes it, as `nc` does when its input ends, the other direction keeps carrying data for up to five minutes. Past that, the tunnel resets the connection and says so on stderr. This needs the matching fix in the Alpamon agent on the server and in the workspace proxy; until both have it, the other direction still stops when the first side half-closes.
 
 ### Work sessions
 ```bash
