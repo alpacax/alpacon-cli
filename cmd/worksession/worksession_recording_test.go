@@ -2,111 +2,10 @@ package worksession
 
 import (
 	"bytes"
-	"strings"
 	"testing"
 
-	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/stretchr/testify/assert"
 )
-
-// buildRecordingIndex
-
-func TestBuildRecordingIndex_GroupsBySessionID(t *testing.T) {
-	t.Parallel()
-	items := []wsapi.TimelineItem{
-		{Type: "websh_session", ID: "s1"},
-		{Type: "websh_record", ID: "r1", SessionID: "s1"},
-		{Type: "websh_record", ID: "r2", SessionID: "s1"},
-		{Type: "websh_session", ID: "s2"},
-		{Type: "websh_record", ID: "r3", SessionID: "s2"},
-	}
-	bySession, flat := buildRecordingIndex(items)
-	assert.Len(t, bySession["s1"], 2)
-	assert.Len(t, bySession["s2"], 1)
-	assert.Len(t, flat, 3)
-	assert.Equal(t, "r1", bySession["s1"][0].ID)
-	assert.Equal(t, "r3", bySession["s2"][0].ID)
-}
-
-func TestBuildRecordingIndex_NoRecordings(t *testing.T) {
-	t.Parallel()
-	items := []wsapi.TimelineItem{
-		{Type: "websh_session", ID: "s1"},
-		{Type: "ftp_session", ID: "f1"},
-	}
-	bySession, flat := buildRecordingIndex(items)
-	assert.Empty(t, bySession)
-	assert.Empty(t, flat)
-}
-
-func TestBuildRecordingIndex_Empty(t *testing.T) {
-	t.Parallel()
-	bySession, flat := buildRecordingIndex(nil)
-	assert.Empty(t, bySession)
-	assert.Empty(t, flat)
-}
-
-// recordingBadge
-
-func TestRecordingBadge_Single(t *testing.T) {
-	t.Parallel()
-	assert.Equal(t, "• 1 recording", recordingBadge(1))
-}
-
-func TestRecordingBadge_Multiple(t *testing.T) {
-	t.Parallel()
-	assert.Equal(t, "• 3 recordings", recordingBadge(3))
-}
-
-// recordingPreview
-
-func TestRecordingPreview_StripsANSI(t *testing.T) {
-	t.Parallel()
-	raw := "\x1b]0;user@host:~\x07\x1b[?2004h[user@host:~]$ ls -la"
-	assert.Equal(t, "[user@host:~]$ ls -la", recordingPreview(raw))
-}
-
-func TestRecordingPreview_StripsCarriageReturns(t *testing.T) {
-	t.Parallel()
-	raw := "[user@host:~]$ \r\r[user@host:~]$ ls -la"
-	assert.Equal(t, "[user@host:~]$ ls -la", recordingPreview(raw))
-}
-
-func TestRecordingPreview_SkipsEmptyLines(t *testing.T) {
-	t.Parallel()
-	assert.Equal(t, "actual content here", recordingPreview("\n\n  \nactual content here"))
-}
-
-func TestRecordingPreview_Truncates(t *testing.T) {
-	t.Parallel()
-	raw := strings.Repeat("a", 80)
-	assert.LessOrEqual(t, len(recordingPreview(raw)), 63) // 60 chars + possible "..."
-}
-
-func TestRecordingPreview_EmptyRaw(t *testing.T) {
-	t.Parallel()
-	assert.Empty(t, recordingPreview(""))
-}
-
-func TestRecordingPreview_OnlyANSI(t *testing.T) {
-	t.Parallel()
-	assert.Empty(t, recordingPreview("\x1b[?2004h\x1b[2J\x1b[H"))
-}
-
-func TestRecordingPreview_StripsBidiOverride(t *testing.T) {
-	t.Parallel()
-	// A bidi override carries no control byte, so the control pass alone leaves
-	// it free to reorder the preview a reviewer reads back.
-	raw := "[user@host:~]$ echo \u202esafe"
-	assert.Equal(t, "[user@host:~]$ echo safe", recordingPreview(raw))
-}
-
-func TestRecordingPreview_StripsFormatCharBuriedInSequence(t *testing.T) {
-	t.Parallel()
-	// Format chars go before the escape strip, or the match breaks and the
-	// sequence's tail lands on screen as text.
-	assert.Equal(t, "ls", recordingPreview("\x1b[2\u200dKls"))
-}
 
 // printRecordingHeader
 
@@ -116,7 +15,7 @@ func TestPrintRecordingHeader_SanitizesTimestamp(t *testing.T) {
 	// the header is a sink for an escape sequence that clears the reviewer's screen.
 	ts := "\x1b[2J\x1b[H\u202eSPOOFED"
 	var buf bytes.Buffer
-	printRecordingHeader(&buf, &wsapi.TimelineItem{Timestamp: &ts}, 1, 1)
+	printRecordingHeader(&buf, ts, 1, 1)
 	assert.Equal(t, "Terminal 1/1 — SPOOFED\n\n", buf.String())
 }
 
