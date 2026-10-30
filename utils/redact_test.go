@@ -77,7 +77,6 @@ func TestRedactURLError_RedactsAQuotedURLInTheInnerError(t *testing.T) {
 	require.ErrorIs(t, got, inner)
 }
 
-// The wrapper reports a timeout the way the *url.Error it replaces does.
 func TestRedactURLError_KeepsTimeoutBehavior(t *testing.T) {
 	t.Parallel()
 	got := RedactURLError(&url.Error{Op: "Get", URL: signedURL, Err: context.DeadlineExceeded})

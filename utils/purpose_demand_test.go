@@ -15,10 +15,8 @@ import (
 
 const purposeTestCommandID = "a1b2c3d4-5678-abcd-ef01-234567890abc"
 
-// purposeRequiredSignal mirrors every field of the published envelope, not just
-// the ones a caller happens to branch on. An earlier version omitted `message`
-// and `context`, which meant deleting them from the envelope kept the suite
-// green while breaking a contract README documents.
+// purposeRequiredSignal mirrors every field of the published envelope, not just the ones a caller
+// branches on, so dropping a field README documents fails the suite.
 type purposeRequiredSignal struct {
 	OK                    bool   `json:"ok"`
 	Status                string `json:"status"`
@@ -35,7 +33,6 @@ type purposeRequiredSignal struct {
 	NextActions []NextAction `json:"next_actions"`
 }
 
-// purposeAnswerSignal is the envelope `exec purpose` prints.
 type purposeAnswerSignal struct {
 	OK          bool         `json:"ok"`
 	Status      string       `json:"status"`
@@ -104,9 +101,6 @@ func TestPrintPurposeDemand_EnvelopeCarriesTheWholeContract(t *testing.T) {
 }
 
 func TestPrintPurposeDemand_DeadlineMeasuresAgainstTheServersExpiry(t *testing.T) {
-	// The server derives the expiry because the window's length is a setting no
-	// endpoint publishes—so this client has no length to assume and cannot be
-	// wrong about one.
 	got := capturePurposeJSONIn(t, 30*time.Second)
 
 	require.NotNil(t, got.Context.DeadlineSeconds)
@@ -123,15 +117,14 @@ func TestPrintPurposeDemand_AnExpiredWindowReportsZeroNotNegative(t *testing.T) 
 }
 
 func TestPrintPurposeDemand_NoExpiryReportsNoDeadline(t *testing.T) {
-	// An older server sends no expiry. Inventing one would publish a deadline
-	// that does not exist on a workspace which raised COMMAND_PURPOSE_DEADLINE.
+	// An older server sends no expiry, and inventing one could publish a deadline that does not
+	// exist: the server's deployment can change the window's length.
 	got := capturePurposeJSON(t, nil)
 
 	assert.Nil(t, got.Context.DeadlineSeconds)
 }
 
 func TestPrintPurposeDemand_TableModeIsActionableOnStderr(t *testing.T) {
-	// The default path—no --output json—had no coverage at all.
 	expires := time.Now().Add(45 * time.Second)
 	var stdout, stderr string
 	withFormat(OutputFormatTable, func() {
@@ -149,8 +142,7 @@ func TestPrintPurposeDemand_TableModeIsActionableOnStderr(t *testing.T) {
 }
 
 func TestPrintPurposeDemand_SanitizesTheServerSuppliedID(t *testing.T) {
-	// The id is server-supplied and every line interpolates it into text
-	// written straight to the terminal (#364).
+	// The id is server-supplied and every line writes it straight to the terminal.
 	var stderr string
 	withFormat(OutputFormatTable, func() {
 		_, stderr = testutil.CaptureOutput(t, func() {
@@ -217,10 +209,9 @@ func TestPrintPurposeAnswer_TableModeKeepsStdoutClean(t *testing.T) {
 
 func TestPurposeDemandLead_SaysWhatSilenceCosts(t *testing.T) {
 	t.Parallel()
-	// Both surfaces read the expiry behaviour off this one string, so they
-	// cannot describe it differently. A caller who arrives through `exec logs`
-	// found the demand late by definition, and needs to know the command is not
-	// blocked by the window closing.
+	// Both surfaces read the expiry behavior off this one string. A caller arriving through `exec
+	// logs` found the demand late by definition and needs to know the window closing blocks
+	// nothing.
 	assert.Contains(t, PurposeDemandLead, "not blocked")
 	assert.Contains(t, PurposeDemandLead, "ordinary path")
 }

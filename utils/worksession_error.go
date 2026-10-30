@@ -18,7 +18,6 @@ const (
 	OperationKube = "kube"
 )
 
-// agentForbiddenScopes are the scopes an agent session cannot hold.
 var agentForbiddenScopes = []string{OperationWebsh}
 
 // IsAgentForbiddenScope reports whether an agent session cannot hold scope.
@@ -216,9 +215,7 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []Next
 		`alpacon work-session create --scope %s --server %s --expires-in 1h --purpose "<intent>" --requester-type agent`,
 		agentScope, serverArg,
 	)
-	// How an agent runs the work once it has a session: the gated command takes
-	// --work-session <ID>. An agent session cannot hold websh, so that work goes
-	// through exec instead.
+	// An agent runs gated work with --work-session <ID>, and websh work through exec instead.
 	agentReuse := "prefixing the gated command with --work-session <ID>"
 	agentNext := "prefix the gated command with --work-session <ID>"
 	agentCreate := NextAction{Command: agentCreateCmd}
@@ -227,8 +224,8 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []Next
 		agentNext = fmt.Sprintf("run the work with 'alpacon exec --work-session <ID>'; an agent session cannot hold %s", operation)
 		agentCreate.Description = "AI agent: " + agentNext
 	}
-	// Reuse an active session first (ls), then create as the fallback. Humans attach via `use`;
-	// agents can't `use` (it rejects agent sessions) and instead pass --work-session <ID> downstream.
+	// Reuse an active session first, then create one. Humans attach with `use`; agents cannot, so
+	// they pass --work-session <ID> to the gated command.
 	createOrReuse := []NextAction{
 		{Command: "alpacon work-session ls --status active", Description: "find an existing active session; AI agent: reuse it by " + agentReuse},
 		{Command: "alpacon work-session use <ID>", Description: "human: attach an existing session (rejects agent sessions)"},
@@ -261,8 +258,8 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []Next
 	case WorkSessionExpired:
 		return []NextAction{{Command: workSessionExtendCommand(activeWS)}, {Command: createCmd}, agentCreate}
 	case WorkSessionAssigneeMismatch:
-		// Session belongs to another principal; reuse/create one owned by this caller.
-		// Agents can't `use`, so route through the agent-aware reuse+create path.
+		// The session belongs to another principal; agents cannot `use`, so take the agent-aware
+		// path.
 		return createOrReuse
 	case WorkSessionNotUsable:
 		return createOrReuse

@@ -29,16 +29,14 @@ func newZipRoots(names ...string) []zipRoot {
 	return roots
 }
 
-// resolveZipPath maps an archive entry name to a path relative to root, with every
-// symlink expanded, and rejects anything that leaves the destination. Confinement
-// does not rest on it: os.Root is the boundary, so a bug here can misplace a file
-// inside the destination but never outside it.
+// resolveZipPath maps an archive entry name to a path relative to root, with every symlink
+// expanded, and rejects anything that leaves the destination. os.Root is the boundary, so a bug
+// here can misplace a file inside the destination but never outside it.
 //
-// os.Root refuses an absolute symlink even when its target is inside the root, so
-// permitting one is what these hops cost; failing closed instead would be about
-// five lines. We resolve and follow the link because the destination is a folder
-// the user chose and may already have populated, and because an archive naming
-// "link" asks for what "link" points at.
+// os.Root refuses an absolute symlink even when its target is inside the root, so these hops
+// resolve one themselves; permitting it is what they cost, and failing closed instead would take
+// about five lines. They follow it because the destination is a folder the user chose and may
+// have populated, and an archive naming "link" asks for what "link" points at.
 func resolveZipPath(root *os.Root, roots []zipRoot, name string) (string, error) {
 	if zipPathRooted(name) {
 		return "", fmt.Errorf("zip path is not relative: %s", name)

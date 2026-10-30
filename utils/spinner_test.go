@@ -34,10 +34,8 @@ func spinnerRunning(s *Spinner) bool {
 	return s.running
 }
 
-// A spinner animating the line output is about to land on gets drawn over that
-// output, and Stop then erases the whole line. StopWriter is what orders the
-// two, so this pins the handover: the spinner is gone before the first byte,
-// and every byte still reaches the wrapped writer.
+// StopWriter must retire the spinner before the first byte, or the output is drawn over and
+// erased, while every byte still reaches the wrapped writer.
 func TestSpinner_StopWriterRetiresTheSpinnerBeforeTheFirstByte(t *testing.T) {
 	var out bytes.Buffer
 
@@ -61,11 +59,8 @@ func TestSpinner_StopWriterRetiresTheSpinnerBeforeTheFirstByte(t *testing.T) {
 	assert.Equal(t, "first and second", out.String())
 }
 
-// Only the animating branch counts itself, and off a TTY—which is every go test
-// run—Start returns before reaching it. Forcing enabled is what lets a test see
-// that branch at all, and the pairing it pins is what CliWarning's line break
-// reads: a dropped increment, or a decrement moved ahead of the goroutine's
-// exit, would otherwise leave the whole suite green.
+// Off a TTY, as in every go test run, Start never reaches the animating branch, so enabled is
+// forced; a dropped increment or a decrement before the goroutine exits would otherwise pass.
 func TestSpinner_AnimatingBranchPairsTheActiveCount(t *testing.T) {
 	captureStderr(t, func() {
 		s := NewSpinner("Waiting for approval...")
@@ -102,11 +97,8 @@ func TestSpinner_RestartsAfterStop(t *testing.T) {
 	})
 }
 
-// The goroutine blocks in a select on stopCh instead of sleeping a frame away,
-// so Stop returns the moment it closes that channel. Sleeping first would make
-// Stop wait out the rest of the frame, and an approval wait pays that on every
-// poll tick. The frame here is far longer than the budget, so only the blocking
-// select can come back in time.
+// Stop must not wait out a frame, which an approval wait would pay on every poll tick; the frame
+// here is far longer than the budget, so only a blocking select returns in time.
 func TestSpinner_StopDoesNotWaitOutAFrame(t *testing.T) {
 	captureStderr(t, func() {
 		s := NewSpinner("Waiting for approval...")
@@ -126,10 +118,9 @@ func TestSpinner_StopDoesNotWaitOutAFrame(t *testing.T) {
 	})
 }
 
-// time.NewTicker panics on a non-positive period where the sleep it replaced
-// took one happily, and the panic would fire on the spinner's own goroutine—far
-// from the caller and fatal to the process. No caller can set that today, so
-// without the fallback this test does not fail, it takes the test binary down.
+// time.NewTicker panics on a non-positive period, on the spinner's own goroutine where it is fatal
+// to the process; no caller sets one today, so without the fallback this takes the test binary
+// down.
 func TestSpinner_NonPositiveIntervalFallsBackToTheDefault(t *testing.T) {
 	captureStderr(t, func() {
 		s := NewSpinner("Waiting for approval...")
