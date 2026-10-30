@@ -38,6 +38,7 @@ func TestGroupNoSubcommandErrorPointsToHelpInsteadOfListingSubcommands(t *testin
 
 			require.Error(t, err)
 			errs[c] = err.Error()
+			assert.True(t, utils.IsUsageError(err), "a missing subcommand must exit 2: %v", err)
 			assert.Equal(t, utils.ErrorCodeUsage, utils.ClassifyError(err))
 			assert.Contains(t, err.Error(), fmt.Sprintf("Run '%s --help'", c.CommandPath()))
 			assert.Contains(t, out.String(), "Available Commands:")

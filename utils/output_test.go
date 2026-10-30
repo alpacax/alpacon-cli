@@ -523,9 +523,8 @@ func TestSetOutputFormatRefusesAnyOtherValueAsAUsageError(t *testing.T) {
 			withFormat(OutputFormatTable, func() {
 				err := SetOutputFormat(tt.value)
 
-				require.Error(t, err)
+				require.EqualError(t, err, fmt.Sprintf("invalid --output value %q (expected \"table\" or \"json\")", tt.value))
 				assert.True(t, IsUsageError(err), "err: %v", err)
-				assert.Equal(t, fmt.Sprintf("invalid --output value %q (expected \"table\" or \"json\")", tt.value), err.Error())
 				assert.Equal(t, OutputFormatTable, OutputFormat)
 			})
 		})
