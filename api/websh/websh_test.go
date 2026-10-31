@@ -588,7 +588,7 @@ func TestFinish_SettlesASingleCloseByItsCode(t *testing.T) {
 		{
 			name:       "idle detach keeps the shell running",
 			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_detached"},
-			wantStderr: "\r\nsession disconnected: disconnected for inactivity; the shell keeps running on the server until the work session ends\r\n",
+			wantStderr: "\r\nsession disconnected after inactivity; the shell keeps running on the server until the work session ends\r\n",
 		},
 		{
 			name:       "session end with no reason",
@@ -732,7 +732,7 @@ func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
 			name:       "duplicate session end prints once",
 			first:      &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_detached"},
 			second:     &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_detached"},
-			wantStderr: "\r\nsession disconnected: disconnected for inactivity; the shell keeps running on the server until the work session ends\r\n",
+			wantStderr: "\r\nsession disconnected after inactivity; the shell keeps running on the server until the work session ends\r\n",
 		},
 	}
 
@@ -1198,7 +1198,7 @@ func TestServeConnections_IdleDetachDoesNotReconnect(t *testing.T) {
 	assert.Equal(t, int32(1), dials.Load())
 	assert.Empty(t, stdout)
 	assert.Empty(t, notices.String())
-	assert.Equal(t, "\r\nsession disconnected: disconnected for inactivity; the shell keeps running on the server until the work session ends\r\n", stderr)
+	assert.Equal(t, "\r\nsession disconnected after inactivity; the shell keeps running on the server until the work session ends\r\n", stderr)
 }
 
 func TestRedial_StopsWhenTheServerRefusesANewChannel(t *testing.T) {

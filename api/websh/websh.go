@@ -30,11 +30,10 @@ const (
 	ctrlC              = 0x03
 	writeFlushInterval = 5 * time.Millisecond
 
-	// sessionEndCloseCode ends the client without auto-reconnecting, including an idle detach.
+	// sessionEndCloseCode treats 4000 as normal; the server never ends sessions with 1000.
 	sessionEndCloseCode = 4000
 
-	// Dropped links get a new channel unless the close ends the client.
-	// The retry budget bounds servers that repeatedly accept and drop channels.
+	// 1012 and 1006 leave the session running, so re-dial; cap repeated drops.
 	maxReconnectAttempts   = 5
 	reconnectBaseDelay     = 1 * time.Second
 	reconnectMaxDelay      = 15 * time.Second
@@ -62,7 +61,7 @@ var (
 	closeReasonMessages = map[string]string{
 		"user_request":           "the session was closed",
 		"force_close":            "closed by an administrator",
-		"idle_detached":          "disconnected for inactivity; the shell keeps running on the server until the work session ends",
+		"idle_detached":          "after inactivity; the shell keeps running on the server until the work session ends",
 		"agent_disconnected":     "Alpamon on the server disconnected",
 		"server_shutdown":        "the service restarted",
 		"work_session_expired":   "the work session expired",
@@ -417,15 +416,15 @@ func printCloseReason(err error) {
 		if message == "" {
 			return
 		}
-		status := "closed"
+		prefix := "session closed: "
 		if reason == "idle_detached" {
-			status = "disconnected"
+			prefix = "session disconnected "
 		}
-		_, _ = fmt.Fprintf(os.Stderr, "\r\nsession %s: %s\r\n", status, message)
+		_, _ = fmt.Fprintf(os.Stderr, "\r\n%s%s\r\n", prefix, message)
 	}
 }
 
-// endsSession reports whether a close ends the client, even if the shell survives an idle detach.
+// endsSession treats 4000 as final without reconnecting, even when idle detach leaves the shell running.
 func endsSession(err error) bool {
 	if err == nil {
 		return true
@@ -466,7 +465,6 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	defer restore()
 
 	conn := wsClient.conn
-	conn.readOnly = true
 	go wsClient.watchInterrupt(sigChan)
 	go wsClient.readCtrlC()
 	conn.startReader()
@@ -738,11 +736,7 @@ func (c *connection) readFromServer() {
 				if notice == nil {
 					notice = os.Stderr
 				}
-				if c.readOnly {
-					_, _ = fmt.Fprintf(notice, "[Idle: this session disconnects at %s.]\r\n", closesAt.Local().Format("15:04:05"))
-				} else {
-					_, _ = fmt.Fprintf(notice, "[Idle: this session disconnects at %s unless you type something.]\r\n", closesAt.Local().Format("15:04:05"))
-				}
+				_, _ = fmt.Fprintf(notice, "[Idle: this session disconnects at %s without input.]\r\n", closesAt.Local().Format("15:04:05"))
 				continue
 			}
 			if legacy || origin.Type != "replay_origin" || origin.Epoch == "" {
