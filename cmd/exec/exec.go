@@ -34,6 +34,9 @@ intended for the remote command (e.g., -U, -d) are not interpreted as alpacon fl
 
 All flags must be placed before the server name.
 
+The session purpose is what the assessor judges each command against. An agent
+should pass --purpose with each command, which skips the purpose demand entirely.
+
 Subcommand names (ls, logs, purpose) win over a server of the same name. To reach
 a server literally named 'ls', 'logs' or 'purpose', put -- before it:
 alpacon exec -- ls uptime
@@ -132,9 +135,11 @@ Flags:
                                 Use 'alpacon exec logs JOB_ID' to retrieve the result.
                                 Inside an agent-requester work session, a command
                                 the gate holds for its purpose can sit for about a
-                                minute before taking the ordinary path—nothing here
-                                waits, but the command does. Pass --purpose to skip
-                                the hold, or read the demand with 'exec logs'.
+                                minute. Without a purpose it is judged again: it
+                                runs, waits for a human approver (who is notified
+                                then), or is refused. Pass --purpose to skip the
+                                hold, or read the result with 'exec logs'; do not
+                                resubmit.
   --wait                        When a sudo command needs human approval, block and
                                 re-attempt until a reviewer approves it in the Alpacon
                                 console (web), or the wait times out (default 5m).
