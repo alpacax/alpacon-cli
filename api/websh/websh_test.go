@@ -586,6 +586,11 @@ func TestFinish_SettlesASingleCloseByItsCode(t *testing.T) {
 		keepAsErr  bool
 	}{
 		{
+			name:       "idle timeout closes the shell",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
+			wantStderr: "\r\nsession closed after inactivity\r\n",
+		},
+		{
 			name:       "idle detach keeps the shell running",
 			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_detached"},
 			wantStderr: "\r\nsession disconnected after inactivity; the shell keeps running on the server until the work session ends\r\n",

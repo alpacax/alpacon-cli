@@ -61,6 +61,7 @@ var (
 	closeReasonMessages = map[string]string{
 		"user_request":           "the session was closed",
 		"force_close":            "closed by an administrator",
+		"idle_timeout":           "after inactivity",
 		"idle_detached":          "after inactivity; the shell keeps running on the server until the work session ends",
 		"agent_disconnected":     "Alpamon on the server disconnected",
 		"server_shutdown":        "the service restarted",
@@ -417,7 +418,10 @@ func printCloseReason(err error) {
 			return
 		}
 		prefix := "session closed: "
-		if reason == "idle_detached" {
+		switch reason {
+		case "idle_timeout":
+			prefix = "session closed "
+		case "idle_detached":
 			prefix = "session disconnected "
 		}
 		_, _ = fmt.Fprintf(os.Stderr, "\r\n%s%s\r\n", prefix, message)
