@@ -30,15 +30,10 @@ const (
 	ctrlC              = 0x03
 	writeFlushInterval = 5 * time.Millisecond
 
-	// sessionEndCloseCode is how the proxy, and Alpamon, close a user channel at the
-	// end of a session. A websh session never ends with 1000, so without it every
-	// normal end would be reported as a failure.
+	// sessionEndCloseCode treats 4000 as normal; the server never ends sessions with 1000.
 	sessionEndCloseCode = 4000
 
-	// A close that does not end the session is a dropped link (a restarted service, a
-	// network interruption); the session still runs on the server, so the client dials
-	// a new channel onto it. The budget, about 30s of waiting, bounds a server that
-	// keeps accepting a channel and dropping it.
+	// 1012 and 1006 leave the session running, so re-dial; cap repeated drops.
 	maxReconnectAttempts   = 5
 	reconnectBaseDelay     = 1 * time.Second
 	reconnectMaxDelay      = 15 * time.Second
@@ -61,12 +56,13 @@ var (
 	// closed while the connection was down, so retrying only asks again.
 	ErrSessionGone = errors.New("the session is no longer open")
 
-	// closeReasonMessages maps the proxy's session-end reason tokens; an empty message stays
+	// closeReasonMessages maps the proxy's close reason tokens; an empty message stays
 	// silent, since shell_exited means the user ended the shell and closed says nothing.
 	closeReasonMessages = map[string]string{
 		"user_request":           "the session was closed",
 		"force_close":            "closed by an administrator",
-		"idle_timeout":           "the session reached its time limit",
+		"idle_timeout":           "after inactivity",
+		"idle_detached":          "after inactivity; the shell keeps running on the server until the work session ends",
 		"agent_disconnected":     "Alpamon on the server disconnected",
 		"server_shutdown":        "the service restarted",
 		"work_session_expired":   "the work session expired",
@@ -316,8 +312,9 @@ func shareCreatedSession(ac *client.AlpaconClient, responseBody []byte, share, r
 
 func newWebsocketClient(header http.Header) *WebsocketClient {
 	return &WebsocketClient{
-		header: header,
-		done:   make(chan struct{}),
+		header:       header,
+		done:         make(chan struct{}),
+		idleWarnings: make(map[time.Time]struct{}),
 	}
 }
 
@@ -340,6 +337,7 @@ func (wsClient *WebsocketClient) dial(websocketURL string) error {
 	}
 	wsClient.conn = newConnection(conn)
 	wsClient.conn.replay = &wsClient.replay
+	wsClient.conn.idleWarnings = wsClient.idleWarnings
 	if wsClient.reconnect != nil {
 		wsClient.conn.reconnected = reconnected
 		wsClient.conn.notice = wsClient.reconnect.notice
@@ -419,14 +417,18 @@ func printCloseReason(err error) {
 		if message == "" {
 			return
 		}
-		_, _ = fmt.Fprintf(os.Stderr, "\r\nsession closed: %s\r\n", message)
+		prefix := "session closed: "
+		switch reason {
+		case "idle_timeout":
+			prefix = "session closed "
+		case "idle_detached":
+			prefix = "session disconnected "
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "\r\n%s%s\r\n", prefix, message)
 	}
 }
 
-// endsSession reports whether a connection error means the session itself ended:
-// the proxy's session-end code or a normal WebSocket close. Any other ending (1012,
-// 1006, a transport error with no close frame) leaves the session running on the
-// server, so the connection is re-dialed.
+// endsSession treats 4000 as final without reconnecting, even when idle detach leaves the shell running.
 func endsSession(err error) bool {
 	if err == nil {
 		return true
@@ -451,7 +453,7 @@ func reconnectDelay(failures int, base time.Duration) time.Duration {
 // Input is not forwarded to the server. Terminal echo is suppressed via raw mode.
 // Ends cleanly on the remote close, on Ctrl+C, or on a signal.
 func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
-	wsClient := newWebsocketClient(ac.SetWebsocketHeader())
+	wsClient := newWebsocketClient(ac.SetWebsocketHeaderWithCapabilities(client.CapabilityIdleWarning))
 	if err := wsClient.dial(sessionResponse.WebsocketURL); err != nil {
 		return err
 	}
@@ -528,9 +530,9 @@ func OpenSharedTerminal(ac *client.AlpaconClient, sessionResponse SessionRespons
 func openInteractiveTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse, reconnect *reconnector) error {
 	var header http.Header
 	if reconnect != nil {
-		header = ac.SetWebsocketHeaderWithCapabilities(client.CapabilityWebsocketReconnect)
+		header = ac.SetWebsocketHeaderWithCapabilities(client.CapabilityWebsocketReconnect, client.CapabilityIdleWarning)
 	} else {
-		header = ac.SetWebsocketHeader()
+		header = ac.SetWebsocketHeaderWithCapabilities(client.CapabilityIdleWarning)
 	}
 
 	wsClient := newWebsocketClient(header)
@@ -706,12 +708,42 @@ func (c *connection) readFromServer() {
 		switch kind {
 		case websocket.TextMessage:
 			var origin struct {
-				Type      string `json:"type"`
-				Epoch     string `json:"epoch"`
-				Offset    uint64 `json:"offset"`
-				Truncated bool   `json:"truncated"`
+				Type      string          `json:"type"`
+				Epoch     string          `json:"epoch"`
+				Offset    uint64          `json:"offset"`
+				Truncated bool            `json:"truncated"`
+				ClosesAt  json.RawMessage `json:"closes_at"`
 			}
-			if legacy || json.Unmarshal(message, &origin) != nil || origin.Type != "replay_origin" || origin.Epoch == "" {
+			if json.Unmarshal(message, &origin) != nil {
+				continue
+			}
+			if origin.Type == "idle_warning" {
+				var closesAt time.Time
+				now := time.Now()
+				if err := json.Unmarshal(origin.ClosesAt, &closesAt); err != nil || !closesAt.After(now) {
+					continue
+				}
+				for deadline := range c.idleWarnings {
+					if !deadline.After(now) {
+						delete(c.idleWarnings, deadline)
+					}
+				}
+				closesAt = closesAt.UTC()
+				if _, seen := c.idleWarnings[closesAt]; seen {
+					continue
+				}
+				if c.idleWarnings == nil {
+					c.idleWarnings = make(map[time.Time]struct{})
+				}
+				c.idleWarnings[closesAt] = struct{}{}
+				notice := c.notice
+				if notice == nil {
+					notice = os.Stderr
+				}
+				_, _ = fmt.Fprintf(notice, "[Idle: this session disconnects at %s without input.]\r\n", closesAt.Local().Format("15:04:05"))
+				continue
+			}
+			if legacy || origin.Type != "replay_origin" || origin.Epoch == "" {
 				continue
 			}
 			originSeen = true

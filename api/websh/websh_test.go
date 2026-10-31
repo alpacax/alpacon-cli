@@ -586,9 +586,14 @@ func TestFinish_SettlesASingleCloseByItsCode(t *testing.T) {
 		keepAsErr  bool
 	}{
 		{
-			name:       "session end with a reason",
+			name:       "idle timeout closes the shell",
 			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
-			wantStderr: "\r\nsession closed: the session reached its time limit\r\n",
+			wantStderr: "\r\nsession closed after inactivity\r\n",
+		},
+		{
+			name:       "idle detach keeps the shell running",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_detached"},
+			wantStderr: "\r\nsession disconnected after inactivity; the shell keeps running on the server until the work session ends\r\n",
 		},
 		{
 			name:       "session end with no reason",
@@ -725,14 +730,14 @@ func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
 		{
 			name:    "earlier failure over a later session end",
 			first:   errors.New("write failed on the closed connection"),
-			second:  &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
+			second:  &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_detached"},
 			wantErr: errors.New("write failed on the closed connection"),
 		},
 		{
 			name:       "duplicate session end prints once",
-			first:      &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
-			second:     &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
-			wantStderr: "\r\nsession closed: the session reached its time limit\r\n",
+			first:      &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_detached"},
+			second:     &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_detached"},
+			wantStderr: "\r\nsession disconnected after inactivity; the shell keeps running on the server until the work session ends\r\n",
 		},
 	}
 
@@ -1104,7 +1109,7 @@ func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, UserAgent: "alpacon-cli/test"}
-	wsClient := newWebsocketClient(ac.SetWebsocketHeaderWithCapabilities(client.CapabilityWebsocketReconnect))
+	wsClient := newWebsocketClient(ac.SetWebsocketHeaderWithCapabilities(client.CapabilityWebsocketReconnect, client.CapabilityIdleWarning))
 	wsClient.reconnect = newReconnector(ac, "sess-1")
 	wsClient.reconnect.baseDelay = time.Millisecond
 	wsClient.reconnect.notice = io.Discard
@@ -1143,7 +1148,7 @@ func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
 	for dial := 1; dial <= 2; dial++ {
 		select {
 		case header := <-dialHeaders:
-			assert.Equal(t, client.CapabilityWebsocketReconnect,
+			assert.Equal(t, "websocket-reconnect, idle-warning",
 				header.Get(client.ClientCapabilitiesHeader), "dial %d", dial)
 			assert.Equal(t, "alpacon-cli/test", header.Get("User-Agent"), "dial %d", dial)
 		default:
@@ -1156,6 +1161,49 @@ func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
 		require.Fail(t, "a service restart must not end the session", "err=%v", wsClient.err)
 	default:
 	}
+}
+
+func TestServeConnections_IdleDetachDoesNotReconnect(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var dials atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dials.Add(1)
+		ws, err := upgrader.Upgrade(w, r, nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer func() { _ = ws.Close() }()
+		assert.NoError(t, ws.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(sessionEndCloseCode, "idle_detached")))
+	}))
+	t.Cleanup(ts.Close)
+
+	wsClient := newWebsocketClient(nil)
+	var attempts int
+	var notices strings.Builder
+	wsClient.reconnect = &reconnector{
+		provision: func() (string, error) {
+			attempts++
+			return "", errors.New("unexpected reconnect after idle detach")
+		},
+		notice: &notices, baseDelay: time.Millisecond, maxAttempts: 1,
+	}
+	require.NoError(t, wsClient.dial("ws"+strings.TrimPrefix(ts.URL, "http")))
+	t.Cleanup(wsClient.closeConn)
+
+	stdout, stderr := testutil.CaptureOutput(t, func() {
+		awaitReturn(t, "idle detach did not end the client", func() {
+			wsClient.serveConnections(make(chan string))
+		})
+	})
+
+	assertReported(t, wsClient)
+	require.NoError(t, wsClient.err)
+	assert.Zero(t, attempts)
+	assert.Equal(t, int32(1), dials.Load())
+	assert.Empty(t, stdout)
+	assert.Empty(t, notices.String())
+	assert.Equal(t, "\r\nsession disconnected after inactivity; the shell keeps running on the server until the work session ends\r\n", stderr)
 }
 
 func TestRedial_StopsWhenTheServerRefusesANewChannel(t *testing.T) {
@@ -1245,7 +1293,7 @@ func pinTerminalSize(t *testing.T, rows, cols int) {
 
 // What reaches the server on the real entry points' first dial. Raw mode fails on
 // a pipe, so each call returns right after the handshake the assertions read.
-func TestOpenTerminal_AdvertisesTheCapabilityOnlyWhereItReconnects(t *testing.T) {
+func TestOpenTerminal_AdvertisesIdleWarningAndReconnectCapabilities(t *testing.T) {
 	tests := []struct {
 		name string
 		open func(*client.AlpaconClient, SessionResponse) error
@@ -1254,13 +1302,19 @@ func TestOpenTerminal_AdvertisesTheCapabilityOnlyWhereItReconnects(t *testing.T)
 		{
 			name: "an interactive session reconnects",
 			open: OpenNewTerminal,
-			want: client.CapabilityWebsocketReconnect,
+			want: "websocket-reconnect, idle-warning",
 		},
 		{
 			// The joiner may not open a channel on someone else's session, so
-			// claiming the capability would promise a recovery it cannot make.
-			name: "a joined session does not",
+			// claiming the reconnect capability would promise a recovery it cannot make.
+			name: "a joined session warns without reconnecting",
 			open: OpenSharedTerminal,
+			want: "idle-warning",
+		},
+		{
+			name: "a watched session warns without reconnecting",
+			open: OpenReadOnlyTerminal,
+			want: "idle-warning",
 		},
 	}
 
