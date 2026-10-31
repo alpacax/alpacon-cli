@@ -30,15 +30,11 @@ const (
 	ctrlC              = 0x03
 	writeFlushInterval = 5 * time.Millisecond
 
-	// sessionEndCloseCode is how the proxy, and Alpamon, close a user channel at the
-	// end of a session. A websh session never ends with 1000, so without it every
-	// normal end would be reported as a failure.
+	// sessionEndCloseCode ends the client without auto-reconnecting, including an idle detach.
 	sessionEndCloseCode = 4000
 
-	// A close that does not end the session is a dropped link (a restarted service, a
-	// network interruption); the session still runs on the server, so the client dials
-	// a new channel onto it. The budget, about 30s of waiting, bounds a server that
-	// keeps accepting a channel and dropping it.
+	// Dropped links get a new channel unless the close ends the client.
+	// The retry budget bounds servers that repeatedly accept and drop channels.
 	maxReconnectAttempts   = 5
 	reconnectBaseDelay     = 1 * time.Second
 	reconnectMaxDelay      = 15 * time.Second
@@ -61,12 +57,12 @@ var (
 	// closed while the connection was down, so retrying only asks again.
 	ErrSessionGone = errors.New("the session is no longer open")
 
-	// closeReasonMessages maps the proxy's session-end reason tokens; an empty message stays
+	// closeReasonMessages maps the proxy's close reason tokens; an empty message stays
 	// silent, since shell_exited means the user ended the shell and closed says nothing.
 	closeReasonMessages = map[string]string{
 		"user_request":           "the session was closed",
 		"force_close":            "closed by an administrator",
-		"idle_timeout":           "closed for inactivity; run the command again to reopen",
+		"idle_detached":          "disconnected for inactivity; the shell keeps running on the server until the work session ends",
 		"agent_disconnected":     "Alpamon on the server disconnected",
 		"server_shutdown":        "the service restarted",
 		"work_session_expired":   "the work session expired",
@@ -421,14 +417,15 @@ func printCloseReason(err error) {
 		if message == "" {
 			return
 		}
-		_, _ = fmt.Fprintf(os.Stderr, "\r\nsession closed: %s\r\n", message)
+		status := "closed"
+		if reason == "idle_detached" {
+			status = "disconnected"
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "\r\nsession %s: %s\r\n", status, message)
 	}
 }
 
-// endsSession reports whether a connection error means the session itself ended:
-// the proxy's session-end code or a normal WebSocket close. Any other ending (1012,
-// 1006, a transport error with no close frame) leaves the session running on the
-// server, so the connection is re-dialed.
+// endsSession reports whether a close ends the client, even if the shell survives an idle detach.
 func endsSession(err error) bool {
 	if err == nil {
 		return true
@@ -453,7 +450,7 @@ func reconnectDelay(failures int, base time.Duration) time.Duration {
 // Input is not forwarded to the server. Terminal echo is suppressed via raw mode.
 // Ends cleanly on the remote close, on Ctrl+C, or on a signal.
 func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
-	wsClient := newWebsocketClient(ac.SetWebsocketHeader())
+	wsClient := newWebsocketClient(ac.SetWebsocketHeaderWithCapabilities(client.CapabilityIdleWarning))
 	if err := wsClient.dial(sessionResponse.WebsocketURL); err != nil {
 		return err
 	}
@@ -531,9 +528,9 @@ func OpenSharedTerminal(ac *client.AlpaconClient, sessionResponse SessionRespons
 func openInteractiveTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse, reconnect *reconnector) error {
 	var header http.Header
 	if reconnect != nil {
-		header = ac.SetWebsocketHeaderWithCapabilities(client.CapabilityWebsocketReconnect)
+		header = ac.SetWebsocketHeaderWithCapabilities(client.CapabilityWebsocketReconnect, client.CapabilityIdleWarning)
 	} else {
-		header = ac.SetWebsocketHeader()
+		header = ac.SetWebsocketHeaderWithCapabilities(client.CapabilityIdleWarning)
 	}
 
 	wsClient := newWebsocketClient(header)
@@ -742,9 +739,9 @@ func (c *connection) readFromServer() {
 					notice = os.Stderr
 				}
 				if c.readOnly {
-					_, _ = fmt.Fprintf(notice, "[Idle: this session closes at %s.]\r\n", closesAt.Local().Format("15:04:05"))
+					_, _ = fmt.Fprintf(notice, "[Idle: this session disconnects at %s.]\r\n", closesAt.Local().Format("15:04:05"))
 				} else {
-					_, _ = fmt.Fprintf(notice, "[Idle: this session closes at %s unless you type something.]\r\n", closesAt.Local().Format("15:04:05"))
+					_, _ = fmt.Fprintf(notice, "[Idle: this session disconnects at %s unless you type something.]\r\n", closesAt.Local().Format("15:04:05"))
 				}
 				continue
 			}

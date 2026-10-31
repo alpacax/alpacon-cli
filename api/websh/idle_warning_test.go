@@ -23,7 +23,7 @@ func TestReadFromServer_IdleWarningUsesStderrAndLocalTime(t *testing.T) {
 	_, stdout, stderr := readIdleFrames(t, idleWarningFrame(closesAt))
 
 	assert.Empty(t, stdout)
-	assert.Equal(t, "[Idle: this session closes at 15:04:05 unless you type something.]\r\n", stderr)
+	assert.Equal(t, "[Idle: this session disconnects at 15:04:05 unless you type something.]\r\n", stderr)
 }
 
 func TestReadFromServer_IdleWarningPreservesReplay(t *testing.T) {
@@ -51,7 +51,7 @@ func TestReadFromServer_IdleWarningPreservesReplay(t *testing.T) {
 			} else {
 				assert.Empty(t, stdout)
 			}
-			assert.Equal(t, "[Idle: this session closes at 15:04:05 unless you type something.]\r\n", stderr)
+			assert.Equal(t, "[Idle: this session disconnects at 15:04:05 unless you type something.]\r\n", stderr)
 		})
 	}
 }
@@ -73,7 +73,7 @@ func TestReadFromServer_IdleWarningIgnoresInvalidDeadlines(t *testing.T) {
 				replayFrame{websocket.TextMessage, tc.body}, idleWarningFrame(closesAt),
 			)
 			assert.Empty(t, stdout)
-			assert.Equal(t, "[Idle: this session closes at 15:04:05 unless you type something.]\r\n", stderr)
+			assert.Equal(t, "[Idle: this session disconnects at 15:04:05 unless you type something.]\r\n", stderr)
 		})
 	}
 }
@@ -85,8 +85,8 @@ func TestReadFromServer_IdleWarningPrintsOncePerDeadline(t *testing.T) {
 		idleWarningFrame(first), idleWarningFrame(first), idleWarningFrame(second), idleWarningFrame(first),
 	)
 	assert.Empty(t, stdout)
-	assert.Equal(t, "[Idle: this session closes at 15:04:05 unless you type something.]\r\n"+
-		"[Idle: this session closes at 15:05:05 unless you type something.]\r\n", stderr)
+	assert.Equal(t, "[Idle: this session disconnects at 15:04:05 unless you type something.]\r\n"+
+		"[Idle: this session disconnects at 15:05:05 unless you type something.]\r\n", stderr)
 }
 
 func TestReadFromServer_IdleWarningStaysDeduplicatedOnReconnect(t *testing.T) {
@@ -96,7 +96,7 @@ func TestReadFromServer_IdleWarningStaysDeduplicatedOnReconnect(t *testing.T) {
 		replayRound{frames: []replayFrame{idleWarningFrame(closesAt)}},
 	)
 	assert.Empty(t, stdout)
-	assert.Equal(t, "[Idle: this session closes at 15:04:05 unless you type something.]\r\n\r\nConnection lost, reconnecting...\r\n", notices)
+	assert.Equal(t, "[Idle: this session disconnects at 15:04:05 unless you type something.]\r\n\r\nConnection lost, reconnecting...\r\n", notices)
 }
 
 func TestReadFromServer_IdleWarningReadOnlyOmitsTypingAdvice(t *testing.T) {
@@ -106,7 +106,7 @@ func TestReadFromServer_IdleWarningReadOnlyOmitsTypingAdvice(t *testing.T) {
 	)
 
 	assert.Empty(t, stdout)
-	assert.Equal(t, "[Idle: this session closes at 15:04:05.]\r\n", stderr)
+	assert.Equal(t, "[Idle: this session disconnects at 15:04:05.]\r\n", stderr)
 }
 
 func TestReadFromServer_IdleWarningPrunesExpiredHistory(t *testing.T) {
@@ -120,7 +120,7 @@ func TestReadFromServer_IdleWarningPrunesExpiredHistory(t *testing.T) {
 	)
 
 	assert.Empty(t, stdout)
-	assert.Equal(t, fmt.Sprintf("[Idle: this session closes at %s unless you type something.]\r\n", next.Local().Format("15:04:05")), stderr)
+	assert.Equal(t, fmt.Sprintf("[Idle: this session disconnects at %s unless you type something.]\r\n", next.Local().Format("15:04:05")), stderr)
 	assert.NotContains(t, conn.idleWarnings, expired)
 	assert.Contains(t, conn.idleWarnings, retained)
 	assert.Contains(t, conn.idleWarnings, next)

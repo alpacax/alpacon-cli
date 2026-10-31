@@ -37,6 +37,9 @@ const (
 	// for a transient reason does not take the session with it.
 	CapabilityWebsocketReconnect = "websocket-reconnect"
 
+	// CapabilityIdleWarning says the client handles idle warnings without printing raw frames.
+	CapabilityIdleWarning = "idle-warning"
+
 	// serverGateTokenScope is the "gate" of a token-scope refusal, the only gate whose "missing" is
 	// a scope string rather than a permission or role.
 	serverGateTokenScope = "token_scope"
