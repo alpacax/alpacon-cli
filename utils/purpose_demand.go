@@ -11,8 +11,7 @@ import (
 // open demand. `exec` and `exec logs` differ only in what they add after it, so
 // keeping the shared half here stops one from being reworded without the other.
 const PurposeDemandLead = "Purpose required—the verification gate held this command and is asking what it is for. " +
-	"No approver has been notified: state the purpose and it is judged again, once, with that in hand. " +
-	"Stay silent and the command is not blocked—it takes the ordinary path when the demand expires."
+	"No approver has been notified: state the purpose and it is judged again, once, with that in hand."
 
 // purposeGuidance says what makes a purpose worth stating. It travels in the
 // response rather than living only in help text: an agent reads the answer to
@@ -85,6 +84,11 @@ func PrintPurposeDemand(message, commandID string, expiresAt *time.Time) {
 	// Sanitized once: the id is server-supplied and every line below writes it to the terminal.
 	commandID = SanitizeTerminalText(commandID)
 	remaining := remainingPurposeWindow(expiresAt)
+	deadline := "the deadline"
+	if remaining != nil {
+		deadline = fmt.Sprintf("%s (about %d s)", expiresAt.Local().Format("15:04:05"), *remaining)
+	}
+	message += fmt.Sprintf(" If no purpose arrives by %s, the command is judged again without one: it runs, waits for a human approver (who is notified then), or is refused. Read the result with `alpacon exec logs %s`; do not resubmit.", deadline, commandID)
 
 	if OutputFormat == OutputFormatJSON {
 		envelope := purposeRequiredJSON{
@@ -108,9 +112,6 @@ func PrintPurposeDemand(message, commandID string, expiresAt *time.Time) {
 	}
 
 	CliWarning("%s", message)
-	if remaining != nil {
-		fmt.Fprintf(os.Stderr, "  About %ds left to answer.\n", *remaining)
-	}
 	fmt.Fprintf(os.Stderr, "  %s\n", purposeGuidance)
 	for _, action := range purposeNextActions(commandID) {
 		fmt.Fprintf(os.Stderr, "  %s\n", action.PlainText())

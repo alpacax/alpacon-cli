@@ -79,7 +79,7 @@ func TestPrintPurposeDemand_EnvelopeCarriesTheWholeContract(t *testing.T) {
 	assert.False(t, got.OK)
 	assert.Equal(t, PurposeRequiredStatus, got.Status)
 	assert.Equal(t, ExitCodePurposeRequired, got.ExitCode)
-	assert.Equal(t, PurposeDemandLead, got.Message)
+	assert.Contains(t, got.Message, PurposeDemandLead)
 	assert.Equal(t, purposeTestCommandID, got.CommandID)
 	assert.Equal(t, purposeTestCommandID, got.Context.CommandID)
 
@@ -135,7 +135,7 @@ func TestPrintPurposeDemand_TableModeIsActionableOnStderr(t *testing.T) {
 
 	assert.Empty(t, stdout, "stdout stays clean for the command's own output")
 	assert.Contains(t, stderr, "Purpose required")
-	assert.Contains(t, stderr, "left to answer")
+	assert.Contains(t, stderr, "the command is judged again without one")
 	assert.Contains(t, stderr, "local to this host")
 	assert.Contains(t, stderr, "alpacon exec purpose "+purposeTestCommandID)
 	assert.Contains(t, stderr, "alpacon exec logs "+purposeTestCommandID)
@@ -207,13 +207,36 @@ func TestPrintPurposeAnswer_TableModeKeepsStdoutClean(t *testing.T) {
 	assert.Contains(t, stderr, "Purpose recorded")
 }
 
-func TestPurposeDemandLead_SaysWhatSilenceCosts(t *testing.T) {
-	t.Parallel()
-	// Both surfaces read the expiry behavior off this one string. A caller arriving through `exec
-	// logs` found the demand late by definition and needs to know the window closing blocks
-	// nothing.
-	assert.Contains(t, PurposeDemandLead, "not blocked")
-	assert.Contains(t, PurposeDemandLead, "ordinary path")
+func TestPrintPurposeDemand_StatesLocalDeadlineAndLapseOutcome(t *testing.T) {
+	for _, format := range []string{OutputFormatTable, OutputFormatJSON} {
+		for _, window := range []time.Duration{time.Minute, -time.Minute} {
+			t.Run(format+" "+window.String(), func(t *testing.T) {
+				var stdout, stderr, want string
+				withFormat(format, func() {
+					stdout, stderr = testutil.CaptureOutput(t, func() {
+						synctest.Test(t, func(*testing.T) {
+							expires := time.Now().Add(window).In(time.FixedZone("server", 9*60*60))
+							left := "60"
+							if window < 0 {
+								left = "0"
+							}
+							want = "If no purpose arrives by " + expires.Local().Format("15:04:05") + " (about " + left + " s), the command is judged again without one: it runs, waits for a human approver (who is notified then), or is refused. Read the result with `alpacon exec logs " + purposeTestCommandID + "`; do not resubmit."
+							PrintPurposeDemand(PurposeDemandLead, purposeTestCommandID, &expires)
+						})
+					})
+				})
+				if format == OutputFormatJSON {
+					var got purposeRequiredSignal
+					require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+					assert.Contains(t, got.Message, want)
+				} else {
+					assert.Empty(t, stdout)
+					assert.Contains(t, stderr, want)
+				}
+				assert.NotContains(t, stdout+stderr, "ordinary path")
+			})
+		}
+	}
 }
 
 // A refused answer whose refusal carries the server's hint leads with the
