@@ -13,6 +13,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
@@ -623,6 +624,7 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 		printStandingGrant(details)
 		// Output is already streamed; errorFromDetails keeps it on the error for
 		// inspection, such as the sudo-denial hint, not for reprinting.
+		SignalPendingSudoApproval(ac, details)
 		return errorFromDetails(details)
 	}
 
@@ -814,6 +816,16 @@ func errorFromDetails(d EventDetails) error {
 	}
 }
 
+// SignalPendingSudoApproval signals a successful command whose sudo grant awaits approval.
+func SignalPendingSudoApproval(ac *client.AlpaconClient, details EventDetails) {
+	if errorFromDetails(details) == nil && details.SudoGrantStatus != nil && *details.SudoGrantStatus == "pending_approval" {
+		utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{
+			Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name,
+			Account: details.Username, Session: details.WorkSessionID(), ConsoleURL: details.ConsoleURL,
+		}, ac)
+	}
+}
+
 // runCommandFallback submits the command and polls it in place of the stream.
 func runCommandFallback(ac *client.AlpaconClient, submit commandSubmitter, out io.Writer, tick time.Duration, cause error) error {
 	cmdResp, err := submit()
@@ -843,6 +855,7 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID api.PathID, out io
 	// The command's own failure carries the remote exit code the caller
 	// propagates, so it outranks an unreadable output. The warning above names a
 	// lost stream, not a lost output, so it cannot stand in for this error.
+	SignalPendingSudoApproval(ac, details)
 	if err := errorFromDetails(details); err != nil {
 		return err
 	}

@@ -67,6 +67,17 @@ func TestArgv0(t *testing.T) {
 		{"command separator", "echo;cat /etc/shadow", "echo"},
 		{"sudo account", "/usr/bin/sudo -u x id", "sudo"},
 		{"quoted assignment", `A="one two" B='three four' psql`, "psql"},
+		{"assignment command substitution", `X="$(printf "%s" "a b")" psql`, ""},
+		{"assignment backticks", "X=`printf a b` psql", ""},
+		{"assignment parameter expansion", `X="${HOME}" psql`, ""},
+		{"plain quoted assignment", `X="plain value" psql`, "psql"},
+		{"assignment nested single quote", `X="a 'b'" psql`, ""},
+		{"assignment nested double quote", `X='a "b"' psql`, ""},
+		{"later assignment substitution", `A=plain X="$(printf a b)" psql`, ""},
+		{"executable command substitution", `psql$(printf a b)`, ""},
+		{"executable backticks", "psql`printf a b`", ""},
+		{"executable parameter expansion", `psql${HOME}`, ""},
+		{"argument substitution", `psql "$(printf a b)"`, "psql"},
 		{"invalid name", "tool=", ""},
 		{"long name", strings.Repeat("x", 65), ""},
 		{"windows", `C:\Windows\System32\whoami.exe /all`, ""},
@@ -81,6 +92,11 @@ func TestArgv0(t *testing.T) {
 			title, body := Format(Denied, Fields{Argv0: tc.command}, 0)
 			for _, secret := range []string{"=", "hunter2", "SECRET", "abc123"} {
 				assert.NotContains(t, title+body, secret)
+			}
+			for _, word := range strings.FieldsFunc(title+body, func(r rune) bool {
+				return r < 'a' || r > 'z'
+			}) {
+				assert.NotContains(t, []string{"a", "b", "printf"}, word)
 			}
 		})
 	}
@@ -238,7 +254,8 @@ func TestNoOptOut(t *testing.T) {
 				key, err := strconv.Unquote(literal.Value)
 				require.NoError(t, err)
 				normalCommandReads := map[string]bool{"editor": true, "username": true, "groupname": true, "force": true, "work-session": true, "recursive": true, "no-overwrite": true, "ALPACON_EDITOR": true, "VISUAL": true, "EDITOR": true}
-				assert.True(t, allowed[key] || normalCommandReads[key], "unreviewed read %s in signal path %s", key, file)
+				commandTimeout := key == "ALPACON_EXEC_TIMEOUT" && filepath.Clean(file) == filepath.Join("..", "..", "api", "event", "event.go")
+				assert.True(t, allowed[key] || normalCommandReads[key] || commandTimeout, "unreviewed read %s in signal path %s", key, file)
 			}
 			if selector, ok := call.Fun.(*ast.SelectorExpr); ok {
 				if pkg, ok := selector.X.(*ast.Ident); ok && pkg.Name == "config" {

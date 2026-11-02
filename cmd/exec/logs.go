@@ -44,6 +44,7 @@ Run the command again later to check for completion.`,
 			utils.CliErrorWithExit("failed to fetch command result: %s", err)
 			return
 		}
+		event.SignalPendingSudoApproval(alpaconClient, details)
 		if line := event.StandingGrantLine(details); line != "" {
 			fmt.Fprintln(os.Stderr, line)
 		}

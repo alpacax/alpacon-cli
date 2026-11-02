@@ -376,3 +376,29 @@ func TestExecLogsSuccessfulCompletionLine(t *testing.T) {
 		})
 	}
 }
+
+func TestExecLogs_SuccessWithPendingSudoApprovalSignals(t *testing.T) {
+	const jobID = "a1b2c3d4-5678-abcd-ef01-234567890abc"
+	const output = "Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED)."
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/chunks/") {
+			_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": jobID, "status": "completed", "success": true, "exit_code": 0,
+			"result": output, "line": "sudo id", "username": "alice",
+			"server":       map[string]string{"name": "my-server"},
+			"work_session": map[string]string{"id": "ses-1"}, "sudo_grant_status": "pending_approval",
+		})
+	}))
+	t.Cleanup(ts.Close)
+
+	stdout, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, jobID)
+
+	assert.Equal(t, 0, exitCode)
+	assert.Equal(t, output+"\n", strings.TrimSuffix(stdout, "PASS\n"))
+	assert.Equal(t, 1, strings.Count(stderr, "==== ALPACON: APPROVAL PENDING ===="))
+	assert.Contains(t, stderr, "sudo on my-server as alice is waiting for approval. Session ses-1.")
+}

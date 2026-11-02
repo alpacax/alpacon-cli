@@ -150,13 +150,13 @@ func Argv0(command string) string {
 	command = strings.TrimLeftFunc(command, unicode.IsSpace)
 	for {
 		prefix := assignmentName.FindString(command)
-		if prefix == "" {
-			break
-		}
 		var quote rune
 		escaped := false
 		end := len(command)
 		for i, r := range command[len(prefix):] {
+			if r == '`' || strings.HasPrefix(command[len(prefix)+i:], "$(") || strings.HasPrefix(command[len(prefix)+i:], "${") {
+				return ""
+			}
 			if escaped {
 				escaped = false
 				continue
@@ -166,8 +166,11 @@ func Argv0(command string) string {
 				continue
 			}
 			if quote != 0 {
-				if r == quote {
+				switch r {
+				case quote:
 					quote = 0
+				case '\'', '"':
+					return ""
 				}
 				continue
 			}
@@ -179,12 +182,15 @@ func Argv0(command string) string {
 				end = len(prefix) + i
 				break
 			}
-			if strings.ContainsRune(";|&<>()$`", r) {
+			if prefix != "" && strings.ContainsRune(";|&<>()$`", r) {
 				return ""
 			}
 		}
 		if quote != 0 {
 			return ""
+		}
+		if prefix == "" {
+			break
 		}
 		command = strings.TrimLeftFunc(command[end:], unicode.IsSpace)
 	}

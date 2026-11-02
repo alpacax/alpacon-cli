@@ -3,6 +3,7 @@ package event
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
+	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -2698,6 +2700,56 @@ func TestRejectedCommandLocalSignal(t *testing.T) {
 				assert.Empty(t, stderr)
 				assert.NoFileExists(t, state)
 			}
+		})
+	}
+}
+
+func TestSuccessfulCommandWithPendingSudoApprovalSignals(t *testing.T) {
+	for _, lane := range []string{"polling", "streaming"} {
+		t.Run(lane, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			const output = "Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n"
+			pending := "pending_approval"
+			details := EventDetails{
+				ID: "cmd-1", Status: "completed", Success: new(true), ExitCode: new(0),
+				Result: output, Line: "sudo id", Username: "alice",
+				Server:      types.ServerSummary{Name: "my-server"},
+				WorkSession: &CommandWorkSession{ID: "ses-1"}, SudoGrantStatus: &pending,
+			}
+			var out bytes.Buffer
+			_, stderr := testutil.CaptureOutput(t, func() {
+				synctest.Test(t, func(t *testing.T) {
+					if lane == "streaming" {
+						ac := newStreamingServers(t, streamingServerConfig{
+							cmdID: "cmd-1", serverID: "srv-1", terminal: details,
+							wsChunks: []ChunkEvent{{Seq: 0, Content: output}},
+						})
+						require.NoError(t, RunCommandStreaming(ac, "my-server", "sudo id", "alice", "", nil, "ses-1", "", &out))
+						return
+					}
+					ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						if strings.Contains(r.URL.Path, "/chunks/") {
+							_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{})
+							return
+						}
+						_ = json.NewEncoder(w).Encode(details)
+					}))
+					ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+					for range 2 {
+						require.NoError(t, runCommandFallbackFromID(ac, testPathID(t, "cmd-1"), &out, time.Millisecond, false, errors.New("no stream")))
+					}
+				})
+			})
+			want := output
+			if lane == "polling" {
+				want += output
+			}
+			assert.Equal(t, want, out.String())
+			assert.Equal(t, 1, strings.Count(stderr, "==== ALPACON: APPROVAL PENDING ===="))
+			assert.Contains(t, stderr, "sudo on my-server as alice is waiting for approval. Session ses-1.")
 		})
 	}
 }
