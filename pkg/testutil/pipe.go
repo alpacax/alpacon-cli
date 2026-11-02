@@ -47,6 +47,7 @@ func (s *PipeServer) DialContext(ctx context.Context, _, _ string) (net.Conn, er
 	client, server := net.Pipe()
 	select {
 	case s.listener.conns <- server:
+		s.listener.track(server)
 		return client, nil
 	case <-s.listener.done:
 		return nil, net.ErrClosed
@@ -55,9 +56,11 @@ func (s *PipeServer) DialContext(ctx context.Context, _, _ string) (net.Conn, er
 	}
 }
 
-// Close stops the server and drops every connection; it is safe to call twice.
+// Close stops the server and drops every connection, a hijacked WebSocket's included;
+// it is safe to call twice.
 func (s *PipeServer) Close() {
 	_ = s.server.Close()
+	s.listener.closeAccepted()
 	s.client.CloseIdleConnections()
 }
 
@@ -65,6 +68,23 @@ type pipeListener struct {
 	conns     chan net.Conn
 	done      chan struct{}
 	closeOnce sync.Once
+	mu        sync.Mutex
+	accepted  []net.Conn // http.Server.Close skips hijacked connections, so Close ends these itself
+}
+
+func (l *pipeListener) track(conn net.Conn) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.accepted = append(l.accepted, conn)
+}
+
+func (l *pipeListener) closeAccepted() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, conn := range l.accepted {
+		_ = conn.Close()
+	}
+	l.accepted = nil
 }
 
 func (l *pipeListener) Accept() (net.Conn, error) {

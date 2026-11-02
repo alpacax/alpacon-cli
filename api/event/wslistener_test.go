@@ -1,9 +1,12 @@
 package event
 
 import (
+	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
@@ -641,4 +644,43 @@ func TestNewListenerDialer_FollowsTheSystemProxy(t *testing.T) {
 	require.NotNil(t, dialer.Proxy)
 	assert.Equal(t, reflect.ValueOf(http.ProxyFromEnvironment).Pointer(), reflect.ValueOf(dialer.Proxy).Pointer())
 	assert.Equal(t, 3*time.Second, dialer.HandshakeTimeout)
+}
+
+func TestWSListener_DialsTheRouteItsClientsTransportTakes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		proxy    func(*http.Request) (*url.URL, error)
+		wantAddr string
+	}{
+		{"straight to the server without a proxy", nil, "pipe.test:80"},
+		{"through the transport's proxy", http.ProxyURL(&url.URL{Scheme: "http", Host: "proxy.example:3128"}), "proxy.example:3128"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ps := testutil.NewPipeServer(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+			dialed := make(chan string, 1)
+			transport := &http.Transport{Proxy: tt.proxy, DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				select {
+				case dialed <- addr:
+				default:
+				}
+				return ps.DialContext(ctx, network, addr)
+			}}
+			ac := &client.AlpaconClient{HTTPClient: &http.Client{Transport: transport}, BaseURL: ps.URL}
+			w := newProvisionedWSListener(ac, provisionURL(ps.WebsocketURL("/ws/")), time.Second)
+			w.handleFrame = func([]byte) {}
+			w.closeUnopened = func(string) {}
+
+			w.connectAndListen()
+
+			select {
+			case addr := <-dialed:
+				assert.Equal(t, tt.wantAddr, addr)
+			default:
+				t.Fatal("the listener never dialed through its client's transport")
+			}
+		})
+	}
 }

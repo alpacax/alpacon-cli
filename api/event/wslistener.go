@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -37,8 +38,10 @@ type wsListener struct {
 	wsHeader         http.Header
 	handshakeTimeout time.Duration
 	readLimit        int64 // 0 for gorilla's default of no limit
-	// The client's own dialer, so the channel goes where its HTTP requests go; nil dials directly.
+	// The client transport's dial and proxy, so the channel goes where its HTTP requests go.
+	// A nil netDial keeps the dialer's defaults; with netDial set, a nil proxy means none.
 	netDial func(ctx context.Context, network, addr string) (net.Conn, error)
+	proxy   func(*http.Request) (*url.URL, error)
 	// The first backoff step, lowered by tests so a reconnect assertion does not have to
 	// sit through the production delay.
 	reconnectBaseDelay time.Duration
@@ -75,7 +78,7 @@ func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (*Event
 		w.closeUnopened = func(id string) { go closeSession(ac, id, eventSessionCloseTimeout) }
 		if ac.HTTPClient != nil {
 			if transport, ok := ac.HTTPClient.Transport.(*http.Transport); ok {
-				w.netDial = transport.DialContext
+				w.netDial, w.proxy = transport.DialContext, transport.Proxy
 			}
 		}
 	}
@@ -172,7 +175,9 @@ func (w *wsListener) connectAndListen() bool {
 	}
 
 	dialer := newListenerDialer(w.handshakeTimeout)
-	dialer.NetDialContext = w.netDial
+	if w.netDial != nil {
+		dialer.NetDialContext, dialer.Proxy = w.netDial, w.proxy
+	}
 	conn, resp, dialErr := dialer.Dial(session.WebsocketURL, w.wsHeader)
 	if dialErr != nil {
 		if w.onDialFailed != nil {
