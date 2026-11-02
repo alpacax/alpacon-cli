@@ -1005,8 +1005,8 @@ func TestRunCommandStreaming_NormalFlow(t *testing.T) {
 	})
 }
 
-// startStream wires a session and listener the way the streaming entry points do,
-// so a test can hand streamSubscribed a poll tick of its own choosing.
+// startStream connects a listener the way the streaming entry points do and runs
+// streamSubscribed on it, so a test can drive the stream past the submission.
 func startStream(t *testing.T, ac *client.AlpaconClient, cmdID, serverID string, out io.Writer, waitApproval bool) <-chan error {
 	t.Helper()
 	listener := NewCommandOutputListener(ac)
