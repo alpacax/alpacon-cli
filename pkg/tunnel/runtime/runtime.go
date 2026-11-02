@@ -309,7 +309,7 @@ func (r *Runtime) handleTCPConnection(tcpConn net.Conn) {
 	}
 
 	if relay(tcpConn, stream, halfCloseTimeout) {
-		utils.CliInfo("Closed a half-closed tunnel connection after %v: %s", halfCloseTimeout, tcpConn.RemoteAddr())
+		utils.CliWarning("Closed a half-closed tunnel connection after %v: %s", halfCloseTimeout, tcpConn.RemoteAddr())
 	}
 	if r.verbose {
 		utils.CliInfo("Connection closed: %s", tcpConn.RemoteAddr())
