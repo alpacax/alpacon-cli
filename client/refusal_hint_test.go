@@ -26,6 +26,8 @@ func sendRefusalWithRetryAfter(t *testing.T, status int, retryAfter, body string
 	return sendRefusalFrom(t, newTestClient, status, retryAfter, body)
 }
 
+func newBearerClient(url string) *AlpaconClient { return newBearerTestClient(url, "access") }
+
 func sendRefusalFrom(t *testing.T, newClient func(string) *AlpaconClient, status int, retryAfter, body string) error {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -441,7 +443,7 @@ func TestSendRequest_RefusalWithNextIsNotAFieldDump(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			err := sendRefusal(t, tt.status, tt.body)
+			err := sendRefusalFrom(t, newBearerClient, tt.status, "", tt.body)
 
 			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
 			assert.Equal(t, tt.wantMessage, err.Error())
@@ -455,13 +457,36 @@ func TestSendRequest_RefusalWithNextIsNotAFieldDump(t *testing.T) {
 
 func TestSendRequest_PlanLimitNextIsShownAsTheEntitlementsRead(t *testing.T) {
 	t.Parallel()
-	err := sendRefusal(t, http.StatusPaymentRequired, `{"code": "server_limit_exceeded", "gate": "plan", "axis": "server", "next": "/api/workspaces/workspaces/abc/entitlements/"}`)
+	err := sendRefusalFrom(t, newBearerClient, http.StatusPaymentRequired, "", `{"code": "server_limit_exceeded", "gate": "plan", "axis": "server", "next": "/api/workspaces/workspaces/abc/entitlements/"}`)
 
 	assert.Equal(t, http.StatusPaymentRequired, utils.HTTPStatusCode(err))
 	assert.Equal(t, []utils.NextAction{{
 		Command:     "alpacon api /api/workspaces/workspaces/abc/entitlements/",
 		Description: "Where the server says to check on this refusal",
 	}}, utils.RefusalNextActions(err))
+}
+
+func TestSendRequest_APITokenLoginShowsNextAsTextOnly(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{name: "plan limit", status: http.StatusPaymentRequired, body: `{"code": "server_limit_exceeded", "gate": "plan", "axis": "server", "next": "/api/workspaces/workspaces/abc/entitlements/"}`},
+		{name: "forbidden", status: http.StatusForbidden, body: `{"code": "future_denied", "gate": "approval", "next": "/api/workspaces/workspaces/abc/entitlements/"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := sendRefusal(t, tt.status, tt.body)
+
+			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
+			assert.Equal(t, []utils.NextAction{{
+				Description: "Where the server says to check on this refusal, which an API token cannot read: /api/workspaces/workspaces/abc/entitlements/",
+			}}, utils.RefusalNextActions(err))
+		})
+	}
 }
 
 func TestSendRequest_NextOutsideARefusalYieldsNoAction(t *testing.T) {

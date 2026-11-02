@@ -104,6 +104,8 @@ type apiError struct {
 	// can be read at.
 	axis string
 	next string
+	// nextUnderAPIToken records that the refused request carried an API token.
+	nextUnderAPIToken bool
 	// hint is the server's sanitized next-step sentence a coded 402/403/405/429 may carry; when it
 	// is set, the message only identifies the refusal.
 	hint string
@@ -593,7 +595,7 @@ func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, er
 
 	respBody, err := readJSONResponse(resp)
 	if err != nil {
-		return nil, resp.StatusCode, ac.withoutForeignNext(err)
+		return nil, resp.StatusCode, ac.withRefusalNextFor(err)
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -601,19 +603,23 @@ func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, er
 		if resp.StatusCode == http.StatusPaymentRequired {
 			apiErr = ac.rewritePlanLimitMessage(apiErr)
 		}
-		return nil, resp.StatusCode, ac.withoutForeignNext(apiErr)
+		return nil, resp.StatusCode, ac.withRefusalNextFor(apiErr)
 	}
 
 	return respBody, resp.StatusCode, nil
 }
 
-// withoutForeignNext drops err's "next" on a client whose host `alpacon api`
-// does not reach.
-func (ac *AlpaconClient) withoutForeignNext(err error) error {
+// withRefusalNextFor fits err's "next" to this client: dropped on a host `alpacon api`
+// does not reach, marked text only when the request carried an API token.
+func (ac *AlpaconClient) withRefusalNextFor(err error) error {
 	var ae *apiError
-	if ac.dropsRefusalNext && errors.As(err, &ae) {
+	if !errors.As(err, &ae) {
+		return err
+	}
+	if ac.dropsRefusalNext {
 		ae.next = ""
 	}
+	ae.nextUnderAPIToken = ac.AccessToken() == "" && ac.Token != ""
 	return err
 }
 
@@ -1041,7 +1047,7 @@ func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, e
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, ac.withoutForeignNext(withRetryAfter(withStatus(checkAuthStatus(resp.StatusCode, body), resp.StatusCode), resp.Header))
+		return nil, ac.withRefusalNextFor(withRetryAfter(withStatus(checkAuthStatus(resp.StatusCode, body), resp.StatusCode), resp.Header))
 	}
 	// A 402, 405 or 429 is a coded refusal too: the shared parser keeps its
 	// code and hint, where the caller would only have the raw body to print.
@@ -1052,7 +1058,7 @@ func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, e
 		if resp.StatusCode == http.StatusPaymentRequired {
 			refusal = ac.rewritePlanLimitMessage(refusal)
 		}
-		return nil, ac.withoutForeignNext(refusal)
+		return nil, ac.withRefusalNextFor(refusal)
 	}
 
 	return resp, nil
@@ -1165,6 +1171,10 @@ func (e *apiError) ErrorHint() string {
 
 func (e *apiError) ErrorNext() string {
 	return e.next
+}
+
+func (e *apiError) ErrorNextUnderAPIToken() bool {
+	return e.nextUnderAPIToken
 }
 
 func (e *apiError) ErrorFields() map[string]any {

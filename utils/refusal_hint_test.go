@@ -444,6 +444,29 @@ func TestNewFailureEnvelope_NextActionsHoldHintThenNextThenRetry(t *testing.T) {
 	}`, rendered)
 }
 
+// tokenRefusedError is refusedError for a request that carried an API token.
+type tokenRefusedError struct{ refusedError }
+
+func (e *tokenRefusedError) ErrorNextUnderAPIToken() bool { return true }
+
+func TestNewFailureEnvelope_NextUnderAPITokenIsTextOnly(t *testing.T) {
+	t.Parallel()
+	err := &tokenRefusedError{refusedError{next: "/api/workspaces/workspaces/abc/entitlements/", gate: "plan"}}
+	rendered, fmtErr := FormatJSON(newFailureEnvelope(ExitCodeGeneralError, "", "exec", err, "Failed to run."))
+	require.NoError(t, fmtErr)
+
+	assert.JSONEq(t, `{
+		"ok": false,
+		"exit_code": 1,
+		"error_code": "future_denied",
+		"message": "Failed to run.",
+		"context": {"operation": "exec"},
+		"next_actions": [
+			{"description": "Where the server says to check on this refusal, which an API token cannot read: /api/workspaces/workspaces/abc/entitlements/"}
+		]
+	}`, rendered)
+}
+
 func TestCliError_PrintsHintNextAndRetryLines(t *testing.T) {
 	pinColor(t, false)
 	err := &refusedError{hint: sampleHint, next: "/api/approvals/7/", gate: "rate", retryAfter: 30 * time.Second}

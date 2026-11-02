@@ -95,6 +95,8 @@ func refusalHints(err error) []string {
 	return hints
 }
 
+const refusalNextDescription = "Where the server says to check on this refusal"
+
 // GatePlan is the "gate" of a plan refusal, whose own message already states
 // when its limit resets, so no Retry-After action is added for it.
 const GatePlan = "plan"
@@ -102,6 +104,12 @@ const GatePlan = "plan"
 // nextCarrier is implemented by an error that carries a refusal's "next" path.
 type nextCarrier interface {
 	ErrorNext() string
+}
+
+// tokenNextCarrier is implemented by an error whose request went out under an
+// API token, which the path "next" names may refuse.
+type tokenNextCarrier interface {
+	ErrorNextUnderAPIToken() bool
 }
 
 // selfRelativePath matches a path whose every segment is plain characters that
@@ -122,9 +130,10 @@ func ParseRefusalNext(body []byte, statusCode int) string {
 	return next
 }
 
-// refusalNext returns the first "next" in err's chain, or "" when there is none
-// or it is not a path safe to hand to `alpacon api` as one shell word.
-func refusalNext(err error) string {
+// refusalNext returns the first "next" in err's chain and whether its request
+// used an API token, or "" when there is none or it is not a path safe to hand
+// to `alpacon api` as one shell word.
+func refusalNext(err error) (next string, underAPIToken bool) {
 	for e := range errorChain(err) {
 		carrier, ok := e.(nextCarrier)
 		if !ok {
@@ -135,27 +144,30 @@ func refusalNext(err error) string {
 			continue
 		}
 		if len(next) > MaxServerHintBytes || !selfRelativePath.MatchString(next) {
-			return ""
+			return "", false
 		}
-		return next
+		tokenCarrier, ok := e.(tokenNextCarrier)
+		return next, ok && tokenCarrier.ErrorNextUnderAPIToken()
 	}
-	return ""
+	return "", false
 }
 
 // RefusalNextActions is the server's guidance for a refused request, shown
 // under the error line: each distinct hint as sent, then where to read the
 // request's state ("next"), then the Retry-After wait of a gated refusal other
-// than a plan limit. Nil when err carries none.
+// than a plan limit. Nil when err carries none. Under an API token "next" is
+// text only, since a path the server names may refuse token authentication.
 func RefusalNextActions(err error) []NextAction {
 	var actions []NextAction
 	for _, hint := range refusalHints(err) {
 		actions = append(actions, NextAction{Description: hint})
 	}
-	if next := refusalNext(err); next != "" {
-		actions = append(actions, NextAction{
-			Command:     "alpacon api " + next,
-			Description: "Where the server says to check on this refusal",
-		})
+	switch next, underAPIToken := refusalNext(err); {
+	case next == "":
+	case underAPIToken:
+		actions = append(actions, NextAction{Description: refusalNextDescription + ", which an API token cannot read: " + next})
+	default:
+		actions = append(actions, NextAction{Command: "alpacon api " + next, Description: refusalNextDescription})
 	}
 	gate, _ := ParseErrorGateAndMissing(err)
 	if wait := RetryAfter(err); wait > 0 && gate != "" && gate != GatePlan {
