@@ -380,6 +380,7 @@ func TestPartialListOutput_RowsToStdoutReasonToStderrAndExitCode(t *testing.T) {
 		wantJSON     string
 		wantStderr   string
 		stdoutIsNone bool
+		wantCode     string // under json: the envelope's error_code; partial.count is 1
 	}{
 		{
 			name:       "partial table",
@@ -389,13 +390,19 @@ func TestPartialListOutput_RowsToStdoutReasonToStderrAndExitCode(t *testing.T) {
 			wantStderr: "read before the request failed",
 		},
 		{
-			// Only the exit code marks the list short here, so stdout must stay a
-			// plain array a script can parse.
+			// Stdout stays a plain array a script can parse; the envelope marks it short.
 			name:       "partial json",
 			helperCase: "partial-json",
 			wantExit:   ExitCodeGeneralError,
 			wantJSON:   `[{"name":"alpha","id":1}]`,
-			wantStderr: "read before the request failed",
+			wantCode:   ErrorCodeCLI,
+		},
+		{
+			name:       "list partial json",
+			helperCase: "list-partial-json",
+			wantExit:   ExitCodeGeneralError,
+			wantJSON:   `[{"name":"alpha","id":1}]`,
+			wantCode:   "rate_limited",
 		},
 		{
 			name:       "list complete",
@@ -452,6 +459,13 @@ func TestPartialListOutput_RowsToStdoutReasonToStderrAndExitCode(t *testing.T) {
 				assert.Contains(t, stderr.String(), tt.wantStderr)
 				assert.NotContains(t, stdout.String(), tt.wantStderr)
 			}
+			if tt.wantCode != "" {
+				env := decodeSingleLineEnvelope(t, stderr.String())
+				assert.Equal(t, tt.wantCode, env.ErrorCode)
+				assert.Equal(t, tt.wantExit, env.ExitCode)
+				require.NotNil(t, env.Partial)
+				assert.Equal(t, 1, env.Partial.Count)
+			}
 		})
 	}
 }
@@ -470,6 +484,9 @@ func TestPartialListOutputHelperProcess(t *testing.T) {
 	case "partial-json":
 		OutputFormat = OutputFormatJSON
 		PartialTableWithExit(rows, "Showing only the %d entries read before the request failed: %s.", 1, boom)
+	case "list-partial-json":
+		OutputFormat = OutputFormatJSON
+		PrintListOrExit(rows, &fakeAPIError{code: "rate_limited", status: 429}, "Failed to get logs")
 	case "list-complete":
 		PrintListOrExit(rows, nil, "Failed to get logs")
 	case "list-partial":

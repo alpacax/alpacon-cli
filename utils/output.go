@@ -236,9 +236,18 @@ func PrintTable(slice any) {
 }
 
 // PartialTableWithExit prints rows to stdout, the reason to stderr, and exits with
-// ExitCodeGeneralError. It is not for a walk that collected nothing: that is an
-// ordinary failure for CliErrorWithExit.
+// ExitCodeGeneralError; under --output json the reason is an envelope carrying partial.count.
+// It is not for a walk that collected nothing: that is an ordinary failure for CliErrorWithExit.
 func PartialTableWithExit(rows any, msg string, args ...any) {
+	if OutputFormat == OutputFormatJSON {
+		PrintTable(rows)
+		ExitWithFailureJSON(Failure{
+			ExitCode: ExitCodeGeneralError,
+			Err:      firstError(args),
+			Message:  fmt.Sprintf(msg, args...),
+			Partial:  &PartialInfo{Count: reflect.ValueOf(rows).Len()},
+		})
+	}
 	CliWarning(msg, args...)
 	PrintTable(rows)
 	os.Exit(ExitCodeGeneralError)

@@ -102,14 +102,16 @@ func CliParseErrorWithExit(cmd *cobra.Command, format, msg string) {
 }
 
 func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {
-	var cause error
+	ExitWithFailureJSON(Failure{ExitCode: exitCode, ErrorCode: errorCode, Err: firstError(args), Message: fmt.Sprintf(msg, args...)})
+}
+
+func firstError(args []any) error {
 	for _, arg := range args {
 		if e, ok := arg.(error); ok && e != nil {
-			cause = e
-			break
+			return e
 		}
 	}
-	ExitWithFailureJSON(Failure{ExitCode: exitCode, ErrorCode: errorCode, Err: cause, Message: fmt.Sprintf(msg, args...)})
+	return nil
 }
 
 // printCliError writes the red Error line and, under it, the server's guidance
