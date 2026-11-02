@@ -176,6 +176,7 @@ func TestWorkSessionCreateClusterSendsOnlyTheCluster(t *testing.T) {
 	assert.NotContains(t, body, "target_account_username")
 	assert.NotContains(t, body, "sudo_policies")
 	assert.Contains(t, stderr, "Next: alpacon kube login prod-east --work-session ses-k")
+	assert.NotContains(t, stderr, "work-session update")
 }
 
 func TestWorkSessionCreateClusterPendingPointsAtKubeLogin(t *testing.T) {
@@ -189,6 +190,7 @@ func TestWorkSessionCreateClusterPendingPointsAtKubeLogin(t *testing.T) {
 	assert.Equal(t, utils.ExitCodePendingApproval, exitCode, "stderr: %s", stderr)
 	assert.Contains(t, stdout, `"command": "alpacon kube login prod-east --work-session ses-k"`)
 	assert.NotContains(t, stdout, "work-session use")
+	assert.NotContains(t, stdout+stderr, "work-session update")
 }
 
 func TestWorkSessionCreateClusterRefusesFlagsBeforeAnyRequest(t *testing.T) {

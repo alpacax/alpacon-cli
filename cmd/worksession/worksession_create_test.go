@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -747,7 +748,75 @@ func TestWorkSessionCreateWaitRejectedNamesTheSessionOnStderr(t *testing.T) {
 	assert.Contains(t, stderr, "alpacon work-session describe ses-x")
 	assert.Contains(t, stderr, "alpacon work-session complete ses-x")
 	assert.NotContains(t, stderr, "work-session use", "see TestRunUseSessionRefusesASettledSession")
+	assert.NotContains(t, stderr, "work-session update")
 	assert.NotContains(t, stderr, "report on https://github.com", "a reviewer saying no is not a bug to file")
+}
+
+func TestWorkSessionCreateUpdateNext(t *testing.T) {
+	const line = "  alpacon work-session update ses-x --server <server,...>  # add servers to this session; include every server to keep (--server replaces the whole list); an added server may need approval\n"
+	tests := []struct {
+		name       string
+		status     string
+		extra      []string
+		refused    bool
+		outputJSON bool
+	}{
+		{name: "active", status: wsapi.StatusActive},
+		{name: "approved", status: wsapi.StatusApproved},
+		{name: "active with use", status: wsapi.StatusActive, extra: []string{"--use"}},
+		{name: "scheduled with use", status: wsapi.StatusApproved, extra: []string{"--use"}},
+		{name: "wait approved", status: wsapi.StatusApproved, extra: []string{"--wait"}},
+		{name: "wait and use", status: wsapi.StatusActive, extra: []string{"--wait", "--use"}},
+		{name: "refused create", refused: true},
+		{name: "success JSON keeps its schema", status: wsapi.StatusActive, outputJSON: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.URL.Path == "/api/servers/servers/":
+					_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+				case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/":
+					if tt.refused {
+						w.WriteHeader(http.StatusForbidden)
+						_, _ = w.Write([]byte(`{"code":"permission_denied"}`))
+						return
+					}
+					status := tt.status
+					if slices.Contains(tt.extra, "--wait") {
+						status = wsapi.StatusPending
+					}
+					_, _ = fmt.Fprintf(w, `{"id":"ses-x","status":%q}`, status)
+				case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/ses-x/":
+					_, _ = fmt.Fprintf(w, `{"id":"ses-x","status":%q}`, tt.status)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(ts.Close)
+			format := utils.OutputFormatTable
+			if tt.outputJSON {
+				format = utils.OutputFormatJSON
+			}
+			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), format, ts.URL, createArgs(tt.extra...)...)
+			if tt.refused {
+				assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
+				assert.NotContains(t, stdout+stderr, "work-session update")
+				return
+			}
+			require.Zero(t, exitCode, "stderr: %s", stderr)
+			if tt.outputJSON {
+				var output map[string]any
+				require.NoError(t, json.Unmarshal([]byte(stdout), &output))
+				assert.NotContains(t, output, "next_actions")
+				assert.Empty(t, stderr)
+				return
+			}
+			assert.Contains(t, stderr, "Next:\n"+line)
+			assert.Equal(t, 1, strings.Count(stderr, line))
+		})
+	}
 }
 
 func TestWorkSessionCreateWaitRejectedJSONCarriesTheSessionID(t *testing.T) {
