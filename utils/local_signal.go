@@ -100,6 +100,7 @@ func SignalApprovalPending(err error, fields localsignal.Fields) {
 		}
 	}
 	fields = responseSignalFields(err, fields)
+	fields.Command = true
 	EmitLocalSignal(localsignal.ApprovalPending, fields)
 }
 
@@ -248,8 +249,14 @@ func responseSignalFields(err error, fields localsignal.Fields) localsignal.Fiel
 		fields.Origin = SignalFields(err).Origin
 	}
 	for e := range errorChain(err) {
+		if carrier, ok := e.(interface{ LocalSignalAccount() string }); ok && carrier.LocalSignalAccount() != "" {
+			fields.Account = carrier.LocalSignalAccount()
+		}
 		if carrier, ok := e.(interface{ ErrorFields() map[string]any }); ok {
 			payload := carrier.ErrorFields()
+			if account, ok := payload["username"].(string); ok && account != "" {
+				fields.Account = account
+			}
 			if link, ok := payload["console_url"].(string); ok && link != "" {
 				fields.ConsoleURL = link
 			}

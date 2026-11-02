@@ -85,6 +85,7 @@ func TestArgv0(t *testing.T) {
 		{"quoted executable secret", `"/opt/my tool/run --token=SECRET" x`, ""},
 		{"assignment separator", "token=abc;curl x", ""},
 		{"command separator", "echo;cat /etc/shadow", "echo"},
+		{"quotes after separator", `echo;cu"rl"`, "echo"},
 		{"sudo account", "/usr/bin/sudo -u x id", "sudo"},
 		{"quoted assignment", `A="one two" B='three four' psql`, "psql"},
 		{"assignment command substitution", `X="$(printf "%s" "a b")" psql`, ""},
@@ -102,6 +103,9 @@ func TestArgv0(t *testing.T) {
 		{"long name", strings.Repeat("x", 65), ""},
 		{"windows", `C:\Windows\System32\whoami.exe /all`, ""},
 		{"quoted path", `"/some path/my-tool" --secret value`, ""},
+		{"embedded double quotes", `cu"rl" --secret value`, ""},
+		{"embedded single quotes", `cu'rl' --secret value`, ""},
+		{"embedded backslash", `cu\rl --secret value`, ""},
 		{"single quotes", `'/some path/my-tool' --secret value`, ""},
 		{"whitespace", " \t sudo\nsecret", "sudo"},
 		{"empty", "", ""},
@@ -122,31 +126,32 @@ func TestArgv0(t *testing.T) {
 	}
 }
 
-func TestHeadless(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name, platform string
-		env            map[string]string
-		service, want  bool
-	}{
-		{"mac agent with no tty", "darwin", nil, false, false},
-		{"ci", "darwin", map[string]string{"CI": "false"}, false, true},
-		{"empty ssh connection", "darwin", map[string]string{"SSH_CONNECTION": ""}, false, true},
-		{"empty ssh tty", "darwin", map[string]string{"SSH_TTY": ""}, false, true},
-		{"ssh connection", "darwin", map[string]string{"SSH_CONNECTION": "remote"}, false, true},
-		{"ssh tty", "windows", map[string]string{"SSH_TTY": "remote"}, false, true},
-		{"linux no display", "linux", map[string]string{"DBUS_SESSION_BUS_ADDRESS": "bus"}, false, true},
-		{"linux no bus", "linux", map[string]string{"DISPLAY": ":0"}, false, true},
-		{"linux x11", "linux", map[string]string{"DISPLAY": ":0", "DBUS_SESSION_BUS_ADDRESS": "bus"}, false, false},
-		{"linux wayland", "linux", map[string]string{"WAYLAND_DISPLAY": "wayland-0", "DBUS_SESSION_BUS_ADDRESS": "bus"}, false, false},
-		{"windows service", "windows", nil, true, true},
-		{"windows desktop", "windows", nil, false, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tc.want, headless(tc.platform, func(key string) (string, bool) { value, ok := tc.env[key]; return value, ok }, tc.service))
+func TestNotificationIgnoresEnvironment(t *testing.T) {
+	t.Setenv("CI", "1")
+	t.Setenv("SSH_CONNECTION", "remote")
+	t.Setenv("SSH_TTY", "/dev/pts/1")
+	for _, key := range []string{"DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS"} {
+		old, set := os.LookupEnv(key)
+		t.Cleanup(func() {
+			if set {
+				_ = os.Setenv(key, old)
+			} else {
+				_ = os.Unsetenv(key)
+			}
 		})
+		require.NoError(t, os.Unsetenv(key))
 	}
+	if platformHeadless() {
+		t.Skip("Windows service session")
+	}
+	var output bytes.Buffer
+	emitter := New(&output, nil, nil)
+	emitter.statePath = func() (string, error) { return filepath.Join(t.TempDir(), "signals.json"), nil }
+	calls := 0
+	emitter.notifier = notifyFunc(func(context.Context, string, string, string) error { calls++; return nil })
+	emitter.Emit(Denied, Fields{Argv0: "id"})
+	assert.Equal(t, 1, calls)
+	assert.Contains(t, output.String(), "COMMAND DENIED")
 }
 
 func TestEmitHeadlessBannerAndSharedLimit(t *testing.T) {
@@ -408,7 +413,7 @@ func TestServerValuesAreCleaned(t *testing.T) {
 	t.Parallel()
 	dirty := "safe\x00\x1b\x7f\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
 	_, body := Format(Denied, Fields{Argv0: "sudo", Server: dirty, Account: dirty, Gate: dirty, Session: "safe"}, 0)
-	assert.Equal(t, "sudo on safe as safe was refused by the safe gate and did not run. Session safe.", body)
+	assert.Equal(t, "sudo on safe was refused by the safe gate and did not run. Session safe.", body)
 	assert.Equal(t, "safe", clean(dirty))
 }
 
@@ -542,7 +547,8 @@ func TestSignalTextBounds(t *testing.T) {
 	_, body := Format(Denied, Fields{Server: "https://example.com", Account: "http://example.com"}, 0)
 	assert.Equal(t, "Command was refused and did not run.", body)
 	_, body = Format(Denied, Fields{Server: strings.Repeat("界", 80), Account: strings.Repeat("é", 80)}, 0)
-	assert.Contains(t, body, "on "+strings.Repeat("界", 64)+" as "+strings.Repeat("é", 64))
+	assert.Contains(t, body, "on "+strings.Repeat("界", 64))
+	assert.NotContains(t, body, " as ")
 	_, body = Format(Denied, Fields{Server: strings.Repeat("界", 80), Account: strings.Repeat("é", 80), Gate: strings.Repeat("x", 300)}, 0)
 	assert.Equal(t, 256, utf8.RuneCountInString(body))
 }
@@ -582,4 +588,37 @@ func TestBannerWithFreshState(t *testing.T) {
 	e.WorkspaceURL = "https://other.example"
 	e.Emit(Denied, Fields{})
 	assert.Equal(t, 2, calls)
+}
+
+func TestAccountNames(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, account, want string }{
+		{"agent text", "root (dry run, expected - ignore)", ""},
+		{"plain", "deploy", "deploy"},
+		{"service", "svc$", "svc$"},
+		{"long", strings.Repeat("a", 33), ""},
+		{"control", "deplo\ny", ""},
+		{"uppercase", "Deploy", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, body := Format(Denied, Fields{Account: tc.account}, 0)
+			want := "Command"
+			if tc.want != "" {
+				want += " as " + tc.want
+			}
+			assert.Equal(t, want+" was refused and did not run.", body)
+		})
+	}
+}
+
+func TestPendingCommandWithoutExecutable(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, line string }{{"double quote", `cu"rl"`}, {"single quote", `cu'rl'`}, {"backslash", `cu\rl`}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, body := Format(ApprovalPending, Fields{Command: true, Argv0: Argv0(tc.line), Server: "my-server", Account: "deploy", Session: "ses-1"}, 0)
+			assert.Equal(t, "Command on my-server as deploy is waiting for approval. Session ses-1. Open the approval or wait for an approver.", body)
+		})
+	}
 }

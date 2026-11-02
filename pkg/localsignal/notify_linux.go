@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func platformHeadless() bool { return headless("linux", os.LookupEnv, false) }
+func platformHeadless() bool { return false }
 
 func (platformNotifier) Notify(ctx context.Context, title, body, consoleURL string) error {
 	tool := linuxNotifierPath()

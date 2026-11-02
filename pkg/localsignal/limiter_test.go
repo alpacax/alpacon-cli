@@ -157,16 +157,17 @@ func TestLimiterFuturePruningAndKeyBound(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "signals.json")
 	now := time.Now()
 	state := map[string]entry{
-		"denied:ses-1":  {Last: now.Add(time.Hour)},
+		"denied:ses-1":  {Last: now.Add(time.Hour), Folded: 9},
 		"denied:old":    {Last: now.Add(-25 * time.Hour)},
 		"paused:folded": {Last: now.Add(-25 * time.Hour), Folded: 2},
 	}
 	data, err := json.Marshal(state)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, data, 0600))
-	_, emit, err := allowAt(path, "ses-1", Denied, now)
+	folded, emit, err := allowAt(path, "ses-1", Denied, now)
 	require.NoError(t, err)
 	assert.True(t, emit, "a future timestamp must expire")
+	assert.Zero(t, folded)
 	_, _, err = allowAt(path, strings.Repeat("x", 200), Paused, now)
 	require.NoError(t, err)
 	data, err = os.ReadFile(path)
@@ -177,10 +178,29 @@ func TestLimiterFuturePruningAndKeyBound(t *testing.T) {
 	assert.NotContains(t, state, "denied:old")
 	assert.NotContains(t, state, "paused:folded")
 	assert.Contains(t, state, "paused:"+strings.Repeat("x", 128))
-	folded, emit, err := allowAt(path, "folded", Paused, now)
+	folded, emit, err = allowAt(path, "folded", Paused, now)
 	require.NoError(t, err)
 	assert.True(t, emit, "an event after pruning must start fresh")
 	assert.Zero(t, folded)
+}
+
+func TestLimiterRecentStoredTimestampFolds(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "signals.json")
+	now := time.Now()
+	data, err := json.Marshal(map[string]entry{
+		"denied:ses-1": {Last: now.Add(-10 * time.Second), Folded: 2},
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0600))
+	folded, emit, err := allowAt(path, "ses-1", Denied, now)
+	require.NoError(t, err)
+	assert.False(t, emit, "a recent stored timestamp must retain the rate limit")
+	assert.Zero(t, folded)
+	folded, emit, err = allowAt(path, "ses-1", Denied, now.Add(50*time.Second))
+	require.NoError(t, err)
+	assert.True(t, emit, "the original window must expire after sixty seconds")
+	assert.Equal(t, 3, folded)
 }
 
 func TestLimiterLockTimeoutFailsOpenWithoutWrite(t *testing.T) {

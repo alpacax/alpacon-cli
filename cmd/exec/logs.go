@@ -48,7 +48,7 @@ Run the command again later to check for completion.`,
 		case "completed", "success", "failed":
 			if details.SudoGrantStatus != nil && *details.SudoGrantStatus == "pending_approval" {
 				utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{
-					Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name,
+					Command: true, Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name,
 					Account: details.Username, Session: details.WorkSessionID(), ConsoleURL: details.ConsoleURL,
 				}, alpaconClient)
 			}
@@ -68,7 +68,7 @@ Run the command again later to check for completion.`,
 
 		// Exit 0 would read as a command that finished with nothing to show.
 		if event.IsAwaitingApprovalStatus(details.Status) {
-			fields := localsignal.Fields{Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username, ConsoleURL: details.ConsoleURL}
+			fields := localsignal.Fields{Command: true, Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username, ConsoleURL: details.ConsoleURL}
 			if details.WorkSession != nil {
 				fields.Session = details.WorkSession.ID
 			}
@@ -93,7 +93,7 @@ Run the command again later to check for completion.`,
 		// another approval request.
 		if event.IsRejectedStatus(details.Status) {
 			rejected := &event.CommandRejectedError{CommandID: details.ID, Cause: details.RejectionCause, Gate: details.RejectionGate, ConsoleURL: details.ConsoleURL, WorkSessionID: details.WorkSessionID()}
-			utils.SignalRefusal(utils.WithSignalFields(rejected, localsignal.Fields{Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username}, alpaconClient))
+			utils.SignalRefusal(utils.WithSignalFields(rejected, localsignal.Fields{Command: true, Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username}, alpaconClient))
 			// A script-body refusal has file-execution guidance of its own.
 			if rejected.Cause == event.RejectionCauseUseFileExecution {
 				accountFlags, accountNote := logsAccountFlags(details)

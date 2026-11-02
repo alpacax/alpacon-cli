@@ -82,7 +82,7 @@ func allowWithin(ctx context.Context, statePath, workspace, session string, kind
 		return 0, true, readErr
 	}
 	for key, item := range state {
-		if now.Sub(item.Last) > 24*time.Hour {
+		if item.Last.After(now) || now.Sub(item.Last) > 24*time.Hour {
 			delete(state, key)
 		}
 	}

@@ -51,6 +51,7 @@ var phaseHints = map[string]string{
 // RemoteCommandError is returned when the remote command completed but exited
 // with a non-zero status. ExitCode is 1 when the server omits exit_code.
 type RemoteCommandError struct {
+	Username      string
 	ConsoleURL    string
 	WorkSessionID string
 	Output        string
@@ -80,6 +81,7 @@ func (e *ClientTimeoutError) ErrorHint() string { return e.hint }
 // console before it runs. CommandID identifies the parked job so a --wait caller can
 // poll it; re-submitting would create a duplicate command and approval request.
 type PendingApprovalError struct {
+	Username      string
 	ConsoleURL    string
 	WorkSessionID string
 	CommandID     string
@@ -106,6 +108,7 @@ type FileExecutionSuggestion struct {
 // ExitCodeNotApproved, but only a reviewer's refusal is answered by going back to
 // the reviewer—a window that simply lapsed is answered by requesting again.
 type CommandRejectedError struct {
+	Username      string
 	Gate          string
 	ConsoleURL    string
 	WorkSessionID string
@@ -437,3 +440,7 @@ func (d EventDetails) WorkSessionID() string {
 func (e *RemoteCommandError) ErrorFields() map[string]any {
 	return map[string]any{"console_url": e.ConsoleURL, "work_session_id": e.WorkSessionID}
 }
+
+func (e *CommandRejectedError) LocalSignalAccount() string { return e.Username }
+func (e *PendingApprovalError) LocalSignalAccount() string { return e.Username }
+func (e *RemoteCommandError) LocalSignalAccount() string   { return e.Username }

@@ -16,17 +16,27 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+var getSystemDirectory = windows.GetSystemDirectory
+
 func platformHeadless() bool {
 	var session uint32
 	err := windows.ProcessIdToSessionId(uint32(os.Getpid()), &session)
-	return headless("windows", os.LookupEnv, err == nil && session == 0)
+	return err == nil && session == 0
 }
 
 func (platformNotifier) Notify(ctx context.Context, title, body, consoleURL string) error {
-	return windowsNotificationCommand(ctx, title, body, consoleURL).Run()
+	cmd, err := windowsNotificationCommand(ctx, title, body, consoleURL)
+	if err != nil {
+		return err
+	}
+	return cmd.Run()
 }
 
-func windowsNotificationCommand(ctx context.Context, title, body, consoleURL string) *exec.Cmd {
+func windowsNotificationCommand(ctx context.Context, title, body, consoleURL string) (*exec.Cmd, error) {
+	systemDir, err := getSystemDirectory()
+	if err != nil {
+		return nil, err
+	}
 	// Only base64 enters script text; XML values are assigned as text nodes.
 	encode := func(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 	var script strings.Builder
@@ -42,11 +52,7 @@ func windowsNotificationCommand(ctx context.Context, title, body, consoleURL str
 		fmt.Fprintf(&script, `$xml.DocumentElement.SetAttribute('launch', [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'))); $xml.DocumentElement.SetAttribute('activationType', 'protocol'); `, encode(clean(consoleURL)))
 	}
 	fmt.Fprint(&script, `[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($xml))`)
-	root := os.Getenv("SystemRoot")
-	if !filepath.IsAbs(root) {
-		root = `C:\Windows`
-	}
-	return exec.CommandContext(ctx, filepath.Join(root, `System32\WindowsPowerShell\v1.0\powershell.exe`), "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(script.String()))
+	return exec.CommandContext(ctx, filepath.Join(systemDir, `WindowsPowerShell\v1.0\powershell.exe`), "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(script.String())), nil
 }
 
 func encodePowerShell(script string) string {

@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
-	"path/filepath"
+	"errors"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -33,7 +33,8 @@ func TestWindowsToastCommand(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			link := consoleLink(tc.link, "https://console.example", "")
-			cmd := windowsNotificationCommand(context.Background(), "title", "body", link)
+			cmd, err := windowsNotificationCommand(context.Background(), "title", "body", link)
+			require.NoError(t, err)
 			require.Len(t, cmd.Args, 5)
 			assert.Equal(t, []string{cmd.Path, "-NoProfile", "-NonInteractive", "-EncodedCommand"}, cmd.Args[:4])
 			data, err := base64.StdEncoding.DecodeString(cmd.Args[4])
@@ -55,7 +56,10 @@ func TestWindowsToastCommand(t *testing.T) {
 }
 
 func platformNotificationArguments(ctx context.Context, title, body, link string) []string {
-	cmd := windowsNotificationCommand(ctx, title, body, link)
+	cmd, err := windowsNotificationCommand(ctx, title, body, link)
+	if err != nil {
+		panic(err)
+	}
 	data, err := base64.StdEncoding.DecodeString(cmd.Args[4])
 	if err != nil {
 		panic(err)
@@ -68,12 +72,15 @@ func platformNotificationArguments(ctx context.Context, title, body, link string
 }
 
 func TestWindowsNotifierPath(t *testing.T) {
-	for _, root := range []string{"", "relative", `D:\Windows`} {
-		t.Setenv("SystemRoot", root)
-		if !filepath.IsAbs(root) {
-			root = `C:\Windows`
-		}
-		cmd := windowsNotificationCommand(context.Background(), "title", "body", "")
-		assert.Equal(t, filepath.Join(root, `System32\WindowsPowerShell\v1.0\powershell.exe`), cmd.Path)
-	}
+	old := getSystemDirectory
+	t.Cleanup(func() { getSystemDirectory = old })
+	getSystemDirectory = func() (string, error) { return `D:\Windows\System32`, nil }
+	t.Setenv("SystemRoot", `C:\other`)
+	cmd, err := windowsNotificationCommand(context.Background(), "title", "body", "")
+	require.NoError(t, err)
+	assert.Equal(t, `D:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`, cmd.Path)
+	getSystemDirectory = func() (string, error) { return "", errors.New("unavailable") }
+	cmd, err = windowsNotificationCommand(context.Background(), "title", "body", "")
+	require.Error(t, err)
+	assert.Nil(t, cmd)
 }

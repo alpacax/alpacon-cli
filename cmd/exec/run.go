@@ -681,7 +681,7 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 			case outcomeRejected, outcomeExpired:
 				spinner.Stop()
 				// Settled without a grant; CommandRejectedError carries it to ExitCodeNotApproved.
-				return &event.CommandRejectedError{CommandID: cmdID, Expired: outcome == outcomeExpired, Cause: details.RejectionCause, Gate: details.RejectionGate, ConsoleURL: details.ConsoleURL, WorkSessionID: details.WorkSessionID()}
+				return &event.CommandRejectedError{Username: details.Username, CommandID: cmdID, Expired: outcome == outcomeExpired, Cause: details.RejectionCause, Gate: details.RejectionGate, ConsoleURL: details.ConsoleURL, WorkSessionID: details.WorkSessionID()}
 			}
 			// A fixed gap over a 30m wait outspends the server's service-token
 			// throttle, so the gap widens as the wait ages.

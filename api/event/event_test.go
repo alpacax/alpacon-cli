@@ -2757,3 +2757,18 @@ func TestSuccessfulCommandWithPendingSudoApprovalSignals(t *testing.T) {
 		})
 	}
 }
+
+func TestSignalAccountFromCommandDetails(t *testing.T) {
+	t.Parallel()
+	for _, status := range []string{"rejected", "awaiting_approval", "failed"} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			success := false
+			err := errorFromDetails(EventDetails{Status: status, Username: "deploy", Success: &success})
+			require.Error(t, err)
+			var carrier interface{ LocalSignalAccount() string }
+			require.ErrorAs(t, err, &carrier)
+			assert.Equal(t, "deploy", carrier.LocalSignalAccount())
+		})
+	}
+}

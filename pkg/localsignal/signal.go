@@ -32,6 +32,7 @@ var OpenTTY = openTTY
 var executableName = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,64}$`)
 var sessionName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 var assignmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+var accountName = regexp.MustCompile(`^[a-z_][a-z0-9_.-]{0,31}\$?$`)
 
 type Kind string
 
@@ -41,6 +42,7 @@ type ConsoleOrigin struct {
 }
 
 type Fields struct {
+	Command    bool
 	Origin     *ConsoleOrigin
 	Argv0      string
 	Server     string
@@ -165,11 +167,17 @@ func Argv0(command string) string {
 		escaped := false
 		end := len(command)
 		for i, r := range command[len(prefix):] {
+			if prefix == "" && strings.ContainsRune("'\"\\", r) {
+				return ""
+			}
 			if r > unicode.MaxASCII || (unicode.IsControl(r) && !asciiSpace(r)) {
 				return ""
 			}
 			if r == '`' || strings.HasPrefix(command[len(prefix)+i:], "$(") || strings.HasPrefix(command[len(prefix)+i:], "${") {
 				return ""
+			}
+			if prefix == "" && strings.ContainsRune(";|&<>()", r) {
+				break
 			}
 			if escaped {
 				escaped = false
@@ -244,8 +252,8 @@ func Format(kind Kind, f Fields, folded int) (title, body string) {
 	if server := displayName(f.Server); server != "" {
 		command += " on " + server
 	}
-	if account := displayName(f.Account); account != "" {
-		command += " as " + account
+	if accountName.MatchString(f.Account) {
+		command += " as " + f.Account
 	}
 	session := f.Session
 	if !sessionName.MatchString(session) {
@@ -263,7 +271,7 @@ func Format(kind Kind, f Fields, folded int) (title, body string) {
 		}
 	case ApprovalPending:
 		title = "Alpacon: approval pending"
-		if strings.TrimSpace(f.Argv0) == "" {
+		if !f.Command && strings.TrimSpace(f.Argv0) == "" {
 			body = "Work Session"
 			if session != "" {
 				body += " " + session
@@ -289,22 +297,6 @@ func Format(kind Kind, f Fields, folded int) (title, body string) {
 		body += fmt.Sprintf(" +%d more.", folded)
 	}
 	return title, capText(body, 256)
-}
-
-func headless(platform string, lookupEnv func(string) (string, bool), sessionZero bool) bool {
-	ci, _ := lookupEnv("CI")
-	_, sshConnection := lookupEnv("SSH_CONNECTION")
-	_, sshTTY := lookupEnv("SSH_TTY")
-	if ci != "" || sshConnection || sshTTY {
-		return true
-	}
-	if platform == "linux" {
-		_, display := lookupEnv("DISPLAY")
-		_, wayland := lookupEnv("WAYLAND_DISPLAY")
-		_, bus := lookupEnv("DBUS_SESSION_BUS_ADDRESS")
-		return (!display && !wayland) || !bus
-	}
-	return platform == "windows" && sessionZero
 }
 
 func asciiSpace(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '\r' }

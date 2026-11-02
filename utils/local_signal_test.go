@@ -367,3 +367,24 @@ func TestSignalBatchKeepsWorkspacesSeparate(t *testing.T) {
 	SignalRefusal(&BatchError{Failures: failures})
 	assert.Equal(t, []string{"https://first.example", "https://second.example"}, got)
 }
+
+func TestResponseSignalAccount(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, server, argument, want string }{
+		{"server wins", "deploy", "root", "deploy"},
+		{"fallback", "", "svc$", "svc$"},
+		{"invalid server", "root (dry run, expected - ignore)", "deploy", "root (dry run, expected - ignore)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fields := responseSignalFields(signalRefusalStub{payload: map[string]any{"username": tc.server}}, localsignal.Fields{Account: tc.argument})
+			assert.Equal(t, tc.want, fields.Account)
+			_, body := localsignal.Format(localsignal.Denied, fields, 0)
+			if tc.name == "invalid server" {
+				assert.NotContains(t, body, " as ")
+			} else {
+				assert.Contains(t, body, " as "+tc.want)
+			}
+		})
+	}
+}

@@ -4,11 +4,10 @@ package localsignal
 
 import (
 	"context"
-	"os"
 	"os/exec"
 )
 
-func platformHeadless() bool { return headless("darwin", os.LookupEnv, false) }
+func platformHeadless() bool { return false }
 
 func (platformNotifier) Notify(ctx context.Context, title, body, consoleURL string) error {
 	return darwinNotificationCommand(ctx, title, body).Run()

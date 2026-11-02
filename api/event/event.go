@@ -653,6 +653,7 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 				// One more read, best effort, so the timed-out wait carries the
 				// same file suggestion a run without --wait prints.
 				if details, err := getCommandByPathID(ac, cmdID); err == nil {
+					pending.Username = details.Username
 					pending.FileSuggestion = details.FileExecutionSuggestion
 					pending.ConsoleURL = details.ConsoleURL
 					pending.WorkSessionID = details.WorkSessionID()
@@ -778,10 +779,10 @@ func errorFromDetails(d EventDetails) error {
 		return &AwaitingPurposeError{CommandID: d.ID, ExpiresAt: d.PurposeExpiresAt}
 	}
 	if IsAwaitingApprovalStatus(d.Status) {
-		return &PendingApprovalError{CommandID: d.ID, FileSuggestion: d.FileExecutionSuggestion, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID()}
+		return &PendingApprovalError{Username: d.Username, CommandID: d.ID, FileSuggestion: d.FileExecutionSuggestion, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID()}
 	}
 	if IsRejectedStatus(d.Status) {
-		return &CommandRejectedError{CommandID: d.ID, Cause: d.RejectionCause, Gate: d.RejectionGate, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID()}
+		return &CommandRejectedError{Username: d.Username, CommandID: d.ID, Cause: d.RejectionCause, Gate: d.RejectionGate, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID()}
 	}
 	if IsStatusOnlyFailure(d.Status) {
 		phase := ""
@@ -808,7 +809,7 @@ func errorFromDetails(d EventDetails) error {
 			if d.ErrorPhase != nil {
 				phase = *d.ErrorPhase
 			}
-			return &RemoteCommandError{Output: d.Result, ExitCode: exitCode, ErrorPhase: phase, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID(), CommandID: d.ID}
+			return &RemoteCommandError{Username: d.Username, Output: d.Result, ExitCode: exitCode, ErrorPhase: phase, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID(), CommandID: d.ID}
 		}
 		return nil
 	default:
@@ -820,7 +821,7 @@ func errorFromDetails(d EventDetails) error {
 func SignalPendingSudoApproval(ac *client.AlpaconClient, details EventDetails) {
 	if errorFromDetails(details) == nil && details.SudoGrantStatus != nil && *details.SudoGrantStatus == "pending_approval" {
 		utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{
-			Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name,
+			Command: true, Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name,
 			Account: details.Username, Session: details.WorkSessionID(), ConsoleURL: details.ConsoleURL,
 		}, ac)
 	}
