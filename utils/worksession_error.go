@@ -130,7 +130,7 @@ func buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS, h
 
 func workSessionMessage(operation string) string {
 	if operation == OperationKube {
-		return "opening a kube session requires an active WorkSession that targets the cluster with the kube scope."
+		return "opening a kube session requires a WorkSession in the active state that targets the cluster with the kube scope."
 	}
 	return fmt.Sprintf("the %s operation requires an active WorkSession on this authentication.", operation)
 }

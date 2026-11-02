@@ -2,6 +2,7 @@ package kube
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"testing/synctest"
@@ -33,6 +34,7 @@ func TestCredentialExpiry(t *testing.T) {
 		retrieve func() (*kubernetes.KubeSessionDetail, error)
 		want     time.Time
 		gone     bool
+		refused  bool
 		warn     bool
 	}{
 		{name: "open session", saved: saved, retrieve: read(&kubernetes.KubeSessionDetail{TokenExpiredAt: &saved}, nil), want: saved},
@@ -41,8 +43,8 @@ func TestCredentialExpiry(t *testing.T) {
 		{name: "expired on the server", saved: saved, retrieve: read(&kubernetes.KubeSessionDetail{TokenExpiredAt: &past}, nil), gone: true},
 		{name: "no expiry in the answer", saved: saved, retrieve: read(&kubernetes.KubeSessionDetail{}, nil), want: saved},
 		{name: "session not found", saved: saved, retrieve: read(nil, statusError{404}), gone: true},
-		{name: "another account logged in", saved: saved, retrieve: read(nil, statusError{403}), gone: true},
-		{name: "login rejected", saved: saved, retrieve: read(nil, statusError{401}), gone: true},
+		{name: "check forbidden", saved: saved, retrieve: read(nil, statusError{403}), gone: true, refused: true},
+		{name: "login rejected", saved: saved, retrieve: read(nil, statusError{401}), gone: true, refused: true},
 		{name: "server error while the token is good", saved: saved, retrieve: read(nil, statusError{503}), want: saved, warn: true},
 		{name: "check fails while the token is good", saved: saved, retrieve: read(nil, errors.New("connection refused")), want: saved, warn: true},
 		{name: "check fails after the token expired", saved: past, retrieve: read(nil, errors.New("connection refused")), gone: true},
@@ -55,6 +57,8 @@ func TestCredentialExpiry(t *testing.T) {
 			got, err := credentialExpiry(&kubeSessionRecord{TokenExpiredAt: tt.saved}, now, tt.retrieve)
 			if tt.gone {
 				require.ErrorIs(t, err, errSessionGone)
+				var refused *refusedCheck
+				assert.Equal(t, tt.refused, errors.As(err, &refused))
 				return
 			}
 			if tt.warn {
@@ -64,6 +68,30 @@ func TestCredentialExpiry(t *testing.T) {
 				require.NoError(t, err)
 			}
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// A new kube login fails on the same refusal, so only an ended session is
+// sent straight to it.
+func TestSessionGoneMessage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "ended", err: errSessionGone, want: "The kube session for prod-east has ended; run 'alpacon kube login prod-east'."},
+		{name: "login rejected", err: &refusedCheck{err: statusError{401}},
+			want: "The server no longer accepts this login, so the kube session for prod-east cannot be checked; run 'alpacon login', then run 'alpacon kube login prod-east'."},
+		{name: "check forbidden", err: &refusedCheck{err: statusError{403}},
+			want: "The server refused to check the kube session for prod-east, so the saved token is not used: status. Resolve that refusal, then run 'alpacon kube login prod-east'."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			msg, args := sessionGoneMessage("prod-east", tt.err)
+			assert.Equal(t, tt.want, fmt.Sprintf(msg, args...))
 		})
 	}
 }

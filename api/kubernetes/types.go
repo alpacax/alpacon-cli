@@ -69,7 +69,8 @@ type groupSummary struct {
 const ClientTypeCLI = "cli"
 
 // KubeSessionCreateRequest opens a proxy session to one cluster. Cluster and
-// WorkSession are UUIDs; WorkSession is left out when no session is active.
+// WorkSession are UUIDs; WorkSession is left out when neither --work-session
+// nor ALPACON_WORK_SESSION names a session.
 type KubeSessionCreateRequest struct {
 	Cluster     string `json:"cluster"`
 	WorkSession string `json:"work_session,omitempty"`

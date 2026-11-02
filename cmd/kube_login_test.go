@@ -39,6 +39,7 @@ type kubeLoginServer struct {
 	kubeCreateCode string // code refusing the kube session, if any
 	pendingReads   int    // reads of the session that answer pending before wsPollStatus
 	kubeClosed     bool   // a read of the kube session answers it closed
+	kubeReadRefuse string // body of a 403 a read of the kube session answers, if any
 	requesterType  string // requester_type the session list must filter on; default user
 	clusters       string // JSON array the cluster lookup answers; default prod-east
 	surfaceOff     bool   // the cluster lookup answers 404
@@ -142,8 +143,13 @@ func (s *kubeLoginServer) start(t *testing.T) *httptest.Server {
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/kubernetes/sessions/"):
 			closedAt := "null"
 			s.mu.Lock()
-			closed := s.kubeClosed
+			closed, refuse := s.kubeClosed, s.kubeReadRefuse
 			s.mu.Unlock()
+			if refuse != "" {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(refuse))
+				return
+			}
 			if closed {
 				closedAt = `"2026-10-22T09:00:00Z"`
 			}
@@ -752,6 +758,30 @@ func TestKubeCredentialsEndsWithTheGateCodeForAClosedSession(t *testing.T) {
 	assert.Equal(t, utils.ExitCodeWorkSessionDenied, exitCode, "stderr: %s", stderr)
 	assert.Empty(t, stdout)
 	assert.Contains(t, stderr, "run 'alpacon kube login prod-east'")
+	assert.NotContains(t, stderr, loginToken)
+}
+
+// A check the server refuses keeps the token back, but a new kube login would
+// meet the same refusal, so the message names it along with the server's hint.
+func TestKubeCredentialsNamesARefusedCheck(t *testing.T) {
+	t.Parallel()
+	srv := &kubeLoginServer{wsCreateStatus: "active"}
+	ts := srv.start(t)
+	home := kubeLoginHome(t, ts.URL)
+	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"),
+		"--purpose", "x", "--scope", "kube", "--duration", "1h")
+	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+	srv.mu.Lock()
+	srv.kubeReadRefuse = `{"code":"auth_ip_not_allowed","detail":"Requests from this address are not allowed.","hint":"Connect from an allowed network."}`
+	srv.mu.Unlock()
+
+	stdout, stderr, exitCode := runKubeCredentials(t, home)
+
+	assert.Equal(t, utils.ExitCodeWorkSessionDenied, exitCode, "stderr: %s", stderr)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "The server refused to check the kube session for prod-east, so the saved token is not used")
+	assert.Contains(t, stderr, "Connect from an allowed network.")
+	assert.NotContains(t, stderr, "has ended")
 	assert.NotContains(t, stderr, loginToken)
 }
 

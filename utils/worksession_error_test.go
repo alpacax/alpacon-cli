@@ -293,7 +293,7 @@ func TestBuildWorkSessionDiagnostic_Kube(t *testing.T) {
 
 			lines := strings.Split(got, "\n")
 			require.NotEmpty(t, lines)
-			assert.Equal(t, Red("Error")+": opening a kube session requires an active WorkSession that targets the cluster with the kube scope.", lines[0])
+			assert.Equal(t, Red("Error")+": opening a kube session requires a WorkSession in the active state that targets the cluster with the kube scope.", lines[0])
 			assert.Contains(t, got, workSessionReasonMap[tc.code])
 			assert.Contains(t, got, "Browser login (interactive)")
 			assert.Contains(t, got, "  required scope: kube\n")
@@ -318,7 +318,7 @@ func TestBuildWorkSessionErrorEnvelope_Kube(t *testing.T) {
 			assert.False(t, envelope.OK)
 			assert.Equal(t, ExitCodeWorkSessionDenied, envelope.ExitCode)
 			assert.Equal(t, tc.code, envelope.ErrorCode)
-			assert.Equal(t, "opening a kube session requires an active WorkSession that targets the cluster with the kube scope.", envelope.Message)
+			assert.Equal(t, "opening a kube session requires a WorkSession in the active state that targets the cluster with the kube scope.", envelope.Message)
 			assert.Equal(t, workSessionReasonMap[tc.code], envelope.Reason)
 			assert.Equal(t, OperationKube, envelope.Context.RequiredScope)
 			assert.Equal(t, []string{}, envelope.Context.TargetServers)

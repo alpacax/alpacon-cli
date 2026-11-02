@@ -95,7 +95,7 @@ func TestKubeConfigWithoutWorkSessionExitsWithTheGateCode(t *testing.T) {
 	_, stderr, exitCode := runKubeGate(t, home, "kube", "config", "prod-east", "--kubeconfig", path)
 
 	assert.Equal(t, utils.ExitCodeWorkSessionDenied, exitCode, "stderr: %s", stderr)
-	assert.Contains(t, stderr, "opening a kube session requires an active WorkSession that targets the cluster")
+	assert.Contains(t, stderr, "opening a kube session requires a WorkSession in the active state that targets the cluster")
 	assert.Contains(t, stderr, "target cluster: prod-east")
 	assert.Contains(t, stderr, "alpacon kube login prod-east")
 	assert.NoFileExists(t, path)

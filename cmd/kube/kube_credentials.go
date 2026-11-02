@@ -81,6 +81,30 @@ func clusterServer(env string) string {
 // and only a new login brings one.
 var errSessionGone = errors.New("session gone")
 
+// refusedCheck is a session check the server refused (401 or 403). The session
+// may still be open, but this login cannot vouch for it, so the token is not
+// served; it is errSessionGone with the refusal kept for the message.
+type refusedCheck struct{ err error }
+
+func (r *refusedCheck) Error() string   { return r.err.Error() }
+func (r *refusedCheck) Unwrap() []error { return []error{errSessionGone, r.err} }
+
+// sessionGoneMessage says why the saved token is not served and what to run.
+// A new kube login fixes an ended session; it fails the same way on a refused
+// check, so a 401 sends the user to alpacon login first and a 403 names the
+// refusal.
+func sessionGoneMessage(cluster string, err error) (string, []any) {
+	relogin := fmt.Sprintf("run 'alpacon kube login %s'", shellQuote(cluster))
+	var refused *refusedCheck
+	if !errors.As(err, &refused) {
+		return "The kube session for %s has ended; %s.", []any{cluster, relogin}
+	}
+	if utils.HTTPStatusCode(refused.err) == http.StatusUnauthorized {
+		return "The server no longer accepts this login, so the kube session for %s cannot be checked; run 'alpacon login', then %s.", []any{cluster, relogin}
+	}
+	return "The server refused to check the kube session for %s, so the saved token is not used: %s. Resolve that refusal, then %s.", []any{cluster, refused.err, relogin}
+}
+
 func runKubeCredentials(cmd *cobra.Command, args []string) {
 	cluster := strings.TrimSpace(kubeCredentialsCluster)
 	relogin := fmt.Sprintf("run 'alpacon kube login %s'", shellQuote(cluster))
@@ -124,7 +148,8 @@ func runKubeCredentials(cmd *cobra.Command, args []string) {
 	}
 	expiry, checkErr := credentialExpiry(record, time.Now(), retrieve)
 	if errors.Is(checkErr, errSessionGone) {
-		utils.CliErrorWithExitCode(utils.ExitCodeWorkSessionDenied, "The kube session for %s has ended; %s.", cluster, relogin)
+		msg, msgArgs := sessionGoneMessage(cluster, checkErr)
+		utils.CliErrorWithExitCode(utils.ExitCodeWorkSessionDenied, msg, msgArgs...)
 	}
 	if checkErr != nil {
 		utils.CliWarning("Could not check the kube session for %s (%s); using the saved token until it expires.", cluster, checkErr)
@@ -172,9 +197,9 @@ func pickRecord(records []kubeSessionRecord, server, workspaceURL string) *kubeS
 // credentialExpiry decides how long the saved token stays good. With
 // retrieve, the server's answer wins: a closed or expired session is gone,
 // and an extended one moves the expiry. So is one the server will not show
-// this login (404, 401 or 403): another account logged in without a logout,
-// or the login itself was revoked, and the token must not go on acting for
-// it. Any other failed check, or a record of another workspace this login
+// this login: a 404 is a session this account cannot see, such as after
+// another account logged in without a logout, and a 401 or 403 is a refused
+// check (refusedCheck), and the token must not go on acting for either. Any other failed check, or a record of another workspace this login
 // cannot check (retrieve nil), falls back to the saved expiry, so a passing
 // outage does not lock kubectl out.
 func credentialExpiry(record *kubeSessionRecord, now time.Time, retrieve func() (*kubernetes.KubeSessionDetail, error)) (time.Time, error) {
@@ -188,8 +213,10 @@ func credentialExpiry(record *kubeSessionRecord, now time.Time, retrieve func() 
 	session, err := retrieve()
 	if err != nil {
 		switch utils.HTTPStatusCode(err) {
-		case http.StatusNotFound, http.StatusUnauthorized, http.StatusForbidden:
+		case http.StatusNotFound:
 			return time.Time{}, errSessionGone
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return time.Time{}, &refusedCheck{err: err}
 		}
 		if !saved.After(now) {
 			return time.Time{}, errSessionGone
