@@ -8,6 +8,7 @@ import (
 	"github.com/alpacax/alpacon-cli/cmd/approval"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/cmd/workspace"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,6 +38,8 @@ func TestGroupNoSubcommandErrorPointsToHelpInsteadOfListingSubcommands(t *testin
 
 			require.Error(t, err)
 			errs[c] = err.Error()
+			assert.True(t, utils.IsUsageError(err), "a missing subcommand must exit 2: %v", err)
+			assert.Equal(t, utils.ErrorCodeUsage, utils.ClassifyError(err))
 			assert.Contains(t, err.Error(), fmt.Sprintf("Run '%s --help'", c.CommandPath()))
 			assert.Contains(t, out.String(), "Available Commands:")
 			for _, sub := range c.Commands() {

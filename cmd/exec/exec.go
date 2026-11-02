@@ -229,20 +229,24 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			_ = cmd.Help()
 			return
 		}
-
 		if parsed.Err != "" {
-			utils.CliErrorWithExit("%s", parsed.Err)
+			utils.CliParseErrorWithExit(cmd, parsed.OutputFormat, parsed.Err)
 			return
+		}
+		if parsed.OutputFormat != "" {
+			if err := utils.SetOutputFormat(parsed.OutputFormat); err != nil {
+				utils.CliUsageErrorWithExit("%s", err)
+			}
 		}
 
 		if parsed.Server == "" {
 			_ = cmd.Help()
-			utils.CliErrorWithExit("server name is required.")
+			utils.CliUsageErrorWithExit("server name is required.")
 			return
 		}
 
 		if parsed.Command == "" && parsed.File == nil {
-			utils.CliErrorWithExit("You must specify a command to execute, or a script with --file.")
+			utils.CliUsageErrorWithExit("You must specify a command to execute, or a script with --file.")
 			return
 		}
 
@@ -251,15 +255,8 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 }
 
 // RunRemoteExec is the shared post-parse execution path for exec and websh
-// command mode. Requires Server and either Command or File to be set.
+// command mode. Requires Server, Command or File, and the parsed --output applied.
 func RunRemoteExec(parsed RemoteExecArgs) {
-	if parsed.OutputFormat != "" {
-		if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
-			utils.CliErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
-		}
-		utils.OutputFormat = parsed.OutputFormat
-	}
-
 	// A local script is read before any network call, so a missing or oversized file fails here;
 	// a --from-server script is read once the client exists.
 	var file *event.FileExecution

@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
 const (
@@ -85,6 +87,18 @@ func CliErrorWithCode(exitCode int, errorCode string, msg string, args ...any) {
 // CliUsageErrorWithExit reports a flag or argument the command rejected and exits 2 with error_code usage_error.
 func CliUsageErrorWithExit(msg string, args ...any) {
 	CliUsageErrorEnvelopeWithExit("", msg, args...)
+}
+
+// CliParseErrorWithExit reports a command line cmd could not parse and exits 2 in format, the --output
+// value its caller found before the parse stopped; table mode points to cmd's help.
+func CliParseErrorWithExit(cmd *cobra.Command, format, msg string) {
+	if format != "" {
+		_ = SetOutputFormat(format) // an invalid value keeps the current format
+	}
+	if OutputFormat == OutputFormatJSON {
+		CliUsageErrorWithExit("%s", msg)
+	}
+	CliUsageErrorWithExit("%s\nRun '%s --help' for usage.", msg, cmd.CommandPath())
 }
 
 func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {

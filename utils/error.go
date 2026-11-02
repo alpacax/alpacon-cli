@@ -191,9 +191,9 @@ const (
 	// reads like the specific ones beside it.
 	ExitCodeGeneralError = 1
 
-	// ExitCodeUsageError is the process exit code for a flag or argument a command rejected in its
-	// own validation. Unlike ExitCodeGeneralError, it means the invocation itself was wrong, so
-	// scripts and AI agents fix the command line rather than retry it unchanged.
+	// ExitCodeUsageError is the process exit code for a flag or argument a command rejected, in
+	// Cobra's parse or in its own validation. Unlike ExitCodeGeneralError, it means the invocation
+	// itself was wrong, so scripts and AI agents fix the command line rather than retry it unchanged.
 	ExitCodeUsageError = 2
 
 	// ExitCodeWorkSessionDenied is the process exit code for WorkSession gate refusals.

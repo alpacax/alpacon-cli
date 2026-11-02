@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/cmd/acl"
 	"github.com/alpacax/alpacon-cli/cmd/agent"
@@ -41,9 +43,11 @@ import (
 var showVersion bool
 
 var RootCmd = &cobra.Command{
-	Use:     "alpacon",
-	Aliases: []string{"ac"},
-	Short:   "Use Alpacon, the AI-native PAM, from the terminal",
+	Use:           "alpacon",
+	Aliases:       []string{"ac"},
+	SilenceErrors: true, // Execute reports every error once, in the --output format
+	SilenceUsage:  true,
+	Short:         "Use Alpacon, the AI-native PAM, from the terminal",
 	Long: `Alpacon CLI is the command-line client for Alpacon, the AI-native PAM.
 Humans, AI agents, and CI/CD run commands—each judged, recorded, and bounded.
 
@@ -69,13 +73,7 @@ kubeconfig context kubectl uses.
 
 See 'alpacon work-session --help' for session lifecycle and error codes.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		switch utils.OutputFormat {
-		case utils.OutputFormatTable, utils.OutputFormatJSON:
-			return nil
-		default:
-			return fmt.Errorf("invalid --output value %q (expected %q or %q)",
-				utils.OutputFormat, utils.OutputFormatTable, utils.OutputFormatJSON)
-		}
+		return utils.SetOutputFormat(utils.OutputFormat)
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		if showVersion {
@@ -88,9 +86,78 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 
 func Execute() {
 	kube.ApplySurfaceGate(RootCmd, kubernetesSurfaceEnabled())
-	if err := RootCmd.Execute(); err != nil {
+	RootCmd.InitDefaultCompletionCmd()
+	markHookErrors(RootCmd)
+	keepWithOwnParser(RootCmd, os.Args[1:])
+	cmd, err := RootCmd.ExecuteC()
+	switch {
+	case err == nil:
+		return
+	case !errors.As(err, new(hookError)):
+		utils.CliParseErrorWithExit(cmd, utils.OutputFormatIn(os.Args[1:]), err.Error())
+	case utils.IsUsageError(err):
+		utils.CliUsageErrorWithExit("%s", err)
+	default:
 		utils.CliErrorWithExit("While executing the command: %s", err)
 	}
+}
+
+// keepWithOwnParser detaches the subcommands of a command that parses its own flags when a flag Cobra
+// does not know comes before the subcommand's name: Cobra took the server for that flag's value.
+func keepWithOwnParser(root *cobra.Command, args []string) {
+	cmd, _, err := root.Find(args)
+	if err != nil || !cmd.HasParent() || cmd.Parent() == root {
+		return
+	}
+	parent := cmd.Parent()
+	if parent.Parent() != root || !parent.DisableFlagParsing {
+		return
+	}
+	at := slices.IndexFunc(args, func(arg string) bool { return arg == parent.Name() || parent.HasAlias(arg) })
+	for _, arg := range args[at+1:] {
+		if arg == cmd.Name() || cmd.HasAlias(arg) {
+			return
+		}
+		if strings.HasPrefix(arg, "-") && !knownFlag(parent, arg) {
+			parent.RemoveCommand(parent.Commands()...)
+			return
+		}
+	}
+}
+
+func knownFlag(c *cobra.Command, arg string) bool {
+	if name, ok := strings.CutPrefix(arg, "--"); ok {
+		name, _, _ = strings.Cut(name, "=")
+		return c.Flags().Lookup(name) != nil
+	}
+	return len(arg) == 2 && c.Flags().ShorthandLookup(arg[1:]) != nil
+}
+
+// hookError marks an error a command's own hook returned; any other error is Cobra rejecting the command line.
+type hookError struct{ err error }
+
+func (e hookError) Error() string { return e.err.Error() }
+func (e hookError) Unwrap() error { return e.err }
+
+// markHookErrors wraps what every error-returning hook of c and its subcommands returns.
+func markHookErrors(c *cobra.Command) {
+	for _, hook := range []*func(*cobra.Command, []string) error{
+		&c.PersistentPreRunE, &c.PreRunE, &c.RunE, &c.PostRunE, &c.PersistentPostRunE,
+	} {
+		if run := *hook; run != nil {
+			*hook = func(cmd *cobra.Command, args []string) error { return markHookError(run(cmd, args)) }
+		}
+	}
+	for _, sub := range c.Commands() {
+		markHookErrors(sub)
+	}
+}
+
+func markHookError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return hookError{err: err}
 }
 
 // kubernetesSurfaceEnabled reads the answer the last login or switch recorded;

@@ -18,10 +18,10 @@ import (
 )
 
 const (
-	exitHelperMarker = "exit-helper"
-	exitHelperEnv    = "GO_WANT_EXIT_HELPER"
-	exitUserUUID     = "11111111-1111-1111-1111-111111111111"
-
+	exitHelperMarker         = "exit-helper"
+	exitHelperEnv            = "GO_WANT_EXIT_HELPER"
+	exitHelperUnwritableEnv  = "GO_EXIT_HELPER_UNWRITABLE_STDOUT"
+	exitUserUUID             = "11111111-1111-1111-1111-111111111111"
 	exitMissingRoleUUID      = "22222222-2222-2222-2222-222222222222"
 	exitLargeFileServer      = "big-server"
 	exitLargeFileDownloadURL = "/downloads/big"
@@ -110,7 +110,6 @@ func exitStubServer() *httptest.Server {
 	}))
 }
 
-// Serial: the child reaches an os.Exit, and the parent's own run returns at once.
 func TestExitCodeHelperProcess(t *testing.T) {
 	if os.Getenv(exitHelperEnv) != "1" {
 		return
@@ -125,7 +124,14 @@ func TestExitCodeHelperProcess(t *testing.T) {
 	if err := writeExitHelperConfig(ts.URL); err != nil {
 		os.Exit(99)
 	}
-	RootCmd.SetArgs(args)
+	if os.Getenv(exitHelperUnwritableEnv) == "1" {
+		readOnly, err := os.Open(os.DevNull)
+		if err != nil {
+			os.Exit(99)
+		}
+		os.Stdout = readOnly
+	}
+	os.Args = append([]string{"alpacon"}, args...)
 	Execute()
 	os.Exit(0)
 }
@@ -218,4 +224,147 @@ func TestCommandsExitOneWhenAValidCommandLineFails(t *testing.T) {
 		{name: "user role revoke from a user who shares a role name", args: []string{"user", "role", "revoke", "operator", "ghost"}, wantExit: utils.ExitCodeGeneralError, wantStderr: `no role named "ghost" is visible to you`},
 		{name: "user role grant of a role the server does not have", args: []string{"user", "role", "grant", "alice", "ghost"}, wantExit: utils.ExitCodeGeneralError, wantStderr: `no role named "ghost" is visible to you`},
 	})
+}
+
+func TestExecuteExitsOneWhenACompletionScriptCannotBeWritten(t *testing.T) {
+	t.Parallel()
+
+	_, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, []string{"completion", "bash"},
+		exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir(), exitHelperUnwritableEnv+"=1")
+
+	assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
+	assert.Contains(t, stderr, "While executing the command")
+}
+
+func TestExecutePrintsACobraParseErrorOnceWithAUsageHint(t *testing.T) {
+	t.Parallel()
+
+	_, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, []string{"server", "ls", "--bogus"},
+		exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir())
+
+	assert.Equal(t, utils.ExitCodeUsageError, exitCode)
+	assert.Equal(t, "Error: unknown flag: --bogus\nRun 'alpacon server ls --help' for usage.\n", stderr)
+}
+
+func TestExecuteKeepsTableOutputForACobraParseErrorWhenTheOutputValueIsInvalid(t *testing.T) {
+	t.Parallel()
+
+	_, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, []string{"server", "ls", "--bogus", "--output", "xml"},
+		exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir())
+
+	assert.Equal(t, utils.ExitCodeUsageError, exitCode)
+	assert.Equal(t, "Error: unknown flag: --bogus\nRun 'alpacon server ls --help' for usage.\n", stderr)
+}
+
+func TestExecuteEmitsOneEnvelopeForACobraParseErrorUnderJSONOutput(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"server", "ls", "--bogus", "--output", "json"},
+		{"server", "ls", "--bogus", "--output=json"},
+		{"--output", "json", "server", "ls", "--bogus"},
+	} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			t.Parallel()
+
+			_, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, args,
+				exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir())
+
+			assert.Equal(t, utils.ExitCodeUsageError, exitCode)
+			var envelope struct {
+				ExitCode  int    `json:"exit_code"`
+				ErrorCode string `json:"error_code"`
+				Message   string `json:"message"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), "stderr must be one envelope: %s", stderr)
+			assert.Equal(t, utils.ExitCodeUsageError, envelope.ExitCode)
+			assert.Equal(t, utils.ErrorCodeUsage, envelope.ErrorCode)
+			assert.Equal(t, "unknown flag: --bogus", envelope.Message)
+		})
+	}
+}
+
+func TestExecuteExitsTwoWhenTheCommandLineIsMalformed(t *testing.T) {
+	t.Parallel()
+	const usage = utils.ExitCodeUsageError
+	runExitCases(t, []exitCase{
+		{name: "unknown shorthand flag", args: []string{"server", "ls", "-Z"}, wantExit: usage, wantStderr: "unknown shorthand flag"},
+		{name: "unknown command", args: []string{"bogus"}, wantExit: usage, wantStderr: `unknown command "bogus"`},
+		{name: "unknown subcommand of a group", args: []string{"token", "bogus"}, wantExit: usage, wantStderr: "a subcommand is required"},
+		{name: "group without a subcommand", args: []string{"token", "acl"}, wantExit: usage, wantStderr: "a subcommand is required"},
+		{name: "too few arguments", args: []string{"exec", "logs"}, wantExit: usage, wantStderr: "accepts 1 arg(s), received 0"},
+		{name: "bad flag value", args: []string{"websh", "ls", "--tail", "x"}, wantExit: usage, wantStderr: "invalid argument"},
+		{name: "missing required flag", args: []string{"token", "acl", "file", "add", "tk"}, wantExit: usage, wantStderr: "required flag(s)"},
+		{name: "mutually exclusive flags", args: []string{"server", "create", "--token", "a", "--new-token", "b"}, wantExit: usage, wantStderr: "none of the others can be"},
+		{name: "invalid output format", args: []string{"server", "ls", "--output", "xml"}, wantExit: usage, wantStderr: `invalid --output value "xml" (expected "table" or "json")`},
+	})
+}
+
+func TestWebshAndExecParsersExitTwoOnABadCommandLine(t *testing.T) {
+	t.Parallel()
+	const usage = utils.ExitCodeUsageError
+	runExitCases(t, []exitCase{
+		{name: "websh flag without its value", args: []string{"websh", "--work-session"}, wantExit: usage, wantStderr: "--work-session requires a value"},
+		{name: "websh without a server", args: []string{"websh"}, wantExit: usage, wantStderr: "Server name is required"},
+		{name: "websh share with a remote command", args: []string{"websh", "--share", "my-server", "whoami"}, wantExit: usage, wantStderr: "--share flag cannot be used with remote commands"},
+		{name: "websh with an invalid output", args: []string{"websh", "--output", "xml", "my-server"}, wantExit: usage, wantStderr: `invalid --output value "xml" (expected "table" or "json")`},
+		{name: "exec flag without its value", args: []string{"exec", "--work-session"}, wantExit: usage, wantStderr: "flag needs an argument: --work-session"},
+		{name: "exec without a server", args: []string{"exec", "--wait"}, wantExit: usage, wantStderr: "server name is required"},
+		{name: "exec without a command", args: []string{"exec", "my-server"}, wantExit: usage, wantStderr: "You must specify a command"},
+		{name: "exec with an invalid output", args: []string{"exec", "--output", "xml", "my-server", "ls"}, wantExit: usage, wantStderr: `invalid --output value "xml" (expected "table" or "json")`},
+		{name: "websh with an unknown flag", args: []string{"websh", "--bogus", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon websh --help' for usage."},
+		{name: "exec with an unknown flag", args: []string{"exec", "--bogus", "my-server", "uptime"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon exec --help' for usage."},
+		{name: "websh with a separator before the server", args: []string{"websh", "--", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --"},
+		{name: "websh with an unknown flag after json output", args: []string{"websh", "--output", "json", "--bogus", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --bogus", wantCode: utils.ErrorCodeUsage},
+		{name: "websh with an unknown flag before json output stops before reading it", args: []string{"websh", "--bogus", "--output", "json", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon websh --help' for usage."},
+		{name: "exec with an unknown flag before json output stops before reading it", args: []string{"exec", "--bogus", "--output", "json", "my-server", "uptime"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon exec --help' for usage."},
+		{name: "exec attached short value and unknown flag before a remote command naming json output", args: []string{"exec", "-uroot", "--bogus", "my-server", "--output", "json"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon exec --help' for usage."},
+		{name: "exec without a command under a leading json output", args: []string{"--output", "json", "exec", "my-server"}, wantExit: usage, wantStderr: "You must specify a command", wantCode: utils.ErrorCodeUsage},
+		{name: "exec with an unknown flag after json output", args: []string{"exec", "--output", "json", "--bogus", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --bogus", wantCode: utils.ErrorCodeUsage},
+		{name: "websh share with a remote command under json output", args: []string{"websh", "--output", "json", "--share", "my-server", "whoami"}, wantExit: usage, wantStderr: "--share flag cannot be used", wantCode: utils.ErrorCodeUsage},
+		{name: "websh unknown flag before a remote command naming json output", args: []string{"websh", "--bogus", "my-server", "cat", "--output", "json"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon websh --help' for usage."},
+		{name: "exec unknown flag before a remote command naming json output", args: []string{"exec", "--bogus", "my-server", "kubectl", "get", "pods", "--output", "json"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon exec --help' for usage."},
+		{name: "exec relative file under json output before a remote command naming table output", args: []string{"exec", "--output", "json", "--file", "relative", "my-server", "--", "echo", "--output", "table"}, wantExit: usage, wantStderr: "--file must be an absolute path", wantCode: utils.ErrorCodeUsage},
+	})
+}
+
+func TestExecAndWebshBoolFlagsDoNotTurnTheServerIntoAFlagValue(t *testing.T) {
+	t.Parallel()
+	const usage = utils.ExitCodeUsageError
+	runExitCases(t, []exitCase{
+		{name: "exec upload before a server and a command named like a subcommand", args: []string{"exec", "--upload", "my-server", "ls"}, wantExit: usage, wantStderr: "--upload requires --file"},
+		{name: "exec overwrite before a server and a command named like a subcommand", args: []string{"exec", "--overwrite", "my-server", "ls"}, wantExit: usage, wantStderr: "--overwrite requires --upload"},
+		{name: "exec from-server before a server and a command named like a subcommand", args: []string{"exec", "--from-server", "my-server", "ls"}, wantExit: usage, wantStderr: "--from-server requires --file"},
+		{name: "websh share before a server and a command named like a subcommand", args: []string{"websh", "-s", "my-server", "join"}, wantExit: usage, wantStderr: "--share flag cannot be used with remote commands"},
+		{name: "websh read-only before a server and a command named like a subcommand", args: []string{"websh", "--read-only", "my-server", "join"}, wantExit: utils.ExitCodeGeneralError, wantStderr: "failed to execute command on 'my-server' server"},
+	})
+}
+
+func TestExecAndWebshRefuseAnUnknownFlagThatWouldTakeTheServerAsItsValue(t *testing.T) {
+	t.Parallel()
+	const usage = utils.ExitCodeUsageError
+	runExitCases(t, []exitCase{
+		{name: "exec value flag it does not have before a server and a subcommand name", args: []string{"exec", "--server", "my-server", "ls"}, wantExit: usage, wantStderr: "unknown flag: --server\nRun 'alpacon exec --help' for usage."},
+		{name: "exec unknown flag before a server and a subcommand name", args: []string{"exec", "--bogus", "my-server", "logs"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon exec --help' for usage."},
+		{name: "websh unknown flag before a server and a subcommand alias", args: []string{"websh", "--wrongflag", "my-server", "list"}, wantExit: usage, wantStderr: "unknown flag: --wrongflag\nRun 'alpacon websh --help' for usage."},
+		{name: "exec unknown flag under json output before a server and a subcommand name", args: []string{"exec", "--output", "json", "--server", "my-server", "ls"}, wantExit: usage, wantStderr: "unknown flag: --server", wantCode: utils.ErrorCodeUsage},
+	})
+}
+
+func TestExecBoolFlagBeforeTheServerSubmitsARemoteCommandNamedLikeASubcommand(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct{ flag, wantStderr string }{
+		{flag: "--detach", wantStderr: "Error: failed to submit command on 'my-server'"},
+		{flag: "--wait", wantStderr: "Error: failed to execute command on 'my-server' server"},
+	} {
+		t.Run(tt.flag, func(t *testing.T) {
+			t.Parallel()
+
+			stdout, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, []string{"exec", tt.flag, "my-server", "ls", "--output", "json"},
+				exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir())
+
+			assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
+			assert.Empty(t, stdout)
+			assert.Contains(t, stderr, tt.wantStderr, "the remote --output json must not reach alpacon")
+		})
+	}
 }

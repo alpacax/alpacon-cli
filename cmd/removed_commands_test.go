@@ -10,7 +10,7 @@ import (
 )
 
 // These paths were removed from the CLI. Their parent groups take no arguments, so
-// each fails as an unknown command with the general error code; an old flag such
+// each fails as an unknown command with the usage error code; an old flag such
 // as -y fails first, as an unknown flag.
 func TestRemovedCommandPathsAreNotCommands(t *testing.T) {
 	t.Parallel()
@@ -28,7 +28,7 @@ func TestRemovedCommandPathsAreNotCommands(t *testing.T) {
 				stdout, stderr, exitCode := runHelperProcess(t, "TestRemovedCommandsHelperProcess", "removed-helper", args,
 					"GO_WANT_REMOVED_HELPER=1", homeEnvVar()+"="+t.TempDir())
 
-				assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "%v", args)
+				assert.Equal(t, utils.ExitCodeUsageError, exitCode, "%v", args)
 				assert.NotContains(t, stdout+stderr, "was removed", "%v", args)
 				if len(extra) == 1 {
 					want := `unknown command "` + path[1] + `" for "alpacon ` + path[0] + `"`
@@ -48,9 +48,9 @@ func TestRemovedCommandsHelperProcess(t *testing.T) {
 	}
 	args, ok := helperArgsAfter(os.Args, "removed-helper")
 	if !ok {
-		os.Exit(2)
+		os.Exit(99)
 	}
-	RootCmd.SetArgs(args)
+	os.Args = append([]string{"alpacon"}, args...)
 	Execute()
 	os.Exit(0)
 }

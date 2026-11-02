@@ -28,8 +28,8 @@ Use: "records SESSION_ID"
 - delete → `Aliases: []string{"rm"}`
 - describe → `Aliases: []string{"desc"}`
 - Group commands may have semantic aliases (e.g., `workspace` → `ws`, `server` → `servers`)
-- **Group commands**: `RunE`—returns error to trigger help when no subcommand is given
-- **Leaf commands**: `Run` + `utils.CliErrorWithExit` (exit 1), or `utils.CliUsageErrorWithExit` (exit 2) for a flag or argument the command rejects—the message is the command's own; an error returned from `RunE` reaches `cmd.Execute()`, which prints it behind a generic "While executing the command:" prefix
+- **Group commands**: `RunE` returns `utils.RequireSubcommand(cmd)`, which prints the help and returns a usage error (exit 2) when no subcommand is given
+- **Leaf commands**: `Run` + `utils.CliErrorWithExit` (exit 1), or `utils.CliUsageErrorWithExit` (exit 2) for a flag or argument the command rejects—the message is the command's own; an error returned from `RunE` reaches `cmd.Execute()`, which prints it behind a generic "While executing the command:" prefix and exits 1, or exits 2 without the prefix when it carries `utils.MarkUsageError`
 
 ## Code review guidelines
 
@@ -54,8 +54,8 @@ This repository is public, and so is everything in it: comments, test fixtures, 
 `alpacon` uses a stable exit code convention:
 
 - `0` success
-- `1` general error
-- `2` usage error—a flag or argument the command rejected in its own validation, so editing the command line fixes it (`utils.ExitCodeUsageError`); Cobra parse errors still exit `1`. These prompts check for a terminal first and exit `2` in a non-interactive run: `--yes`, `server create`'s `--platform` and `--token`, `user invite`'s email, `login`'s HOST, the `work-session create` and `extend` flags, `edit`'s `--force`; any other prompt reads stdin and exits `1` on no input, even where a flag would have answered it. Report a usage error with `utils.CliUsageErrorWithExit`
+- `1` general error—the command line was valid and the command failed (environment, server, network)
+- `2` usage error—a flag or argument the command rejected, in Cobra's parse or in the command's own validation, so editing the command line fixes it (`utils.ExitCodeUsageError`). These prompts check for a terminal first and exit `2` in a non-interactive run: `--yes`, `server create`'s `--platform` and `--token`, `user invite`'s email, `login`'s HOST, the `work-session create` and `extend` flags, `edit`'s `--force`; any other prompt reads stdin and exits `1` on no input, even where a flag would have answered it. Report a usage error with `utils.CliUsageErrorWithExit`
 - `3` WorkSession gate denied (`utils.ExitCodeWorkSessionDenied`)
 - `4` Pending human approval, outcome still open (`utils.ExitCodePendingApproval`)
 - `5` Server busy with active user work (`utils.ExitCodeServerBusy`)

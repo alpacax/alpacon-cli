@@ -105,6 +105,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		waitApproval                                             time.Duration
 	)
 	env := map[string]string{}
+	fail := func(msg string) RemoteExecArgs { return RemoteExecArgs{Err: msg, OutputFormat: outputFormat} }
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -137,182 +138,168 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			var errMsg string
 			username, i, errMsg = extractFlagValue(args, i, "-u")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 		case matchShortOrLongFlag(arg, "-g", "--groupname"):
 			var errMsg string
 			groupname, i, errMsg = extractFlagValue(args, i, "-g")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 		case arg == "--work-session" || strings.HasPrefix(arg, "--work-session="):
 			var errMsg string
 			// No short form: pass the long name as sentinel to disable attached-value parsing.
 			workSessionID, i, errMsg = extractFlagValue(args, i, "--work-session")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 		case arg == "--purpose" || strings.HasPrefix(arg, "--purpose="):
 			var errMsg string
 			// No short form: pass the long name as sentinel to disable attached-value parsing.
 			purpose, i, errMsg = extractFlagValue(args, i, "--purpose")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 			var msg string
 			if purpose, msg = checkPurpose("--purpose", purpose); msg != "" {
-				return RemoteExecArgs{Err: msg}
+				return fail(msg)
 			}
 		case arg == "--output" || strings.HasPrefix(arg, "--output="):
 			var errMsg string
 			outputFormat, i, errMsg = extractFlagValue(args, i, "--output")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 			if outputFormat == "" {
-				return RemoteExecArgs{Err: "--output requires a value (table|json)"}
+				return fail("--output requires a value (table|json)")
 			}
 		case arg == "--env" || strings.HasPrefix(arg, "--env="):
 			if errMsg := ParseEnvArg(arg, env); errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 		case arg == "--file" || strings.HasPrefix(arg, "--file="):
 			var errMsg string
 			filePath, i, errMsg = extractFlagValue(args, i, "--file")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 			if filePath == "" {
-				return RemoteExecArgs{Err: "--file requires the script's absolute path on the target server"}
+				return fail("--file requires the script's absolute path on the target server")
 			}
 			if !strings.HasPrefix(filePath, "/") {
-				return RemoteExecArgs{Err: fmt.Sprintf("--file must be an absolute path on the target server (starting with /): %s", filePath)}
+				return fail(fmt.Sprintf("--file must be an absolute path on the target server (starting with /): %s", filePath))
 			}
 		case arg == "--file-from" || strings.HasPrefix(arg, "--file-from="):
 			var errMsg string
 			fileFrom, i, errMsg = extractFlagValue(args, i, "--file-from")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 			if fileFrom == "" {
-				return RemoteExecArgs{Err: "--file-from requires a local path to read the script from"}
+				return fail("--file-from requires a local path to read the script from")
 			}
 		case arg == "--interpreter" || strings.HasPrefix(arg, "--interpreter="):
 			var errMsg string
 			interpreter, i, errMsg = extractFlagValue(args, i, "--interpreter")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 			if interpreter == "" {
-				return RemoteExecArgs{Err: "--interpreter requires the interpreter's absolute path on the target server"}
+				return fail("--interpreter requires the interpreter's absolute path on the target server")
 			}
 			if !strings.HasPrefix(interpreter, "/") {
-				return RemoteExecArgs{Err: fmt.Sprintf("--interpreter must be an absolute path (starting with /): %s", interpreter)}
+				return fail(fmt.Sprintf("--interpreter must be an absolute path (starting with /): %s", interpreter))
 			}
 		case arg == "--reuse-days" || strings.HasPrefix(arg, "--reuse-days="):
 			var raw, errMsg string
 			raw, i, errMsg = extractFlagValue(args, i, "--reuse-days")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 			var msg string
 			if reuseDays, msg = checkReuseDays(raw); msg != "" {
-				return RemoteExecArgs{Err: msg}
+				return fail(msg)
 			}
 		case arg == "--upload":
 			upload = true
 		case strings.HasPrefix(arg, "--upload="):
-			return RemoteExecArgs{Err: "--upload does not accept a value; use --upload alone"}
+			return fail("--upload does not accept a value; use --upload alone")
 		case arg == "--overwrite":
 			overwrite = true
 		case strings.HasPrefix(arg, "--overwrite="):
-			return RemoteExecArgs{Err: "--overwrite does not accept a value; use --overwrite alone"}
+			return fail("--overwrite does not accept a value; use --overwrite alone")
 		case arg == "--from-server":
 			fromServer = true
 		case strings.HasPrefix(arg, "--from-server="):
-			return RemoteExecArgs{Err: "--from-server does not accept a value; use --from-server alone"}
+			return fail("--from-server does not accept a value; use --from-server alone")
 		case arg == "--detach":
 			detach = true
 		case strings.HasPrefix(arg, "--detach="):
-			return RemoteExecArgs{Err: "--detach does not accept a value; use --detach alone"}
+			return fail("--detach does not accept a value; use --detach alone")
 		case arg == "--wait":
 			wait = true
 		case strings.HasPrefix(arg, "--wait="):
-			return RemoteExecArgs{Err: "--wait does not accept a value; use --wait alone"}
+			return fail("--wait does not accept a value; use --wait alone")
 		case arg == "--wait-approval" || strings.HasPrefix(arg, "--wait-approval="):
 			var raw, errMsg string
 			raw, i, errMsg = extractFlagValue(args, i, "--wait-approval")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 			d, err := utils.ParsePositiveDuration("--wait-approval", raw)
 			if err != nil {
-				return RemoteExecArgs{Err: err.Error()}
+				return fail(err.Error())
 			}
 			waitApproval = d
 		case strings.HasPrefix(arg, "-"):
-			return RemoteExecArgs{Err: "unknown flag: " + arg}
+			return fail("unknown flag: " + arg)
 		default:
 			server = arg
 		}
 	}
 
 	if detach && wait {
-		return RemoteExecArgs{
-			Err: "--wait and --detach cannot be combined; --detach returns immediately and would ignore --wait",
-		}
+		return fail("--wait and --detach cannot be combined; --detach returns immediately and would ignore --wait")
 	}
 	if detach && waitApproval > 0 {
-		return RemoteExecArgs{
-			Err: "--wait-approval and --detach cannot be combined; --detach returns immediately and would ignore --wait-approval",
-		}
+		return fail("--wait-approval and --detach cannot be combined; --detach returns immediately and would ignore --wait-approval")
 	}
 	if overwrite && !upload {
-		return RemoteExecArgs{Err: "--overwrite requires --upload; it only applies to the file --upload writes"}
+		return fail("--overwrite requires --upload; it only applies to the file --upload writes")
 	}
 	if filePath == "" {
 		if fileFrom != "" {
-			return RemoteExecArgs{Err: "--file-from requires --file"}
+			return fail("--file-from requires --file")
 		}
 		if interpreter != "" {
-			return RemoteExecArgs{Err: "--interpreter requires --file"}
+			return fail("--interpreter requires --file")
 		}
 		if reuseDays > 0 {
-			return RemoteExecArgs{Err: "--reuse-days requires --file; only a verified file execution can propose a reuse duration"}
+			return fail("--reuse-days requires --file; only a verified file execution can propose a reuse duration")
 		}
 		if upload {
-			return RemoteExecArgs{Err: "--upload requires --file; it writes the script to the --file path on the server"}
+			return fail("--upload requires --file; it writes the script to the --file path on the server")
 		}
 		if fromServer {
-			return RemoteExecArgs{Err: "--from-server requires --file; it reads the script from the --file path on the server"}
+			return fail("--from-server requires --file; it reads the script from the --file path on the server")
 		}
 	} else {
 		if len(env) > 0 {
-			return RemoteExecArgs{
-				Err: "--env cannot be combined with --file; a verified file takes no environment—set the variables inside the script",
-			}
+			return fail("--env cannot be combined with --file; a verified file takes no environment—set the variables inside the script")
 		}
 		if fromServer && upload {
-			return RemoteExecArgs{
-				Err: "--from-server cannot be combined with --upload; --from-server submits the file already on the server, --upload writes a local copy there",
-			}
+			return fail("--from-server cannot be combined with --upload; --from-server submits the file already on the server, --upload writes a local copy there")
 		}
 		if fromServer && fileFrom != "" {
-			return RemoteExecArgs{
-				Err: "--from-server cannot be combined with --file-from; the content is read from the --file path on the server, not from a local file",
-			}
+			return fail("--from-server cannot be combined with --file-from; the content is read from the --file path on the server, not from a local file")
 		}
 		// The upload writes to the cleaned path while the agent opens the path as
 		// given, and a symlink before ".." makes those two different files.
 		if upload && pathpkg.Clean(filePath) != filePath {
-			return RemoteExecArgs{
-				Err: fmt.Sprintf("--upload needs a clean --file path, without '.', '..', or repeated or trailing slashes: %s", filePath),
-			}
+			return fail(fmt.Sprintf("--upload needs a clean --file path, without '.', '..', or repeated or trailing slashes: %s", filePath))
 		}
 		if len(commandParts) > 0 && !separated {
-			return RemoteExecArgs{
-				Err: "--file cannot be combined with a command line; put the script's arguments after --",
-			}
+			return fail("--file cannot be combined with a command line; put the script's arguments after --")
 		}
 	}
 
