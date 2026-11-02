@@ -5,28 +5,29 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // newWatcherTestServer serves the session, subscription, and WebSocket endpoints on one
-// httptest server so a Watcher can run end to end. Each hook receives its own 1-based
+// pipe server so a Watcher can run end to end. Each hook receives its own 1-based
 // attempt count, in the order the runtime reaches them.
-func newWatcherTestServer(t *testing.T, sessionStatus func(attempt int32) int, shouldUpgrade func(attempt int32) bool, subscribeStatus func(attempt int32) int, wsHandler func(conn *websocket.Conn, n int32)) (*httptest.Server, *atomic.Int32, *atomic.Int32) {
+func newWatcherTestServer(t *testing.T, sessionStatus func(attempt int32) int, shouldUpgrade func(attempt int32) bool, subscribeStatus func(attempt int32) int, wsHandler func(conn *websocket.Conn, n int32)) (*testutil.PipeServer, *atomic.Int32, *atomic.Int32) {
 	t.Helper()
 
 	var sessions, conns, subscribes atomic.Int32
 	upgrader := websocket.Upgrader{}
 	mux := http.NewServeMux()
 
-	ts := httptest.NewServer(mux)
+	ts := testutil.NewPipeServer(t, mux)
 
 	mux.HandleFunc(eventSessionsURL, func(w http.ResponseWriter, r *http.Request) {
 		n := sessions.Add(1)
@@ -38,7 +39,7 @@ func newWatcherTestServer(t *testing.T, sessionStatus func(attempt int32) int, s
 		}
 		_ = json.NewEncoder(w).Encode(EventSessionResponse{
 			ID:           "session",
-			WebsocketURL: "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/",
+			WebsocketURL: ts.WebsocketURL("/ws/"),
 			ChannelID:    fmt.Sprintf("channel-%d", n),
 		})
 	})
@@ -71,7 +72,6 @@ func newWatcherTestServer(t *testing.T, sessionStatus func(attempt int32) int, s
 		wsHandler(conn, n)
 	})
 
-	t.Cleanup(ts.Close)
 	return ts, &sessions, &subscribes
 }
 
@@ -112,34 +112,35 @@ func TestWatcher_ForwardsFramesVerbatim(t *testing.T) {
 
 func TestWatcher_CreatesANewSessionOnReconnect(t *testing.T) {
 	t.Parallel()
-	ts, sessions, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
-		if n == 1 {
-			// The token is single-use, so recovering means a whole new session.
-			_ = conn.Close()
-			return
-		}
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
+	synctest.Test(t, func(t *testing.T) {
+		ts, sessions, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
+			if n == 1 {
+				// The token is single-use, so recovering means a whole new session.
+				_ = conn.Close()
 				return
 			}
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					return
+				}
+			}
+		})
+
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		w := NewWatcher(ac, "work_session", "ws-uuid")
+		w.Start()
+		defer w.Stop()
+
+		require.True(t, w.WaitConnected(3*time.Second))
+
+		select {
+		case <-w.Reconnected():
+		case <-time.After(5 * time.Second):
+			t.Fatalf("expected a reconnect, sessions=%d subscribes=%d", sessions.Load(), subscribes.Load())
 		}
+
+		assert.GreaterOrEqual(t, sessions.Load(), int32(2), "each attempt must create its own event session")
 	})
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	w := NewWatcher(ac, "work_session", "ws-uuid")
-	w.reconnectBaseDelay = testReconnectBaseDelay
-	w.Start()
-	defer w.Stop()
-
-	require.True(t, w.WaitConnected(3*time.Second))
-
-	select {
-	case <-w.Reconnected():
-	case <-time.After(5 * time.Second):
-		t.Fatalf("expected a reconnect, sessions=%d subscribes=%d", sessions.Load(), subscribes.Load())
-	}
-
-	assert.GreaterOrEqual(t, sessions.Load(), int32(2), "each attempt must create its own event session")
 }
 
 func TestWatcher_FirstSubscribeFailureStopsAndSurfaces(t *testing.T) {
@@ -166,140 +167,143 @@ func TestWatcher_FirstSubscribeFailureStopsAndSurfaces(t *testing.T) {
 
 func TestWatcher_FailureAfterFirstSuccessIsNonFatal(t *testing.T) {
 	t.Parallel()
-	firstOnly := func(attempt int32) int {
-		if attempt == 1 {
-			return http.StatusCreated
+	synctest.Test(t, func(t *testing.T) {
+		firstOnly := func(attempt int32) int {
+			if attempt == 1 {
+				return http.StatusCreated
+			}
+			return http.StatusBadRequest
 		}
-		return http.StatusBadRequest
-	}
 
-	ts, _, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, firstOnly, func(conn *websocket.Conn, n int32) {
-		if n == 1 {
-			// Dropped only after its subscribe succeeded, so the reconnect is the
-			// attempt that gets rejected.
-			_ = conn.Close()
-			return
-		}
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
+		ts, _, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, firstOnly, func(conn *websocket.Conn, n int32) {
+			if n == 1 {
+				// Dropped only after its subscribe succeeded, so the reconnect is the
+				// attempt that gets rejected.
+				_ = conn.Close()
 				return
 			}
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					return
+				}
+			}
+		})
+
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		w := NewWatcher(ac, "work_session", "ws-uuid")
+		w.Start()
+		defer w.Stop()
+
+		require.True(t, w.WaitConnected(3*time.Second))
+		require.NoError(t, w.Err())
+
+		time.Sleep(wsReconnectBaseDelay)
+		synctest.Wait()
+		require.Equal(t, int32(2), subscribes.Load(), "expected a rejected re-subscribe")
+
+		require.NoError(t, w.Err())
+		select {
+		case <-w.done:
+			t.Fatal("watcher stopped after a post-success subscribe failure")
+		default:
+		}
+
+		select {
+		case failErr := <-w.ReconnectFailed():
+			require.ErrorContains(t, failErr, "failed to subscribe to work_session events")
+		case <-time.After(5 * time.Second):
+			t.Fatal("expected a ReconnectFailed notice after a post-success failure")
+		}
+
+		time.Sleep(2 * wsReconnectBaseDelay)
+		synctest.Wait()
+		require.Equal(t, int32(3), subscribes.Load(), "expected the listener to keep retrying")
+
+		require.NoError(t, w.Err())
+		select {
+		case <-w.done:
+			t.Fatal("watcher stopped after a post-success subscribe failure")
+		default:
 		}
 	})
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	w := NewWatcher(ac, "work_session", "ws-uuid")
-	w.reconnectBaseDelay = testReconnectBaseDelay
-	w.Start()
-	defer w.Stop()
-
-	require.True(t, w.WaitConnected(3*time.Second))
-	require.NoError(t, w.Err())
-
-	require.Eventually(t, func() bool {
-		return subscribes.Load() >= 2
-	}, 5*time.Second, 10*time.Millisecond, "expected a rejected re-subscribe")
-
-	require.NoError(t, w.Err())
-	select {
-	case <-w.done:
-		t.Fatal("watcher stopped after a post-success subscribe failure")
-	default:
-	}
-
-	select {
-	case failErr := <-w.ReconnectFailed():
-		require.ErrorContains(t, failErr, "failed to subscribe to work_session events")
-	case <-time.After(5 * time.Second):
-		t.Fatal("expected a ReconnectFailed notice after a post-success failure")
-	}
-
-	require.Eventually(t, func() bool {
-		return subscribes.Load() >= 3
-	}, 5*time.Second, 10*time.Millisecond, "expected the listener to keep retrying")
-
-	require.NoError(t, w.Err())
-	select {
-	case <-w.done:
-		t.Fatal("watcher stopped after a post-success subscribe failure")
-	default:
-	}
 }
 
 func TestWatcher_DialFailureAfterFirstSuccessIsAnnounced(t *testing.T) {
 	t.Parallel()
-	// A refused handshake is a real dial error, which reaches neither provision nor
-	// subscribe.
-	firstConnOnly := func(attempt int32) bool { return attempt == 1 }
+	synctest.Test(t, func(t *testing.T) {
+		// A refused handshake is a real dial error, which reaches neither provision nor
+		// subscribe.
+		firstConnOnly := func(attempt int32) bool { return attempt == 1 }
 
-	ts, _, _ := newWatcherTestServer(t, alwaysCreated, firstConnOnly, alwaysCreated, func(conn *websocket.Conn, _ int32) {
-		_ = conn.Close()
+		ts, _, _ := newWatcherTestServer(t, alwaysCreated, firstConnOnly, alwaysCreated, func(conn *websocket.Conn, _ int32) {
+			_ = conn.Close()
+		})
+
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		w := NewWatcher(ac, "work_session", "ws-uuid")
+		w.Start()
+		defer w.Stop()
+
+		require.True(t, w.WaitConnected(3*time.Second))
+
+		select {
+		case failErr := <-w.ReconnectFailed():
+			require.Error(t, failErr)
+		case <-time.After(5 * time.Second):
+			t.Fatal("a dial failure after a first success must be announced")
+		}
+
+		assert.NoError(t, w.Err(), "a dial failure after a first success must not be fatal")
 	})
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	w := NewWatcher(ac, "work_session", "ws-uuid")
-	w.reconnectBaseDelay = testReconnectBaseDelay
-	w.Start()
-	defer w.Stop()
-
-	require.True(t, w.WaitConnected(3*time.Second))
-
-	select {
-	case failErr := <-w.ReconnectFailed():
-		require.Error(t, failErr)
-	case <-time.After(5 * time.Second):
-		t.Fatal("a dial failure after a first success must be announced")
-	}
-
-	assert.NoError(t, w.Err(), "a dial failure after a first success must not be fatal")
 }
 
 func TestWatcher_StaleFailureNoticeIsDroppedOnRecovery(t *testing.T) {
 	t.Parallel()
-	secondOnly := func(attempt int32) int {
-		if attempt == 2 {
-			return http.StatusBadRequest
+	synctest.Test(t, func(t *testing.T) {
+		secondOnly := func(attempt int32) int {
+			if attempt == 2 {
+				return http.StatusBadRequest
+			}
+			return http.StatusCreated
 		}
-		return http.StatusCreated
-	}
 
-	ts, _, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, secondOnly, func(conn *websocket.Conn, n int32) {
-		if n == 1 {
-			_ = conn.Close()
-			return
-		}
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
+		ts, _, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, secondOnly, func(conn *websocket.Conn, n int32) {
+			if n == 1 {
+				_ = conn.Close()
 				return
 			}
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					return
+				}
+			}
+		})
+
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		w := NewWatcher(ac, "work_session", "ws-uuid")
+		w.Start()
+		defer w.Stop()
+
+		require.True(t, w.WaitConnected(3*time.Second))
+
+		// ReconnectFailed is deliberately never drained: attempt 2 queues a notice that
+		// attempt 3's recovery must discard.
+		time.Sleep(3 * wsReconnectBaseDelay)
+		synctest.Wait()
+		require.Equal(t, int32(3), subscribes.Load(), "expected a recovery after the rejected re-subscribe")
+
+		select {
+		case <-w.Reconnected():
+		case <-time.After(3 * time.Second):
+			t.Fatal("expected a reconnect notice after recovery")
+		}
+
+		select {
+		case failErr := <-w.ReconnectFailed():
+			t.Fatalf("a resolved outage must not stay queued, got %v", failErr)
+		default:
 		}
 	})
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	w := NewWatcher(ac, "work_session", "ws-uuid")
-	w.reconnectBaseDelay = testReconnectBaseDelay
-	w.Start()
-	defer w.Stop()
-
-	require.True(t, w.WaitConnected(3*time.Second))
-
-	// ReconnectFailed is deliberately never drained: attempt 2 queues a notice that
-	// attempt 3's recovery must discard.
-	require.Eventually(t, func() bool {
-		return subscribes.Load() >= 3
-	}, 5*time.Second, 10*time.Millisecond, "expected a recovery after the rejected re-subscribe")
-
-	select {
-	case <-w.Reconnected():
-	case <-time.After(3 * time.Second):
-		t.Fatal("expected a reconnect notice after recovery")
-	}
-
-	select {
-	case failErr := <-w.ReconnectFailed():
-		t.Fatalf("a resolved outage must not stay queued, got %v", failErr)
-	default:
-	}
 }
 
 func TestWatcher_MalformedWebsocketURLStopsAndSurfaces(t *testing.T) {
@@ -336,124 +340,126 @@ func TestWatcher_MalformedWebsocketURLStopsAndSurfaces(t *testing.T) {
 // the close of the session it rejected has to land before the stop, not after.
 func TestWatcher_ClosesARejectedSessionBeforeStopping(t *testing.T) {
 	t.Parallel()
-	deleted := make(chan string, 1)
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST "+eventSessionsURL, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(EventSessionResponse{
-			ID:           "session-1",
-			WebsocketURL: "ws://127.0.0.1/ws/\x7f",
-			ChannelID:    "channel",
+	synctest.Test(t, func(t *testing.T) {
+		deleted := make(chan string, 1)
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST "+eventSessionsURL, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(EventSessionResponse{
+				ID:           "session-1",
+				WebsocketURL: "ws://127.0.0.1/ws/\x7f",
+				ChannelID:    "channel",
+			})
 		})
-	})
-	mux.HandleFunc("DELETE "+eventSessionsURL+"{id}/", func(w http.ResponseWriter, r *http.Request) {
-		deleted <- r.PathValue("id")
-		w.WriteHeader(http.StatusNoContent)
-	})
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	w := NewWatcher(ac, "work_session", "ws-uuid")
+		mux.HandleFunc("DELETE "+eventSessionsURL+"{id}/", func(w http.ResponseWriter, r *http.Request) {
+			deleted <- r.PathValue("id")
+			w.WriteHeader(http.StatusNoContent)
+		})
+		ts := testutil.NewPipeServer(t, mux)
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		w := NewWatcher(ac, "work_session", "ws-uuid")
 
-	w.Start()
-	defer w.Stop()
+		w.Start()
+		defer w.Stop()
 
-	require.False(t, w.WaitConnected(2*time.Second), "a rejected URL must not report a connection")
-	select {
-	case id := <-deleted:
-		assert.Equal(t, "session-1", id)
-	default:
-		t.Fatal("the close had not reached the server when the Watcher stopped")
-	}
+		require.False(t, w.WaitConnected(2*time.Second), "a rejected URL must not report a connection")
+		select {
+		case id := <-deleted:
+			assert.Equal(t, "session-1", id)
+		default:
+			t.Fatal("the close had not reached the server when the Watcher stopped")
+		}
+	})
 }
 
 // The close can outlast WaitConnected's window, so the cause must already be readable
 // when the wait times out, or the command reports a timeout instead of the bad URL.
 func TestWatcher_SurfacesARejectedURLWhileItsCloseIsPending(t *testing.T) {
 	t.Parallel()
-	release := make(chan struct{})
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST "+eventSessionsURL, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(EventSessionResponse{
-			ID:           "session-1",
-			WebsocketURL: "ws://127.0.0.1/ws/\x7f",
-			ChannelID:    "channel",
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST "+eventSessionsURL, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(EventSessionResponse{
+				ID:           "session-1",
+				WebsocketURL: "ws://127.0.0.1/ws/\x7f",
+				ChannelID:    "channel",
+			})
 		})
-	})
-	mux.HandleFunc("DELETE "+eventSessionsURL+"{id}/", func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-release:
-		case <-r.Context().Done():
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
-	defer close(release) // runs before ts.Close, which waits on the held DELETE
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	w := NewWatcher(ac, "work_session", "ws-uuid")
+		mux.HandleFunc("DELETE "+eventSessionsURL+"{id}/", func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+		ts := testutil.NewPipeServer(t, mux)
+		defer close(release)
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		w := NewWatcher(ac, "work_session", "ws-uuid")
 
-	w.Start()
-	defer w.Stop()
+		w.Start()
+		defer w.Stop()
 
-	require.False(t, w.WaitConnected(300*time.Millisecond), "a rejected URL must not report a connection")
-	require.Error(t, w.Err())
-	assert.Contains(t, w.Err().Error(), "malformed event channel URL")
+		require.False(t, w.WaitConnected(300*time.Millisecond), "a rejected URL must not report a connection")
+		require.Error(t, w.Err())
+		assert.Contains(t, w.Err().Error(), "malformed event channel URL")
+	})
 }
 
 // Past the first subscribe the Watcher keeps reconnecting, so the close goes to
 // the background like a failed dial's and the stream carries on.
 func TestWatcher_ClosesARejectedSessionInTheBackgroundAfterTheFirstSubscribe(t *testing.T) {
 	t.Parallel()
-	var sessions atomic.Int32
-	upgrader := websocket.Upgrader{}
-	mux := http.NewServeMux()
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
-	mux.HandleFunc("POST "+eventSessionsURL, func(w http.ResponseWriter, r *http.Request) {
-		n := sessions.Add(1)
-		session := EventSessionResponse{ID: fmt.Sprintf("session-%d", n), WebsocketURL: "ws://127.0.0.1/ws/\x7f", ChannelID: "channel"}
-		if n == 1 {
-			session.WebsocketURL = "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/"
+	synctest.Test(t, func(t *testing.T) {
+		var sessions atomic.Int32
+		upgrader := websocket.Upgrader{}
+		mux := http.NewServeMux()
+		ts := testutil.NewPipeServer(t, mux)
+		mux.HandleFunc("POST "+eventSessionsURL, func(w http.ResponseWriter, r *http.Request) {
+			n := sessions.Add(1)
+			session := EventSessionResponse{ID: fmt.Sprintf("session-%d", n), WebsocketURL: "ws://127.0.0.1/ws/\x7f", ChannelID: "channel"}
+			if n == 1 {
+				session.WebsocketURL = ts.WebsocketURL("/ws/")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(session)
+		})
+		mux.HandleFunc(eventSubscriptionsURL, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":"sub"}`))
+		})
+		mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			_ = conn.Close() // dropped at once, so the next attempt meets the malformed URL
+		})
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		w := NewWatcher(ac, "work_session", "ws-uuid")
+		closed := make(chan string, 1)
+		w.closeUnopened = func(id string) {
+			select {
+			case closed <- id: // later attempts also close; never park the listen goroutine on them
+			default:
+			}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(session)
-	})
-	mux.HandleFunc(eventSubscriptionsURL, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":"sub"}`))
-	})
-	mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		_ = conn.Close() // dropped at once, so the next attempt meets the malformed URL
-	})
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	w := NewWatcher(ac, "work_session", "ws-uuid")
-	w.reconnectBaseDelay = testReconnectBaseDelay
-	closed := make(chan string, 1)
-	w.closeUnopened = func(id string) {
+
+		w.Start()
+		defer w.Stop()
+
+		require.True(t, w.WaitConnected(2*time.Second), "the first session must subscribe")
 		select {
-		case closed <- id: // later attempts also close; never park the listen goroutine on them
-		default:
+		case id := <-closed:
+			assert.Equal(t, "session-2", id)
+		case <-time.After(2 * time.Second):
+			t.Fatal("the rejected session was never closed")
 		}
-	}
-
-	w.Start()
-	defer w.Stop()
-
-	require.True(t, w.WaitConnected(2*time.Second), "the first session must subscribe")
-	select {
-	case id := <-closed:
-		assert.Equal(t, "session-2", id)
-	case <-time.After(2 * time.Second):
-		t.Fatal("the rejected session was never closed")
-	}
-	assert.NoError(t, w.Err(), "a rejection after the first subscribe must not stop the Watcher")
+		assert.NoError(t, w.Err(), "a rejection after the first subscribe must not stop the Watcher")
+	})
 }
 
 func TestWatcher_SessionCreateRejectionStopsAndSurfaces(t *testing.T) {
@@ -489,30 +495,31 @@ func TestWatcher_SessionCreateRetryableStatusIsRetried(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			failFirst := func(attempt int32) int {
-				if attempt == 1 {
-					return tt.status
-				}
-				return http.StatusCreated
-			}
-
-			ts, sessions, _ := newWatcherTestServer(t, failFirst, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
-				for {
-					if _, _, err := conn.ReadMessage(); err != nil {
-						return
+			synctest.Test(t, func(t *testing.T) {
+				failFirst := func(attempt int32) int {
+					if attempt == 1 {
+						return tt.status
 					}
+					return http.StatusCreated
 				}
+
+				ts, sessions, _ := newWatcherTestServer(t, failFirst, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
+					for {
+						if _, _, err := conn.ReadMessage(); err != nil {
+							return
+						}
+					}
+				})
+
+				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+				w := NewWatcher(ac, "work_session", "ws-uuid")
+				w.Start()
+				defer w.Stop()
+
+				require.True(t, w.WaitConnected(3*time.Second), "a transient session-create failure must be absorbed, not fatal")
+				require.NoError(t, w.Err())
+				assert.GreaterOrEqual(t, sessions.Load(), int32(2), "the failed attempt must be retried with a new session")
 			})
-
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			w := NewWatcher(ac, "work_session", "ws-uuid")
-			w.reconnectBaseDelay = testReconnectBaseDelay
-			w.Start()
-			defer w.Stop()
-
-			require.True(t, w.WaitConnected(3*time.Second), "a transient session-create failure must be absorbed, not fatal")
-			require.NoError(t, w.Err())
-			assert.GreaterOrEqual(t, sessions.Load(), int32(2), "the failed attempt must be retried with a new session")
 		})
 	}
 }
