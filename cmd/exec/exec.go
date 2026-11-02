@@ -304,6 +304,9 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 			}))
 		}
 		if err != nil {
+			signalArgs := parsed
+			signalArgs.WorkSessionID = workSessionID
+			err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs))
 			utils.HandleWorkSessionError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID)
 			if HandleFileExecRefusal(err, parsed.Server) {
 				return

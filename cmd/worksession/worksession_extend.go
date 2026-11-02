@@ -8,6 +8,7 @@ import (
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -86,6 +87,7 @@ func printExtendSuccess(id, expiresAt string) {
 // nil on a body that omits it. The next steps point at 'describe' and a retry with a new reason,
 // not at 'work-session complete', which has nothing to do with an extension.
 func printExtendPending(id string, req *wsapi.PendingExtensionRequest) {
+	utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: id})
 	message, requestID, requestedExpiresAt, deadline := extendPendingMessage(id, req)
 	describeCmd := fmt.Sprintf("alpacon work-session describe %s", id)
 	next := []utils.NextAction{

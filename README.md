@@ -494,6 +494,20 @@ Run `alpacon --help` for the full list, or `alpacon <command> --help` for detail
 
 ## When a command is denied
 
+When the server returns a gate refusal, the CLI prints a red banner on a color terminal, or the same plain-text box on redirected stderr, before its error:
+
+```text
+==== ALPACON: COMMAND DENIED ====
+sudo on my-server as alice was refused by the risk gate and did not run. Session ses-1.
+================================
+```
+
+Pending command, sudo, and Work Session approvals show an `ALPACON: APPROVAL PENDING` banner when the CLI starts waiting or reports pending. A `session_paused` refusal shows `ALPACON: SESSION PAUSED`. A denial alone does not mean the session paused. The banners also appear with `--output json`; stdout and exit codes keep their existing contracts, and the JSON error envelope follows the banner on stderr.
+
+The CLI also attempts a desktop notification on macOS, Linux (`notify-send` when installed), and Windows. Its title is `Alpacon: command denied`, `Alpacon: approval pending`, or `Alpacon: session paused`. The banner and notification include only the command's first word with its path removed, server, OS account, gate, and Work Session identifier when known; command arguments are omitted. No console link is included. Notification failures are debug-only and cannot change the result; each attempt has a two-second timeout, which the CLI waits for before exiting.
+
+Desktop notifications are skipped when `CI` is non-empty, `SSH_CONNECTION` or `SSH_TTY` is set, Linux lacks both display variables or its session bus variable, or Windows runs in service session 0. The banner still prints, including when an agent runs with non-terminal stdio. There is no local-signal opt-out. Both outputs share a limit of one signal per Work Session and kind every 60 seconds (kind alone without a session). Repeats are folded into the next signal as `+N more.`; the shared state is stored in `~/.alpacon/state/signals.json` across CLI invocations.
+
 Under interactive auth (browser login), `websh`, `exec`, `cp`, `edit`, and `tunnel` require an active work session. Without one, the command is refused with a diagnostic and exit code `3`:
 
 ```

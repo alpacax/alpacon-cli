@@ -8,6 +8,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -58,6 +59,11 @@ Run the command again later to check for completion.`,
 
 		// Exit 0 would read as a command that finished with nothing to show.
 		if event.IsAwaitingApprovalStatus(details.Status) {
+			fields := localsignal.Fields{Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username}
+			if details.WorkSession != nil {
+				fields.Session = details.WorkSession.ID
+			}
+			utils.EmitLocalSignal(localsignal.ApprovalPending, fields)
 			requestID, lookupErr := approval.FindCommandApprovalRequestID(alpaconClient, details.ID)
 			if lookupErr != nil {
 				utils.CliWarning("failed to read approval request: %s", lookupErr)

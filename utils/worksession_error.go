@@ -84,6 +84,14 @@ func HandleWorkSessionError(err error, operation, target, authMethod, activeWS s
 	if !isWorkSessionCode(code) {
 		return
 	}
+	fields := SignalFields(err)
+	if fields.Server == "" && operation != OperationKube {
+		fields.Server = target
+	}
+	if fields.Session == "" {
+		fields.Session = activeWS
+	}
+	SignalRefusal(WithSignalFields(err, fields))
 	hint := RefusalHint(err)
 	if OutputFormat == OutputFormatJSON {
 		PrintJSONError(os.Stderr, buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS, hint))

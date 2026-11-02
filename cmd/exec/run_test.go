@@ -354,7 +354,7 @@ func TestRunExecWithApprovalWait_TimesOutAfterWindow(t *testing.T) {
 		err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
 		elapsed := time.Since(start)
 
-		assert.Same(t, denial, err, "timeout returns the last pending denial for the caller's handler")
+		require.ErrorIs(t, err, denial, "timeout returns the last pending denial for the caller's handler")
 		assert.Equal(t, waitTimeout, elapsed, "loop must wait exactly the anchored window before timing out")
 	})
 }
@@ -474,7 +474,7 @@ func TestRunExecWithApprovalWait_TimeoutReportsThePendingDenial(t *testing.T) {
 
 		err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
 
-		assert.Same(t, denial, err, "a timed-out wait reports the pending denial, not the last poll failure")
+		require.ErrorIs(t, err, denial, "a timed-out wait reports the pending denial, not the last poll failure")
 	})
 }
 
@@ -500,7 +500,7 @@ func TestRunExecWithApprovalWait_GivesUpAfterConsecutivePollFailures(t *testing.
 
 	// The request is still open, so giving up must exit on the pending contract
 	// like the timeout does; the transport detail rides on the warning line.
-	assert.Same(t, denial, err, "an unreachable server leaves the approval request open")
+	require.ErrorIs(t, err, denial, "an unreachable server leaves the approval request open")
 	assert.Contains(t, stderr, "server said 502")
 	assert.Equal(t, utils.MaxConsecutivePollFailures, polls, "the bounded run of failed polls")
 }

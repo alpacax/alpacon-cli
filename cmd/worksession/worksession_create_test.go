@@ -757,6 +757,9 @@ func TestWorkSessionCreateWaitRejectedJSONCarriesTheSessionID(t *testing.T) {
 	_, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, rejectedWaitArgs()...)
 
 	assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
+	assert.Contains(t, stderr, "==== ALPACON: APPROVAL PENDING ====\n")
+	assert.Equal(t, 1, strings.Count(stderr, "==== ALPACON: APPROVAL PENDING ===="))
+	jsonLine := stderr[strings.LastIndex(stderr, "\n{")+1:]
 	assert.JSONEq(t, `{
 		"ok": false,
 		"exit_code": 6,
@@ -767,7 +770,7 @@ func TestWorkSessionCreateWaitRejectedJSONCarriesTheSessionID(t *testing.T) {
 			{"command": "alpacon work-session describe ses-x", "description": "why it settled"},
 			{"command": "alpacon work-session complete ses-x"}
 		]
-	}`, stderr)
+	}`, jsonLine)
 }
 
 // An agent runs the refusal's follow-ups, so each must be a command the session can still take.
