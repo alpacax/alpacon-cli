@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -255,9 +256,16 @@ func TestWorkSessionCreate_PendingFollowUpMatchesRequesterType(t *testing.T) {
 					require.NoError(t, json.Unmarshal([]byte(stdout), &envelope), "stdout: %s", stdout)
 					assert.Equal(t, utils.PendingApprovalStatus, envelope.Status)
 					require.NotEmpty(t, envelope.NextActions)
+					assert.Equal(t, utils.NextAction{
+						Command:     "alpacon work-session update ses-x --server <server,...>",
+						Description: "add servers to this session; include every server to keep (--server replaces the whole list)",
+					}, envelope.NextActions[len(envelope.NextActions)-1])
 					raw, err := json.Marshal(envelope.NextActions)
 					require.NoError(t, err)
 					guidance = string(raw)
+				} else {
+					assert.Contains(t, stderr, "  alpacon work-session update ses-x --server <server,...>  # add servers to this session; include every server to keep (--server replaces the whole list)\n")
+					assert.Less(t, strings.Index(stderr, "Approve it out of band"), strings.Index(stderr, "alpacon work-session update"))
 				}
 				assert.Contains(t, guidance, tt.want)
 				assert.NotContains(t, guidance, tt.notWant)
