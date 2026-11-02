@@ -199,10 +199,8 @@ type TimelineItem struct {
 
 	// websh_session: record_chunks_total is nil both when the server sends null
 	// (it could not count) and when it sends no key (it predates the count), so
-	// neither reads as "no recording". max_cols/max_rows are 0 when unknown.
-	RecordChunksTotal *int `json:"record_chunks_total,omitempty"`
-	MaxCols           int  `json:"max_cols"`
-	MaxRows           int  `json:"max_rows"`
+	// neither reads as "no recording".
+	RecordChunksTotal *int `json:"record_chunks_total"`
 }
 
 type TimelineAttributes struct {

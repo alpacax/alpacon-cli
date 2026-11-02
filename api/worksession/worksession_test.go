@@ -470,8 +470,6 @@ func TestGetWorkSessionTimeline_DecodesTheRecordChunkCount(t *testing.T) {
 	require.Len(t, result, 4)
 	require.NotNil(t, result[0].RecordChunksTotal)
 	assert.Equal(t, 3, *result[0].RecordChunksTotal)
-	assert.Equal(t, 120, result[0].MaxCols)
-	assert.Equal(t, 40, result[0].MaxRows)
 	require.NotNil(t, result[1].RecordChunksTotal)
 	assert.Equal(t, 0, *result[1].RecordChunksTotal)
 	assert.Nil(t, result[2].RecordChunksTotal)
