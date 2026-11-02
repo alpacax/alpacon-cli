@@ -26,7 +26,7 @@ This command requires staff or superuser privileges.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		isSaaS, err := config.IsSaaS()
 		if err != nil {
-			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+			utils.CliErrorEnvelopeWithExit("", err, "Not logged in. Run 'alpacon login' first.")
 		}
 		if !isSaaS {
 			utils.CliErrorWithExit("This command is only available on Alpacon Cloud workspaces.")

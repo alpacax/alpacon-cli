@@ -24,7 +24,7 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 
 		cfg, err := config.LoadConfig()
 		if err != nil {
-			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+			utils.CliErrorEnvelopeWithExit("", err, "Not logged in. Run 'alpacon login' first.")
 		}
 		if !cfg.IsSaaS() {
 			utils.CliErrorWithExit("This command is only available on Alpacon Cloud workspaces.")

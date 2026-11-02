@@ -45,6 +45,7 @@ func PromptForPassword(promptText string) string {
 		case 3: // Ctrl+C
 			_, _ = fmt.Fprint(TrackedStderr(), "\r\n")
 			_ = term.Restore(int(os.Stdin.Fd()), oldState)
+			ExitWithFailureJSON(Failure{ExitCode: ExitCodeGeneralError, Message: "Interrupted at the password prompt."})
 			os.Exit(1)
 		default:
 			if buf[0] >= 32 {
