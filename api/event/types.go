@@ -125,7 +125,7 @@ type CommandRejectedError struct {
 const RejectionCauseUseFileExecution = "use_file_execution"
 
 const (
-	RejectionCauseApprovalExpired  = "approval_expired"
+	RejectionCauseApprovalExpired  = utils.ApprovalExpired
 	RejectionCauseApprovalRejected = "approval_rejected"
 )
 
@@ -418,7 +418,7 @@ func IsStatusOnlyFailure(status string) bool {
 }
 
 func (e *CommandRejectedError) RejectedCommand() bool {
-	return !e.Expired && e.Cause != RejectionCauseApprovalExpired && e.Cause != "approval_cancelled"
+	return !e.Expired && !utils.IsApprovalLapse(e.Cause)
 }
 func (e *CommandRejectedError) ErrorGate() string { return e.Gate }
 func (e *CommandRejectedError) ErrorFields() map[string]any {

@@ -41,7 +41,7 @@ func allow(statePath, session string, kind Kind, clock func() time.Time) (folded
 		}
 	}
 	for key, item := range state {
-		if item.Folded == 0 && now.Sub(item.Last) > 24*time.Hour {
+		if now.Sub(item.Last) > 24*time.Hour {
 			delete(state, key)
 		}
 	}

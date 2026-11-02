@@ -15,6 +15,11 @@ import (
 // The MCP client mirrors this command-denial gate allowlist.
 const commandDenialGates = "server_reach,command_preapproval,command_acl,file_acl,risk,approval,sudo,work_session,block"
 
+const (
+	ApprovalExpired   = "approval_expired"
+	ApprovalCancelled = "approval_cancelled"
+)
+
 // The command layer supplies config access without making utils import config.
 var LocalSignalConsoleOrigin = func() (workspaceURL, baseDomain string) { return "", "" }
 
@@ -158,6 +163,18 @@ func signalRefusal(err error, command bool) {
 			if !command {
 				return
 			}
+			if IsApprovalLapse(code) {
+				return
+			}
+			if carrier, ok := e.(interface{ ErrorFields() map[string]any }); ok {
+				payload := carrier.ErrorFields()
+				for _, field := range []string{"code", "error_code"} {
+					value, _ := payload[field].(string)
+					if IsApprovalLapse(value) {
+						return
+					}
+				}
+			}
 			rejected, _ := e.(interface{ RejectedCommand() bool })
 			if rejected == nil || !rejected.RejectedCommand() {
 				status, ok := e.(interface{ HTTPStatusCode() int })
@@ -210,6 +227,11 @@ func commandDenial(code, gate string) bool {
 		gate = "work_session"
 	}
 	return slices.Contains(strings.Split(commandDenialGates, ","), gate)
+}
+
+// IsApprovalLapse reports an approval that ended without a denial.
+func IsApprovalLapse(code string) bool {
+	return code == ApprovalExpired || code == ApprovalCancelled
 }
 
 func responseSignalFields(err error, fields localsignal.Fields) localsignal.Fields {

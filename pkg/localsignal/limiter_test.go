@@ -175,8 +175,12 @@ func TestLimiterFuturePruningAndKeyBound(t *testing.T) {
 	state = nil
 	require.NoError(t, json.Unmarshal(data, &state))
 	assert.NotContains(t, state, "denied:old")
-	assert.Equal(t, 2, state["paused:folded"].Folded)
+	assert.NotContains(t, state, "paused:folded")
 	assert.Contains(t, state, "paused:"+strings.Repeat("x", 128))
+	folded, emit, err := allowAt(path, "folded", Paused, now)
+	require.NoError(t, err)
+	assert.True(t, emit, "an event after pruning must start fresh")
+	assert.Zero(t, folded)
 }
 
 func TestLimiterLockTimeoutFailsOpenWithoutWrite(t *testing.T) {
