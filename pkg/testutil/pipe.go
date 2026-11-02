@@ -39,6 +39,9 @@ func (s *PipeServer) SetHandler(h http.Handler) { s.server.Handler = h }
 // Client returns an http.Client whose every request reaches the server.
 func (s *PipeServer) Client() *http.Client { return s.client }
 
+// Transport is Client's transport, for code that dials the way a client's transport does.
+func (s *PipeServer) Transport() *http.Transport { return s.client.Transport.(*http.Transport) }
+
 // WebsocketURL is the ws:// form of URL with path appended.
 func (s *PipeServer) WebsocketURL(path string) string { return "ws" + s.URL[len("http"):] + path }
 

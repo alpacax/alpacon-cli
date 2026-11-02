@@ -133,7 +133,7 @@ func TestWSListener_ConnectAndListen_ResetsOnlyAfterStableLifetime(t *testing.T)
 				}))
 
 				w := newProvisionedWSListener(nil, provisionURL(ts.WebsocketURL("/")), time.Second)
-				w.netDial = ts.DialContext
+				w.transport = ts.Transport()
 				w.handleFrame = func([]byte) {}
 				w.stableLifetime = tt.stableLifetime
 
@@ -184,7 +184,7 @@ func TestWSListener_ListenLoop_KeepsBackoffAcrossShortConnections(t *testing.T) 
 					time.Sleep(tt.provisionDelay)
 					return &EventSessionResponse{ID: "session", WebsocketURL: ts.WebsocketURL("/")}, nil
 				}, time.Second)
-				w.netDial = ts.DialContext
+				w.transport = ts.Transport()
 				w.handleFrame = func([]byte) {}
 				w.Start()
 				defer func() { // a provision sleeping past the last attempt must end inside the bubble
@@ -243,7 +243,7 @@ func TestWSListener_ListenLoop_ResetsBackoffAfterStableConnections(t *testing.T)
 			}
 			return &EventSessionResponse{ID: "session", WebsocketURL: ts.WebsocketURL("/")}, nil
 		}, time.Second)
-		w.netDial = ts.DialContext
+		w.transport = ts.Transport()
 		w.handleFrame = func([]byte) {}
 		w.stableLifetime = time.Millisecond
 		w.Start()
@@ -303,7 +303,7 @@ func TestWSListener_ListenLoop_DoesNotDialWhenAlreadyStopped(t *testing.T) {
 		}))
 
 		w := newProvisionedWSListener(nil, provisionURL(ts.WebsocketURL("/")), time.Second)
-		w.netDial = ts.DialContext
+		w.transport = ts.Transport()
 		w.handleFrame = func([]byte) {}
 		w.Stop()
 
@@ -369,7 +369,7 @@ func TestWSListener_ProvisionCalledPerDialAttempt(t *testing.T) {
 			provisions.Add(1)
 			return &EventSessionResponse{ID: "session", WebsocketURL: ts.WebsocketURL("/")}, nil
 		}, time.Second)
-		w.netDial = ts.DialContext
+		w.transport = ts.Transport()
 		w.handleFrame = func([]byte) {}
 		w.Start()
 		defer w.Stop()
@@ -419,7 +419,7 @@ func TestWSListener_OnConnectedRunsBeforeConnectedCloses(t *testing.T) {
 		var hookRan, openDuringHook atomic.Bool
 
 		w := newProvisionedWSListener(nil, provisionURL(ts.WebsocketURL("/")), time.Second)
-		w.netDial = ts.DialContext
+		w.transport = ts.Transport()
 		w.handleFrame = func([]byte) {}
 		w.onConnected = func() error {
 			hookRan.Store(true)
@@ -683,4 +683,21 @@ func TestWSListener_DialsTheRouteItsClientsTransportTakes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// httpclient.New sets both, but a transport may carry a proxy and leave the dial to the default.
+func TestWSListener_TakesTheTransportsProxyWithoutItsDial(t *testing.T) {
+	t.Parallel()
+	errProxyConsulted := errors.New("proxy consulted")
+	transport := &http.Transport{Proxy: func(*http.Request) (*url.URL, error) { return nil, errProxyConsulted }}
+	ac := &client.AlpaconClient{HTTPClient: &http.Client{Transport: transport}, BaseURL: testutil.PipeServerURL}
+	w := newProvisionedWSListener(ac, provisionURL("ws://pipe.test/ws/"), time.Second)
+	w.handleFrame = func([]byte) {}
+	w.closeUnopened = func(string) {}
+	var dialErr error
+	w.onDialFailed = func(err error) { dialErr = err }
+
+	w.connectAndListen()
+
+	require.ErrorIs(t, dialErr, errProxyConsulted)
 }
