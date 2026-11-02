@@ -85,21 +85,32 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 }
 
 func Execute() {
+	args := os.Args[1:]
+	format := utils.OutputFormatIn(args)
 	kube.ApplySurfaceGate(RootCmd, kubernetesSurfaceEnabled())
 	RootCmd.InitDefaultCompletionCmd()
 	markHookErrors(RootCmd)
-	keepWithOwnParser(RootCmd, os.Args[1:])
+	keepWithOwnParser(RootCmd, args)
+	utils.CommandName = commandName(RootCmd, args)
 	cmd, err := RootCmd.ExecuteC()
 	switch {
 	case err == nil:
 		return
 	case !errors.As(err, new(hookError)):
-		utils.CliParseErrorWithExit(cmd, utils.OutputFormatIn(os.Args[1:]), err.Error())
+		utils.CliParseErrorWithExit(cmd, format, err.Error())
 	case utils.IsUsageError(err):
 		utils.CliUsageErrorWithExit("%s", err)
 	default:
 		utils.CliErrorWithExit("While executing the command: %s", err)
 	}
+}
+
+// commandName is the canonical path of the command args reach, without the root name: aliases
+// resolve, and a command line that names no known command stops at the deepest one it did name.
+func commandName(root *cobra.Command, args []string) string {
+	cmd, _, _ := root.Find(args)
+	_, name, _ := strings.Cut(cmd.CommandPath(), " ")
+	return name
 }
 
 // keepWithOwnParser detaches the subcommands of a command that parses its own flags when a flag Cobra
