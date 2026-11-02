@@ -89,68 +89,76 @@ func TestSudoListener_HandleSudoMFA_DropsRequestWhenClientIsNil(t *testing.T) {
 	assert.NotPanics(t, func() { sl.handleSudoMFA(event) })
 }
 
+// holdUntilClientCloses keeps the WebSocket open until the client closes it.
+func holdUntilClientCloses(conn *websocket.Conn, _ int32) {
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+	}
+}
+
+func pipeSudoClient(ps *testutil.PipeServer) *client.AlpaconClient {
+	return &client.AlpaconClient{HTTPClient: ps.Client(), BaseURL: ps.URL}
+}
+
 func TestSudoListener_StopClosesConnection(t *testing.T) {
 	t.Parallel()
-	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
+	synctest.Test(t, func(t *testing.T) {
+		ps, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, holdUntilClientCloses)
+
+		sl := NewSudoListener(pipeSudoClient(ps), "my-server", "session-1")
+		sl.Start()
+
+		require.True(t, sl.WaitConnected(3*time.Second), "the listener must connect before Stop has a connection to close")
+
+		sl.Stop()
+
+		select {
+		case <-sl.stopped:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for listener goroutine to exit")
 		}
+
+		sl.mu.Lock()
+		assert.Nil(t, sl.conn, "connection should be nil after stop")
+		sl.mu.Unlock()
 	})
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	sl := NewSudoListener(ac, "my-server", "session-1")
-	sl.Start()
-
-	require.True(t, sl.WaitConnected(3*time.Second), "the listener must connect before Stop has a connection to close")
-
-	sl.Stop()
-
-	select {
-	case <-sl.stopped:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for listener goroutine to exit")
-	}
-
-	sl.mu.Lock()
-	assert.Nil(t, sl.conn, "connection should be nil after stop")
-	sl.mu.Unlock()
 }
 
 func TestSudoListener_ConnectAndListen_ExitsOnDisconnect(t *testing.T) {
 	t.Parallel()
-	clientRead := make(chan struct{})
+	synctest.Test(t, func(t *testing.T) {
+		clientRead := make(chan struct{})
 
-	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
-		defer func() { _ = conn.Close() }()
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"payload":{"type":"info","query":"status"}}`))
-		<-clientRead
-	})
+		ps, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
+			defer func() { _ = conn.Close() }()
+			_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"payload":{"type":"info","query":"status"}}`))
+			<-clientRead
+		})
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	sl := NewSudoListener(ac, "my-server", "session-1")
+		sl := NewSudoListener(pipeSudoClient(ps), "my-server", "session-1")
 
-	// Local signal, so the test does not close the skeleton's stopped channel
-	readDone := make(chan struct{})
-	go func() {
-		defer close(readDone)
-		_ = sl.connectAndListen()
-	}()
+		// Local signal, so the test does not close the skeleton's stopped channel
+		readDone := make(chan struct{})
+		go func() {
+			defer close(readDone)
+			_ = sl.connectAndListen()
+		}()
 
-	require.Eventually(t, func() bool {
+		synctest.Wait() // connected and parked in the read loop
 		sl.mu.Lock()
-		defer sl.mu.Unlock()
-		return sl.conn != nil
-	}, 2*time.Second, 10*time.Millisecond)
+		assert.NotNil(t, sl.conn, "the listener must hold its connection while it reads")
+		sl.mu.Unlock()
 
-	close(clientRead) // server closes → client read loop exits
+		close(clientRead) // server closes → client read loop exits
 
-	select {
-	case <-readDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for connectAndListen to return")
-	}
+		select {
+		case <-readDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for connectAndListen to return")
+		}
+	})
 }
 
 func newTestSudoListener(ts *httptest.Server) *SudoListener {
@@ -266,77 +274,80 @@ func TestSudoListener_RetryVerifyUntilMFA_AnotherRefusalEndsTheWait(t *testing.T
 	assert.Equal(t, int32(1), verifies.Load())
 }
 
+// closeFirstThenHold drops the first connection and holds every later one.
+func closeFirstThenHold(conn *websocket.Conn, n int32) {
+	if n == 1 {
+		_ = conn.Close()
+		return
+	}
+	holdUntilClientCloses(conn, n)
+}
+
+// closeAtOnce answers each connection by closing it.
+func closeAtOnce(conn *websocket.Conn, _ int32) { _ = conn.Close() }
+
+// startOutageListener starts a listener whose abandoned sessions are closed through ac, and
+// stops it when the bubble's test body ends.
+func startOutageListener(t *testing.T, ac *client.AlpaconClient) *SudoListener {
+	t.Helper()
+	sl := NewSudoListener(ac, "my-server", "session-1")
+	sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
+	sl.Start()
+	t.Cleanup(func() {
+		sl.Stop()
+		<-sl.stopped
+	})
+	return sl
+}
+
 func TestSudoListener_CreatesANewSessionOnReconnect(t *testing.T) {
 	t.Parallel()
-	ts, sessions, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
-		if n == 1 {
-			// The token is single-use, so recovering means a whole new session.
-			_ = conn.Close()
-			return
-		}
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
-		}
+	synctest.Test(t, func(t *testing.T) {
+		// The token is single-use, so recovering means a whole new session.
+		ps, sessions, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, closeFirstThenHold)
+
+		sl := NewSudoListener(pipeSudoClient(ps), "my-server", "session-1")
+		sl.Start()
+		defer sl.Stop()
+
+		time.Sleep(wsReconnectBaseDelay)
+		synctest.Wait()
+
+		assert.Equal(t, int32(2), sessions.Load(), "each attempt must create its own event session")
 	})
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	sl := NewSudoListener(ac, "my-server", "session-1")
-	sl.reconnectBaseDelay = testReconnectBaseDelay
-	sl.Start()
-	defer sl.Stop()
-
-	assert.Eventually(t, func() bool {
-		return sessions.Load() >= 2
-	}, 5*time.Second, 10*time.Millisecond, "each attempt must create its own event session")
 }
 
 func TestSudoListener_ResubscribesOnReconnect(t *testing.T) {
 	t.Parallel()
-	ts, _, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
-		if n == 1 {
-			_ = conn.Close()
-			return
-		}
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
-		}
+	synctest.Test(t, func(t *testing.T) {
+		ps, _, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, closeFirstThenHold)
+
+		sl := NewSudoListener(pipeSudoClient(ps), "my-server", "session-1")
+		sl.Start()
+		defer sl.Stop()
+
+		time.Sleep(wsReconnectBaseDelay)
+		synctest.Wait()
+
+		assert.Equal(t, int32(2), subscribes.Load(), "a reconnect must re-issue the sudo subscription")
 	})
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	sl := NewSudoListener(ac, "my-server", "session-1")
-	sl.reconnectBaseDelay = testReconnectBaseDelay
-	sl.Start()
-	defer sl.Stop()
-
-	assert.Eventually(t, func() bool {
-		return subscribes.Load() >= 2
-	}, 5*time.Second, 10*time.Millisecond, "a reconnect must re-issue the sudo subscription")
 }
 
 func TestSudoListener_FirstSubscribeFailureStopsAndSurfaces(t *testing.T) {
 	t.Parallel()
-	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysRejected, func(conn *websocket.Conn, _ int32) {
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
-		}
+	synctest.Test(t, func(t *testing.T) {
+		ps, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysRejected, holdUntilClientCloses)
+
+		sl := NewSudoListener(pipeSudoClient(ps), "my-server", "session-1")
+		sl.Start()
+		defer sl.Stop()
+
+		assert.False(t, sl.WaitConnected(3*time.Second), "a rejected subscription must not report connected")
+
+		err := sl.Err()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to subscribe to sudo events")
 	})
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	sl := NewSudoListener(ac, "my-server", "session-1")
-	sl.Start()
-	defer sl.Stop()
-
-	assert.False(t, sl.WaitConnected(3*time.Second), "a rejected subscription must not report connected")
-
-	err := sl.Err()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to subscribe to sudo events")
 }
 
 func TestSudoListener_SessionCreateRetryableStatusIsRetried(t *testing.T) {
@@ -348,50 +359,36 @@ func TestSudoListener_SessionCreateRetryableStatusIsRetried(t *testing.T) {
 		return http.StatusCreated
 	}
 
-	ts, _, _ := newWatcherTestServer(t, failFirst, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
-		}
+	synctest.Test(t, func(t *testing.T) {
+		ps, _, _ := newWatcherTestServer(t, failFirst, alwaysUpgrade, alwaysCreated, holdUntilClientCloses)
+
+		sl := NewSudoListener(pipeSudoClient(ps), "my-server", "session-1")
+		sl.Start()
+		defer sl.Stop()
+
+		start := time.Now()
+		assert.True(t, sl.WaitConnected(3*time.Second), "a 503 before the first subscribe is not fatal; the next attempt must connect")
+		assert.Equal(t, wsReconnectBaseDelay, time.Since(start), "the retry must wait one base delay")
+		assert.NoError(t, sl.Err())
 	})
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	sl := NewSudoListener(ac, "my-server", "session-1")
-	sl.reconnectBaseDelay = testReconnectBaseDelay
-	sl.Start()
-	defer sl.Stop()
-
-	assert.True(t, sl.WaitConnected(3*time.Second), "a 503 before the first subscribe is not fatal; the next attempt must connect")
-	assert.NoError(t, sl.Err())
 }
 
 func TestSudoListener_AnnouncesOutageOncePerOutage(t *testing.T) {
 	// Subscribed once, then every later dial fails: exactly one outage.
 	upgradeFirstOnly := func(attempt int32) bool { return attempt == 1 }
 
-	ts, sessions, _ := newWatcherTestServer(t, alwaysCreated, upgradeFirstOnly, alwaysCreated, func(conn *websocket.Conn, _ int32) {
-		_ = conn.Close()
-	})
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
 	_, stderr := testutil.CaptureOutput(t, func() {
-		sl := NewSudoListener(ac, "my-server", "session-1")
-		sl.reconnectBaseDelay = testReconnectBaseDelay
-		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
-		sl.Start()
-		defer func() {
-			sl.Stop()
-			<-sl.stopped
-		}()
+		synctest.Test(t, func(t *testing.T) {
+			ps, sessions, _ := newWatcherTestServer(t, alwaysCreated, upgradeFirstOnly, alwaysCreated, closeAtOnce)
+			sl := startOutageListener(t, pipeSudoClient(ps))
 
-		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before an outage counts")
+			require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before an outage counts")
 
-		// A third session means at least two dials failed after the first connect.
-		require.Eventually(t, func() bool {
-			return sessions.Load() >= 3
-		}, 3*time.Second, 10*time.Millisecond)
+			// Attempts land at 0s, 1s and 3s: two dials failed after the first connect.
+			time.Sleep(4 * time.Second)
+			synctest.Wait()
+			assert.Equal(t, int32(3), sessions.Load())
+		})
 	})
 
 	assert.Equal(t, 1, strings.Count(stderr, sudoOutageWarning),
@@ -401,22 +398,17 @@ func TestSudoListener_AnnouncesOutageOncePerOutage(t *testing.T) {
 func TestSudoListener_StaysQuietBeforeFirstSubscribe(t *testing.T) {
 	// It never subscribes, so websh's WaitConnected failure is the only thing that speaks.
 	neverUpgrade := func(int32) bool { return false }
-
-	ts, _, _ := newWatcherTestServer(t, alwaysCreated, neverUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	const waitFor = 300 * time.Millisecond
 
 	_, stderr := testutil.CaptureOutput(t, func() {
-		sl := NewSudoListener(ac, "my-server", "session-1")
-		sl.reconnectBaseDelay = testReconnectBaseDelay
-		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
-		sl.Start()
-		defer func() {
-			sl.Stop()
-			<-sl.stopped
-		}()
+		synctest.Test(t, func(t *testing.T) {
+			ps, _, _ := newWatcherTestServer(t, alwaysCreated, neverUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
+			sl := startOutageListener(t, pipeSudoClient(ps))
 
-		assert.False(t, sl.WaitConnected(300*time.Millisecond), "a listener that never upgrades must not report a connection")
+			start := time.Now()
+			assert.False(t, sl.WaitConnected(waitFor), "a listener that never upgrades must not report a connection")
+			assert.Equal(t, waitFor, time.Since(start))
+		})
 	})
 
 	assert.NotContains(t, stderr, sudoOutageWarning)
@@ -432,27 +424,17 @@ func TestSudoListener_AnnouncesOutageWhenSessionCreateFails(t *testing.T) {
 	}
 	upgradeFirstOnly := func(attempt int32) bool { return attempt == 1 }
 
-	ts, sessions, _ := newWatcherTestServer(t, createThenFail, upgradeFirstOnly, alwaysCreated, func(conn *websocket.Conn, _ int32) {
-		_ = conn.Close()
-	})
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
 	_, stderr := testutil.CaptureOutput(t, func() {
-		sl := NewSudoListener(ac, "my-server", "session-1")
-		sl.reconnectBaseDelay = testReconnectBaseDelay
-		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
-		sl.Start()
-		defer func() {
-			sl.Stop()
-			<-sl.stopped
-		}()
+		synctest.Test(t, func(t *testing.T) {
+			ps, sessions, _ := newWatcherTestServer(t, createThenFail, upgradeFirstOnly, alwaysCreated, closeAtOnce)
+			sl := startOutageListener(t, pipeSudoClient(ps))
 
-		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before an outage counts")
+			require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before an outage counts")
 
-		require.Eventually(t, func() bool {
-			return sessions.Load() >= 3
-		}, 3*time.Second, 10*time.Millisecond)
+			time.Sleep(4 * time.Second) // attempts at 0s, 1s and 3s
+			synctest.Wait()
+			assert.Equal(t, int32(3), sessions.Load())
+		})
 	})
 
 	assert.Equal(t, 1, strings.Count(stderr, sudoOutageWarning),
@@ -468,27 +450,17 @@ func TestSudoListener_AnnouncesOutageWhenResubscribeFails(t *testing.T) {
 		return http.StatusInternalServerError
 	}
 
-	ts, _, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, createThenFail, func(conn *websocket.Conn, _ int32) {
-		_ = conn.Close()
-	})
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
 	_, stderr := testutil.CaptureOutput(t, func() {
-		sl := NewSudoListener(ac, "my-server", "session-1")
-		sl.reconnectBaseDelay = testReconnectBaseDelay
-		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
-		sl.Start()
-		defer func() {
-			sl.Stop()
-			<-sl.stopped
-		}()
+		synctest.Test(t, func(t *testing.T) {
+			ps, _, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, createThenFail, closeAtOnce)
+			sl := startOutageListener(t, pipeSudoClient(ps))
 
-		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before an outage counts")
+			require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before an outage counts")
 
-		require.Eventually(t, func() bool {
-			return subscribes.Load() >= 3
-		}, 3*time.Second, 10*time.Millisecond)
+			time.Sleep(4 * time.Second) // attempts at 0s, 1s and 3s
+			synctest.Wait()
+			assert.Equal(t, int32(3), subscribes.Load())
+		})
 	})
 
 	assert.Equal(t, 1, strings.Count(stderr, sudoOutageWarning),
@@ -499,28 +471,18 @@ func TestSudoListener_AnnouncesTheNextOutageAfterRecovering(t *testing.T) {
 	// Outage, recovery, outage: the recovery must clear the warned flag.
 	upgradeFirstAndThird := func(attempt int32) bool { return attempt == 1 || attempt == 3 }
 
-	ts, sessions, _ := newWatcherTestServer(t, alwaysCreated, upgradeFirstAndThird, alwaysCreated, func(conn *websocket.Conn, _ int32) {
-		_ = conn.Close()
-	})
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
 	_, stderr := testutil.CaptureOutput(t, func() {
-		sl := NewSudoListener(ac, "my-server", "session-1")
-		sl.reconnectBaseDelay = testReconnectBaseDelay
-		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
-		sl.Start()
-		defer func() {
-			sl.Stop()
-			<-sl.stopped
-		}()
+		synctest.Test(t, func(t *testing.T) {
+			ps, sessions, _ := newWatcherTestServer(t, alwaysCreated, upgradeFirstAndThird, alwaysCreated, closeAtOnce)
+			sl := startOutageListener(t, pipeSudoClient(ps))
 
-		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must connect and subscribe")
+			require.True(t, sl.WaitConnected(3*time.Second), "the first dial must connect and subscribe")
 
-		// Six sessions means the fifth dial already failed, so the second outage has spoken.
-		require.Eventually(t, func() bool {
-			return sessions.Load() >= 6
-		}, 5*time.Second, 10*time.Millisecond)
+			// Attempts land at 0s, 1s, 3s, 7s, 15s and 31s; the one at 7s opens the second outage.
+			time.Sleep(32 * time.Second)
+			synctest.Wait()
+			assert.Equal(t, int32(6), sessions.Load())
+		})
 	})
 
 	assert.Equal(t, 2, strings.Count(stderr, sudoOutageWarning),
@@ -529,40 +491,40 @@ func TestSudoListener_AnnouncesTheNextOutageAfterRecovering(t *testing.T) {
 
 func TestSudoListener_FirstSessionFailureStopsAndSurfaces(t *testing.T) {
 	t.Parallel()
-	ts, _, _ := newWatcherTestServer(t, alwaysRejected, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
+	synctest.Test(t, func(t *testing.T) {
+		ps, _, _ := newWatcherTestServer(t, alwaysRejected, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	sl := NewSudoListener(ac, "my-server", "session-1")
-	sl.reconnectBaseDelay = testReconnectBaseDelay
-	sl.Start()
-	defer sl.Stop()
+		sl := NewSudoListener(pipeSudoClient(ps), "my-server", "session-1")
+		sl.Start()
+		defer sl.Stop()
 
-	// It must end the wait rather than retry, and websh needs the server's reason.
-	assert.False(t, sl.WaitConnected(3*time.Second), "a rejected session must not report a connection")
+		// It must end the wait rather than retry, and websh needs the server's reason.
+		assert.False(t, sl.WaitConnected(3*time.Second), "a rejected session must not report a connection")
 
-	err := sl.Err()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create event session")
+		err := sl.Err()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create event session")
+	})
 }
 
 func TestSudoListener_StopsOnAnUnauthorizedFirstSession(t *testing.T) {
 	t.Parallel()
 	alwaysUnauthorized := func(int32) int { return http.StatusUnauthorized }
-	ts, sessions, _ := newWatcherTestServer(t, alwaysUnauthorized, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	sl := NewSudoListener(ac, "my-server", "session-1")
-	sl.reconnectBaseDelay = testReconnectBaseDelay
+	synctest.Test(t, func(t *testing.T) {
+		ps, sessions, _ := newWatcherTestServer(t, alwaysUnauthorized, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
+		sl := NewSudoListener(pipeSudoClient(ps), "my-server", "session-1")
 
-	sl.Start()
-	defer sl.Stop()
+		sl.Start()
+		defer sl.Stop()
 
-	select {
-	case <-sl.stopped:
-	case <-time.After(3 * time.Second):
-		t.Fatal("a 401 on the first session must stop the listener")
-	}
-	assert.Equal(t, int32(1), sessions.Load())
-	require.ErrorContains(t, sl.Err(), "failed to create event session")
+		select {
+		case <-sl.stopped:
+		case <-time.After(3 * time.Second):
+			t.Fatal("a 401 on the first session must stop the listener")
+		}
+		assert.Equal(t, int32(1), sessions.Load())
+		require.ErrorContains(t, sl.Err(), "failed to create event session")
+	})
 }
 
 func TestSudoListener_RetriesAnUnauthorizedSessionAfterTheFirstSubscribe(t *testing.T) {
@@ -572,28 +534,23 @@ func TestSudoListener_RetriesAnUnauthorizedSessionAfterTheFirstSubscribe(t *test
 		}
 		return http.StatusUnauthorized
 	}
-	ts, sessions, _ := newWatcherTestServer(t, createThenUnauthorized, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
-		_ = conn.Close()
-	})
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	_, stderr := testutil.CaptureOutput(t, func() {
-		sl := NewSudoListener(ac, "my-server", "session-1")
-		sl.reconnectBaseDelay = testReconnectBaseDelay
-		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
-		sl.Start()
-		defer func() {
-			sl.Stop()
-			<-sl.stopped
-		}()
+		synctest.Test(t, func(t *testing.T) {
+			ps, sessions, _ := newWatcherTestServer(t, createThenUnauthorized, alwaysUpgrade, alwaysCreated, closeAtOnce)
+			sl := startOutageListener(t, pipeSudoClient(ps))
 
-		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before a 401 counts as post-subscribe")
-		require.Eventually(t, func() bool { return sessions.Load() >= 3 }, 3*time.Second, 10*time.Millisecond)
-		select {
-		case <-sl.stopped:
-			t.Error("a 401 after the first subscribe must not stop the listener")
-		default:
-		}
+			require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before a 401 counts as post-subscribe")
+
+			time.Sleep(4 * time.Second) // attempts at 0s, 1s and 3s
+			synctest.Wait()
+			assert.Equal(t, int32(3), sessions.Load())
+			select {
+			case <-sl.stopped:
+				t.Error("a 401 after the first subscribe must not stop the listener")
+			default:
+			}
+		})
 	})
 
 	assert.Equal(t, 1, strings.Count(stderr, sudoOutageWarning))
@@ -619,22 +576,24 @@ func TestSudoListener_SurfacesANonFatalCauseAfterTheWaitEnds(t *testing.T) {
 	t.Parallel()
 	alwaysServerError := func(int32) int { return http.StatusInternalServerError }
 
-	ts, sessions, _ := newWatcherTestServer(t, alwaysServerError, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
+	synctest.Test(t, func(t *testing.T) {
+		ps, sessions, _ := newWatcherTestServer(t, alwaysServerError, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	sl := NewSudoListener(ac, "my-server", "session-1")
-	sl.reconnectBaseDelay = testReconnectBaseDelay
-	sl.Start()
-	defer sl.Stop()
+		sl := NewSudoListener(pipeSudoClient(ps), "my-server", "session-1")
+		sl.Start()
+		defer sl.Stop()
 
-	// A second attempt means the first 500 was already recorded and retried.
-	require.Eventually(t, func() bool { return sessions.Load() >= 2 }, 5*time.Second, time.Millisecond)
-	// A 500 is retried, so the wait runs out; websh still has to name the reason.
-	assert.False(t, sl.WaitConnected(10*time.Millisecond), "a listener that never creates a session must not report connected")
+		// A second attempt means the first 500 was already recorded and retried.
+		time.Sleep(wsReconnectBaseDelay)
+		synctest.Wait()
+		assert.Equal(t, int32(2), sessions.Load())
+		// A 500 is retried, so the wait runs out; websh still has to name the reason.
+		assert.False(t, sl.WaitConnected(10*time.Millisecond), "a listener that never creates a session must not report connected")
 
-	err := sl.Err()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create event session")
+		err := sl.Err()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create event session")
+	})
 }
 
 func TestSudoListener_HandleSudoMFA_CredentialCannotProveMFAPointsToLogin(t *testing.T) {
