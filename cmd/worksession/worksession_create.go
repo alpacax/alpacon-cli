@@ -603,7 +603,7 @@ func createUpdateNextActions(clusterName string, session *wsapi.WorkSession) []u
 	}
 	return []utils.NextAction{{
 		Command:     fmt.Sprintf("alpacon work-session update %s --server <server,...>", session.ID),
-		Description: "add servers to this session; include every server to keep (--server replaces the whole list)",
+		Description: "add servers to this session; include every server to keep (--server replaces the whole list); an added server may need approval",
 	}}
 }
 

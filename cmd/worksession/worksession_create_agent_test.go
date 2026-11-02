@@ -258,13 +258,13 @@ func TestWorkSessionCreate_PendingFollowUpMatchesRequesterType(t *testing.T) {
 					require.NotEmpty(t, envelope.NextActions)
 					assert.Equal(t, utils.NextAction{
 						Command:     "alpacon work-session update ses-x --server <server,...>",
-						Description: "add servers to this session; include every server to keep (--server replaces the whole list)",
+						Description: "add servers to this session; include every server to keep (--server replaces the whole list); an added server may need approval",
 					}, envelope.NextActions[len(envelope.NextActions)-1])
 					raw, err := json.Marshal(envelope.NextActions)
 					require.NoError(t, err)
 					guidance = string(raw)
 				} else {
-					assert.Contains(t, stderr, "  alpacon work-session update ses-x --server <server,...>  # add servers to this session; include every server to keep (--server replaces the whole list)\n")
+					assert.Contains(t, stderr, "  alpacon work-session update ses-x --server <server,...>  # add servers to this session; include every server to keep (--server replaces the whole list); an added server may need approval\n")
 					assert.Less(t, strings.Index(stderr, "Approve it out of band"), strings.Index(stderr, "alpacon work-session update"))
 				}
 				assert.Contains(t, guidance, tt.want)

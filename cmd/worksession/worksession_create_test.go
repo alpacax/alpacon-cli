@@ -753,7 +753,7 @@ func TestWorkSessionCreateWaitRejectedNamesTheSessionOnStderr(t *testing.T) {
 }
 
 func TestWorkSessionCreateUpdateNext(t *testing.T) {
-	const line = "  alpacon work-session update ses-x --server <server,...>  # add servers to this session; include every server to keep (--server replaces the whole list)\n"
+	const line = "  alpacon work-session update ses-x --server <server,...>  # add servers to this session; include every server to keep (--server replaces the whole list); an added server may need approval\n"
 	tests := []struct {
 		name       string
 		status     string
