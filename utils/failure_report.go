@@ -19,12 +19,14 @@ type Failure struct {
 	HTTPStatus     int
 	RetryAfter     time.Duration
 	Server         map[string]any
+	CommandID      string
 }
 
 func (f Failure) envelope() JSONErrorEnvelope[cliErrorCtx] {
 	env := newFailureEnvelope(f.ExitCode, f.ErrorCode, f.Operation, f.Err, f.Message)
 	env.RemoteExitCode = f.RemoteExitCode
 	env.Partial = f.Partial
+	env.Context.CommandID = f.CommandID
 	if f.NextActions != nil {
 		env.NextActions = f.NextActions
 	}
@@ -47,6 +49,13 @@ func ExitWithFailureJSON(f Failure) {
 		return
 	}
 	sealStderr()
-	PrintJSONError(os.Stderr, f.envelope())
+	PrintFailureJSON(f)
 	os.Exit(f.ExitCode)
+}
+
+// PrintFailureJSON writes the envelope to stderr under --output json and never exits.
+func PrintFailureJSON(f Failure) {
+	if OutputFormat == OutputFormatJSON {
+		PrintJSONError(os.Stderr, f.envelope())
+	}
 }

@@ -13,6 +13,7 @@ var CommandName string
 // cliErrorCtx mirrors the "operation" key of the mutation success outputs.
 type cliErrorCtx struct {
 	Operation string `json:"operation"`
+	CommandID string `json:"command_id,omitempty"`
 }
 
 // newFailureEnvelope classifies an empty errorCode from err, then from exitCode; an empty
