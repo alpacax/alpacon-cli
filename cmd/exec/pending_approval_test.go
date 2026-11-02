@@ -329,6 +329,7 @@ func TestExecLogsRejectedExits6(t *testing.T) {
 		_, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, jobID)
 		assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "a rejection is final; exit 1 reads as retryable")
 		assert.Contains(t, stderr, "rejected by a reviewer")
+		assert.Contains(t, stderr, "==== ALPACON: COMMAND DENIED ====\n")
 	})
 
 	t.Run("json", func(t *testing.T) {

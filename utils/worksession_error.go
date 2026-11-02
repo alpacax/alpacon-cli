@@ -91,7 +91,7 @@ func HandleWorkSessionError(err error, operation, target, authMethod, activeWS s
 	if fields.Session == "" {
 		fields.Session = activeWS
 	}
-	SignalRefusal(WithSignalFields(err, fields))
+	SignalPaused(WithSignalFields(err, fields))
 	hint := RefusalHint(err)
 	if OutputFormat == OutputFormatJSON {
 		PrintJSONError(os.Stderr, buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS, hint))

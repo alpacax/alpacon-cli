@@ -494,7 +494,7 @@ Run `alpacon --help` for the full list, or `alpacon <command> --help` for detail
 
 ## When a command is denied
 
-When the server returns a gate refusal, the CLI prints a red banner on a color terminal, or the same plain-text box on redirected stderr, before its error:
+When a command or file transfer receives a 403 gate refusal, or a submitted command is later rejected, the CLI prints a red banner on a color terminal, or the same plain-text box on redirected stderr, before its error. Plan, rate, token scope, role, MFA, authentication, and validation refusals do not produce denial signals:
 
 ```text
 ==== ALPACON: COMMAND DENIED ====
@@ -502,11 +502,11 @@ sudo on my-server as alice was refused by the risk gate and did not run. Session
 ================================
 ```
 
-Pending command, sudo, and Work Session approvals show an `ALPACON: APPROVAL PENDING` banner when the CLI starts waiting or reports pending. A `session_paused` refusal shows `ALPACON: SESSION PAUSED`. A denial alone does not mean the session paused. The banners also appear with `--output json`; stdout and exit codes keep their existing contracts, and the JSON error envelope follows the banner on stderr.
+Pending command, sudo, and Work Session approvals show an `ALPACON: APPROVAL PENDING` banner when the CLI starts waiting or reports pending. A `session_paused` refusal shows `ALPACON: SESSION PAUSED`. A denial alone does not mean the session paused. With `--output json`, the banner goes to the controlling terminal (`/dev/tty` or `CONOUT$`) when available; stdout, stderr, and exit codes keep their existing contracts. Without a controlling terminal, the JSON run has no banner.
 
-The CLI also attempts a desktop notification on macOS, Linux (`notify-send` when installed), and Windows. Its title is `Alpacon: command denied`, `Alpacon: approval pending`, or `Alpacon: session paused`. The banner and notification include only the command's first word with its path removed, server, OS account, gate, and Work Session identifier when known; command arguments are omitted. No console link is included. Notification failures are debug-only and cannot change the result; each attempt has a two-second timeout, which the CLI waits for before exiting.
+The CLI also attempts a desktop notification on macOS, Linux (`notify-send` when installed), and Windows. Its title is `Alpacon: command denied`, `Alpacon: approval pending`, or `Alpacon: session paused`. The banner and notification include only the command's first word with its path removed, server, OS account, gate, and Work Session identifier when known; command arguments are omitted. When the server supplies `console_url`, the banner shows it on its own line and the Windows notification opens it when clicked. Notification failures cannot change the result; each attempt has a two-second timeout, which the CLI waits for before exiting.
 
-Desktop notifications are skipped when `CI` is non-empty, `SSH_CONNECTION` or `SSH_TTY` is set, Linux lacks both display variables or its session bus variable, or Windows runs in service session 0. The banner still prints, including when an agent runs with non-terminal stdio. There is no local-signal opt-out. Both outputs share a limit of one signal per Work Session and kind every 60 seconds (kind alone without a session). Repeats are folded into the next signal as `+N more.`; the shared state is stored in `~/.alpacon/state/signals.json` across CLI invocations.
+Desktop notifications are skipped when `CI` is non-empty, `SSH_CONNECTION` or `SSH_TTY` is set, Linux lacks both display variables or its session bus variable, or Windows runs in service session 0. Text-mode banners still print on stderr, including when an agent runs with non-terminal stdio. JSON mode uses the controlling terminal independently of notification delivery. There is no local-signal opt-out. Both outputs share a limit of one signal per Work Session and kind every 60 seconds (kind alone without a session). Repeats are folded into the next signal as `+N more.`; the shared state is stored in `~/.alpacon/state/signals.json` across CLI invocations. A limiter lock wait ends after 500 ms; if the lock remains busy, the signal is emitted without updating the state.
 
 Under interactive auth (browser login), `websh`, `exec`, `cp`, `edit`, and `tunnel` require an active work session. Without one, the command is refused with a diagnostic and exit code `3`:
 

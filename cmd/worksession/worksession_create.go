@@ -273,7 +273,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 		}
 		approvalSignaled := session.Status == wsapi.StatusPending
 		if approvalSignaled {
-			utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: session.ID})
+			utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: session.ID, ConsoleURL: session.ConsoleURL})
 		}
 		afterApproval := afterApprovalAction(sessionRequesterType, session.ID, account)
 		if clusterName != "" {
@@ -449,7 +449,7 @@ type terminalWaitErrorCtx struct {
 }
 
 func printTerminalWaitErrorJSON(operation string, terminal *terminalWaitError, err error) {
-	utils.SignalRefusal(err)
+	utils.SignalPaused(err)
 	utils.PrintJSONError(os.Stderr, utils.JSONErrorEnvelope[terminalWaitErrorCtx]{
 		OK:          false,
 		ExitCode:    utils.ExitCodeNotApproved,
@@ -474,7 +474,7 @@ func terminalWaitNextActions(sessionID string) []utils.NextAction {
 // printTerminalWaitError writes the refusal and its follow-ups to stderr itself rather than through
 // CliError, which appends the report-a-bug pointer: a reviewer saying no is not a bug.
 func printTerminalWaitError(terminal *terminalWaitError, err error) {
-	utils.SignalRefusal(err)
+	utils.SignalPaused(err)
 	var sb strings.Builder
 	// The message carries a server-issued session id, so it takes the sanitizer
 	// CliError would otherwise have applied on the way out.
@@ -730,7 +730,7 @@ func waitForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 			continue
 		}
 		if s.Status == wsapi.StatusPending && !signaled {
-			utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: id})
+			utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: id, ConsoleURL: s.ConsoleURL})
 			signaled = true
 		}
 		failures = 0

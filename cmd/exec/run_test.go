@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -681,20 +682,27 @@ func TestRunExecWithApprovalWait_ThrottleWarnsOnce(t *testing.T) {
 // command's own grant status, so a reviewer's rejection is visible on the very
 // next tick.
 func TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 		return denial
 	}
 	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 		status := "rejected"
-		return event.EventDetails{SudoGrantStatus: &status}, nil
+		return event.EventDetails{SudoGrantStatus: &status, RejectionGate: "approval", ConsoleURL: "https://console.example/commands/1"}, nil
 	}
 	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
 		t.Fatal("stream must not run for a rejected command")
 		return nil
 	}
 
-	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+	var err error
+	stderr := captureStderr(t, func() {
+		err = RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+	})
+	assert.Contains(t, stderr, "==== ALPACON: COMMAND DENIED ====\n")
+	assert.Contains(t, stderr, "\nhttps://console.example/commands/1\n")
 
 	var rejected *event.CommandRejectedError
 	require.ErrorAs(t, err, &rejected)
@@ -750,11 +758,11 @@ func TestPollApprovalOnceLegacyExpiry(t *testing.T) {
 				}, nil
 			}
 
-			outcome, requestID, cause, err := pollApprovalOnce(nil, "cmd-1")
+			outcome, requestID, details, err := pollApprovalOnce(nil, "cmd-1")
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, outcome)
 			assert.Equal(t, "apr-1", requestID)
-			assert.Equal(t, tc.cause, cause)
+			assert.Equal(t, tc.cause, details.RejectionCause)
 		})
 	}
 }

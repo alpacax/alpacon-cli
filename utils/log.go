@@ -118,7 +118,7 @@ func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {
 // into its message prints the server's hint without naming it.
 func printCliError(err error, msg string, args ...any) {
 	if err != nil {
-		SignalRefusal(err)
+		SignalPaused(err)
 	} else {
 		signalErrorsIn(args)
 	}

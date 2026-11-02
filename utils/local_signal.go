@@ -3,7 +3,9 @@ package utils
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"golang.org/x/term"
@@ -16,7 +18,9 @@ var deliverLocalSignal = func(kind localsignal.Kind, fields localsignal.Fields) 
 		}
 		return s
 	}
-	localsignal.New(TrackedStderr(), red, CliDebug).Emit(kind, fields)
+	emitter := localsignal.New(TrackedStderr(), red, nil)
+	emitter.JSON = OutputFormat == OutputFormatJSON
+	emitter.Emit(kind, fields)
 }
 
 type signalError struct {
@@ -55,6 +59,7 @@ func SignalApprovalPending(err error, fields localsignal.Fields) {
 			return
 		}
 	}
+	fields = responseSignalFields(err, fields)
 	EmitLocalSignal(localsignal.ApprovalPending, fields)
 }
 
@@ -75,7 +80,7 @@ func (e responseRefusal) ErrorGate() string           { return e.Gate }
 func (e responseRefusal) ErrorMissing() []string      { return nil }
 func (e responseRefusal) ErrorFields() map[string]any { return e.payload }
 
-// SignalResponse covers the raw API path, which deliberately preserves the response body.
+// SignalResponse handles a pause on raw responses without classifying raw API calls as commands.
 func SignalResponse(status int, body []byte) {
 	if !IsRefusalStatus(status) {
 		return
@@ -85,18 +90,21 @@ func SignalResponse(status int, body []byte) {
 		return
 	}
 	code, _ := payload["code"].(string)
-	gate, _ := payload["gate"].(string)
-	SignalRefusal(responseRefusal{Code: code, Gate: gate, payload: payload})
+	SignalPaused(responseRefusal{Code: code, payload: payload})
 }
 
-// SignalRefusal uses structured fields only: message text cannot create a denial signal.
-func SignalRefusal(err error) {
-	fallback := SignalFields(err)
-	for e := range errorChain(err) {
-		fields := fallback
-		if context := SignalFields(e); context != (localsignal.Fields{}) {
-			fields = context
-		}
+// SignalRefusal is called only by command execution and file transfer paths.
+func SignalRefusal(err error) { signalRefusal(err, true) }
+
+// SignalPaused applies to any operation, using only the structured pause code.
+func SignalPaused(err error) { signalRefusal(err, false) }
+
+func signalRefusal(err error, command bool) {
+	seen := map[struct {
+		session string
+		kind    localsignal.Kind
+	}]bool{}
+	signalOne := func(e error, fields localsignal.Fields) {
 		fields.Gate = ""
 		if carrier, ok := e.(interface{ ErrorGate() string }); ok {
 			fields.Gate = carrier.ErrorGate()
@@ -108,11 +116,73 @@ func SignalRefusal(err error) {
 		kind := localsignal.Denied
 		if code == "session_paused" {
 			kind = localsignal.Paused
-		} else if fields.Gate == "" {
-			continue
+		} else {
+			if !command {
+				return
+			}
+			rejected, _ := e.(interface{ RejectedCommand() bool })
+			if rejected == nil || !rejected.RejectedCommand() {
+				status, ok := e.(interface{ HTTPStatusCode() int })
+				if !ok || status.HTTPStatusCode() != http.StatusForbidden {
+					return
+				}
+				if !commandDenial(code, fields.Gate) {
+					return
+				}
+			}
 		}
+		fields = responseSignalFields(e, fields)
+		key := struct {
+			session string
+			kind    localsignal.Kind
+		}{fields.Session, kind}
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		EmitLocalSignal(kind, fields)
+	}
+
+	var walk func(error, localsignal.Fields)
+	walk = func(e error, fields localsignal.Fields) {
+		if e == nil {
+			return
+		}
+		if context, ok := e.(*signalError); ok && context.fields != (localsignal.Fields{}) {
+			fields = context.fields
+		}
+		signalOne(e, fields)
+		switch wrapped := e.(type) {
+		case interface{ Unwrap() []error }:
+			for _, child := range wrapped.Unwrap() {
+				walk(child, fields)
+			}
+		case interface{ Unwrap() error }:
+			walk(wrapped.Unwrap(), fields)
+		}
+	}
+	walk(err, localsignal.Fields{})
+}
+
+func commandDenial(code, gate string) bool {
+	if strings.HasPrefix(code, "auth_") || strings.HasPrefix(code, "api_token_") || strings.HasPrefix(code, "rbac_") {
+		return false
+	}
+	switch gate {
+	case "", "plan", "rate", "token_scope", "role", "presence", "mfa", "auth", "validation":
+		return gate == "" && isWorkSessionCode(code)
+	default:
+		return true
+	}
+}
+
+func responseSignalFields(err error, fields localsignal.Fields) localsignal.Fields {
+	for e := range errorChain(err) {
 		if carrier, ok := e.(interface{ ErrorFields() map[string]any }); ok {
 			payload := carrier.ErrorFields()
+			if link, ok := payload["console_url"].(string); ok && link != "" {
+				fields.ConsoleURL = link
+			}
 			for _, key := range []string{"work_session_id", "work_session", "session"} {
 				if id, ok := payload[key].(string); ok && id != "" {
 					fields.Session = id
@@ -126,14 +196,14 @@ func SignalRefusal(err error) {
 				}
 			}
 		}
-		EmitLocalSignal(kind, fields)
 	}
+	return fields
 }
 
 func signalErrorsIn(args []any) {
 	for _, arg := range args {
 		if err, ok := arg.(error); ok {
-			SignalRefusal(err)
+			SignalPaused(err)
 			return
 		}
 	}

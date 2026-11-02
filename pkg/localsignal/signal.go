@@ -8,6 +8,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"time"
 	"unicode"
@@ -22,23 +24,39 @@ const (
 	notifyTimeout        = 2 * time.Second
 )
 
+// These dependencies are replaceable for callers that embed the emitter.
+var NewNotifier = func() Notifier { return platformNotifier{} }
+var OpenTTY = func() (io.WriteCloser, error) {
+	name := "/dev/tty"
+	if runtime.GOOS == "windows" {
+		name = "CONOUT$"
+	}
+	return os.OpenFile(name, os.O_WRONLY, 0)
+}
+
+var executableName = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,64}$`)
+var assignmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
 type Kind string
 
 type Fields struct {
-	Argv0   string
-	Server  string
-	Account string
-	Gate    string
-	Session string
+	Argv0      string
+	Server     string
+	Account    string
+	Gate       string
+	Session    string
+	ConsoleURL string
 }
 
 type Notifier interface {
-	Notify(context.Context, string, string) error
+	Notify(context.Context, string, string, string) error
 }
 
 type platformNotifier struct{}
 
 type Emitter struct {
+	JSON      bool
+	openTTY   func() (io.WriteCloser, error)
 	notifier  Notifier
 	writer    io.Writer
 	red       func(string) string
@@ -50,7 +68,7 @@ type Emitter struct {
 
 func New(w io.Writer, red func(string) string, debug func(string, ...any)) *Emitter {
 	return &Emitter{
-		notifier: platformNotifier{}, writer: w, red: red, debug: debug,
+		notifier: NewNotifier(), openTTY: OpenTTY, writer: w, red: red, debug: debug,
 		headless: platformHeadless, now: time.Now,
 		statePath: func() (string, error) {
 			dir, err := configdir.Dir()
@@ -80,18 +98,28 @@ func (e *Emitter) Emit(kind Kind, fields Fields) {
 	if title == "" {
 		return
 	}
+	if link := clean(fields.ConsoleURL); link != "" {
+		body += "\n" + link
+	}
 	banner := fmt.Sprintf("==== %s ====\n%s\n================================\n", strings.ToUpper(title), body)
 	if e.red != nil {
 		banner = e.red(banner)
 	}
-	_, _ = io.WriteString(e.writer, banner)
+	if e.JSON {
+		if tty, err := e.openTTY(); err == nil {
+			_, _ = io.WriteString(tty, banner)
+			_ = tty.Close()
+		}
+	} else {
+		_, _ = io.WriteString(e.writer, banner)
+	}
 	if e.headless() {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- e.notifier.Notify(ctx, title, body) }()
+	go func() { done <- e.notifier.Notify(ctx, title, body, clean(fields.ConsoleURL)) }()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -108,28 +136,63 @@ func (e *Emitter) log(message string, args ...any) {
 	}
 }
 
-// Argv0 takes only the first shell word, recognizing quoted executable paths on either platform.
+// Argv0 discards assignments and shell syntax before accepting a plain executable name.
 func Argv0(command string) string {
-	command = strings.TrimSpace(command)
-	var word strings.Builder
-	var quote rune
-	for _, r := range command {
-		if quote == 0 && unicode.IsSpace(r) {
+	command = strings.TrimLeftFunc(command, unicode.IsSpace)
+	for {
+		prefix := assignmentName.FindString(command)
+		if prefix == "" {
 			break
 		}
-		if r == '\'' || r == '"' {
-			if quote == 0 {
+		var quote rune
+		escaped := false
+		end := len(command)
+		for i, r := range command[len(prefix):] {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if r == '\\' && quote != '\'' {
+				escaped = true
+				continue
+			}
+			if quote != 0 {
+				if r == quote {
+					quote = 0
+				}
+				continue
+			}
+			if r == '\'' || r == '"' {
 				quote = r
 				continue
 			}
-			if quote == r {
-				quote = 0
-				continue
+			if unicode.IsSpace(r) {
+				end = len(prefix) + i
+				break
+			}
+			if strings.ContainsRune(";|&<>()$`", r) {
+				return ""
 			}
 		}
-		word.WriteRune(r)
+		if quote != 0 {
+			return ""
+		}
+		command = strings.TrimLeftFunc(command[end:], unicode.IsSpace)
 	}
-	return clean(path.Base(strings.ReplaceAll(word.String(), `\`, "/")))
+	end := strings.IndexFunc(command, func(r rune) bool {
+		return unicode.IsSpace(r) || strings.ContainsRune(";|&<>()$`'\"\\", r)
+	})
+	if end >= 0 {
+		command = command[:end]
+	}
+	if command == "" {
+		return ""
+	}
+	name := path.Base(command)
+	if !executableName.MatchString(name) {
+		return ""
+	}
+	return name
 }
 
 func clean(s string) string {

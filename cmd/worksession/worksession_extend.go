@@ -66,7 +66,7 @@ reason once the request settles.`,
 		// Branch on the status, not PendingExtensionRequest: a 200 body can still carry a stale
 		// request.
 		if status == http.StatusAccepted {
-			printExtendPending(id, session.PendingExtensionRequest)
+			printExtendPending(id, session.PendingExtensionRequest, session.ConsoleURL)
 			os.Exit(utils.ExitCodePendingApproval)
 		}
 
@@ -86,8 +86,8 @@ func printExtendSuccess(id, expiresAt string) {
 // printExtendPending reports a 202, which queued the extension instead of applying it; req may be
 // nil on a body that omits it. The next steps point at 'describe' and a retry with a new reason,
 // not at 'work-session complete', which has nothing to do with an extension.
-func printExtendPending(id string, req *wsapi.PendingExtensionRequest) {
-	utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: id})
+func printExtendPending(id string, req *wsapi.PendingExtensionRequest, consoleURL string) {
+	utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: id, ConsoleURL: consoleURL})
 	message, requestID, requestedExpiresAt, deadline := extendPendingMessage(id, req)
 	describeCmd := fmt.Sprintf("alpacon work-session describe %s", id)
 	next := []utils.NextAction{

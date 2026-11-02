@@ -652,6 +652,8 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 				// same file suggestion a run without --wait prints.
 				if details, err := getCommandByPathID(ac, cmdID); err == nil {
 					pending.FileSuggestion = details.FileExecutionSuggestion
+					pending.ConsoleURL = details.ConsoleURL
+					pending.WorkSessionID = details.WorkSessionID()
 				}
 				return pending
 			}
@@ -774,10 +776,10 @@ func errorFromDetails(d EventDetails) error {
 		return &AwaitingPurposeError{CommandID: d.ID, ExpiresAt: d.PurposeExpiresAt}
 	}
 	if IsAwaitingApprovalStatus(d.Status) {
-		return &PendingApprovalError{CommandID: d.ID, FileSuggestion: d.FileExecutionSuggestion}
+		return &PendingApprovalError{CommandID: d.ID, FileSuggestion: d.FileExecutionSuggestion, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID()}
 	}
 	if IsRejectedStatus(d.Status) {
-		return &CommandRejectedError{CommandID: d.ID, Cause: d.RejectionCause}
+		return &CommandRejectedError{CommandID: d.ID, Cause: d.RejectionCause, Gate: d.RejectionGate, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID()}
 	}
 	if IsStatusOnlyFailure(d.Status) {
 		phase := ""
@@ -804,7 +806,7 @@ func errorFromDetails(d EventDetails) error {
 			if d.ErrorPhase != nil {
 				phase = *d.ErrorPhase
 			}
-			return &RemoteCommandError{Output: d.Result, ExitCode: exitCode, ErrorPhase: phase, CommandID: d.ID}
+			return &RemoteCommandError{Output: d.Result, ExitCode: exitCode, ErrorPhase: phase, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID(), CommandID: d.ID}
 		}
 		return nil
 	default:

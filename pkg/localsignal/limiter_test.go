@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -29,14 +30,13 @@ func TestLimiterKeysAndFolding(t *testing.T) {
 		wantFolded    int
 	}{
 		{"first", "ses-1", Denied, 0, true, 0},
-		{"out of order timestamp", "ses-1", Denied, -time.Second, false, 0},
 		{"fold one", "ses-1", Denied, time.Second, false, 0},
 		{"fold two", "ses-1", Denied, 59 * time.Second, false, 0},
 		{"separate kind", "ses-1", Paused, time.Second, true, 0},
 		{"separate session", "ses-2", Denied, time.Second, true, 0},
 		{"no session", "", Denied, time.Second, true, 0},
 		{"no session fold", "", Denied, 2 * time.Second, false, 0},
-		{"boundary", "ses-1", Denied, time.Minute, true, 3},
+		{"boundary", "ses-1", Denied, time.Minute, true, 2},
 		{"reset count", "ses-1", Denied, 2 * time.Minute, true, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -150,4 +150,49 @@ func TestLimiterContentionPreservesFirstEvent(t *testing.T) {
 
 func allowAt(statePath, session string, kind Kind, now time.Time) (int, bool, error) {
 	return allow(statePath, session, kind, func() time.Time { return now })
+}
+
+func TestLimiterFuturePruningAndKeyBound(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "signals.json")
+	now := time.Now()
+	state := map[string]entry{
+		"denied:ses-1":  {Last: now.Add(time.Hour)},
+		"denied:old":    {Last: now.Add(-25 * time.Hour)},
+		"paused:folded": {Last: now.Add(-25 * time.Hour), Folded: 2},
+	}
+	data, err := json.Marshal(state)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0600))
+	_, emit, err := allowAt(path, "ses-1", Denied, now)
+	require.NoError(t, err)
+	assert.True(t, emit, "a future timestamp must expire")
+	_, _, err = allowAt(path, strings.Repeat("x", 200), Paused, now)
+	require.NoError(t, err)
+	data, err = os.ReadFile(path)
+	require.NoError(t, err)
+	// Read into a fresh map so removed entries do not survive from the fixture.
+	state = nil
+	require.NoError(t, json.Unmarshal(data, &state))
+	assert.NotContains(t, state, "denied:old")
+	assert.Equal(t, 2, state["paused:folded"].Folded)
+	assert.Contains(t, state, "paused:"+strings.Repeat("x", 128))
+}
+
+func TestLimiterLockTimeoutFailsOpenWithoutWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "signals.json")
+	require.NoError(t, os.WriteFile(path, []byte("original"), 0600))
+	lock, err := filelock.Acquire(path+".lock", 0600)
+	require.NoError(t, err)
+	defer func() { _ = lock.Release() }()
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		_, emit, err := allowAt(path, "ses-1", Paused, time.Now())
+		require.ErrorIs(t, err, filelock.ErrLocked)
+		assert.True(t, emit, "lock timeout must fail open")
+		assert.Equal(t, 500*time.Millisecond, time.Since(start))
+	})
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "original", string(data))
 }

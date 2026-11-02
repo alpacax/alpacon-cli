@@ -17,13 +17,17 @@ type entry struct {
 
 func allow(statePath, session string, kind Kind, clock func() time.Time) (folded int, emit bool, err error) {
 	// Hold a sibling lock: renaming the state file replaces its inode.
+	deadline := time.Now().Add(500 * time.Millisecond)
 	var lock *filelock.Lock
 	for {
 		lock, err = filelock.Acquire(statePath+".lock", 0600)
 		if !errors.Is(err, filelock.ErrLocked) {
 			break
 		}
-		time.Sleep(5 * time.Millisecond)
+		if !time.Now().Before(deadline) {
+			return 0, true, filelock.ErrLocked
+		}
+		time.Sleep(min(5*time.Millisecond, time.Until(deadline)))
 	}
 	if err != nil {
 		return 0, true, err
@@ -36,12 +40,20 @@ func allow(statePath, session string, kind Kind, clock func() time.Time) (folded
 			state = map[string]entry{}
 		}
 	}
+	for key, item := range state {
+		if item.Folded == 0 && now.Sub(item.Last) > 24*time.Hour {
+			delete(state, key)
+		}
+	}
+	if runes := []rune(session); len(runes) > 128 {
+		session = string(runes[:128])
+	}
 	key := string(kind)
 	if session != "" {
 		key += ":" + session
 	}
 	last, found := state[key]
-	if found && now.Sub(last.Last) < 60*time.Second {
+	if found && !last.Last.After(now) && now.Sub(last.Last) < 60*time.Second {
 		last.Folded++
 		state[key] = last
 		err := saveState(statePath, state)

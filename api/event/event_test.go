@@ -399,6 +399,8 @@ func TestErrorFromDetails_UseFileExecutionCarriesCause(t *testing.T) {
 		"verification_status": "rejected",
 		"rejection_cause": "use_file_execution",
 		"rejection_gate": "approval",
+ "console_url": "https://console.example/commands/cmd-9",
+ "work_session": {"id":"ses-1"},
 		"result": "Save the script to a file and run it as a verified file.",
 		"server": {"id": "srv-1", "name": "prod"}
 	}`), &d))
@@ -407,6 +409,9 @@ func TestErrorFromDetails_UseFileExecutionCarriesCause(t *testing.T) {
 	var rejected *CommandRejectedError
 	require.ErrorAs(t, err, &rejected)
 	assert.Equal(t, RejectionCauseUseFileExecution, rejected.Cause)
+	assert.Equal(t, "approval", rejected.Gate)
+	assert.Equal(t, "https://console.example/commands/cmd-9", rejected.ConsoleURL)
+	assert.Equal(t, "ses-1", rejected.WorkSessionID)
 	assert.Equal(t, "command cmd-9 was refused because its command line carries a script body (use_file_execution)", err.Error())
 	code, _ := utils.ParseErrorResponse(err)
 	assert.Equal(t, RejectionCauseUseFileExecution, code)
@@ -2647,4 +2652,13 @@ func TestStreamApprovedCommand_RefusesACommandIDThatIsNotOneSegment(t *testing.T
 	err := StreamApprovedCommand(ac, "../x", io.Discard, time.Second)
 
 	require.ErrorIs(t, err, utils.ErrInvalidID)
+}
+
+func TestPendingCommandCarriesConsoleURL(t *testing.T) {
+	t.Parallel()
+	err := errorFromDetails(EventDetails{Status: "awaiting_approval", ConsoleURL: "https://console.example/commands/1", WorkSession: &CommandWorkSession{ID: "ses-1"}})
+	var pending *PendingApprovalError
+	require.ErrorAs(t, err, &pending)
+	assert.Equal(t, "https://console.example/commands/1", pending.ConsoleURL)
+	assert.Equal(t, "ses-1", pending.WorkSessionID)
 }

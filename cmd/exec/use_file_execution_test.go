@@ -204,6 +204,7 @@ func TestExecUseFileExecutionRefusalPrintsGuidance(t *testing.T) {
 		// refusal that is the server's own wording of it.
 		assert.Contains(t, stdout, "Save the script to a file and run it as a verified file.")
 		assert.Contains(t, stderr, "(use_file_execution)")
+		assert.Contains(t, stderr, "==== ALPACON: COMMAND DENIED ====\n")
 		assert.Contains(t, stderr, "Hint:")
 		assert.Contains(t, stderr, "  alpacon exec -u root --upload --file /path/to/script.sh --file-from ./script.sh prod\n")
 		assert.Contains(t, stderr, "  alpacon exec -u root --file /path/to/script.sh --from-server prod\n")

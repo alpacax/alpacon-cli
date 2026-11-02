@@ -24,6 +24,7 @@ const (
 var endedStatuses = []string{StatusCompleted, StatusExpired, StatusRevoked, StatusRejected, StatusCancelled}
 
 type WorkSession struct {
+	ConsoleURL    string                `json:"console_url,omitempty"`
 	ID            string                `json:"id"`
 	Title         string                `json:"title"`
 	Description   string                `json:"description"`

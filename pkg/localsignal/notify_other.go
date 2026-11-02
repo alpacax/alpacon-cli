@@ -10,4 +10,4 @@ import (
 
 func platformHeadless() bool { return headless(runtime.GOOS, os.LookupEnv, false) }
 
-func (platformNotifier) Notify(context.Context, string, string) error { return nil }
+func (platformNotifier) Notify(context.Context, string, string, string) error { return nil }

@@ -51,9 +51,11 @@ var phaseHints = map[string]string{
 // RemoteCommandError is returned when the remote command completed but exited
 // with a non-zero status. ExitCode is 1 when the server omits exit_code.
 type RemoteCommandError struct {
-	Output     string
-	ExitCode   int
-	ErrorPhase string
+	ConsoleURL    string
+	WorkSessionID string
+	Output        string
+	ExitCode      int
+	ErrorPhase    string
 	// CommandID identifies the job this failure came from, so an approval wait
 	// has something to poll. ApprovalRequestID is filled in by that wait, not
 	// by the server response this error is built from.
@@ -78,7 +80,9 @@ func (e *ClientTimeoutError) ErrorHint() string { return e.hint }
 // console before it runs. CommandID identifies the parked job so a --wait caller can
 // poll it; re-submitting would create a duplicate command and approval request.
 type PendingApprovalError struct {
-	CommandID string
+	ConsoleURL    string
+	WorkSessionID string
+	CommandID     string
 	// FileSuggestion is the server's proposal to run the held command as a
 	// verified file instead; nil when the server made none.
 	FileSuggestion *FileExecutionSuggestion
@@ -102,8 +106,11 @@ type FileExecutionSuggestion struct {
 // ExitCodeNotApproved, but only a reviewer's refusal is answered by going back to
 // the reviewer—a window that simply lapsed is answered by requesting again.
 type CommandRejectedError struct {
-	CommandID string
-	Expired   bool
+	Gate          string
+	ConsoleURL    string
+	WorkSessionID string
+	CommandID     string
+	Expired       bool
 	// Cause is the server's rejection_cause, such as approval_rejected for a
 	// reviewer's refusal; empty on older servers.
 	Cause string
@@ -179,6 +186,8 @@ type EventDetails struct {
 	FileExecutionSuggestion *FileExecutionSuggestion `json:"file_execution_suggestion"`
 	// RejectionCause says why a rejected command was refused; empty on older servers.
 	RejectionCause string `json:"rejection_cause"`
+	RejectionGate  string `json:"rejection_gate"`
+	ConsoleURL     string `json:"console_url,omitempty"`
 	// The account the command ran as and the work session it ran under, so a
 	// re-run printed from the detail repeats them. WorkSession is null when the
 	// command ran under none.
@@ -406,4 +415,23 @@ func IsRejectedStatus(status string) bool {
 // detach paths both read it, so a new status-only terminal state goes here, not at either caller.
 func IsStatusOnlyFailure(status string) bool {
 	return status == "stuck" || status == "error" || status == "cancelled"
+}
+
+func (e *CommandRejectedError) RejectedCommand() bool { return true }
+func (e *CommandRejectedError) ErrorGate() string     { return e.Gate }
+func (e *CommandRejectedError) ErrorFields() map[string]any {
+	return map[string]any{"console_url": e.ConsoleURL, "work_session_id": e.WorkSessionID}
+}
+func (e *PendingApprovalError) ErrorFields() map[string]any {
+	return map[string]any{"console_url": e.ConsoleURL, "work_session_id": e.WorkSessionID}
+}
+func (d EventDetails) WorkSessionID() string {
+	if d.WorkSession != nil {
+		return d.WorkSession.ID
+	}
+	return ""
+}
+
+func (e *RemoteCommandError) ErrorFields() map[string]any {
+	return map[string]any{"console_url": e.ConsoleURL, "work_session_id": e.WorkSessionID}
 }

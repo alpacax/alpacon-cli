@@ -59,7 +59,7 @@ Run the command again later to check for completion.`,
 
 		// Exit 0 would read as a command that finished with nothing to show.
 		if event.IsAwaitingApprovalStatus(details.Status) {
-			fields := localsignal.Fields{Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username}
+			fields := localsignal.Fields{Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username, ConsoleURL: details.ConsoleURL}
 			if details.WorkSession != nil {
 				fields.Session = details.WorkSession.ID
 			}
@@ -83,7 +83,8 @@ Run the command again later to check for completion.`,
 		// Exit 6 through the envelope, as exec and work-session create do: retrying only files
 		// another approval request.
 		if event.IsRejectedStatus(details.Status) {
-			rejected := &event.CommandRejectedError{CommandID: details.ID, Cause: details.RejectionCause}
+			rejected := &event.CommandRejectedError{CommandID: details.ID, Cause: details.RejectionCause, Gate: details.RejectionGate, ConsoleURL: details.ConsoleURL, WorkSessionID: details.WorkSessionID()}
+			utils.SignalRefusal(utils.WithSignalFields(rejected, localsignal.Fields{Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username}))
 			// A script-body refusal has file-execution guidance of its own.
 			if rejected.Cause == event.RejectionCauseUseFileExecution {
 				accountFlags, accountNote := logsAccountFlags(details)

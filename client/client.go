@@ -1309,7 +1309,7 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 		}
 		// A refusal's string "hint" reaches the output sanitized through ErrorHint; rendering it
 		// here would print it a second time, raw.
-		if field == "hint" && utils.IsRefusalStatus(statusCode) {
+		if (field == "hint" || field == "console_url") && utils.IsRefusalStatus(statusCode) {
 			if _, isString := parsed[field].(string); isString {
 				continue
 			}
@@ -1356,7 +1356,7 @@ func isEnvelopeOnly(parsed map[string]any, statusCode int) bool {
 			if _, ok := value.(string); !ok {
 				return false
 			}
-		case "hint":
+		case "hint", "console_url":
 			if !utils.IsRefusalStatus(statusCode) {
 				return false
 			}
