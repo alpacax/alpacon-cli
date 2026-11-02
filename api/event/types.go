@@ -51,9 +51,11 @@ var phaseHints = map[string]string{
 // RemoteCommandError is returned when the remote command completed but exited
 // with a non-zero status. ExitCode is 1 when the server omits exit_code.
 type RemoteCommandError struct {
-	Output     string
-	ExitCode   int
-	ErrorPhase string
+	Output   string
+	ExitCode int
+	// ExitCodeReported is false when the server sent no exit code and ExitCode is the fallback 1.
+	ExitCodeReported bool
+	ErrorPhase       string
 	// CommandID identifies the job this failure came from, so an approval wait
 	// has something to poll. ApprovalRequestID is filled in by that wait, not
 	// by the server response this error is built from.

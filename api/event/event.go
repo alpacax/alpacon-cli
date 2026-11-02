@@ -804,7 +804,7 @@ func errorFromDetails(d EventDetails) error {
 			if d.ErrorPhase != nil {
 				phase = *d.ErrorPhase
 			}
-			return &RemoteCommandError{Output: d.Result, ExitCode: exitCode, ErrorPhase: phase, CommandID: d.ID}
+			return &RemoteCommandError{Output: d.Result, ExitCode: exitCode, ExitCodeReported: d.ExitCode != nil, ErrorPhase: phase, CommandID: d.ID}
 		}
 		return nil
 	default:

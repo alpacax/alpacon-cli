@@ -19,6 +19,9 @@ const (
 	ErrorCodeConfirmationRequired = "confirmation_required"
 	ErrorCodeNetwork              = "network_error"
 	ErrorCodeNotApproved          = "not_approved"
+	ErrorCodeRemoteCommandFailed  = "remote_command_failed" // the command ran on the server and failed there
+	ErrorCodeChildCommandFailed   = "child_command_failed"  // tunnel's local command exited non-zero
+	ErrorCodePermissionNotHeld    = "permission_not_held"
 	ErrorCodeCLI                  = "cli_error"
 )
 

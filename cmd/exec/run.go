@@ -845,11 +845,11 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 		var remoteErr *event.RemoteCommandError
 		if errors.As(err, &remoteErr) {
 			stderrText, exitCode := remoteFailureReport(remoteErr)
-			fmt.Fprint(os.Stderr, stderrText)
-			os.Exit(exitCode)
+			exitWithReport(stderrText, remoteFailure(stderrText, exitCode, remoteErr.ExitCodeReported))
 		}
 		var clientTimeout *event.ClientTimeoutError
 		if errors.As(err, &clientTimeout) {
+			utils.ExitWithFailureJSON(utils.Failure{ExitCode: 1, Err: clientTimeout, Message: plainReport(clientTimeoutLine())})
 			fmt.Fprint(os.Stderr, clientTimeoutLine())
 			// A wait that ended on a refusal (a 429 in practice) keeps its hint.
 			utils.PrintRefusalHints(os.Stderr, clientTimeout)
@@ -867,6 +867,34 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 		}
 		utils.CliErrorWithExit("%s", err)
 	}
+}
+
+// exitWithReport writes report, the table-mode stderr text, and exits f.ExitCode; under --output
+// json the envelope f stands in for it.
+func exitWithReport(report string, f utils.Failure) {
+	if f.ExitCode != 0 {
+		utils.ExitWithFailureJSON(f)
+	}
+	fmt.Fprint(os.Stderr, report)
+	os.Exit(f.ExitCode)
+}
+
+// plainReport is report without color and without the leading "Error: " the table line carries.
+func plainReport(report string) string {
+	return strings.TrimSpace(strings.TrimPrefix(utils.StripANSIEscapes(report), "Error: "))
+}
+
+// remoteFailure is the envelope for a command that failed on the server, its message the
+// table-mode report; reported says the server sent the exit code.
+func remoteFailure(report string, exitCode int, reported bool) utils.Failure {
+	f := utils.Failure{ExitCode: exitCode, ErrorCode: utils.ErrorCodeRemoteCommandFailed, Message: plainReport(report)}
+	if reported {
+		f.RemoteExitCode = &exitCode
+	}
+	if f.Message == "" {
+		f.Message = fmt.Sprintf("the remote command exited with code %d", exitCode)
+	}
+	return f
 }
 
 // remoteFailureReport is what HandleCommandResult writes to stderr for a

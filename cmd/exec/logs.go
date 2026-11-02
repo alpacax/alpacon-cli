@@ -127,11 +127,11 @@ Run the command again later to check for completion.`,
 		if stdoutLine != "" {
 			fmt.Println(stdoutLine)
 		}
+		if exitCode != 0 {
+			exitWithReport(stderrLine, logsFailure(details, stderrLine, exitCode))
+		}
 		if stderrLine != "" {
 			fmt.Fprint(os.Stderr, stderrLine)
-		}
-		if exitCode != 0 {
-			os.Exit(exitCode)
 		}
 	},
 }
@@ -164,6 +164,18 @@ func logsAccountFlags(details event.EventDetails) (flags []string, note string) 
 	}
 	note += ": without -u the command runs as the server's default account"
 	return append(placeholders, flags...), note
+}
+
+// logsFailure is the envelope for a failed outcome of logsCommandOutcome: the command's own
+// failure on the server, or a status this build does not know.
+func logsFailure(details event.EventDetails, report string, exitCode int) utils.Failure {
+	if event.IsStatusOnlyFailure(details.Status) {
+		return remoteFailure(report, exitCode, false)
+	}
+	if details.Success != nil && !*details.Success {
+		return remoteFailure(report, exitCode, details.ExitCode != nil)
+	}
+	return utils.Failure{ExitCode: exitCode, ErrorCode: utils.ErrorCodeCLI, Message: plainReport(report)}
 }
 
 // logsCommandOutcome guarantees a non-empty stderrLine ends with \n. Neither the
