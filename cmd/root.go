@@ -71,7 +71,8 @@ For a Kubernetes cluster, 'alpacon kube login <CLUSTER>' finds or creates a
 session that targets the cluster (scopes kube, kube_exec) and writes the
 kubeconfig context kubectl uses.
 
-See 'alpacon work-session --help' for session lifecycle and error codes.`,
+See 'alpacon work-session --help' for session lifecycle and error codes.
+See 'alpacon help output' for the JSON output and error contract.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return utils.SetOutputFormat(utils.OutputFormat)
 	},
