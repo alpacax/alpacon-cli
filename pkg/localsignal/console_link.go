@@ -59,6 +59,9 @@ func consoleHost(host string) string {
 		}
 	}
 	if ip, err := netip.ParseAddr(host); err == nil {
+		if ip.Is4In6() {
+			return ""
+		}
 		return ip.String()
 	}
 	return strings.ToLower(strings.TrimSuffix(host, "."))
