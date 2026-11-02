@@ -60,8 +60,6 @@ func TestGetCommandChunks_PassesSeqGteAndReturnsResults(t *testing.T) {
 	assert.NotContains(t, capturedQuery, "seq__lte")
 }
 
-// TestGetCommandOutput_ConcatenatesChunksInSeqOrder verifies the full output is
-// reconstructed from chunks in seq order regardless of server ordering.
 func TestGetCommandOutput_ConcatenatesChunksInSeqOrder(t *testing.T) {
 	t.Parallel()
 	cmdID := "a1b2c3d4-1234-5678-abcd-000000000000"
@@ -87,8 +85,6 @@ func TestGetCommandOutput_ConcatenatesChunksInSeqOrder(t *testing.T) {
 	assert.Equal(t, "a\nb\nc\n", got)
 }
 
-// TestGetCommandChunks_SortsBySeq verifies out-of-order server results are
-// returned sorted by seq.
 func TestGetCommandChunks_SortsBySeq(t *testing.T) {
 	t.Parallel()
 	cmdID := "a1b2c3d4-1234-5678-abcd-000000000000"
@@ -118,8 +114,6 @@ func TestGetCommandChunks_SortsBySeq(t *testing.T) {
 	}, got)
 }
 
-// TestGetCommandChunks_SendsSeqLteWhenBounded verifies a non-negative toSeq is
-// sent as the seq__lte upper bound.
 func TestGetCommandChunks_SendsSeqLteWhenBounded(t *testing.T) {
 	t.Parallel()
 	cmdID := "a1b2c3d4-1234-5678-abcd-000000000000"
@@ -130,7 +124,6 @@ func TestGetCommandChunks_SendsSeqLteWhenBounded(t *testing.T) {
 		wantQ   []string
 	}{
 		{"bounded range", 5, 8, []string{"seq__gte=5", "seq__lte=8"}},
-		// toSeq=0 is a valid bound (seq is 0-indexed), not treated as "unbounded".
 		{"zero is a valid bound", 0, 0, []string{"seq__lte=0"}},
 	}
 	for _, tt := range tests {

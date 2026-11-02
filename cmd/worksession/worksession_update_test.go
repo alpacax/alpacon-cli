@@ -40,7 +40,6 @@ func TestValidateSessionForSudoUpdate(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "ses-no-sudo")
 		assert.Contains(t, err.Error(), "'sudo' scope")
-		// Guidance must point at the create flag, not at a separate scope flag.
 		assert.Contains(t, err.Error(), "--sudo",
 			"guidance should reference --sudo so the user creates the right session next time")
 	})

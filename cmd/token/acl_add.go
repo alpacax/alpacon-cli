@@ -33,12 +33,12 @@ func runLegacyAclAdd(cmd *cobra.Command, args []string) {
 	case len(args) > 0:
 		tokenArg = args[0]
 	default:
-		utils.CliErrorWithExit("token name or ID is required (use --token or positional argument)")
+		utils.CliUsageErrorWithExit("token name or ID is required (use --token or positional argument)")
 	}
 
 	command, _ := cmd.Flags().GetString("command")
 	if command == "" {
-		utils.CliErrorWithExit("--command is required")
+		utils.CliUsageErrorWithExit("--command is required")
 	}
 	username, _ := cmd.Flags().GetString("username")
 	groupname, _ := cmd.Flags().GetString("groupname")

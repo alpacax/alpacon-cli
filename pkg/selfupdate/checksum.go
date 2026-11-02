@@ -24,7 +24,7 @@ func ParseChecksums(data []byte) map[string]string { // Each line is "<sha256>  
 }
 
 func VerifyChecksum(path, want string) error {
-	if want == "" { // An empty expectation is a checksum file that never named this archive—no weaker a reason to stop than a hash that disagrees.
+	if want == "" { // A checksum file that never named this archive fails like a mismatch.
 		return ErrChecksumMismatch
 	}
 

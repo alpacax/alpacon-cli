@@ -17,25 +17,19 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// sudoDenialLinePrefix is the terminal-facing denial line the sudo plugin
-// prints ("Alpacon denied this sudo command (CODE)."), up to the code slot.
-// The other "Permission denied (CODE)" form only reaches the audit log—not the
-// invoking terminal—so it must not be matched. Anchoring on this full prefix
-// (not a bare "(CODE)") stops a command whose own output prints
-// "(SUDO_RISK_DENIED)" from forging a hint.
+// sudoDenialLinePrefix is the sudo plugin's terminal denial line ("Alpacon denied this sudo
+// command (CODE).") up to the code slot. Only this form reaches the terminal; the "Permission
+// denied (CODE)" form goes to the audit log. Anchoring on the whole prefix keeps a command that
+// prints "(SUDO_RISK_DENIED)" from forging a hint.
 const sudoDenialLinePrefix = "Alpacon denied this sudo command ("
 
-// sudoDenialCodelessLine is the denial line the agent emits with no code to
-// name because the plugin has none to report. Its own literal rather than
-// sudoDenialLinePrefix with an empty slot—the sanitizer rejects a bad code
-// whole, so the parentheses go with it and no empty-slot form ever reaches
-// the terminal.
+// sudoDenialCodelessLine is the denial line the agent emits when the plugin has no code to report.
+// It is its own literal because the sanitizer drops a bad code with its parentheses, so no
+// empty-slot form ever reaches the terminal.
 const sudoDenialCodelessLine = "Alpacon denied this sudo command."
 
-// sudoPresenceRequiredCode is the one denial code the CLI resolves in-flow (an
-// MFA step-up). The hint table and hasSudoPresenceDenial both name it from
-// here, so renaming it cannot leave one of them behind and silently stop the
-// step-up.
+// sudoPresenceRequiredCode is the one denial code the CLI resolves in-flow, with an MFA step-up.
+// The hint table and hasSudoPresenceDenial share it so a rename cannot silently stop the step-up.
 const sudoPresenceRequiredCode = "SUDO_PRESENCE_REQUIRED"
 
 // commandInlineCredentialMessage is the exec-facing error line for the
@@ -56,9 +50,6 @@ const (
 	WebshInvocation Invocation = "alpacon websh"
 )
 
-// approvalWaitMessage labels the --wait spinner. Named because each stretch of
-// waiting gets a spinner of its own (see RunExecWithApprovalWait), and two
-// labels drifting apart would read as two different waits.
 const approvalWaitMessage = "Waiting for approval in the Alpacon console..."
 
 const (
@@ -83,55 +74,37 @@ var (
 	runPresenceStepUp     = RunExecWithPresenceStepUp
 	streamApprovedCommand = event.StreamApprovedCommand
 	mfaLinkByServerName   = mfa.GetMFALinkByServerName
-	// getCommandByID is the approval wait's own read of the command detail, kept
-	// as a var so a test can drive it without a server.
-	getCommandByID = event.GetCommandByID
+	getCommandByID        = event.GetCommandByID
 )
 
-// sudoDenialHints maps a non-interactive sudo denial code to actionable
-// guidance. Codes mirror the server's by hand—nothing enforces the sync,
-// which is why sudoDenialHint falls back to naming a code this table does not
-// carry.
+// sudoDenialHints maps a non-interactive sudo denial code to guidance. The codes mirror the
+// server's by hand, which is why sudoDenialHint falls back to naming a code this table lacks.
+// The table is the fallback for a server that sends no hint: the sudo plugin prints a server hint
+// under the denial line, and such a line (serverHintFollows) gets no sentence from here.
 //
-// The table is the fallback for a server that sends no hint of its own. A
-// server that does has the sudo plugin print it on the line under the denial
-// line, where the user already reads it in the command's output, so a denial
-// line followed by one (serverHintFollows) gets no sentence from here.
+// Codes are UPPERCASE because the plugin's sanitizer passes only [A-Z0-9_] into the denial line.
+// Each hint stays at the category level; the server never sends the risk score or reasoning to a
+// client.
 //
-// The codes are UPPERCASE because the plugin only passes [A-Z0-9_]
-// codes through its sanitizer into the user-facing denial line (lowercase
-// values are dropped). Each hint stays at the denial *category* level (what to
-// do)—the server never sends the risk score or reasoning to a client.
+// pendingApproval marks the codes the server emits after creating an approval grant: the sudo call
+// fails now, but a reviewer can still approve it. Flagging them here rather than in a second list
+// keeps the hints and that code set from drifting apart. selfService narrows those to entries whose
+// guidance names a way out other than waiting for a reviewer. HandlePendingApproval prints only
+// those, since its own message already says to re-run after approval, and pendingSudoDenial
+// prefers them whatever the table order.
 //
-// pendingApproval marks the codes the server emits after creating an approval
-// grant: the sudo call still fails now (an interactive sudo cannot wait on an
-// out-of-band approval), but a reviewer can still approve it.
-// Flagging them here rather than in a second list is what keeps the hints and
-// that code set from drifting apart.
-//
-// selfService narrows the pendingApproval codes to those whose guidance names a
-// way out that is not "wait for a reviewer". HandlePendingApproval prints only
-// those: its own message already covers re-running after approval, so printing
-// an entry without one would say the same thing twice. pendingSudoDenial
-// prefers a selfService entry over the rest, so the table order does not decide
-// which pending code answers.
-//
-// The gates the server checks before it judges the command at all lead the
-// table, in that order, so output carrying denial lines from several sudo calls
-// answers with the gate the server checks earliest—not with whichever call ran
-// first. The codes after them are alternative verdicts on one call, so their
-// order among themselves carries no meaning.
+// The gates the server checks before judging the command lead the table, in the order it checks
+// them, so output with denial lines from several sudo calls answers with the earliest gate. The
+// order of the codes after them carries no meaning.
 var sudoDenialHints = []struct {
 	code, guidance  string
 	pendingApproval bool
 	selfService     bool
 }{
 	{
-		// Checked before the websh/command branch split, so it answers every
-		// surface. Turning sudo with MFA on loosens execution control, which the
-		// server accepts from the web console only, and on a self-hosted server
-		// without MFA sign-in it refuses that change, so the guidance names both
-		// routes.
+		// Checked before the websh/command split, so it answers every surface. The server accepts
+		// turning sudo with MFA on from the web console only, and a self-hosted server without MFA
+		// sign-in refuses it there too, so the guidance names both routes.
 		code: "WORKSPACE_SUDO_WITH_MFA_DISABLED",
 		guidance: "sudo was denied: this workspace does not allow sudo with MFA at all, so no work session or policy can authorize it.\n" +
 			"A workspace administrator can turn sudo with MFA on from the web console (Settings \u2192 Access control); the CLI cannot make this change.\n" +
@@ -160,9 +133,8 @@ var sudoDenialHints = []struct {
 			"Adding a scope may require approval before it takes effect. A new session created with --sudo gets the scope on its own.\n",
 	},
 	{
-		// A Command with no requesting user, i.e. a service-token submission,
-		// which the token lane only resolves under EXEC_SUDO_MODE=enforce.
-		// Re-running it with the same token repeats it.
+		// A command with no requesting user, i.e. a service-token submission, which this deployment
+		// does not elevate. Re-running it with the same token repeats the denial.
 		code: "SUDO_COMMAND_NOT_AUTHORIZED",
 		guidance: "sudo was denied: this command names no accountable user, so it cannot be elevated—a service token is not one on this deployment.\n" +
 			"Sign in with " + utils.LoginWithoutTokenHint + ", then re-run the command under that login.\n",
@@ -193,11 +165,10 @@ var sudoDenialHints = []struct {
 		pendingApproval: true,
 	},
 	{
-		// The session title and description both ride in the risk payload the
-		// judge reads, but only the title is a way around the wait: a
-		// description edit on an approved/active session is queued for an
-		// approval of its own. The hint says "may" because an
-		// approval-bypassing principal escapes that queue.
+		// Both the session title and description reach the risk assessment, but only a title edit
+		// applies at once: a description edit on an approved or active session queues for an
+		// approval of its own. The hint says "may" because a principal that bypasses approval skips
+		// that queue.
 		code: "SUDO_INTENT_DEVIATION",
 		guidance: "sudo needs approval: this command reads as off-purpose for your work session, so an approval request was created.\n" +
 			"If the session's stated purpose is out of date, re-declare it and re-run instead of waiting for a reviewer (omit SESSION_ID to use the active session):\n" +
@@ -250,13 +221,10 @@ func approvalOutcomeOf(status *string) approvalOutcome {
 	}
 }
 
-// denialCodePresent reports whether output contains the plugin's terminal denial
-// line for the given code. It anchors on the full "Alpacon denied this sudo
-// command (CODE)." line—including the trailing period the plugin emits—never a
-// bare "(CODE)" token, so a command whose own output prints the token cannot
-// forge a match on a command that succeeded. Every code-specific detector routes
-// through here, and firstDenialCode scans for the same sudoDenialLinePrefix, so
-// the two cannot disagree on what the line looks like.
+// denialCodePresent reports whether output holds the plugin's full denial line for code, trailing
+// period included, never a bare "(CODE)" token, so a command printing the token cannot forge a
+// match. Every code-specific detector routes through here, and firstDenialCode scans for the same
+// sudoDenialLinePrefix, so the two agree on the line.
 func denialCodePresent(output, code string) bool {
 	return strings.Contains(output, sudoDenialLinePrefix+code+").")
 }
@@ -317,13 +285,10 @@ func denialHintLine(guidance string) string {
 	return fmt.Sprintf("%s %s", utils.Yellow("Hint:"), guidance)
 }
 
-// firstDenialCode returns the code carried by the first well-formed terminal
-// denial line in output, or "" when output holds none. It accepts only the
-// [A-Z0-9_] shape that the plugin's sanitizer emits, capped at the 63 chars its
-// buffer holds, so the code it hands back can be printed verbatim—a
-// command's own output cannot smuggle escapes or newlines into a hint through
-// it. It answers for known and unknown codes alike; only sudoDenialHint, which
-// consults the table first, cares about the difference.
+// firstDenialCode returns the code of the first well-formed denial line in output, known or
+// unknown, or "" when there is none. It accepts only the [A-Z0-9_] shape the plugin's sanitizer
+// emits, at most the 63 chars its buffer holds, so the code can be printed verbatim without
+// carrying escapes or newlines from the command's own output.
 func firstDenialCode(output string) string {
 	const maxCodeLen = 63 // the plugin's code buffer holds 64 bytes, NUL included
 	rest := output
@@ -358,19 +323,11 @@ func isSanitizedDenialCode(code string) bool {
 	return true
 }
 
-// sudoDenialHint returns actionable guidance when the command output shows a
-// non-interactive sudo denial. Returns "" when no such denial is present.
-//
-// A code with no table entry still gets a hint naming it: the server adds codes
-// on its own release train and nothing enforces this table's sync with the
-// server's codes, so returning "" for one would leave the next drift invisible
-// until someone reported a bare denial line.
-//
-// A denial carrying no code gets a last, thinner hint: without a category from
-// the server there is only the console to point at.
-//
-// Whichever line answers, a server hint under it (serverHintFollows) already
-// said what to do, so the answer is "" then.
+// sudoDenialHint returns guidance for a non-interactive sudo denial in output, or "" when there is
+// none. A code with no table entry still gets a hint naming it: nothing keeps the table in sync
+// with the server, and "" would hide the drift. A denial with no code gets a thinner hint pointing
+// at the console. Whichever line answers, a server hint under it (serverHintFollows) makes the
+// answer "".
 func sudoDenialHint(output string) string {
 	for _, h := range sudoDenialHints {
 		if denialCodePresent(output, h.code) {
@@ -410,37 +367,24 @@ func hasSudoPresenceDenial(output string) bool {
 	return denialCodePresent(output, sudoPresenceRequiredCode)
 }
 
-// hasSudoApprovalDenial reports whether output carries a denial that left an
-// approval request in flight (the pendingApproval codes in sudoDenialHints): a
-// human must approve it out of band in the Alpacon console before the command
-// can run. Like the other detectors it anchors on the plugin's exact terminal
-// denial line via denialCodePresent, so a command that merely prints the token
-// in its own output cannot forge a pending signal or wedge --wait into an
-// indefinite re-run loop.
+// hasSudoApprovalDenial reports whether output carries a denial that left an approval request in
+// flight (a pendingApproval code in sudoDenialHints). It matches the plugin's exact denial line, so
+// a command printing the token cannot forge a pending signal or keep --wait re-running.
 func hasSudoApprovalDenial(output string) bool {
 	_, pending := pendingSudoDenial(output)
 	return pending
 }
 
-// pendingSudoDenial reports whether output carries a pendingApproval code, and
-// returns that code's guidance only when the entry is selfService—the caller's
-// own pending message already tells the user to re-run after approval, so an
-// entry without a way past the wait would just say it twice.
+// pendingSudoDenial reports whether output carries a pendingApproval code, and returns guidance
+// only for a selfService entry, since the caller's pending message already says to re-run after
+// approval.
 //
-// It scans the pendingApproval codes alone rather than deferring to
-// sudoDenialHint: one command line can run several sudo calls (`sudo a; sudo b`)
-// and carry a denial line for each, and sudoDenialHint answers with whichever
-// code sits earliest in the table—which on that output may be a terminal code
-// that had no part in the pending classification.
+// It scans the pendingApproval codes itself rather than using sudoDenialHint, which answers with
+// the earliest code in the table: with several sudo calls on one line, that may be a terminal code
+// that played no part in the pending classification. A selfService entry wins over any other
+// pending code whatever the table order, since its guidance is the only one the user can act on.
 //
-// A selfService entry wins over any other pendingApproval code on that same
-// output, whatever the table order: the classification is identical either way,
-// so answering with the entry that has no way past the wait would drop the only
-// guidance the user could act on.
-//
-// A server hint under that entry's denial line withholds the guidance as in
-// sudoDenialHint; pending is unaffected, since it decides the wait, not a
-// sentence.
+// A server hint under that entry's denial line withholds the guidance; pending is unaffected.
 func pendingSudoDenial(output string) (hint string, pending bool) {
 	for _, h := range sudoDenialHints {
 		if h.pendingApproval && h.selfService && denialCodePresent(output, h.code) {
@@ -458,13 +402,10 @@ func pendingSudoDenial(output string) (hint string, pending bool) {
 	return "", false
 }
 
-// isCommandInlineCredentialError reports whether err carries the server's
-// inline-credential gate code (utils.CommandInlineCredential): the submitted
-// content itself contained a credential (e.g. a -p/--password flag, a
-// KEY=VALUE secret such as PGPASSWORD=..., or a user:pass@host connection
-// string), so the server refused it before it ever ran rather than persist it.
-// The content is the command line on the exec and websh lanes and the verified
-// file's content on the --file lane.
+// isCommandInlineCredentialError reports whether err carries the server's inline-credential gate
+// code (utils.CommandInlineCredential): the submitted content—the command line, or the verified
+// file's content on the --file lane—held a credential such as a -p/--password flag, a KEY=VALUE
+// secret or a user:pass@host string, so the server refused it before it ran.
 func isCommandInlineCredentialError(err error) bool {
 	code, _ := utils.ParseErrorResponse(err)
 	return code == utils.CommandInlineCredential
@@ -491,13 +432,11 @@ func credentialInlineHint(invokedAs Invocation) string {
 		utils.Yellow("Hint:"), credentialInlineExample(invokedAs))
 }
 
-// RunExecWithPresenceStepUp runs a command via RunCommandWithRetry and, when it
-// is denied for a missing recent MFA (SUDO_PRESENCE_REQUIRED) on an interactive
-// terminal, offers an MFA step-up and retries once. Non-interactive callers
-// (scripts, CI, AI agents) fall through unchanged so HandleCommandResult prints
-// the static denial hint; non-interactive humans additionally get the
-// verification link they can complete out of band. Reached via RunRemoteExec by
-// exec and websh command mode; interactive websh keeps its own sudo MFA flow.
+// RunExecWithPresenceStepUp runs a command via RunCommandWithRetry and, when it is denied for a
+// missing recent MFA (SUDO_PRESENCE_REQUIRED) on an interactive terminal, offers an MFA step-up
+// and retries once. A non-interactive caller gets the verification link to complete out of band
+// and the denial unchanged, so HandleCommandResult prints the static hint. Interactive websh keeps
+// its own sudo MFA flow.
 func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
 	return runWithPresenceStepUp(ac, serverName, func() error {
 		return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
@@ -507,11 +446,8 @@ func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, us
 // runWithPresenceStepUp is RunExecWithPresenceStepUp over a commandRun.
 func runWithPresenceStepUp(ac *client.AlpaconClient, serverName string, run commandRun) error {
 	err := run()
-	// A real presence denial makes sudo exit non-zero, so it always surfaces as a
-	// RemoteCommandError carrying the denial line. Require that error as well as
-	// the line match: a command that merely prints the line and SUCCEEDS
-	// (err == nil) must not trigger a step-up and a re-run of a side-effecting
-	// command.
+	// A real presence denial exits non-zero, so require a RemoteCommandError as well as the line: a
+	// command that prints the line and succeeds must not trigger a step-up and a re-run.
 	var remoteErr *event.RemoteCommandError
 	if !errors.As(err, &remoteErr) || !hasSudoPresenceDenial(remoteErr.Output) {
 		return err
@@ -532,11 +468,9 @@ func runWithPresenceStepUp(ac *client.AlpaconClient, serverName string, run comm
 	return run()
 }
 
-// printPresenceStepUpLink surfaces the verification link for a non-interactive
-// presence denial, so a human reading the logs can complete MFA out of band and
-// re-run. We cannot prompt or open a browser here. A link that cannot be
-// fetched is dropped silently: the static denial hint already carries the
-// actionable part, and the link is the extra.
+// printPresenceStepUpLink prints the verification link for a non-interactive presence denial, so a
+// human reading the logs can complete MFA out of band and re-run. A link that cannot be fetched is
+// dropped silently; the static denial hint carries the actionable part.
 func printPresenceStepUpLink(ac *client.AlpaconClient, serverName string) {
 	url, err := mfaLinkByServerName(ac, serverName)
 	if err != nil {
@@ -545,13 +479,10 @@ func printPresenceStepUpLink(ac *client.AlpaconClient, serverName string) {
 	utils.CliInfo("MFA verification link (open in a browser):\n  %s", url)
 }
 
-// approvalDenialOutput returns the captured output of a denial that left an
-// approval request in flight: the command exited non-zero (a real denial always
-// surfaces as a RemoteCommandError) AND the plugin's exact denial line for a
-// pendingApproval code is in that output. Requiring both keeps a command that
-// merely prints the token but succeeds (err == nil) from being mistaken for a
-// pending approval. It hands back the output, not a bool, so a caller needing
-// the denial code does not restate the rule for what counts as one.
+// approvalDenialOutput returns the output of a denial that left an approval request in flight: a
+// RemoteCommandError whose output holds the plugin's denial line for a pendingApproval code.
+// Requiring the error keeps a command that prints the line and succeeds from passing for one. It
+// returns the output so a caller needing the code does not restate the rule.
 func approvalDenialOutput(err error) (string, bool) {
 	var remoteErr *event.RemoteCommandError
 	if !errors.As(err, &remoteErr) || !hasSudoApprovalDenial(remoteErr.Output) {
@@ -568,36 +499,34 @@ func isApprovalDenial(err error) bool {
 
 // pollApprovalOnce reads the grant the denial left behind. The command it names
 // already ran and was blocked, so this is a status read, not a re-attempt.
-func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalOutcome, string, error) {
+func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalOutcome, string, string, error) {
 	details, err := getCommandByID(ac, cmdID)
 	if err != nil {
-		return outcomePending, "", err
+		return outcomePending, "", "", err
 	}
 	requestID := ""
 	if details.SudoApprovalRequestID != nil {
 		requestID = *details.SudoApprovalRequestID
 	}
-	return approvalOutcomeOf(details.SudoGrantStatus), requestID, nil
+	outcome := approvalOutcomeOf(details.SudoGrantStatus)
+	if event.IsRejectedStatus(details.Status) && (details.RejectionCause != "" || outcome != outcomeExpired) {
+		outcome = outcomeRejected
+	}
+	return outcome, requestID, details.RejectionCause, nil
 }
 
-// RunExecWithApprovalWait runs a command via RunExecWithPresenceStepUp and, when
-// it is denied with an approval request in flight (a pendingApproval code) and
-// waitTimeout is positive, blocks and polls the command's detail until a
-// reviewer grants or refuses the request out of band, or the bounded timeout
-// elapses. When waitTimeout is zero or negative, or the denial carries a
-// terminal code, it returns the first err unchanged so the caller's
-// pending/denial handling runs.
+// RunExecWithApprovalWait runs a command via RunExecWithPresenceStepUp and, when it is denied with
+// an approval request in flight and waitTimeout is positive, polls the command's detail until a
+// reviewer grants or refuses the request or the timeout elapses. A job the server parked at
+// awaiting_approval is instead streamed once approved. With no positive waitTimeout, or on a
+// terminal denial, it returns the first err unchanged.
 //
-// A tick that never reached the server is not an answer: the loop backs off, and
-// a timeout—or a run of failed polls long enough to give up on—reports the denial
-// that opened the wait, so the caller still exits on the pending contract rather
-// than as a generic failure.
+// A poll that never reached the server is not an answer: the loop backs off. A timeout, a run of
+// failed polls, or a fatal 4xx on the read returns the denial that opened the wait, so the caller
+// still exits on the pending contract.
 //
-// The poll reads the command's own detail (sudo_grant_status) rather than
-// re-submitting it: the denial carries the command id, and re-attempting a
-// command still pending approval would file a fresh approval request on every
-// tick. The poll mirrors the MFA step-up structure (api/mfa/mfa.go): a spinner,
-// a timer, and a precise deadline.
+// The poll reads sudo_grant_status rather than re-submitting the command, which would file a
+// fresh approval request on every tick.
 func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
 	return runWithApprovalWait(ac, func() error {
 		return runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
@@ -655,9 +584,8 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 
 	spinner := utils.NewSpinner(approvalWaitMessage)
 	spinner.Start()
-	// Every return path below stops the spinner before it writes, which is
-	// load-bearing for output ordering; this backstops paths added later. Stop
-	// on a stopped spinner is a no-op.
+	// Every return below stops the spinner before it writes, for output ordering; this backstops
+	// paths added later. Stop on a stopped spinner is a no-op.
 	defer spinner.Stop()
 
 	pendingDenial := err
@@ -682,17 +610,15 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 			utils.CliWarning("%s", utils.HintOnly(fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", waitTimeout), lastRefusal))
 			return pendingWithRequestID(pendingDenial, lastRequestID)
 		case <-poll.C:
-			outcome, requestID, err := pollApprovalOnce(ac, cmdID)
+			outcome, requestID, cause, err := pollApprovalOnce(ac, cmdID)
 			lastRefusal = nil
 			if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
 				lastRefusal = err
 			}
 			switch {
 			case err != nil && isPollFailure(err):
-				// A 429 says the server is answering, so it is not counted toward
-				// the cap below—the throttle budget and the deadline bound it
-				// instead, and counting it would end the wait before the budget it
-				// just spent could carry it anywhere.
+				// A 429 means the server is answering, so it does not count toward the failure cap;
+				// the throttle budget and the deadline bound it.
 				if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
 					delay := utils.NextPollBackoff(approvalWaitPollInterval, throttles, utils.RetryAfter(err))
 					throttles++
@@ -711,10 +637,8 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 				failures++
 				if failures >= utils.MaxConsecutivePollFailures {
 					spinner.Stop()
-					// The approval request is still open, so this exits on the
-					// pending contract like the timeout does. Exit 1 reads as
-					// retryable, and an agent answers it by re-running exec and
-					// filing a second request for the same command.
+					// The approval request is still open, so exit on the pending contract: exit 1
+					// reads as retryable, and an agent re-running exec would file a second request.
 					utils.CliWarning("Approval wait gave up after %d failed polls (%s); the command is still pending.", failures, err)
 					return pendingWithRequestID(pendingDenial, lastRequestID)
 				}
@@ -722,19 +646,15 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 				continue
 			case err != nil:
 				spinner.Stop()
-				// A fatal 4xx on the status read says nothing about the approval
-				// request, which is still open—so this exits on the pending contract
-				// like the give-up branch above, rather than on an exit 1 an agent
-				// answers by filing a second request for the same command.
+				// A fatal 4xx on the status read says nothing about the still-open request, so exit
+				// on the pending contract as above.
 				utils.CliWarning("Approval status read failed (%s); the command is still pending.", err)
 				return pendingWithRequestID(pendingDenial, lastRequestID)
 			}
 			failures = 0
 			throttles = 0
-			// The budget is not reset here: reading a grant that is still pending is
-			// not progress, and this loop returns the moment the status becomes one.
-			// So the allowance runs for the life of the wait, like the deadline it
-			// extends—resetting per poll would re-earn it on any non-429 response.
+			// No budget reset: reading a still-pending grant is not progress, so the allowance
+			// lasts the whole wait; resetting per poll would re-earn it on any non-429 response.
 			if requestID != "" {
 				lastRequestID = requestID
 			}
@@ -744,10 +664,8 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 				return runAfterApproval(run)
 			case outcomeRejected, outcomeExpired:
 				spinner.Stop()
-				// Settled without a grant. CommandRejectedError is what already carries
-				// this to ExitCodeNotApproved, so the two denial shapes exit alike; only
-				// the sentence they print differs.
-				return &event.CommandRejectedError{CommandID: cmdID, Expired: outcome == outcomeExpired}
+				// Settled without a grant; CommandRejectedError carries it to ExitCodeNotApproved.
+				return &event.CommandRejectedError{CommandID: cmdID, Expired: outcome == outcomeExpired, Cause: cause}
 			}
 			// A fixed gap over a 30m wait outspends the server's service-token
 			// throttle, so the gap widens as the wait ages.
@@ -762,11 +680,9 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 // asked for.
 func runAfterApproval(run commandRun) error {
 	err := run()
-	// Either shape means the grant did not carry this run, and each gets the
-	// sentence its own way out needs. A repeated denial is answered by filing a
-	// fresh request; a job the server parked runs on its own once approved, so
-	// telling that caller to re-run would contradict the pending text
-	// HandlePendingApproval prints moments later on the same stream.
+	// Each shape gets the sentence its way out needs: a repeated denial needs a fresh request,
+	// while a parked job runs on its own once approved, so advising a re-run would contradict the
+	// pending text HandlePendingApproval prints next.
 	var pendingErr *event.PendingApprovalError
 	switch {
 	case isApprovalDenial(err):
@@ -789,18 +705,13 @@ func pendingWithRequestID(denial error, requestID string) error {
 	return &withID
 }
 
-// isPollFailure separates a status read that carried no usable answer from one
-// that did: a network error, an undecodable body, or a retryable HTTP status
-// (any but a fatal 4xx, so 429/5xx keep the wait alive). It costs nothing to be
-// liberal here—the poll only reads the command detail, so a false retry wastes a
-// tick, never a re-run of the command. A run of them is capped at
-// MaxConsecutivePollFailures, except for 429s: the throttle budget bounds those.
+// isPollFailure reports whether a status read carried no usable answer: a network error, an
+// undecodable body, or a retryable HTTP status (any but a fatal 4xx). Being liberal costs only a
+// tick, since the poll reads the command detail and never re-runs the command.
 //
-// *url.Error satisfies net.Error, so one errors.As covers both the dial and the
-// round-trip failure—neither reached the server. *json.SyntaxError and
-// *json.UnmarshalTypeError cover a body that did reach it but would not decode
-// (a proxy error page under a JSON content type, or a response shape that
-// drifted).
+// *url.Error satisfies net.Error, so one errors.As covers dial and round-trip failures. The json
+// errors cover a body that would not decode: a proxy error page under a JSON content type, or a
+// drifted response shape.
 func isPollFailure(err error) bool {
 	if err == nil {
 		return false
@@ -841,18 +752,13 @@ func HandlePurposeDemand(err error) bool {
 	return true
 }
 
-// HandlePendingApproval emits the structured pending-approval feedback for a
-// command left pending human approval and not waited on—either a job the server
-// parked at awaiting_approval (PendingApprovalError) or a sudo denial with an
-// approval request in flight—then exits with ExitCodePendingApproval. It reports
-// true when it handled the err; the caller skips its normal result handling on
-// true. The status-hold path carries no approval request id; the sudo-denial
-// path carries one only when a --wait poll picked one up along the way
-// (pendingWithRequestID), so the machine signal reports an id when it has one
-// and omits it otherwise. The sudo-denial path repeats the exact command the
-// caller invoked (reRunHint of parsed), so a human can copy-paste it once the
-// request is approved. A held command line the server reads as a script on the
-// target also gets the --file --from-server form of it (fileSuggestionAction).
+// HandlePendingApproval reports a command left pending human approval and not waited on—a job the
+// server parked at awaiting_approval (PendingApprovalError) or a sudo denial with an approval
+// request in flight—and exits with ExitCodePendingApproval, or returns false when err is neither.
+// The approval request id is reported only when a --wait poll picked one up
+// (pendingWithRequestID). The sudo-denial path repeats the invoked command (reRunHint), and a held
+// command line the server reads as a script also gets its --file --from-server form
+// (fileSuggestionAction).
 func HandlePendingApproval(err error, parsed RemoteExecArgs) bool {
 	// Status-hold: held job runs automatically once approved, so point at exec logs.
 	var pendingErr *event.PendingApprovalError
@@ -875,10 +781,8 @@ func HandlePendingApproval(err error, parsed RemoteExecArgs) bool {
 	if !ok {
 		return false
 	}
-	// This exits before HandleCommandResult, the hint's only other caller, so a
-	// self-service path out (re-declaring a stale session intent) would
-	// otherwise never reach the user. pendingSudoDenial withholds the guidance
-	// for codes whose only way out is the wait the message below already names.
+	// This exits before HandleCommandResult, so a self-service way out (re-declaring a stale
+	// session intent) would otherwise never reach the user.
 	if hint, _ := pendingSudoDenial(output); hint != "" {
 		fmt.Fprint(os.Stderr, hint)
 	}
@@ -991,6 +895,7 @@ func reportCodedRefusalWithExit(code int, operation string, err error, message, 
 		utils.CliUsageErrorEnvelopeWithExit(operation, "%s.", message)
 		return
 	}
+	utils.ExitIfUsageError(code, operation, err, "%s.", message)
 	utils.ExitWithFailureJSON(utils.Failure{ExitCode: code, Operation: operation, Err: err, Message: message + ".", NextActions: actions})
 	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
 	if hint := codedRefusalHint(err, hint); hint != "" {
@@ -1008,8 +913,9 @@ func codedRefusalHint(err error, local string) string {
 	return local
 }
 
-// propagateCommandError reports errors RunCommandWithRetry must return unchanged
-// (never MFA-retried or wrapped): phased errors and a status-hold PendingApprovalError.
+// propagateCommandError reports errors RunCommandWithRetry must return unchanged (never
+// MFA-retried or wrapped): phased errors, a status-hold PendingApprovalError and an
+// AwaitingPurposeError.
 func propagateCommandError(err error) (error, bool) {
 	if phased, ok := asPhasedError(err); ok {
 		return phased, true
@@ -1049,21 +955,18 @@ func clientTimeoutLine() string {
 	return fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, event.DescribePhase(phase))
 }
 
-// detachResultLines renders the --detach confirmation. The job id comes from the
-// server's submit response and both lines are written raw, outside the Cli*
-// helpers—sanitize here (#364).
+// detachResultLines renders the --detach confirmation. The job id comes from the server and both
+// lines are written raw, outside the Cli* helpers, so it is sanitized here.
 func detachResultLines(jobID string) (string, string) {
 	jobID = utils.SanitizeTerminalText(jobID)
 	return fmt.Sprintf("Job submitted: %s", jobID),
 		fmt.Sprintf("Run `alpacon exec logs %s` to check the result.", jobID)
 }
 
-// sanitizedPhaseParts returns the phase identifier and its description ready for
-// a raw stderr write, outside the Cli* sanitizing helpers (#364). The identifier
-// is always the server's; the description is a constant from phaseDescriptions
-// for a known phase, and the raw phase echoed back for an unknown one. Describing
-// before stripping is what keeps a payload that only becomes a known phase once
-// sanitized from borrowing that phase's description.
+// sanitizedPhaseParts returns the phase identifier and its description sanitized for a raw stderr
+// write. The description is a constant for a known phase and the raw phase for an unknown one;
+// describing before stripping keeps a payload that only sanitizes into a known phase from
+// borrowing its description.
 func sanitizedPhaseParts(phase string) (id, desc string) {
 	return utils.SanitizeTerminalText(phase),
 		utils.SanitizeTerminalText(event.DescribePhase(phase))
@@ -1091,9 +994,8 @@ func remoteCommandOutcome(remoteErr *event.RemoteCommandError) (stderrLine strin
 	return stderrLine, remoteErr.ExitCode
 }
 
-// HandleExecUserRefusal reports the missing execution user and exits 1, or
-// returns false when err is something else. Under --output json it returns
-// false so the envelope stays what it is today.
+// HandleExecUserRefusal reports the missing execution user and exits 1, or returns false when err
+// is something else. Under --output json it returns false, leaving the generic error envelope.
 func HandleExecUserRefusal(err error, parsed RemoteExecArgs) bool {
 	if utils.OutputFormat == utils.OutputFormatJSON {
 		return false

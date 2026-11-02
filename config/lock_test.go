@@ -51,7 +51,6 @@ func TestConcurrentProcessesKeepEachOthersConfigChanges(t *testing.T) {
 		os.Exit(0)
 	}
 
-	// Given a config and two alpacon processes that each change their own fields
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "", "", "token-start", "refresh", "alpacon.io", 3600, false))
 	children := make([]*exec.Cmd, 0, 2)
@@ -61,7 +60,6 @@ func TestConcurrentProcessesKeepEachOthersConfigChanges(t *testing.T) {
 		children = append(children, child)
 	}
 
-	// When both run at once
 	outputs := make([][]byte, len(children))
 	errs := make([]error, len(children))
 	done := make(chan int, len(children))
@@ -75,7 +73,6 @@ func TestConcurrentProcessesKeepEachOthersConfigChanges(t *testing.T) {
 		<-done
 	}
 
-	// Then every change either of them made is still in the file
 	for i := range children {
 		require.NoError(t, errs[i], "writer output: %s", outputs[i])
 	}

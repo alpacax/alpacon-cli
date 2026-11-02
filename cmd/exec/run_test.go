@@ -125,11 +125,10 @@ func TestRemoteCommandOutcome(t *testing.T) {
 	}
 }
 
-// The phase line bypasses the Cli* helpers, and DescribePhase echoes an unknown
-// phase verbatim, so an attacker-chosen error_phase must be sanitized where the
-// line is assembled (#364). The second case pins the order: the lookup runs on
-// the raw phase, so a payload that only becomes a known phase after sanitizing
-// still renders as an identifier and cannot borrow that phase's description.
+// The phase line bypasses the Cli* helpers and DescribePhase echoes an unknown phase verbatim, so
+// an attacker-chosen error_phase must be sanitized where the line is built. The second case pins
+// the order: the lookup runs on the raw phase, so a payload that only sanitizes into a known phase
+// cannot borrow that phase's description.
 func TestRemoteCommandOutcomeSanitizesPhase(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -143,8 +142,6 @@ func TestRemoteCommandOutcomeSanitizesPhase(t *testing.T) {
 			wantStderr: utils.Red("Error") + ": [boom_phase] boom_phase\n",
 		},
 		{
-			// Describing before stripping is what keeps the payload from borrowing
-			// agent_timeout's own description once it sanitizes into that phase.
 			name:       "payload sanitizing into a known phase does not borrow its description",
 			phase:      "agent_\x1b[2K\u202etimeout",
 			wantStderr: utils.Red("Error") + ": [agent_timeout] agent_timeout\n",
@@ -171,8 +168,8 @@ func TestDetachResultLines(t *testing.T) {
 	assert.Equal(t, "Run `alpacon exec logs a1b2c3d4-1234-5678-abcd-000000000000` to check the result.", line2)
 }
 
-// The job id comes from the server's submit response and both lines are written
-// raw (stdout and stderr), outside the Cli* helpers—same class as #364.
+// The job id comes from the server's submit response and both lines are written raw (stdout and
+// stderr), outside the Cli* helpers.
 func TestDetachResultLinesSanitizesJobID(t *testing.T) {
 	t.Parallel()
 	line1, line2 := detachResultLines("job-1\x1b[2K\u202e")
@@ -181,9 +178,9 @@ func TestDetachResultLinesSanitizesJobID(t *testing.T) {
 	assert.Equal(t, "Run `alpacon exec logs job-1` to check the result.", line2)
 }
 
-// stubApprovalWaitSeams swaps the loop's seams/interval (restored on cleanup) and returns a denial carrying the plugin line the loop keys on for that code.
-// CommandID is set to "cmd-1": the wait loop polls the command detail by id, so
-// a denial with no id would never enter the loop at all.
+// stubApprovalWaitSeams swaps the wait loop's seams and poll interval, restored on cleanup, and
+// returns a denial carrying the plugin line for code. Its CommandID is "cmd-1", since a denial
+// without one never enters the loop.
 func stubApprovalWaitSeams(t *testing.T, interval time.Duration, code string) *event.RemoteCommandError {
 	t.Helper()
 	origStepUp, origStream, origInterval, origGetCommand := runPresenceStepUp, streamApprovedCommand, approvalWaitPollInterval, getCommandByID
@@ -230,7 +227,7 @@ func TestRunExecWithApprovalWait_RejectionEndsTheWaitWithoutAGrant(t *testing.T)
 		message string
 	}{
 		{"rejected", "rejected", "was rejected by a reviewer"},
-		{"expired", "expired", "was not approved before the request expired"},
+		{"expired", "expired", "was not approved before the approval request expired"},
 	}
 
 	for _, tt := range tests {
@@ -300,11 +297,9 @@ func TestRunExecWithApprovalWait_TimeoutCarriesTheApprovalRequestID(t *testing.T
 	assert.Equal(t, "req-9", remoteErr.ApprovalRequestID)
 }
 
-// TestRunExecWithApprovalWait_EntersLoopOnIntentDeviation pins that an intent
-// deviation denial (the same HITL branch server-side as SUDO_APPROVAL_REQUIRED,
-// with only the code swapped) enters the poll loop rather than
-// returning the first denial, and that a grant reaching the polled command
-// detail runs the command once more.
+// TestRunExecWithApprovalWait_EntersLoopOnIntentDeviation pins that an intent-deviation denial
+// (the same approval branch as SUDO_APPROVAL_REQUIRED, with only the code swapped) enters the poll
+// loop, and that a grant on the polled command detail runs the command once more.
 func TestRunExecWithApprovalWait_EntersLoopOnIntentDeviation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_INTENT_DEVIATION")
@@ -641,10 +636,9 @@ func TestRunExecWithApprovalWait_SustainedThrottleDoesNotTripTheFailureCap(t *te
 	assert.Equal(t, 2, submits, "one first attempt and one run after approval")
 }
 
-// A wait that stays throttled prints nothing but a spinner, so a user watching
-// it has no way to tell a slow approver from a rate-limited CLI. The budget caps
-// the notice at one per throttled stretch, the way the work-session wait and the
-// command poll do (TestPollForApproval_ThrottleWarnsOnce).
+// A wait that stays throttled shows only a spinner, so a user cannot tell a slow approver from a
+// rate-limited CLI. The budget caps the notice at one per throttled stretch, matching
+// TestPollForApproval_ThrottleWarnsOnce.
 func TestRunExecWithApprovalWait_ThrottleWarnsOnce(t *testing.T) {
 	const waitTimeout = 150 * time.Millisecond
 	const pollInterval = 2 * time.Millisecond
@@ -728,6 +722,39 @@ func TestApprovalOutcomeOf(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, approvalOutcomeOf(tt.status))
+		})
+	}
+}
+
+func TestPollApprovalOnceLegacyExpiry(t *testing.T) {
+	original := getCommandByID
+	t.Cleanup(func() { getCommandByID = original })
+	cases := []struct {
+		name, status, cause string
+		want                approvalOutcome
+	}{
+		{"legacy rejected command", "rejected", "", outcomeExpired},
+		{"legacy completed command", "completed", "", outcomeExpired},
+		{"explicit reviewer rejection", "rejected", event.RejectionCauseApprovalRejected, outcomeRejected},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+				grantStatus := "expired"
+				requestID := "apr-1"
+				return event.EventDetails{
+					Status:                tc.status,
+					RejectionCause:        tc.cause,
+					SudoGrantStatus:       &grantStatus,
+					SudoApprovalRequestID: &requestID,
+				}, nil
+			}
+
+			outcome, requestID, cause, err := pollApprovalOnce(nil, "cmd-1")
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, outcome)
+			assert.Equal(t, "apr-1", requestID)
+			assert.Equal(t, tc.cause, cause)
 		})
 	}
 }
@@ -859,7 +886,7 @@ func TestRemoteCommandOutcomeFilePhaseHint(t *testing.T) {
 	assert.Contains(t, stderrLine, "Hint: "+event.PhaseHint("file_hash_mismatch"))
 	assert.Contains(t, stderrLine, "alpacon exec --file")
 
-	// A non-file phase renders exactly as before: no hint line.
+	// A phase with no hint gets no hint line.
 	stderrLine, _ = remoteCommandOutcome(&event.RemoteCommandError{
 		ExitCode:   1,
 		ErrorPhase: "agent_timeout",

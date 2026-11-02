@@ -149,7 +149,7 @@ func TestKubeConfigRejectsAnInvalidProxyPort(t *testing.T) {
 
 	_, stderr, exitCode := runKubeGate(t, home, "kube", "config", "prod-east", "--kubeconfig", path, "--proxy-port", "0")
 
-	assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
+	assert.Equal(t, utils.ExitCodeUsageError, exitCode)
 	assert.Contains(t, stderr, "--proxy-port must be a port number")
 	assert.Zero(t, srv.lookups.Load())
 	assert.NoFileExists(t, path)

@@ -56,7 +56,6 @@ func TestUsernameGetCommand_StripsControlSequences(t *testing.T) {
 	assert.Contains(t, got, "root")
 }
 
-// hintedRefusal is a coded refusal carrying the server's hint.
 type hintedRefusal struct{ code, hint string }
 
 func (e hintedRefusal) Error() string       { return "request refused (code: " + e.code + ")" }

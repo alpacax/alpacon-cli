@@ -299,8 +299,7 @@ func TestPrintWhoamiJSON_PreflightFields(t *testing.T) {
 			var got map[string]json.RawMessage
 			assert.NoError(t, json.Unmarshal(body, &got))
 
-			// Contract: both keys must always be present in the JSON output,
-			// so callers can rely on them without checking for missing fields.
+			// All five keys must always be present, so callers need not check for missing fields.
 			_, hasRequired := got["work_session_required"]
 			_, hasRequiredForAccess := got["worksession_required_for_access"]
 			_, hasActive := got["active_work_session"]

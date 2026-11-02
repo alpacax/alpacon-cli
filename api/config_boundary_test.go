@@ -35,9 +35,9 @@ var (
 	_ = config.ResolveAuthMethod
 )
 
-// TestAPILayerNeverReadsConfig keeps the api layer off the config file: a read
-// here can name a workspace the request is no longer going to (issue #401). It
-// walks the AST, so a comment naming config.LoadConfig is not one and an alias is.
+// TestAPILayerNeverReadsConfig keeps the api layer off the config file: a read here can name a
+// workspace the request is no longer going to. It walks the AST, so a comment naming
+// config.LoadConfig is not one and an alias is.
 func TestAPILayerNeverReadsConfig(t *testing.T) {
 	t.Parallel()
 	pkgs, err := nonTestGoFiles("./...")

@@ -201,10 +201,9 @@ func TestExecIntentDeviationPrintsSelfServiceHintAfterWaitTimeout(t *testing.T) 
 	assert.Contains(t, stderr, "work-session update [SESSION_ID] --title")
 }
 
-// TestExecWaitTimeoutCarriesTheApprovalRequestID drives a real --wait-approval
-// timeout through the subprocess and checks that the request id the wait loop
-// picked up while polling reaches the JSON envelope, not just the in-process
-// RunExecWithApprovalWait return value (TestRunExecWithApprovalWait_TimeoutCarriesTheApprovalRequestID).
+// TestExecWaitTimeoutCarriesTheApprovalRequestID checks through a subprocess that the request id
+// the wait loop picked up while polling reaches the JSON envelope, not only the in-process return
+// value that TestRunExecWithApprovalWait_TimeoutCarriesTheApprovalRequestID checks.
 func TestExecWaitTimeoutCarriesTheApprovalRequestID(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -452,7 +451,7 @@ func TestExecResultPollTimeoutStaysATimeout(t *testing.T) {
 
 			_, stderr, exitCode := runHelperProcess(t, ts.URL,
 				"TestExecCommandWorkSessionGateHelperProcess", execWorkSessionHelperMarker,
-				[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1", "ALPACON_EXEC_TIMEOUT=3s"},
+				[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1", "ALPACON_EXEC_TIMEOUT=300ms"},
 				[]string{"prod", "--", "uptime"})
 
 			assert.Equal(t, 1, exitCode, "stderr: %s", stderr)
@@ -463,6 +462,51 @@ func TestExecResultPollTimeoutStaysATimeout(t *testing.T) {
 				return
 			}
 			assert.NotContains(t, stderr, "Hint:")
+		})
+	}
+}
+
+func TestExecLogsApprovalLookupFallback(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		status  int
+		body    string
+		warning bool
+	}{
+		{name: "forbidden", status: http.StatusForbidden, body: `{}`},
+		{name: "not found", status: http.StatusNotFound, body: `{}`},
+		{name: "missing metadata", status: http.StatusOK, body: `{"results":[{"id":"apr-1"}]}`},
+		{name: "missing command id", status: http.StatusOK, body: `{"results":[{"id":"apr-1","metadata":{}}]}`},
+		{name: "server failure", status: http.StatusInternalServerError, body: `{}`, warning: true},
+		{name: "invalid body", status: http.StatusOK, body: `{`, warning: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/events/commands/" + rejectedCommandID + "/":
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": rejectedCommandID, "status": "awaiting_approval"})
+				case "/api/approvals/approvals/-/":
+					w.WriteHeader(tc.status)
+					_, _ = w.Write([]byte(tc.body))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer ts.Close()
+
+			_, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, rejectedCommandID)
+			assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
+			assert.Contains(t, stderr, "awaiting human approval in the Alpacon console")
+			assert.NotContains(t, stderr, "(approval request:")
+			if tc.warning {
+				assert.Contains(t, stderr, "failed to read approval request")
+			} else {
+				assert.NotContains(t, stderr, "failed to read approval request")
+			}
 		})
 	}
 }

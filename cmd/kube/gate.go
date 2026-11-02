@@ -15,15 +15,13 @@ func exitNotEnabled() {
 	utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, NotEnabledMessage)
 }
 
-// ApplySurfaceGate replaces KubeCmd under root with a hidden stand-in when the
-// workspace has not reported the Kubernetes surface. It must run before
-// root.Execute: Cobra answers --help and validates arguments before any
-// PreRun hook, and decides suggestions and completion from Hidden alone, so
-// no hook on the real command could cover every way of reaching it. Swapping
-// the command leaves the enabled tree exactly as built.
+// ApplySurfaceGate replaces KubeCmd under root with a hidden stand-in when the workspace has not
+// reported the Kubernetes surface. It must run before root.Execute: Cobra answers --help and
+// validates arguments before any PreRun hook, and decides suggestions and completion from Hidden
+// alone. Swapping the command leaves the enabled tree exactly as built.
 //
-// This is a courtesy, not a control: the server refuses /api/kubernetes/ on
-// its own whenever the surface is off.
+// This is a courtesy, not a control: the server refuses /api/kubernetes/ on its own whenever the
+// surface is off.
 func ApplySurfaceGate(root *cobra.Command, enabled bool) {
 	applySurfaceGate(root, KubeCmd, enabled)
 }

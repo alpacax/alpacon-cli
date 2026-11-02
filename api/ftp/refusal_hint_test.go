@@ -44,6 +44,18 @@ func refusedBlobClient(status int, blob string) *client.AlpaconClient {
 	}
 }
 
+// downloadInBubble runs DownloadFileToPath on the fake clock, where the
+// command poll's tick and the fetch retries' backoff pass at once.
+func downloadInBubble(t *testing.T, ac *client.AlpaconClient) error {
+	t.Helper()
+	localPath := filepath.Join(t.TempDir(), "a.txt")
+	var err error
+	synctest.Test(t, func(t *testing.T) {
+		_, err = DownloadFileToPath(ac, "my-server", "/home/alice/a.txt", localPath, "", "", "")
+	})
+	return err
+}
+
 // The final fetch does not go through the shared client parser, so its error
 // reads the hint itself; without one it is what it was.
 func TestDownloadFileToPath_FetchRefusalKeepsTheHint(t *testing.T) {
@@ -51,7 +63,7 @@ func TestDownloadFileToPath_FetchRefusalKeepsTheHint(t *testing.T) {
 	const hint = "This token's file access rules do not allow this transfer for this path, account and direction."
 
 	ac := refusedBlobClient(http.StatusForbidden, `{"code": "api_token_acl_not_allowed", "gate": "file_acl", "hint": "`+hint+`\n"}`)
-	_, err := DownloadFileToPath(ac, "my-server", "/home/alice/a.txt", filepath.Join(t.TempDir(), "a.txt"), "", "", "")
+	err := downloadInBubble(t, ac)
 	require.Error(t, err)
 	assert.Equal(t, hint, utils.RefusalHint(err))
 	assert.Equal(t, http.StatusForbidden, utils.HTTPStatusCode(err))
@@ -59,7 +71,7 @@ func TestDownloadFileToPath_FetchRefusalKeepsTheHint(t *testing.T) {
 	assert.Equal(t, "api_token_acl_not_allowed", code)
 
 	ac = refusedBlobClient(http.StatusForbidden, `{"code": "api_token_acl_not_allowed"}`)
-	_, err = DownloadFileToPath(ac, "my-server", "/home/alice/a.txt", filepath.Join(t.TempDir(), "a.txt"), "", "", "")
+	err = downloadInBubble(t, ac)
 	require.Error(t, err)
 	assert.Empty(t, utils.RefusalHint(err))
 }
@@ -67,12 +79,11 @@ func TestDownloadFileToPath_FetchRefusalKeepsTheHint(t *testing.T) {
 // A 429 that outlasts the download retries still reaches the caller with its
 // code, status and hint; the retries themselves are unchanged.
 func TestDownloadFileToPath_ExhaustedThrottleKeepsTheHint(t *testing.T) {
-	restore := swapDownloadRetryDelays(time.Millisecond, time.Millisecond)
-	defer restore()
+	t.Parallel()
 	const hint = "Too many requests were made in a short time; wait, then retry."
 
 	ac := refusedBlobClient(http.StatusTooManyRequests, `{"code": "api_rate_limited", "gate": "rate", "hint": "`+hint+`"}`)
-	_, err := DownloadFileToPath(ac, "my-server", "/home/alice/a.txt", filepath.Join(t.TempDir(), "a.txt"), "", "", "")
+	err := downloadInBubble(t, ac)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "download failed after 10 attempts (last status: 429)")
 	assert.Equal(t, hint, utils.RefusalHint(err))
@@ -81,7 +92,7 @@ func TestDownloadFileToPath_ExhaustedThrottleKeepsTheHint(t *testing.T) {
 	assert.Equal(t, "api_rate_limited", code)
 
 	ac = refusedBlobClient(http.StatusTooManyRequests, `{"code": "api_rate_limited"}`)
-	_, err = DownloadFileToPath(ac, "my-server", "/home/alice/a.txt", filepath.Join(t.TempDir(), "a.txt"), "", "", "")
+	err = downloadInBubble(t, ac)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "download failed after 10 attempts (last status: 429)")
 	assert.Empty(t, utils.RefusalHint(err))

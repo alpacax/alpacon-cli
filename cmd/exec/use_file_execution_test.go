@@ -3,12 +3,14 @@ package exec
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	osexec "os/exec"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -124,8 +126,14 @@ func newRejectedCommandServer(cause string) *httptest.Server {
 // newRejectedCommandServerAs is newRejectedCommandServer with the detail's
 // account; an empty username or groupname leaves the field out.
 func newRejectedCommandServerAs(cause, username, groupname string) *httptest.Server {
+	ts, _ := newRejectedCommandSequenceServer(cause, username, groupname, false, "")
+	return ts
+}
+
+func newRejectedCommandSequenceServer(cause, username, groupname string, wait bool, grantStatus string) (*httptest.Server, *atomic.Int64) {
 	const cmdID = rejectedCommandID
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var reads atomic.Int64
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
@@ -141,13 +149,24 @@ func newRejectedCommandServerAs(cause, username, groupname string) *httptest.Ser
 				"server":              map[string]any{"id": "srv-1", "name": "prod"},
 				"work_session":        map[string]any{"id": "ses-1"},
 			}
+			read := reads.Add(1)
+			if wait {
+				detail["sudo_grant_status"] = grantStatus
+				if read <= 2 {
+					detail["status"] = "completed"
+					detail["success"] = false
+					detail["exit_code"] = 1
+					detail["result"] = denialLine("SUDO_APPROVAL_REQUIRED")
+					detail["sudo_grant_status"] = "pending_approval"
+				}
+			}
 			if username != "" {
 				detail["username"] = username
 			}
 			if groupname != "" {
 				detail["groupname"] = groupname
 			}
-			if cause != "" {
+			if cause != "" && (!wait || read > 2) {
 				detail["rejection_cause"] = cause
 				detail["rejection_gate"] = "approval"
 			}
@@ -156,6 +175,7 @@ func newRejectedCommandServerAs(cause, username, groupname string) *httptest.Ser
 			http.NotFound(w, r)
 		}
 	}))
+	return ts, &reads
 }
 
 // cliErrorEnvelope is the --output json error envelope on stderr.
@@ -236,16 +256,15 @@ func TestExecReviewerRejectionKeepsItsSentence(t *testing.T) {
 	assert.NotContains(t, stderr, "--file")
 }
 
-// TestReviewerRejectionCauseKeepsItsSentence pins that the approval_rejected
-// cause a reviewer's refusal carries stays off the file lane on both exec and
-// exec logs: exit 6, the reviewer sentence, no --file guidance, and the
-// envelope's not_approved code rather than use_file_execution.
-func TestReviewerRejectionCauseKeepsItsSentence(t *testing.T) {
+// Expiry and human rejection share exit 6 but carry distinct messages and JSON codes.
+func TestApprovalRejectionCauseMessages(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name   string
-		format string
-		run    func(t *testing.T, serverURL, format string) (string, int)
+		name        string
+		format      string
+		wait        bool
+		grantStatus string
+		run         func(t *testing.T, serverURL, format string) (string, int)
 	}{
 		{
 			name:   "exec table",
@@ -262,6 +281,28 @@ func TestReviewerRejectionCauseKeepsItsSentence(t *testing.T) {
 			run: func(t *testing.T, serverURL, _ string) (string, int) {
 				t.Helper()
 				_, stderr, exitCode := runExecHelper(t, serverURL, "--output", "json", "prod", "--", "uptime")
+				return stderr, exitCode
+			},
+		},
+		{
+			name:        "exec wait table",
+			grantStatus: "rejected",
+			wait:        true,
+			format:      utils.OutputFormatTable,
+			run: func(t *testing.T, serverURL, _ string) (string, int) {
+				t.Helper()
+				_, stderr, exitCode := runExecWaitHelper(t, serverURL, "--wait", "--wait-approval", "300ms", "prod", "--", "uptime")
+				return stderr, exitCode
+			},
+		},
+		{
+			name:        "exec wait json",
+			grantStatus: "pending_approval",
+			wait:        true,
+			format:      utils.OutputFormatJSON,
+			run: func(t *testing.T, serverURL, _ string) (string, int) {
+				t.Helper()
+				_, stderr, exitCode := runExecWaitHelper(t, serverURL, "--output", "json", "--wait", "--wait-approval", "300ms", "prod", "--", "uptime")
 				return stderr, exitCode
 			},
 		},
@@ -284,27 +325,43 @@ func TestReviewerRejectionCauseKeepsItsSentence(t *testing.T) {
 			},
 		},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	causes := []struct {
+		name, cause, code, message string
+	}{
+		{name: "expired", cause: event.RejectionCauseApprovalExpired, code: event.RejectionCauseApprovalExpired, message: "was not approved before the approval request expired"},
+		{name: "reviewer", cause: event.RejectionCauseApprovalRejected, code: event.RejectionCauseApprovalRejected, message: "was rejected by a reviewer"},
+		{name: "other", cause: "risk_denied", code: "risk_denied", message: "was refused (risk_denied)"},
+		{name: "older server", code: "not_approved", message: "was rejected by a reviewer"},
+	}
+	for _, cause := range causes {
+		t.Run(cause.name, func(t *testing.T) {
 			t.Parallel()
-			ts := newRejectedCommandServer("approval_rejected")
-			defer ts.Close()
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					ts, reads := newRejectedCommandSequenceServer(cause.cause, "root", "wheel", tc.wait, tc.grantStatus)
+					defer ts.Close()
 
-			stderr, exitCode := tc.run(t, ts.URL, tc.format)
-			assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "stderr: %s", stderr)
-			assert.Contains(t, stderr, "rejected by a reviewer")
-			assert.NotContains(t, stderr, "--file")
-			if tc.format != utils.OutputFormatJSON {
-				return
+					stderr, exitCode := tc.run(t, ts.URL, tc.format)
+					assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "stderr: %s", stderr)
+					assert.Contains(t, stderr, cause.message)
+					if tc.wait {
+						assert.EqualValues(t, 3, reads.Load(), "submission read, pending poll, then terminal poll")
+					}
+					assert.NotContains(t, stderr, "--file")
+					if tc.format != utils.OutputFormatJSON {
+						return
+					}
+					// exec may print a polling-fallback warning ahead of the envelope,
+					// so the envelope starts at the last line that opens with a brace.
+					start := strings.LastIndex("\n"+stderr, "\n{")
+					require.GreaterOrEqual(t, start, 0, "stderr: %s", stderr)
+					var envelope cliErrorEnvelope
+					require.NoError(t, json.Unmarshal([]byte(stderr[start:]), &envelope), "stderr: %s", stderr)
+					assert.Equal(t, utils.ExitCodeNotApproved, envelope.ExitCode)
+					assert.Equal(t, cause.code, envelope.ErrorCode)
+				})
 			}
-			// exec may print a polling-fallback warning ahead of the envelope,
-			// so the envelope starts at the last line that opens with a brace.
-			start := strings.LastIndex("\n"+stderr, "\n{")
-			require.GreaterOrEqual(t, start, 0, "stderr: %s", stderr)
-			var envelope cliErrorEnvelope
-			require.NoError(t, json.Unmarshal([]byte(stderr[start:]), &envelope), "stderr: %s", stderr)
-			assert.Equal(t, utils.ExitCodeNotApproved, envelope.ExitCode)
-			assert.Equal(t, utils.ErrorCodeNotApproved, envelope.ErrorCode)
 		})
 	}
 }
@@ -537,4 +594,45 @@ func TestReportCodedRefusalInvalidIDHelperProcess(t *testing.T) {
 	utils.OutputFormat = format
 	err := fmt.Errorf("work session ID: %w", utils.ErrInvalidID)
 	reportCodedRefusalWithExit(utils.ExitCodeNotApproved, "command", err, "work session ID is unusable", "", nil)
+}
+
+func TestReportCodedRefusalOfAUsageErrorExitsTwoOnlyInPlaceOfOne(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		code     string
+		wantExit int
+	}{
+		{name: "exit code 1 becomes 2", code: "1", wantExit: utils.ExitCodeUsageError},
+		{name: "a chosen exit code other than 1 is kept", code: "6", wantExit: utils.ExitCodeNotApproved},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			helper := osexec.Command(os.Args[0], "-test.run=^TestReportCodedRefusalUsageErrorHelperProcess$")
+			helper.Env = append(os.Environ(), "GO_WANT_CODED_REFUSAL_USAGE_HELPER="+tc.code)
+			var stderr bytes.Buffer
+			helper.Stderr = &stderr
+
+			err := helper.Run()
+
+			var exitErr *osexec.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, tc.wantExit, exitErr.ExitCode())
+			assert.Contains(t, stderr.String(), "the flag is unusable.")
+		})
+	}
+}
+
+func TestReportCodedRefusalUsageErrorHelperProcess(t *testing.T) {
+	code := os.Getenv("GO_WANT_CODED_REFUSAL_USAGE_HELPER")
+	if code == "" {
+		return
+	}
+	utils.OutputFormat = utils.OutputFormatTable
+	err := utils.MarkUsageError(errors.New("bad flag"))
+	if code == "1" {
+		reportCodedRefusal("command", err, "the flag is unusable", "")
+	}
+	reportCodedRefusalWithExit(utils.ExitCodeNotApproved, "command", err, "the flag is unusable", "", nil)
 }

@@ -61,13 +61,14 @@ func retryAfterSeconds(d time.Duration) int {
 	return int(seconds)
 }
 
-// CliErrorEnvelopeWithExit reports a failure and exits 1; json mode carries err's code. An
-// ErrInvalidID refusal exits 2 through CliUsageErrorEnvelopeWithExit.
+// CliErrorEnvelopeWithExit reports a failure and exits 1, or 2 when err is an ErrInvalidID refusal or
+// it or an argument is a usage error; json mode carries err's code.
 func CliErrorEnvelopeWithExit(operation string, err error, format string, args ...any) {
 	if errors.Is(err, ErrInvalidID) {
 		CliUsageErrorEnvelopeWithExit(operation, format, args...)
 		return
 	}
+	ExitIfUsageError(ExitCodeGeneralError, operation, err, format, args...)
 	ExitWithFailureJSON(Failure{ExitCode: ExitCodeGeneralError, Operation: operation, Err: err, Message: fmt.Sprintf(format, args...), NextActions: RefusalNextActions(refusalGuidance(err, args))})
 	printCliError(refusalGuidance(err, args), format, args...)
 	reportCLIError()
@@ -88,12 +89,22 @@ func refusalGuidance(err error, args []any) error {
 // CliErrorEnvelopeWithExitCode is CliErrorEnvelopeWithExit with a caller-chosen exit
 // code, for refusals a script branches on (e.g. ExitCodeNotApproved).
 func CliErrorEnvelopeWithExitCode(code int, operation string, err error, format string, args ...any) {
+	ExitIfUsageError(code, operation, err, format, args...)
 	ExitWithFailureJSON(Failure{ExitCode: code, Operation: operation, Err: err, Message: fmt.Sprintf(format, args...), NextActions: RefusalNextActions(refusalGuidance(err, args))})
 	printCliError(refusalGuidance(err, args), format, args...)
 	os.Exit(code)
 }
 
+// ExitIfUsageError is the one place a report that would exit 1 exits 2 instead: when err, or an error
+// among args, answers IsUsageError, it reports through CliUsageErrorEnvelopeWithExit. Otherwise it returns.
+func ExitIfUsageError(code int, operation string, err error, format string, args ...any) {
+	if code == ExitCodeGeneralError && (IsUsageError(err) || usageErrorIn(args)) {
+		CliUsageErrorEnvelopeWithExit(operation, format, args...)
+	}
+}
+
 // CliUsageErrorEnvelopeWithExit reports a bad flag or argument and exits 2 with error_code usage_error.
+// The envelope keeps no error from args, so a server refusal must not go through it.
 func CliUsageErrorEnvelopeWithExit(operation string, format string, args ...any) {
 	ExitWithFailureJSON(Failure{ExitCode: ExitCodeUsageError, ErrorCode: ErrorCodeUsage, Operation: operation, Message: fmt.Sprintf(format, args...)})
 	CliErrorWithExitCode(ExitCodeUsageError, format, args...)

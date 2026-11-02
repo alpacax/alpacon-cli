@@ -64,7 +64,7 @@ func runEntryAdd(cmd *cobra.Command, args []string) {
 	var flagged *flagEntry
 	if file != "" {
 		if flagged := entryFlagsSet(cmd); len(flagged) > 0 {
-			utils.CliErrorWithExit("--file cannot be combined with --%s.", flagged[0])
+			utils.CliUsageErrorWithExit("--file cannot be combined with --%s.", flagged[0])
 		}
 		data, err := os.ReadFile(file)
 		if err != nil {
@@ -94,7 +94,6 @@ func runEntryAdd(cmd *cobra.Command, args []string) {
 	}
 }
 
-// entryFlagsSet lists the single-entry flags that were given.
 func entryFlagsSet(cmd *cobra.Command) []string {
 	var set []string
 	for _, name := range []string{"token", "command", "username", "groupname", "server", "expires-at", "disabled"} {
@@ -127,14 +126,14 @@ func entryFromFlags(cmd *cobra.Command) *flagEntry {
 	tokenRef, command, username = strings.TrimSpace(tokenRef), strings.TrimSpace(command), strings.TrimSpace(username)
 	for _, required := range []struct{ flag, value string }{{"token", tokenRef}, {"command", command}, {"username", username}} {
 		if required.value == "" {
-			utils.CliErrorWithExit("--%s is required (or pass --file).", required.flag)
+			utils.CliUsageErrorWithExit("--%s is required (or pass --file).", required.flag)
 		}
 	}
 	if err := validateExpiry(expiresAt); err != nil {
-		utils.CliErrorWithExit("%s", err)
+		utils.CliUsageErrorWithExit("%s", err)
 	}
 	if err := validateServerRefs(cmd.Flags().Changed("server"), serverRefs); err != nil {
-		utils.CliErrorWithExit("%s", err)
+		utils.CliUsageErrorWithExit("%s", err)
 	}
 
 	return &flagEntry{

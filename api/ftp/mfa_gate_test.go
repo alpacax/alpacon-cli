@@ -90,7 +90,6 @@ func TestPollTransfer_SiblingsShareAFailedMFAWait(t *testing.T) {
 	}
 }
 
-// When the wait succeeds, the polls share its one link and each completes.
 func TestPollTransfer_SiblingsShareASuccessfulMFAWait(t *testing.T) {
 	t.Setenv("ALPACON_NO_BROWSER", "1")
 	t.Setenv("HOME", t.TempDir())
@@ -203,7 +202,6 @@ func TestBulkUpload_QueuedPollsShareASuccessfulMFAWait(t *testing.T) {
 	assert.Equal(t, int32(1), stub.links.Load(), "one MFA link for the whole command")
 }
 
-// The probe tolerates a transient status read the way the full poll does.
 func TestPollTransfer_ProbeRidesThroughATransientError(t *testing.T) {
 	t.Setenv("ALPACON_NO_BROWSER", "1")
 	t.Setenv("HOME", t.TempDir())

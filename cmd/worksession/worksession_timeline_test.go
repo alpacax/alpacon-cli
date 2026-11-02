@@ -243,8 +243,6 @@ func TestFormatDetails_WebshRecord(t *testing.T) {
 
 func TestFormatDetails_WebshRecord_SanitizesBeforeTruncating(t *testing.T) {
 	t.Parallel()
-	// The escape has to go before the 60-char cut, or it eats the budget the command
-	// text needs and the cell shows less than the rows beside it.
 	item := wsapi.TimelineItem{Type: "websh_record", MaskedRecord: "\x1b[2K\u202els -la"}
 	assert.Equal(t, "ls -la", formatDetails(&item))
 }
@@ -302,8 +300,6 @@ func TestOutputTimelineJSON_EscapesFormatChars(t *testing.T) {
 	assert.Contains(t, out, `\u202e`)
 }
 
-// outputTimelineJSON must emit recordings as [] not null when no recordings exist,
-// including when --no-records passes nil for recordings.
 func TestOutputTimelineJSON_RecordingsEmptyArrayNotNull(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
 		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, nil)
@@ -313,7 +309,6 @@ func TestOutputTimelineJSON_RecordingsEmptyArrayNotNull(t *testing.T) {
 	assert.Equal(t, "[]", string(result["recordings"]), "recordings must be [] not null")
 }
 
-// Both timeline and recordings keys must always be present in JSON output.
 func TestOutputTimelineJSON_BothKeysPresent(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
 		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, nil)

@@ -7,8 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// The --file lane's parse tables (TestParseRemoteExecArgs_File*) live in
-// file_test.go with the rest of that lane.
 func TestParseRemoteExecArgs(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -16,7 +14,6 @@ func TestParseRemoteExecArgs(t *testing.T) {
 		args     []string
 		expected RemoteExecArgs
 	}{
-		// ── Basic usage ─────────────────────────────────────────────
 		{
 			name: "simple command",
 			args: []string{"prod-docker", "docker", "ps"},
@@ -47,7 +44,6 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			expected: RemoteExecArgs{},
 		},
 
-		// ── SSH-like user@host syntax ───────────────────────────────
 		{
 			name: "user@host syntax",
 			args: []string{"root@prod-docker", "docker", "ps"},
@@ -67,7 +63,6 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			},
 		},
 
-		// ── Flag parsing (-u, -g) ───────────────────────────────────
 		{
 			name: "-u flag with space",
 			args: []string{"-u", "admin", "server", "ls"},
@@ -162,7 +157,6 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			},
 		},
 
-		// ── Double-dash separator (the core fix) ────────────────────
 		{
 			name: "-- separator basic",
 			args: []string{"server", "--", "docker", "ps"},
@@ -208,7 +202,6 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			},
 		},
 
-		// ── Remote commands with flags that look like alpacon flags ──
 		{
 			name: "remote -u without -- (no separator, swallowed as command arg)",
 			args: []string{"server", "grep", "-u", "pattern", "/var/log/syslog"},
@@ -234,7 +227,6 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			},
 		},
 
-		// ── Shell operators and special characters ──────────────────
 		{
 			name: "pipe operator",
 			args: []string{"root@server", "ps", "aux", "|", "grep", "nginx"},
@@ -341,7 +333,6 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			},
 		},
 
-		// ── Real-world complex commands ─────────────────────────────
 		{
 			name: "docker exec with psql flags via --",
 			args: []string{"-u", "root", "db-server", "--", "docker", "exec", "-it", "postgres", "psql", "-U", "myproject", "-d", "myproject", "-c", "SELECT 1;"},
@@ -423,7 +414,6 @@ func TestParseRemoteExecArgs(t *testing.T) {
 				Command: "ls",
 			},
 		},
-		// ── Edge cases ──────────────────────────────────────────────
 		{
 			name: "-u with only server, no command",
 			args: []string{"-u", "admin", "server"},
@@ -439,7 +429,6 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			expected: RemoteExecArgs{},
 		},
 
-		// ── --wait-approval flag ────────────────────────────────────
 		{
 			name: "wait-approval with space value",
 			args: []string{"--wait-approval", "10m", "server", "ls"},
@@ -524,7 +513,6 @@ func TestWaitTimeout(t *testing.T) {
 	assert.Equal(t, time.Duration(0), RemoteExecArgs{}.WaitTimeout())
 	assert.Equal(t, 5*time.Minute, RemoteExecArgs{Wait: true}.WaitTimeout())
 	assert.Equal(t, 10*time.Minute, RemoteExecArgs{WaitApproval: 10 * time.Minute}.WaitTimeout())
-	// --wait-approval wins over bare --wait
 	assert.Equal(t, 10*time.Minute, RemoteExecArgs{Wait: true, WaitApproval: 10 * time.Minute}.WaitTimeout())
 }
 
@@ -563,10 +551,9 @@ func TestParseRemoteExecArgs_DoubleDashIgnoresWorkSession(t *testing.T) {
 	assert.Contains(t, parsed.Command, "--work-session")
 }
 
-// TestParseRemoteExecArgs_ShellQuoting verifies that multi-word arguments
-// (e.g. the script body in bash -c '...') are re-quoted after the OS shell
-// strips the surrounding quotes during tokenization. Without this, strings.Join
-// loses the arg boundary and the server's sh fails with a syntax error (issue #164).
+// TestParseRemoteExecArgs_ShellQuoting verifies that multi-word arguments (e.g. the script body
+// in bash -c '...') are re-quoted after the local shell strips their quotes; joined bare, they
+// would lose their boundary and the remote sh would fail with a syntax error.
 func TestParseRemoteExecArgs_ShellQuoting(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -577,9 +564,7 @@ func TestParseRemoteExecArgs_ShellQuoting(t *testing.T) {
 		expectedCommand  string
 	}{
 		{
-			// Exact reproduction of issue #164 symptom 3.
-			// User types: alpacon exec root@r770-1 bash -c 'for i in 1 2 3; do echo "line-$i"; done'
-			// OS shell strips the outer single quotes; CLI receives the for-loop body as one token.
+			// The local shell strips the outer quotes, so the loop body arrives as one token.
 			name:             "bash -c for loop body (issue #164)",
 			args:             []string{"root@r770-1", "bash", "-c", `for i in 1 2 3; do echo "line-$i"; done`},
 			expectedUsername: "root",
@@ -587,8 +572,6 @@ func TestParseRemoteExecArgs_ShellQuoting(t *testing.T) {
 			expectedCommand:  `bash -c 'for i in 1 2 3; do echo "line-$i"; done'`,
 		},
 		{
-			// Simpler variant: stdout check from issue #164 symptom 1.
-			// User types: alpacon exec root@r770-1 bash -c 'echo hello-stdout'
 			name:             "bash -c simple echo",
 			args:             []string{"root@r770-1", "bash", "-c", "echo hello-stdout"},
 			expectedUsername: "root",
@@ -596,38 +579,30 @@ func TestParseRemoteExecArgs_ShellQuoting(t *testing.T) {
 			expectedCommand:  "bash -c 'echo hello-stdout'",
 		},
 		{
-			// Exit-code check from issue #164 symptom 2.
-			// User types: alpacon exec root@r770-1 bash -c 'echo before-fail; exit 1'
 			name:            "bash -c with exit code",
 			args:            []string{"server", "bash", "-c", "echo before-fail; exit 1"},
 			expectedServer:  "server",
 			expectedCommand: "bash -c 'echo before-fail; exit 1'",
 		},
 		{
-			// Non-bash interpreter with a multi-word script body.
 			name:            "python3 -c with spaces",
 			args:            []string{"server", "python3", "-c", "import sys; print(sys.version)"},
 			expectedServer:  "server",
 			expectedCommand: "python3 -c 'import sys; print(sys.version)'",
 		},
 		{
-			// Args with no special characters must not be quoted (no behavior change).
 			name:            "plain command — no quoting needed",
 			args:            []string{"server", "docker", "ps"},
 			expectedServer:  "server",
 			expectedCommand: "docker ps",
 		},
 		{
-			// Arg contains an internal single quote — must be escaped as '\''
 			name:            "arg with internal single quote",
 			args:            []string{"server", "bash", "-c", "echo it's done"},
 			expectedServer:  "server",
 			expectedCommand: `bash -c 'echo it'\''s done'`,
 		},
 		{
-			// Single token with spaces — entire command passed as one quoted CLI argument,
-			// e.g. alpacon exec server "ls -la /var/log". Must be returned unchanged
-			// so the remote shell interprets it as a command with arguments.
 			name:            "single-token command with spaces",
 			args:            []string{"server", "ls -la /var/log"},
 			expectedServer:  "server",
@@ -928,9 +903,8 @@ func TestParseRemoteExecArgs_Errors(t *testing.T) {
 	}
 }
 
-// The --purpose flag. The ceiling is counted in runes: the server limits
-// purpose to 2000 characters, counted in characters not bytes, so a byte count
-// would refuse a Korean purpose at roughly a third of the limit.
+// TestParseRemoteExecArgsPurpose counts the ceiling in runes: the server counts characters, so a
+// byte count would refuse a Korean purpose at roughly a third of the limit.
 func TestParseRemoteExecArgsPurpose(t *testing.T) {
 	t.Parallel()
 	koreanAtCeiling := make([]rune, PurposeMaxLength)

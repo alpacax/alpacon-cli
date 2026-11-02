@@ -450,9 +450,8 @@ func TestSendRequest_403FieldErrorsRenderMessage(t *testing.T) {
 
 func TestSendRequest_403ACLDeniedExplainsTokenAccessControl(t *testing.T) {
 	t.Parallel()
-	// An ACL refusal (exec, websh, cp) arrives as a bare {"code": ...} 403—the
-	// server's error handler emits nothing else. Without a mapping the user reads
-	// the generic privileges message and never learns a token rule caused it.
+	// An ACL refusal (exec, websh, cp) arrives as a bare {"code": ...} 403. Without a mapping the
+	// user reads the generic privileges message and never learns a token rule caused it.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
@@ -475,10 +474,8 @@ func TestSendRequest_403ACLDeniedExplainsTokenAccessControl(t *testing.T) {
 
 func TestSendRequest_400ACLDeniedKeepsCodeWithoutAuthStatusMessage(t *testing.T) {
 	t.Parallel()
-	// A server may still answer an ACL denial with 400 rather than 403.
-	// checkAuthStatus only handles 401/403, so this body never reaches
-	// authStatusCodeMessage—the code must still survive for callers that route
-	// on it.
+	// A server may still answer an ACL denial with 400, which checkAuthStatus never sees; the code
+	// must still survive for callers that route on it.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -900,10 +897,9 @@ func TestSendRequest_NonJSONBodyUnaffectedByCodeMapping(t *testing.T) {
 
 func TestSendRequest_401MFARequiredCodeNoReLoginHint(t *testing.T) {
 	t.Parallel()
-	// Accessing root / a system account requires MFA: the server returns 401
-	// with {"code": "auth_mfa_required"} and no detail string. This must not be
-	// mislabeled as an authentication failure or suggest re-login—the user is
-	// authenticated and only needs MFA. The code must survive for the MFA flow.
+	// Root or a system account needs MFA: the server answers 401 {"code": "auth_mfa_required"} with
+	// no detail. The user is authenticated, so no re-login hint; the code must survive for the MFA
+	// flow.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -963,11 +959,9 @@ func TestSendRequest_401CodedDenialNotMislabeledAsAuthFailure(t *testing.T) {
 	assert.Equal(t, "command", source)
 }
 
-// The RBAC role gate and the token-scope gate now answer a refusal with one of
-// these four codes instead of a legacy bare {"detail": ...}, and send no detail of
-// their own—checkAuthStatus must keep "gate"/"missing" on the error (for
-// cmd/iam's guidance table to read) and fall back to naming the missing
-// scope(s) in the generic message when there is one.
+// The role and token-scope gates answer a refusal with one of these codes and no detail, so
+// checkAuthStatus must keep "gate"/"missing" on the error and name the missing scopes in the
+// generic message.
 func TestSendRequest_403CodedRefusalsPreserveGateAndMissing(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -1048,9 +1042,8 @@ func TestSendRequest_403CodedRefusalsPreserveGateAndMissing(t *testing.T) {
 	}
 }
 
-// Every one of these codes is documented as never carrying a "detail"—but if a
-// future response does, the existing rule still applies: the server's human
-// text wins over any client-side rendering of "missing".
+// If one of these codes ever carries a "detail", the server's text still wins over the rendered
+// "missing".
 func TestSendRequest_403DetailStillWinsOverMissing(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1072,9 +1065,7 @@ func TestSendRequest_403DetailStillWinsOverMissing(t *testing.T) {
 	assert.Equal(t, []string{"scope:server:create"}, missing)
 }
 
-// A 405/429 never reaches checkAuthStatus (401/403 only), so parseAPIError is
-// what must keep gate/missing for those—the same struct field, populated on a
-// different path.
+// A 405/429 never reaches checkAuthStatus, so parseAPIError must keep gate/missing for them.
 func TestSendRequest_429KeepsGateAndMissing(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1121,7 +1112,7 @@ func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {
 	// client pays a second round trip.
 	assert.Equal(t, "/api/iam/users/-/", requestedPath)
 
-	_ = ac.LoadCurrentUser() // second call must be a no-op
+	_ = ac.LoadCurrentUser()
 	assert.Equal(t, 1, callCount, "LoadCurrentUser must hit the server exactly once")
 }
 
@@ -1379,7 +1370,7 @@ func TestLoadCurrentUser_ErrorIsCachedOnFailure(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	err1 := ac.LoadCurrentUser()
-	err2 := ac.LoadCurrentUser() // second call must return cached error without hitting server
+	err2 := ac.LoadCurrentUser()
 
 	require.ErrorContains(t, err1, "invalid token")
 	require.ErrorContains(t, err2, "invalid token")
@@ -1509,9 +1500,8 @@ func TestSendGetRequestWithContext_RetriesWithARenewalInsideTheDeadline(t *testi
 	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, sent)
 }
 
-// The server rejects a stale token in its permission layer, before the view
-// runs, so the first attempt changed nothing—but only a replayed body makes the
-// retry the same request.
+// The server rejects a stale token before handling the request, so the first attempt changed
+// nothing—but only a replayed body makes the retry the same request.
 func TestSendPostRequest_ReplaysTheBodyAfterRenewal(t *testing.T) {
 	stubTokenRenewal(t, "fresh")
 
@@ -1560,9 +1550,8 @@ func TestSendRequest_CodedUnauthorizedIsNotRenewed(t *testing.T) {
 	assert.Equal(t, utils.AuthMFARequired, code, "the code must still reach the MFA handler")
 }
 
-// auth_ip_not_allowed is a deliberate server refusal, not a stale token—unlike
-// newTestClient's legacy path, a bearer client actually reaches
-// isStaleCredential, so this is what proves it does not renew here either.
+// auth_ip_not_allowed is a deliberate refusal; unlike newTestClient's legacy path, a bearer client
+// reaches isStaleCredential, so this proves it does not renew there either.
 func TestSendRequest_CodedIPNotAllowedIsNotRenewed(t *testing.T) {
 	renewals := stubTokenRenewal(t, "fresh")
 
@@ -1724,10 +1713,8 @@ func TestSendRequest_AuthVerificationUnavailableExplainsRetryWithoutRenewal(t *t
 	assert.Equal(t, 1, requests)
 }
 
-// A proxy, a WAF or an mTLS gate can answer 401 before the request ever reaches
-// the server, and what it writes is not the JSON every server error carries.
-// No token this process can obtain moves that answer, so renewing on it would
-// spend an Auth0 round trip and a config rewrite to be refused the same way.
+// A proxy, WAF or mTLS gate can answer 401 before the server sees the request, with a body that is
+// not the JSON every server error carries; no new token moves that answer.
 func TestSendRequest_GatewayUnauthorizedIsNotRenewed(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1780,7 +1767,6 @@ func TestSendRequest_RenewalFailureSurfacesTheOriginal401(t *testing.T) {
 	_, err := ac.SendGetRequest("/api/test/")
 
 	require.Error(t, err)
-	// The caller must read what the server said, not how the renewal failed.
 	require.ErrorContains(t, err, "Authentication credentials were not provided.")
 	assert.Equal(t, 1, requests, "a failed renewal must not replay the request")
 }
@@ -1911,11 +1897,10 @@ func TestSendMultipartStreamRequest_UnrewindableBodyIsNotReplayed(t *testing.T) 
 	assert.Equal(t, 1, requests)
 }
 
-// The refresh-token grant is unbounded network I/O—no HTTP client on that path
-// sets a timeout—so it must not hold the lock every other request takes to read
-// the token. A background goroutine sharing this client (api/event/sudolistener.go
-// spawns one per MFA frame) would otherwise stall the whole session on one slow
-// Auth0 call.
+// The refresh-token grant is unbounded network I/O—no HTTP client on that path sets a timeout—so
+// it must not hold the lock every request takes to read the token; a background goroutine sharing
+// the client (api/event's sudo listener) would otherwise stall the whole session on one slow Auth0
+// call.
 func TestRenewAccessToken_DoesNotBlockTokenReads(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
@@ -2312,9 +2297,8 @@ func TestSetWebsocketHeaderWithCapabilities(t *testing.T) {
 	}
 }
 
-// Issue #397: the token is written on one goroutine while others read it for the
-// Authorization header. Nothing is stubbed, so the real grant runs. Serial because
-// t.Setenv panics alongside t.Parallel().
+// The token is written on one goroutine while others read it for the Authorization header. Nothing
+// is stubbed, so the real grant runs. Serial because t.Setenv panics alongside t.Parallel().
 func TestRefreshTokenRacesConcurrentRequests(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
@@ -2378,12 +2362,9 @@ func TestRefreshTokenRacesConcurrentRequests(t *testing.T) {
 	}
 }
 
-// TestPlanLimitMessage covers the client classification and the
-// CLI/MCP/alpamon message template for a 402.
-// workspaceURL is exercised directly here—an httptest server's URL is always
-// self-hosted-shaped, so the acme.us1.alpacon.io billing-link case can only be
-// reached by calling planLimitMessage itself rather than through a full
-// SendGetRequest round trip.
+// TestPlanLimitMessage covers the 402 classification and message template. It calls
+// planLimitMessage directly: an httptest URL is always self-hosted-shaped, so the
+// acme.us1.alpacon.io billing link is unreachable through a round trip.
 func TestPlanLimitMessage(t *testing.T) {
 	t.Parallel()
 
@@ -2568,11 +2549,8 @@ func TestConsoleLabel(t *testing.T) {
 	}
 }
 
-// TestSendRequest_PlanLimitEnvelopeRendersReadableMessage pins the fix for
-// what today's client renders as garbled field errors: before axis/next joined
-// the envelope isEnvelopeOnly rejected this body on sight of "axis", and the
-// fallback field-validation renderer turned it into
-// "axis: server; gate: plan; next: ...".
+// TestSendRequest_PlanLimitEnvelopeRendersReadableMessage guards against isEnvelopeOnly rejecting
+// a 402 body on sight of "axis", which rendered it as "axis: server; gate: plan; next: ...".
 func TestSendRequest_PlanLimitEnvelopeRendersReadableMessage(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

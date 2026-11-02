@@ -415,8 +415,6 @@ func (e hintedKubeError) ErrorCode() string   { return e.code }
 func (e hintedKubeError) ErrorSource() string { return "" }
 func (e hintedKubeError) ErrorHint() string   { return e.hint }
 
-// The server's hint is the guidance, so the local sentence gives way and the
-// caller's fallback line prints the error with the hint under it.
 func TestKubeSessionErrorHint_DefersToTheServerHint(t *testing.T) {
 	t.Parallel()
 	hinted := hintedKubeError{code: utils.KubeSessionAgentModeNotSupported, hint: "Open the kube session from a work session you created."}
@@ -467,7 +465,6 @@ func TestValidatePort(t *testing.T) {
 	}
 }
 
-// The token is the credential; the JSON result describes the session only.
 func TestKubeConfigResultJSONCarriesNoToken(t *testing.T) {
 	t.Parallel()
 	srv := newSessionServer()

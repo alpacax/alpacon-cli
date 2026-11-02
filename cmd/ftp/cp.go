@@ -63,7 +63,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 		allowOverwrite := !noOverwrite
 
 		if len(args) < 2 {
-			utils.CliErrorWithExit("You must specify at least two arguments.\n\n" +
+			utils.CliUsageErrorWithExit("You must specify at least two arguments.\n\n" +
 				"Usage examples:\n" +
 				"  • Upload file to server:\n" +
 				"    alpacon cp /local/file.txt server:/remote/path/\n" +
@@ -77,16 +77,15 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
 		username, err := normalizeArgs(args, username)
 		if err != nil {
-			utils.CliErrorWithExit("%v", err)
+			utils.CliUsageErrorWithExit("%v", err)
 			return
 		}
 
 		sources := args[:len(args)-1]
 		dest := args[len(args)-1]
 
-		// Validate source and destination paths
 		if err := validatePaths(sources, dest); err != nil {
-			utils.CliErrorWithExit("%s", err.Error())
+			utils.CliUsageErrorWithExit("%s", err.Error())
 			return
 		}
 
@@ -138,7 +137,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
 			utils.CliSuccess("Downloaded %s to %s", wrappedSrc, dest)
 		} else {
-			utils.CliErrorWithExit("Invalid combination of source and destination paths.\n\n" +
+			utils.CliUsageErrorWithExit("Invalid combination of source and destination paths.\n\n" +
 				"Valid operations:\n" +
 				"  • Upload (local → remote): alpacon cp /local/file server:/remote/path/\n" +
 				"  • Download (remote → local): alpacon cp server:/remote/file /local/path/\n\n" +
@@ -157,12 +156,10 @@ func init() {
 	CpCmd.Flags().String("work-session", "", "Attach this transfer to a work-session (overrides 'work-session use')")
 }
 
-// isRemotePath determines if the given path is a remote server path.
 func isRemotePath(path string) bool {
 	return utils.IsRemoteTarget(path)
 }
 
-// isLocalPath determines if the given path is a local file system path.
 func isLocalPath(path string) bool {
 	return utils.IsLocalTarget(path)
 }
@@ -208,7 +205,6 @@ func stripUserPrefix(arg string) (rewritten, user string) {
 }
 
 func validatePaths(sources []string, dest string) error {
-	// Check for mixed local and remote sources (not allowed)
 	hasLocal := false
 	hasRemote := false
 
@@ -228,7 +224,6 @@ func validatePaths(sources []string, dest string) error {
 			"  • Cannot mix: alpacon cp file1.txt server:/file2.txt /dest/  ❌")
 	}
 
-	// Check for invalid remote path format
 	allPaths := make([]string, 0, len(sources)+1)
 	allPaths = append(allPaths, sources...)
 	allPaths = append(allPaths, dest)
@@ -263,7 +258,6 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 		err = ftp.UploadFile(client, src, dest, username, groupname, allowOverwrite, workSessionID)
 	}
 	if err != nil {
-		// Parse error and provide specific guidance
 		errStr := err.Error()
 		if strings.Contains(errStr, "no such file or directory") {
 			utils.CliErrorWithExit("Source file(s) not found: %s\n\n"+
@@ -303,7 +297,6 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 
 	err = ftp.DownloadFile(client, sources, dest, username, groupname, recursive, workSessionID)
 	if err != nil {
-		// Parse error and provide specific guidance
 		errStr := err.Error()
 		if strings.Contains(errStr, "no such file or directory") || strings.Contains(errStr, "file not found") {
 			utils.CliErrorWithExit("Source file not found: '%s' on server '%s'.\n\n"+
@@ -340,12 +333,9 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 	return serverName, nil
 }
 
-// wantsPermissionAdvice reports whether err reads as a permission error the
-// local advice (run as root, pick a writable path) answers: a file permission
-// on the server, or a refusal from a server that sends no hint. A refusal
-// carrying the server's hint gets the hint instead, which the caller's error
-// line prints; the advice would point at the wrong fix for a refusal such as
-// a token's file access rules.
+// wantsPermissionAdvice reports whether err is a permission error the run-as-root advice fits:
+// a file permission on the server, or a refusal with no server hint. A hinted refusal, such as a
+// token's file access rules, gets the hint instead.
 func wantsPermissionAdvice(err error) bool {
 	if utils.RefusalHint(err) != "" {
 		return false

@@ -44,22 +44,15 @@ type WorkSession struct {
 	Adjustments       *Adjustments          `json:"adjustments"`
 	Recommendations   []Recommendation      `json:"recommendations"`
 
-	// PendingExtensionRequest is the open extension request for this session, or
-	// nil when there is none. Every 'extend' request follows the workspace's
-	// approval policy, the same rule 'work-session create' uses; when it needs a
-	// decision instead of auto-approving, 'extend' answers 202 with this
-	// populated instead of 200 with the session already extended. It stays
-	// populated on later reads too, until the request is approved, rejected,
-	// cancelled, or lapses.
+	// PendingExtensionRequest is the open extension request, nil when there is none. 'extend'
+	// answers 202 with it set when the workspace's approval policy holds the request, and later
+	// reads keep it set until the request is approved, rejected, cancelled, or lapses.
 	PendingExtensionRequest *PendingExtensionRequest `json:"pending_extension_request"`
 }
 
-// PendingExtensionRequest names the open request 'extend' filed instead of
-// applying immediately. RequestedExpiresAt is the expiry being asked for;
-// ExpiresAt is the request's own deadline—when it lapses
-// undecided, never later than the session's current expiry at request
-// time—not to be confused with WorkSession.ExpiresAt, which stays at its
-// prior value until the request is decided.
+// PendingExtensionRequest is the open request 'extend' filed instead of applying at once.
+// ExpiresAt is the request's own deadline, never later than the session's expiry when it was
+// filed; WorkSession.ExpiresAt keeps its prior value until the request is decided.
 type PendingExtensionRequest struct {
 	ID                 string    `json:"id"`
 	RequestedExpiresAt time.Time `json:"requested_expires_at"`
@@ -96,8 +89,8 @@ type Recommendation struct {
 }
 
 type WorkSessionAttributes struct {
-	// Active is the active-session marker ("*" for the workspace's active session, empty otherwise).
-	// Decorated by cmd/worksession.MarkActive; hidden from JSON output via the "-" tag.
+	// Active is "*" on the workspace's active session and empty otherwise;
+	// cmd/worksession.MarkActive sets it.
 	Active      string `json:"-"           table:"Active"`
 	ID          string `json:"id"          table:"ID"`
 	Status      string `json:"status"      table:"Status"`
@@ -119,20 +112,13 @@ type WorkSessionCreateRequest struct {
 	TargetAccountUsername string `json:"target_account_username,omitempty"`
 }
 
-// SudoPolicyInline is a sudo policy bound to a work session. It serves three
-// roles: read (when returned on a WorkSession), create (attached at session
-// create time), and modify (sent on update). Commands are the allowed patterns
-// (wildcards permitted); SessionAuthorized lets matching sudo run inside the
-// approved work session without an MFA prompt, which is the only way a
-// non-interactive caller (e.g. an AI agent running 'exec') can sudo. Users is
-// intentionally omitted—the server binds the policy to the session assignee so it never
-// applies to other workspace users.
+// SudoPolicyInline is a sudo policy bound to a work session, read from a WorkSession and sent on
+// create and update. Commands are the allowed patterns, wildcards permitted. SessionAuthorized lets
+// matching sudo run in the approved session without an MFA prompt, the only way a non-interactive
+// caller can sudo. There is no Users field: the server binds the policy to the session assignee.
 //
-// ID is set only on read and on modify: the sudo_policies field of an update
-// PATCH is the FULL desired set, so existing policies must be echoed back with
-// their ID (modify in place) alongside new entries without an ID (additions).
-// Omitting an existing policy from the set deletes it, so callers must preserve
-// the current entries.
+// ID is set only on read and on update. An update's sudo_policies is the full desired set: send
+// existing policies back with their ID and new ones without, since a policy left out is deleted.
 type SudoPolicyInline struct {
 	ID                string   `json:"id,omitempty"`
 	Commands          []string `json:"commands"`
@@ -169,10 +155,9 @@ func (p *SudoPolicyInline) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// WorkSessionUpdateRequest is a partial update: omitempty leaves unset fields
-// untouched. SudoPolicies is PUT-style — the server replaces the whole set, so
-// existing policies must be echoed back or they are deleted. An empty slice is
-// also omitted (omitempty), so this request cannot clear policies.
+// WorkSessionUpdateRequest is a partial update: omitempty leaves unset fields untouched.
+// SudoPolicies replaces the whole set, so existing policies must be sent back or they are deleted;
+// an empty slice is omitted, so this request cannot clear policies.
 type WorkSessionUpdateRequest struct {
 	Title        string             `json:"title,omitempty"`
 	Description  string             `json:"description,omitempty"`
@@ -183,10 +168,9 @@ type WorkSessionUpdateRequest struct {
 	SudoPolicies []SudoPolicyInline `json:"sudo_policies,omitempty"`
 }
 
-// WorkSessionExtendRequest is the payload for the extend action. Reason is
-// always required by the server (WORK_SESSION_EXTENSION_REASON_REQUIRED
-// otherwise); omitted here when empty so a caller who never passed --reason
-// gets the server's own refusal rather than an empty string silently sent.
+// WorkSessionExtendRequest is the payload for the extend action. The server requires Reason
+// (work_session_extension_reason_required otherwise); it is omitted when empty so a caller without
+// --reason gets that refusal rather than an empty string sent.
 type WorkSessionExtendRequest struct {
 	ExpiresAt string `json:"expires_at"`
 	Reason    string `json:"reason,omitempty"`

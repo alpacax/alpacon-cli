@@ -206,8 +206,6 @@ func TestKubeCommandNamesAndAliases(t *testing.T) {
 	}
 }
 
-// The suggested kubectl command must reach the file just written: one kubectl
-// does not read by default is named with --kubeconfig.
 func TestKubeConfigNextStepNamesAFileKubectlDoesNotRead(t *testing.T) {
 	dir := t.TempDir()
 	read := filepath.Join(dir, "read")
@@ -260,8 +258,6 @@ func TestShellQuoteFor(t *testing.T) {
 	}
 }
 
-// The warning names a real risk only when an earlier KUBECONFIG entry can
-// override what was written.
 func TestKubeConfigWarnsOnlyWhenAnEarlierFileCanOverride(t *testing.T) {
 	dir := t.TempDir()
 	first, second := filepath.Join(dir, "first"), filepath.Join(dir, "second")

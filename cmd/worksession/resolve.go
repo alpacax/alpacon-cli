@@ -8,8 +8,7 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// WorkSessionEnvVar is the environment variable consulted as a fallback when
-// no --work-session flag is given. Resolution order: flag > env var > config.
+// WorkSessionEnvVar is the environment variable consulted when no --work-session flag is given.
 const WorkSessionEnvVar = "ALPACON_WORK_SESSION"
 
 // Resolve returns the effective work-session UUID using flag > env var > config priority.

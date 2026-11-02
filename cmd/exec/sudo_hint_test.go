@@ -54,10 +54,9 @@ func TestSudoDenialHint(t *testing.T) {
 			wantContains: []string{"MFA", "work-session update", "may require approval"},
 		},
 		{
-			// The AI judges the command against both the session title and its
-			// description (WorkSessionRiskContext), but only a title edit applies at
-			// once: a description edit on an approved/active session is queued for an
-			// approval of its own, which is the wait this path exists to skip.
+			// The command is judged against both the session title and its description, but only a
+			// title edit applies at once: a description edit on an approved or active session
+			// queues for an approval of its own, which is the wait this path exists to skip.
 			name: "intent-deviation offers only the edit that skips the wait",
 			code: "SUDO_INTENT_DEVIATION",
 			wantContains: []string{
@@ -439,7 +438,6 @@ func TestIsApprovalDenial(t *testing.T) {
 	}
 }
 
-// The --file lane's re-run hint cases (TestReRunHint_File) live in file_test.go.
 func TestReRunHint(t *testing.T) {
 	t.Parallel()
 	t.Run("minimal: server and command only", func(t *testing.T) {

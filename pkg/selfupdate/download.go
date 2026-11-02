@@ -130,10 +130,9 @@ func downloadTo(assetURL, destPath string, maxBytes int64) error {
 	return nil
 }
 
-// writeBounded copies src into file, closes it, and reports whether the stream
-// ran past maxBytes. Reading one byte more than the bound is what separates a
-// stream that overran it from one landing exactly on it, so the +1 and the >
-// are a single decision and belong in a single place.
+// writeBounded copies src into file, closes it, and reports whether the stream ran past
+// maxBytes. Reading one byte past the bound tells an overrun from a stream landing exactly on it,
+// so the +1 and the > are one decision and stay together here.
 func writeBounded(file *os.File, src io.Reader, maxBytes int64) (bool, error) {
 	written, copyErr := io.Copy(file, io.LimitReader(src, maxBytes+1))
 	closeErr := file.Close()

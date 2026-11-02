@@ -21,14 +21,13 @@ import (
 const (
 	defaultBaseDomain = "alpacon.io"
 
-	// whoami verification outcomes (see classifyWhoamiVerification).
 	whoamiVerified = "verified"
 	whoamiFallback = "fallback"
 	whoamiFail     = "fail"
 )
 
-// knownCloudRegions are the Alpacon Cloud regions shown when --region is omitted.
-// Add a region here when it launches.
+// knownCloudRegions are the Alpacon Cloud regions shown when --region is omitted; the first is the
+// default. Add a region here when it launches.
 var knownCloudRegions = []string{"us1", "ap1"}
 
 var (
@@ -89,12 +88,12 @@ with the saved target as the default. Non-interactive login requires a HOST or
 	Run: func(cmd *cobra.Command, args []string) {
 		workspaceURL, workspaceName, baseDomain, ok, err := resolveLoginTarget(args, workspaceFlag, regionFlag)
 		if err != nil {
-			utils.CliErrorWithExit("%s", err.Error())
+			utils.CliUsageErrorWithExit("%s", err.Error())
 		}
 
 		if !ok {
 			if err := validateInteractiveLoginTargetPrompt(utils.IsInteractiveShell()); err != nil {
-				utils.CliErrorWithExit("%s", err.Error())
+				utils.CliUsageErrorWithExit("%s", err.Error())
 			}
 			cfg, _ := config.LoadConfig()
 			workspaceURL, workspaceName, baseDomain, err = promptForLoginTarget(cfg)
@@ -311,7 +310,6 @@ func hostBelongsToBaseDomain(workspaceURL, baseDomain string) bool {
 	return hostname == baseDomain || strings.HasSuffix(hostname, "."+baseDomain)
 }
 
-// buildCloudWorkspaceURL assembles an Alpacon Cloud workspace URL.
 func buildCloudWorkspaceURL(workspace, region string) string {
 	return fmt.Sprintf("https://%s.%s.%s", workspace, region, defaultBaseDomain)
 }
@@ -355,7 +353,6 @@ func isCloudWorkspaceURL(workspaceURL string) bool {
 	return strings.EqualFold(formatHostURL(workspaceURL), buildCloudWorkspaceURL(workspace, region))
 }
 
-// parseHostURL trims the input, defaults a missing scheme to https, and parses it.
 func parseHostURL(raw string) (*url.URL, error) {
 	raw = strings.TrimSpace(raw)
 	if !strings.Contains(raw, "://") {
@@ -387,9 +384,8 @@ func parseCloudWorkspaceURL(workspaceURL string) (workspace, region string, ok b
 	return parts[0], parts[1], true
 }
 
-// normalizeCloudFlags trims flag values and reports whether the user supplied
-// only blank (whitespace-only) values, which must be rejected rather than
-// silently treated as if no flags were passed.
+// normalizeCloudFlags trims flag values and reports whether the user passed only
+// blank values, which must be rejected rather than read as no flags.
 func normalizeCloudFlags(workspace, region string) (w, r string, blank bool) {
 	w, r = strings.TrimSpace(workspace), strings.TrimSpace(region)
 	blank = (workspace != "" || region != "") && w == "" && r == ""
@@ -397,12 +393,9 @@ func normalizeCloudFlags(workspace, region string) (w, r string, blank bool) {
 }
 
 // resolveLoginTarget resolves the non-interactive login target from the HOST
-// argument and the cloud --workspace/--region flags, applying all combination
-// guards. ok is false when neither a HOST nor cloud flags were supplied, so the
-// caller falls back to saved config or interactive prompts.
+// argument and the --workspace/--region flags. ok is false when neither was
+// supplied, so the caller falls back to saved config or interactive prompts.
 func resolveLoginTarget(args []string, workspace, region string) (workspaceURL, workspaceName, baseDomain string, ok bool, err error) {
-	// Trim cloud flag values so whitespace-only input is rejected up front
-	// instead of slipping past validation or building a malformed URL.
 	workspace, region, blank := normalizeCloudFlags(workspace, region)
 	if blank {
 		return "", "", "", false, errors.New("--workspace/--region cannot be blank")
@@ -420,7 +413,6 @@ func resolveLoginTarget(args []string, workspace, region string) (workspaceURL, 
 		workspaceURL = formatHostURL(args[0])
 		return workspaceURL, utils.ExtractWorkspaceName(workspaceURL), utils.ExtractBaseDomain(workspaceURL), true, nil
 	case workspace != "" || region != "":
-		// Alpacon Cloud mode via flags (non-interactive)
 		if err := validateCloudFlags(workspace, region); err != nil {
 			return "", "", "", false, err
 		}
@@ -430,7 +422,6 @@ func resolveLoginTarget(args []string, workspace, region string) (workspaceURL, 
 	}
 }
 
-// validateCloudFlags validates the paired --workspace/--region flags.
 func validateCloudFlags(workspace, region string) error {
 	if workspace == "" && region == "" {
 		return nil
@@ -479,8 +470,8 @@ func unsupportedHostTargetError() error {
 	return errors.New("URL credentials, paths, queries, and fragments are not supported, and the scheme must be http or https. For Alpacon Cloud use 'alpacon login --workspace <name> --region <region>'; for self-hosted pass only the host, with optional http/https scheme and port (e.g. 'alpacon login alpacon.example.com')")
 }
 
-// formatHostURL normalizes a host argument into a full URL.
-// localhost and 127.0.0.1 default to http://, everything else to https://.
+// formatHostURL normalizes a host argument into a full URL. Loopback hosts
+// (localhost, 127.0.0.1, ::1) default to http://, everything else to https://.
 func formatHostURL(host string) string {
 	host = strings.TrimSpace(host)
 	lowerHost := strings.ToLower(host)
@@ -561,17 +552,14 @@ func verifyLoginLegacy(ac *client.AlpaconClient, token string) {
 	}
 }
 
-// shouldFailOnProfileError reports whether a failed user-profile load should abort
-// login. It is only consulted for non-service-token logins; service tokens skip the
-// preload entirely. Browser (Auth0) and username/password logins are human logins that
-// always have a user profile, so a failed preload signals a real problem and is fatal.
-// A personal API token was already validated against /api/status/ in
-// LoginAndSaveCredentials, so a failed preload is non-fatal.
+// shouldFailOnProfileError reports whether a failed user-profile load aborts login. It is consulted
+// only for non-service-token logins; service tokens skip the preload.
+// Browser and username/password logins always have a profile, so a failure is fatal;
+// a personal API token was already validated against /api/status/, so it is not.
 func shouldFailOnProfileError(token string) bool {
 	return token == ""
 }
 
-// printDeviceCodePrompt prints the device-code prompt; see utils.PrintDeviceCodePrompt.
 func printDeviceCodePrompt(w io.Writer, verificationURI, userCode string) (printedURI string) {
 	return utils.PrintDeviceCodePrompt(w, verificationURI, userCode)
 }

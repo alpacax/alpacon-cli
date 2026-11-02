@@ -109,8 +109,6 @@ func TestRunUse_RejectsAgentSession(t *testing.T) {
 	defer ts.Close()
 	ac := newTestClient(ts)
 
-	// Agent sessions are not workspace-attachable; even when active they must be
-	// rejected here so an interactive exec/websh never silently runs against one.
 	_, err := RunUse(ac, "ses-agent")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not workspace-attachable")
@@ -122,11 +120,9 @@ func TestRunUse_RejectsAgentSession(t *testing.T) {
 func TestRunUnset_Idempotent(t *testing.T) {
 	setupTmpConfig(t)
 
-	// First call on empty
 	err := RunUnset()
 	require.NoError(t, err)
 
-	// Set something, unset, verify clear
 	require.NoError(t, config.SetActiveWorkSession("ses-xyz"))
 	err = RunUnset()
 	require.NoError(t, err)
@@ -134,10 +130,8 @@ func TestRunUnset_Idempotent(t *testing.T) {
 	assert.Empty(t, got)
 }
 
-// TestRunUse_FilesUnderClientWorkspaceWhenConfigSwitchedMidCommand covers a --wait --use
-// create that blocks for minutes on a human approver while another shell's `alpacon ws use`
-// rewrites the config's workspace name; the session must file under the client's pinned
-// workspace, not whatever the file names when the wait ends.
+// A --wait --use create can block for minutes while another shell's `alpacon ws use` rewrites the
+// config's workspace; the session must file under the client's pinned workspace.
 func TestRunUse_FilesUnderClientWorkspaceWhenConfigSwitchedMidCommand(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)

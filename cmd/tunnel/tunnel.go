@@ -135,8 +135,7 @@ func validateTunnelArgs(cmd *cobra.Command, args []string) error {
 
 func runTunnel(cmd *cobra.Command, args []string) {
 	if err := tunnelruntime.ValidatePorts(tunnelFlags.remotePort, tunnelFlags.localPort); err != nil {
-		utils.CliError("%s", err)
-		os.Exit(1)
+		utils.CliUsageErrorWithExit("%s", err)
 	}
 	ac, err := client.NewAlpaconAPIClient()
 	if err != nil {

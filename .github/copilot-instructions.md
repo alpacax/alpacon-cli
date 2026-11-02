@@ -24,12 +24,12 @@ Use: "records SESSION_ID"
 
 ## Subcommand alias convention
 
-- list → `Aliases: []string{"list", "all"}`
+- ls → `Aliases: []string{"list"}`
 - delete → `Aliases: []string{"rm"}`
 - describe → `Aliases: []string{"desc"}`
 - Group commands may have semantic aliases (e.g., `workspace` → `ws`, `server` → `servers`)
 - **Group commands**: `RunE`—returns error to trigger help when no subcommand is given
-- **Leaf commands**: `Run` + `utils.CliErrorWithExit`—preserves colored output; `RunE` would print plain text and may append usage on error
+- **Leaf commands**: `Run` + `utils.CliErrorWithExit` (exit 1), or `utils.CliUsageErrorWithExit` (exit 2) for a flag or argument the command rejects—the message is the command's own; an error returned from `RunE` reaches `cmd.Execute()`, which prints it behind a generic "While executing the command:" prefix
 
 ## Code review guidelines
 
@@ -55,17 +55,19 @@ This repository is public, and so is everything in it: comments, test fixtures, 
 
 - `0` success
 - `1` general error
-- `2` usage error—a flag or argument rejected by `work-session`, `event wait`/`watch`, or `utils.RequirePositiveInt` (`utils.ExitCodeUsageError`); every other command's own validation and Cobra parse errors exit `1`
+- `2` usage error—a flag or argument the command rejected in its own validation, so editing the command line fixes it (`utils.ExitCodeUsageError`); Cobra parse errors still exit `1`. These prompts check for a terminal first and exit `2` in a non-interactive run: `--yes`, `server create`'s `--platform` and `--token`, `user invite`'s email, `login`'s HOST, the `work-session create` and `extend` flags, `edit`'s `--force`; any other prompt reads stdin and exits `1` on no input, even where a flag would have answered it. Report a usage error with `utils.CliUsageErrorWithExit`
 - `3` WorkSession gate denied (`utils.ExitCodeWorkSessionDenied`)
 - `4` Pending human approval, outcome still open (`utils.ExitCodePendingApproval`)
 - `5` Server busy with active user work (`utils.ExitCodeServerBusy`)
 - `6` Approval not granted—settled without the grant (`utils.ExitCodeNotApproved`)
+- `7` Purpose required—an agent's command held while the gate asks what it is for, answerable by the caller rather than by an approver (`utils.ExitCodePurposeRequired`)
+- `8` A newer release exists (only `alpacon update --check`, `utils.ExitCodeUpdateAvailable`)
 
 Keep these stable—scripts, CI, and AI agents branch on them. See README "Exit codes".
 
 ## Release workflow conventions
 
-- Every `uses:` in `.github/workflows/` that names another repository is pinned to a 40-character commit SHA, with the version in a trailing comment. The one local reference, `uses: ./.github/workflows/build-and-test.yaml`, runs at the calling commit and has nothing to pin: `uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0`
+- Every `uses:` in `.github/workflows/` that names another repository is pinned to a 40-character commit SHA, with the version in a trailing comment. The one local reference, `uses: ./.github/workflows/build-and-test.yaml`, runs at the calling commit and has nothing to pin: `uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0`
 - Never replace a pinned SHA with a tag. A tag is a ref its own repository can move—`v6.1.0` no less than `v6`—so a moved tag runs new code inside our release build with nothing in our diff to show it. A SHA is the hash of the commit it names and cannot come to mean different content
 - Keep the trailing version comment. It is the only thing that says which version a SHA is, and it is what Dependabot rewrites when raising a pin. `.github/dependabot.yml` has it check the actions and the Go modules weekly, each ecosystem grouped into one PR with a Conventional Commit prefix
 - Raising a pin means changing both the SHA and its comment together. Resolve the SHA rather than guessing it: `gh api repos/OWNER/REPO/commits/vX.Y.Z --jq .sha`. The one exception is `danielmundi/upload-packagecloud` (used four times in `.github/workflows/release.yaml`, the only action that receives `PACKAGECLOUD_TOKEN`): it has exactly one tag, `v1`, and no upstream commit since 2021-08, so there is no newer version to resolve and Dependabot has nothing to raise it to. Its pin stays where it is; the follow-up is replacing the action with a direct call to the PackageCloud upload API rather than raising the pin

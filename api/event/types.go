@@ -8,6 +8,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 // phaseDescriptions humanizes server-classified error_phase identifiers.
@@ -48,8 +49,7 @@ var phaseHints = map[string]string{
 }
 
 // RemoteCommandError is returned when the remote command completed but exited
-// with a non-zero status. Callers populate ExitCode from the server response;
-// errorFromDetails falls back to 1 when the server omits exit_code.
+// with a non-zero status. ExitCode is 1 when the server omits exit_code.
 type RemoteCommandError struct {
 	Output     string
 	ExitCode   int
@@ -74,10 +74,9 @@ type ClientTimeoutError struct {
 func (e *ClientTimeoutError) ErrorHint() string { return e.hint }
 
 // PendingApprovalError is returned when the server parked a command at the
-// "awaiting_approval" status: the job was accepted but a human must approve it
-// out of band in the Alpacon console before it runs. CommandID identifies the
-// parked job so a --wait caller can poll it to completion—re-submitting would
-// create a duplicate command (and a duplicate approval request).
+// "awaiting_approval" status: a human must approve it out of band in the Alpacon
+// console before it runs. CommandID identifies the parked job so a --wait caller can
+// poll it; re-submitting would create a duplicate command and approval request.
 type PendingApprovalError struct {
 	CommandID string
 	// FileSuggestion is the server's proposal to run the held command as a
@@ -118,20 +117,21 @@ type CommandRejectedError struct {
 // command, so it covers one server even when the same script went to several.
 const RejectionCauseUseFileExecution = "use_file_execution"
 
+const (
+	RejectionCauseApprovalExpired  = "approval_expired"
+	RejectionCauseApprovalRejected = "approval_rejected"
+)
+
 // AwaitingPurposeError is returned when the server parked a command at the
-// "awaiting_purpose" status: the verification gate would have queued it for a
-// human, so instead of opening an approval request it is asking the requester
-// what the command is for. Nobody has been notified, so this is not
-// a wait—the answer is the caller's to give, with 'alpacon exec purpose'.
-// CommandID identifies the parked job; re-submitting would create a second
-// command that gets its own demand and may run twice.
+// "awaiting_purpose" status: instead of queuing it for a human, the gate asks the
+// requester what the command is for. Nobody has been notified, so the answer is the
+// caller's to give, with 'alpacon exec purpose'. CommandID identifies the parked job;
+// re-submitting would create a second command that may run twice.
 type AwaitingPurposeError struct {
 	CommandID string
-	// When the demand stops being answerable, as the server computed it. Nil
-	// when absent—an older server, or a command that was never asked. The
-	// reporter states the remaining window only when this is present:
-	// COMMAND_PURPOSE_DEADLINE is env-overridable and no endpoint publishes it,
-	// so a client deriving this itself would be guessing the window's length.
+	// When the demand stops being answerable, as the server computed it; nil on an
+	// older server or a command never asked. No endpoint publishes the window's
+	// length, so the remaining window is stated only when this is present.
 	ExpiresAt *time.Time
 }
 
@@ -162,16 +162,11 @@ type EventDetails struct {
 	Server                types.ServerSummary `json:"server"`
 	RequestedBy           types.UserSummary   `json:"requested_by"`
 	ApprovedFileExecution *json.RawMessage    `json:"approved_file_execution,omitempty"`
-	// What the requester said this command is for, and when the ask expires.
-	// Both are absent on a server predating the read exposure, and on any
-	// command nobody was asked—which is every command until the gate is
-	// enabled, so nil and empty are the ordinary shapes here.
-	//
-	// The expiry is server-derived and read instead of `purpose_requested_at`:
-	// the window's length is COMMAND_PURPOSE_DEADLINE and no endpoint publishes
-	// it, so a start time alone would leave this client guessing the length.
-	// The start time is deliberately not parsed—no surface here shows it, and a
-	// field read by nothing is a promise no surface keeps.
+	// What the requester said this command is for, and when the ask expires. Both are
+	// absent on an older server and on any command nobody was asked, so nil and empty
+	// are ordinary here. The expiry is read rather than purpose_requested_at because no
+	// endpoint publishes the window's length; purpose_requested_at is deliberately not
+	// parsed: nothing shows it.
 	Purpose          string     `json:"purpose"`
 	PurposeExpiresAt *time.Time `json:"purpose_expires_at"`
 	// The server fills these only on the command detail; the list response omits
@@ -182,8 +177,7 @@ type EventDetails struct {
 	// FileExecutionSuggestion is set on a held command line the server reads as
 	// a script on the target; absent otherwise and on older servers.
 	FileExecutionSuggestion *FileExecutionSuggestion `json:"file_execution_suggestion"`
-	// RejectionCause says why a rejected command was refused when the gate,
-	// not a reviewer, decided it; empty otherwise and on older servers.
+	// RejectionCause says why a rejected command was refused; empty on older servers.
 	RejectionCause string `json:"rejection_cause"`
 	// The account the command ran as and the work session it ran under, so a
 	// re-run printed from the detail repeats them. WorkSession is null when the
@@ -213,10 +207,9 @@ type CommandRequest struct {
 	// with it in hand the assessor judges on the first pass and the demand
 	// round trip never happens.
 	Purpose string `json:"purpose,omitempty"`
-	// Declares that this client answers a purpose demand. The gate does not arm
-	// without it, so the declaration is the opt-in—and it is unconditional here
-	// because every exec path surfaces the demand to its caller instead of
-	// stalling on it.
+	// Declares that this client answers a purpose demand; the gate does not arm
+	// without it. Unconditional because every exec path surfaces the demand to its
+	// caller instead of stalling on it.
 	PurposeDemandSupported bool `json:"purpose_demand_supported,omitempty"`
 	// File selects the verified file lane. Its presence is what the server
 	// switches on, so it is omitted from every generic-lane request and no
@@ -326,8 +319,10 @@ func (e *CommandRejectedError) Error() string {
 	switch {
 	case e.Cause == RejectionCauseUseFileExecution:
 		reason = "was refused because its command line carries a script body (" + RejectionCauseUseFileExecution + ")"
-	case e.Expired:
-		reason = "was not approved before the request expired"
+	case e.Cause == RejectionCauseApprovalExpired || e.Expired:
+		reason = "was not approved before the approval request expired"
+	case e.Cause != "" && e.Cause != RejectionCauseApprovalRejected:
+		reason = "was refused (" + utils.SanitizeTerminalText(e.Cause) + ")"
 	}
 	if e.CommandID == "" {
 		return "command " + reason
@@ -335,12 +330,14 @@ func (e *CommandRejectedError) Error() string {
 	return fmt.Sprintf("command %s %s", e.CommandID, reason)
 }
 
-// ErrorCode returns use_file_execution for the --output json envelope; every
-// other refusal returns "" until the CLI has a sentence for its cause, since
-// Error() still reads it as a reviewer's.
+// ErrorCode preserves the rejection cause for callers that distinguish expiry,
+// a reviewer's decision, and other refusals without parsing the message.
 func (e *CommandRejectedError) ErrorCode() string {
-	if e.Cause == RejectionCauseUseFileExecution {
+	if e.Cause != "" {
 		return e.Cause
+	}
+	if e.Expired {
+		return RejectionCauseApprovalExpired
 	}
 	return ""
 }
@@ -384,9 +381,8 @@ func IsRunningStatus(status string) bool {
 	}
 }
 
-// IsAwaitingApprovalStatus reports whether status is the server's hold state for a
-// command parked pending out-of-band human approval (HITL). The server reports
-// it while the command awaits approval and has not yet been delivered to the agent.
+// IsAwaitingApprovalStatus reports whether status is the server's hold for a
+// command awaiting out-of-band human approval, not yet delivered to the agent.
 func IsAwaitingApprovalStatus(status string) bool {
 	return status == "awaiting_approval"
 }
@@ -400,17 +396,14 @@ func IsAwaitingPurposeStatus(status string) bool {
 }
 
 // IsRejectedStatus reports whether status is the server's terminal state for a
-// command a reviewer refused. It never ran, and re-submitting it only files a
-// second approval request.
+// command a reviewer or the gate refused. It never ran.
 func IsRejectedStatus(status string) bool {
 	return status == "rejected"
 }
 
 // IsStatusOnlyFailure reports the terminal failures whose whole outcome is a
-// line about the status: the command never reached a result worth printing. It
-// lives here so the polling path and the detach path read the triple from one
-// place—both decide alike on an unreadable output, and a fourth terminal status
-// must not reach one of them and miss the other.
+// line about the status: the command never reached a result worth printing. The polling and
+// detach paths both read it, so a new status-only terminal state goes here, not at either caller.
 func IsStatusOnlyFailure(status string) bool {
 	return status == "stuck" || status == "error" || status == "cancelled"
 }

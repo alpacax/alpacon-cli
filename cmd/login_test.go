@@ -571,7 +571,7 @@ func TestLoginNonInteractiveNoTargetCommand(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, stderr, exitCode := runLoginCommandHelper(t, tt.args)
 
-			assert.Equal(t, 1, exitCode)
+			assert.Equal(t, utils.ExitCodeUsageError, exitCode)
 			assert.Contains(t, stderr, "login target is required in non-interactive mode")
 			assert.Contains(t, stderr, "--workspace and --region")
 			assert.NotContains(t, stderr, "Using saved workspace")
@@ -813,11 +813,8 @@ func TestLoginFailureMessages_VerificationUnavailableAsksToRetry(t *testing.T) {
 
 func TestShouldFailOnProfileError(t *testing.T) {
 	t.Parallel()
-	// Browser/password login (no token) → profile failure is fatal.
 	assert.True(t, shouldFailOnProfileError(""))
-	// Any token login → profile failure is non-fatal (credential already validated via
-	// /api/status/). Service tokens skip the preload entirely; these cases cover the
-	// personal-token path and the pure predicate.
+	// Service tokens skip the preload; the alpst case checks the predicate alone.
 	assert.False(t, shouldFailOnProfileError("alpst-x"))
 	assert.False(t, shouldFailOnProfileError("alpat-x"))
 }
@@ -870,7 +867,7 @@ func TestLoginCommandHelperProcess(t *testing.T) {
 	}
 	args, ok := helperArgsAfter(os.Args, "login-helper")
 	if !ok {
-		os.Exit(2)
+		os.Exit(99)
 	}
 	RootCmd.SetArgs(args)
 	if err := RootCmd.Execute(); err != nil {
@@ -1009,7 +1006,6 @@ func TestPersistWorkspaceEnv_SkipsAnotherWorkspace(t *testing.T) {
 	assert.Contains(t, stderr, "Did not save the workspace identity and Kubernetes support for https://ws.example.com")
 }
 
-// loginRefusal is a coded refusal carrying the server's hint.
 type loginRefusal struct{ code, hint string }
 
 func (e loginRefusal) Error() string       { return "permission denied (HTTP 403, code: " + e.code + ")" }

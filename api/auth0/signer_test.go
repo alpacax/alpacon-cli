@@ -150,8 +150,7 @@ func TestPollForToken_ReturnsSentinels(t *testing.T) {
 	}
 }
 
-// The extraction that added the signer variant must leave the login's request
-// as it was: the workspace audience, and offline_access for its refresh token.
+// The login's request keeps the workspace audience, and offline_access for its refresh token.
 func TestRequestDeviceCode_KeepsTheWorkspaceAudience(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	var sent map[string]string

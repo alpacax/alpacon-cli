@@ -94,10 +94,8 @@ func (e *testCodedError) Error() string       { return e.msg }
 func (e *testCodedError) ErrorCode() string   { return e.code }
 func (e *testCodedError) ErrorSource() string { return "" }
 
-// TestExtendCommand_SendsReason covers the immediate (auto-approved) 200 path
-// end-to-end through the command's Run func: --reason flows onto the request
-// body, and the printed JSON result carries the server's own expires_at (not
-// just the value the flag sent).
+// The 200 path end to end: --reason reaches the request body, and the JSON result carries the
+// server's expires_at rather than the flag's value.
 func TestExtendCommand_SendsReason(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -142,13 +140,9 @@ func TestExtendCommand_SendsReason(t *testing.T) {
 	assert.Equal(t, "2026-06-01T12:00:00Z", got.ExpiresAt)
 }
 
-// TestExtendCommand_PendingApproval covers the 202 shape end-to-end: the
-// server names an extension request instead of applying it, and the CLI
-// reports it pending and exits ExitCodePendingApproval (4) rather than
-// treating it as a success or a failure. The requested expiry and the
-// request's own deadline land in the envelope's context, not only in the
-// message text. Runs as a subprocess (see worksession_error_test.go's
-// runWorkSessionHelper) because this path calls os.Exit.
+// The 202 path end to end: the CLI reports pending, exits 4, and puts the requested expiry and the
+// request's deadline in the envelope's context. It runs as a subprocess because the path calls
+// os.Exit.
 func TestExtendCommand_PendingApproval(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -217,12 +211,8 @@ func TestExtendCommand_PendingApproval(t *testing.T) {
 	assert.True(t, sawDescribe, "next_actions must point at describe to check status")
 }
 
-// TestExtendCommand_StalePendingOn200_IsSuccess covers the case the status
-// code (not the body field) exists to resolve: a 200 whose body still carries
-// a pending_extension_request left over from before the workspace's approval
-// policy switched to auto-approve, or from a request the periodic sweep has
-// not yet cleared. The extension applied—status says so—so this must report
-// success (exit 0), not pending.
+// A 200 whose body still carries a stale pending_extension_request applied the extension, so the
+// command reports success, not pending.
 func TestExtendCommand_StalePendingOn200_IsSuccess(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -270,10 +260,8 @@ func TestExtendCommand_StalePendingOn200_IsSuccess(t *testing.T) {
 	assert.Equal(t, "2026-06-01T12:00:00Z", got.ExpiresAt)
 }
 
-// TestExtendCommand_ReasonRequired_MapsToReadableMessage covers the CLI's own
-// message for WORK_SESSION_EXTENSION_REASON_REQUIRED: the server sends no
-// human detail on this code, so the friendly text has to come from
-// extendErrorMessage rather than the generic fallback.
+// The server sends no human detail on work_session_extension_reason_required, so the readable text
+// must come from extendErrorMessage rather than the generic fallback.
 func TestExtendCommand_ReasonRequired_MapsToReadableMessage(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -300,9 +288,7 @@ func TestExtendCommand_ReasonRequired_MapsToReadableMessage(t *testing.T) {
 	assert.Contains(t, env.Message, "--reason")
 }
 
-// TestExtendCommand_AlreadyPending_MapsToReadableMessage covers the CLI's own
-// message for WORK_SESSION_EXTENSION_ALREADY_PENDING, which likewise carries
-// no human detail from the server.
+// work_session_extension_already_pending likewise carries no human detail from the server.
 func TestExtendCommand_AlreadyPending_MapsToReadableMessage(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

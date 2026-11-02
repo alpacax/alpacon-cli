@@ -82,7 +82,7 @@ const (
 	APIInvalidCursor     = "api_invalid_cursor"
 	APISearchUnavailable = "api_search_unavailable"
 
-	// ServerBusyWithUserWork: disruptive action refused; --force overrides it.
+	// ServerBusyWithUserWork means the server refused a disruptive action; --force overrides it.
 	ServerBusyWithUserWork = "server_busy_with_user_work"
 
 	// ServerPAMInstallUnsupported rides a 400: the host has no alpamon-pam
@@ -96,28 +96,21 @@ const (
 	// ServerPAMInstallInProgress rides a 409: an alpamon-pam install is already pending.
 	ServerPAMInstallInProgress = "server_pam_install_in_progress"
 
-	// CommandInlineCredential: the server refused a command because its command
-	// line carries a credential (e.g. a -p/--password flag, a KEY=VALUE secret such
-	// as PGPASSWORD=..., or a user:pass@host connection string), which the server
-	// would otherwise persist in the stored command line. Move the secret to
-	// --env instead.
-	// The rejected-forms list above is repeated in the exec and websh help text
-	// and the README's "When a command is denied" section—when the server-side
-	// gate changes, update all of them together.
+	// CommandInlineCredential means the server refused a command whose command line carries a
+	// credential (a -p/--password flag, a KEY=VALUE secret such as PGPASSWORD=..., or a
+	// user:pass@host connection string) it would otherwise store. Move the secret to --env. The
+	// exec and websh help and the README's "When a command is denied" section repeat these forms;
+	// update them together.
 	//
-	// The server also accepts a per-command credential_exposure_acknowledged
-	// override, which the CLI deliberately does not expose: it records the
-	// exposure rather than preventing it (hygiene, not authorization—it carries
-	// no role gate), so exposing it would offer a one-flag way past the gate
-	// where rewriting with --env costs the same. --env stays the only path.
+	// The CLI deliberately does not expose the server's credential_exposure_acknowledged override:
+	// it records the exposure rather than preventing it (hygiene, not authorization, with no role
+	// gate), so it would be a one-flag way past the gate where rewriting with --env costs the same.
+	// --env stays the only path.
 	CommandInlineCredential = "command_inline_credential"
 
-	// APITokenACLNotAllowed: the server refused the request because the token's
-	// access control rules do not cover it—the command, the server, or the file path
-	// falls outside the envelope an admin granted this token. The refusal is
-	// permanent for the same request: a retry submits the same thing. Widen the
-	// rules with 'alpacon token acl' instead. The server sends this on a 403 with no
-	// human detail, so authStatusCodeMessage in client/client.go renders the message.
+	// APITokenACLNotAllowed means the token's access control rules do not cover the command, server
+	// or file path, so a retry fails the same way; widen them with 'alpacon token acl'. It rides a
+	// 403 with no detail, so authStatusCodeMessage in client/client.go renders the message.
 	APITokenACLNotAllowed = "api_token_acl_not_allowed"
 
 	// CommandACLMoved rides a 405 on a command-ACL write once command ACLs live on
@@ -128,12 +121,10 @@ const (
 	// whatever its scopes and ACL rules say; only 'alpacon login' without -t lifts it.
 	AuthInteractiveChannelRequiresPresence = "auth_interactive_channel_requires_presence"
 
-	// AuthMFARequiresHumanPrincipal rides a 403: the action requires a person's MFA,
-	// which a token (API or service) cannot complete, so completing MFA under the
-	// token cannot lift it. Signing in with 'alpacon login' without -t can. Removing
-	// the action from the workspace's MFA required actions also can, but only for an
-	// action the workspace armed: the server holds some actions (security settings,
-	// sudo and approval policy writes, RBAC roles) to this no matter what.
+	// AuthMFARequiresHumanPrincipal rides a 403: the action needs a person's MFA, which a token
+	// (API or service) cannot complete; 'alpacon login' without -t can. Removing the action from
+	// the workspace's MFA required actions also lifts it, except for actions the server always
+	// holds to this (security settings, sudo and approval policy writes, RBAC roles).
 	AuthMFARequiresHumanPrincipal = "auth_mfa_requires_human_principal"
 
 	// The token-scope gate's refusals: the token's scopes do not cover this call, or
@@ -141,7 +132,7 @@ const (
 	APITokenScopeMissing          = "api_token_scope_missing"
 	APITokenScopeActionUnresolved = "api_token_scope_action_unresolved"
 
-	// WorkSession gate codes the server returns
+	// WorkSession gate codes the server returns.
 	WorkSessionRequired         = "work_session_required"
 	WorkSessionNotUsable        = "work_session_not_usable"
 	WorkSessionNotActive        = "work_session_not_active"
@@ -149,11 +140,11 @@ const (
 	WorkSessionScopeNotAllowed  = "work_session_scope_not_allowed"
 	WorkSessionServerNotAllowed = "work_session_server_not_allowed"
 	WorkSessionAssigneeMismatch = "work_session_assignee_mismatch"
-	// WorkSessionAgentSessionRequired: the CLI declared an AI agent, and the
+	// WorkSessionAgentSessionRequired means the CLI declared an AI agent, and the
 	// session it named is a user session. Only an agent session serves it.
 	WorkSessionAgentSessionRequired = "work_session_agent_session_required"
 
-	// WorkSessionAccountNotApproved: the command names an account other than
+	// WorkSessionAccountNotApproved means the command names an account other than
 	// the one the session was approved to run as.
 	WorkSessionAccountNotApproved = "work_session_account_not_approved"
 
@@ -171,77 +162,62 @@ const (
 	KubeSessionChannelOpenFailed     = "kube_session_channel_open_failed"
 	KubeSessionPrincipalNotSupported = "kube_session_principal_not_supported"
 
-	// WorkSession extension approval. Every 'work-session extend' request
-	// requires a reason and follows the workspace's approval policy, the same
-	// rule 'work-session create' uses; a session may hold only one pending
-	// extension request at a time. See cmd/worksession's extend command.
+	// WorkSession extension refusals: every 'work-session extend' needs a reason and follows the
+	// workspace's approval policy, as 'work-session create' does, and a session holds at most one
+	// pending extension request.
 	WorkSessionExtensionReasonRequired = "work_session_extension_reason_required"
 	WorkSessionExtensionAlreadyPending = "work_session_extension_already_pending"
-	// WorkSessionAdmissionDenied: the workspace refuses this request outright
+	// WorkSessionAdmissionDenied means the workspace refuses this request outright
 	// (session creation, or an extension)—not a queued request waiting on a
 	// human, a hard no.
 	WorkSessionAdmissionDenied = "work_session_admission_denied"
 
-	// ExitCodeGeneralError is the process exit code for an ordinary failure—what
-	// CliErrorWithExit already exits with. Name it when calling CliErrorWithExitCode
-	// so the general case reads like the specific ones beside it.
+	// ExitCodeGeneralError is the process exit code for an ordinary failure, the one
+	// CliErrorWithExit exits with. Name it when calling CliErrorWithExitCode so the general case
+	// reads like the specific ones beside it.
 	ExitCodeGeneralError = 1
 
-	// ExitCodeUsageError is the process exit code for a flag or argument a command
-	// rejected in its own validation. It is distinct from ExitCodeGeneralError (1):
-	// 1 means the request failed (network, server), 2 means the invocation itself
-	// was wrong. Scripts and AI agents branch on it to fix the command line rather
-	// than retry unchanged.
+	// ExitCodeUsageError is the process exit code for a flag or argument a command rejected in its
+	// own validation. Unlike ExitCodeGeneralError, it means the invocation itself was wrong, so
+	// scripts and AI agents fix the command line rather than retry it unchanged.
 	ExitCodeUsageError = 2
 
 	// ExitCodeWorkSessionDenied is the process exit code for WorkSession gate refusals.
 	ExitCodeWorkSessionDenied = 3
 
-	// ExitCodePendingApproval is the process exit code for an action whose
-	// approval is still open: a sudo HITL denial that created an approval
-	// request, a work session created in the pending state, or a wait that ended
-	// (timed out or was interrupted) with the outcome undecided.
-	// It is distinct from ExitCodeWorkSessionDenied (3): the action was not
-	// refused, it is awaiting an out-of-band approve/reject in the Alpacon console
-	// (web/Slack). Scripts and AI agents branch on it to "wait or check later"
-	// rather than treat it as a hard failure.
+	// ExitCodePendingApproval is the process exit code for an action whose approval is still open:
+	// a sudo denial that created an approval request, a work session created pending, or a wait
+	// that ended (timed out or interrupted) undecided. Unlike ExitCodeWorkSessionDenied nothing was
+	// refused, so scripts and AI agents wait or check later.
 	ExitCodePendingApproval = 4
 
 	// PendingApprovalStatus is the stable machine-readable status string emitted
 	// under --output json when an action is pending human approval.
 	PendingApprovalStatus = "pending_approval"
 
-	// ExitCodeServerBusy is the process exit code for a disruptive server action
-	// refused because the server has active user work (server_busy_with_user_work).
-	// It is a transient, retryable "busy now → retry later" condition, distinct from
-	// a hard failure (1): scripts and AI agents branch on it to retry when idle
-	// (or re-run with --force) rather than give up.
+	// ExitCodeServerBusy is the process exit code for a disruptive server action refused because
+	// the server has active user work (server_busy_with_user_work). Scripts and AI agents retry
+	// when the server is idle, or re-run with --force.
 	ExitCodeServerBusy = 5
 
-	// ExitCodeNotApproved is the process exit code for an awaited approval that
-	// ended without being granted—rejected, expired, revoked, cancelled, or
-	// completed. It is the counterpart of ExitCodePendingApproval (4): 4 means the
-	// outcome is still open, 6 means it settled without the grant. Scripts and AI
-	// agents branch on it to stop retrying rather than keep re-requesting approval.
+	// ExitCodeNotApproved is the process exit code for an awaited approval that ended without the
+	// grant: rejected, expired, revoked, cancelled, or completed. Where ExitCodePendingApproval
+	// means the outcome is still open, this one tells scripts and AI agents to stop re-requesting
+	// approval.
 	ExitCodeNotApproved = 6
 
-	// ExitCodePurposeRequired is the process exit code for a command the
-	// verification gate parked while it asks what the command is for.
-	// It is deliberately not ExitCodePendingApproval (4): nothing is pending on a
-	// human, no approval request exists, and the next move belongs to the caller
-	// that submitted the command. Scripts and AI agents branch on it to answer
-	// with 'alpacon exec purpose' rather than to wait or to give up—and the
-	// window is about a minute, so waiting loses it.
+	// ExitCodePurposeRequired is the process exit code for a command the verification gate parked
+	// while it asks what the command is for. No approval request exists, so it is not
+	// ExitCodePendingApproval: the caller answers with 'alpacon exec purpose' within about a minute
+	// rather than wait.
 	ExitCodePurposeRequired = 7
 
 	// PurposeRequiredStatus is the stable machine-readable status string emitted
 	// under --output json when a command is parked awaiting its purpose.
 	PurposeRequiredStatus = "purpose_required"
 
-	// ExitCodeUpdateAvailable is the process exit code for `alpacon update --check`
-	// finding a newer release. It is distinct from ExitCodeGeneralError (1): 1 means
-	// the check itself failed, 8 means the check succeeded and a newer version
-	// exists. Scripts and CI branch on it to schedule an update.
+	// ExitCodeUpdateAvailable is the process exit code for `alpacon update --check` finding a newer
+	// release; a failed check exits ExitCodeGeneralError instead.
 	ExitCodeUpdateAvailable = 8
 )
 
@@ -272,12 +248,10 @@ type retryAfterCarrier interface {
 	RetryAfter() time.Duration
 }
 
-// HTTPStatusCode returns the HTTP status carried by err, or 0 if none—lets callers tell 404 from 401.
-// Along a chain the outermost status wins. An error that joins several (a
-// BatchError, errors.Join, fmt.Errorf with more than one %w) has a status only
-// when the whole tree under it names one: the statuses of every branch, nested
-// joins included, are collected, and one distinct status is the answer while
-// two or more give 0.
+// HTTPStatusCode returns the HTTP status carried by err, or 0 if none. Along a chain the outermost
+// status wins. An error that joins several (a BatchError, errors.Join, fmt.Errorf with more than
+// one %w) has a status only when the statuses found across its tree, nested joins included, are
+// all one; two or more distinct statuses give 0.
 func HTTPStatusCode(err error) int {
 	statuses := map[int]bool{}
 	collectStatusCodes(err, statuses)
@@ -365,18 +339,14 @@ type submissionError struct{ err error }
 func (e *submissionError) Error() string { return e.err.Error() }
 func (e *submissionError) Unwrap() error { return e.err }
 
-// MarkSubmission tags err, if any, as the error of the request that carries the
-// operation's side effect itself (the command submission, an upload or download
-// create, a session create, a one-request change), including whatever lookup
-// precedes that request. Only such an error says the server did or did not act,
-// so only it can be retried after MFA or ridden through when it is unprocessed.
+// MarkSubmission tags err, if any, as the error of the request that carries the operation's side
+// effect (the command submission, an upload or download create, a session create, a one-request
+// change), or of a lookup before it. Only such an error says whether the server acted, so only it
+// can be retried after MFA or ridden through when unprocessed.
 //
-// The tag is read off the error exactly as returned, never through wrapping: an
-// operation that makes further requests after the one it tagged returns their
-// errors untagged, and a caller that wraps a tagged error hides the tag. An
-// untagged error is therefore the safe default, "the operation already took
-// effect": HandleCommonErrors passes it through and the wait ends on it. The
-// status and dial error underneath stay readable through the tag.
+// The tag is read off the error as returned, never through wrapping, so a later request's error
+// and a wrapped tagged error count as untagged, which means "the operation already took effect":
+// HandleCommonErrors passes it through. The status and dial error underneath stay readable.
 func MarkSubmission(err error) error {
 	if err == nil || IsSubmissionError(err) {
 		return err
@@ -400,14 +370,10 @@ func endSubmission(err error) error {
 	return err
 }
 
-// IsUnprocessedRequestError reports whether err shows the server did not act on
-// the request: the connection never opened, or the server answered 429 or 503.
-// Unlike IsTransientRequestError it leaves out a lost response, a 502 and a 504,
-// which can follow a request that already ran, so a request that is not
-// idempotent may be sent again on it. Only the tagged error of the
-// side-effecting request itself (MarkSubmission) can be unprocessed: any other
-// error came from a later request of an operation the server already acted on,
-// whatever status it carries.
+// IsUnprocessedRequestError reports whether err shows the server did not act on the request: the
+// dial failed, or the server answered 429 or 503. Unlike IsTransientRequestError it leaves out a
+// lost response, 502 and 504, which can follow a request that ran, so a non-idempotent request may
+// be resent on it. Only a MarkSubmission-tagged error qualifies.
 func IsUnprocessedRequestError(err error) bool {
 	if err == nil || !IsSubmissionError(err) {
 		return false
@@ -469,7 +435,6 @@ func ParseErrorResponse(err error) (string, string) {
 	for e := range codeChain(err) {
 		errStr := e.Error()
 
-		// Try JSON format: {"code": "...", "source": "..."}
 		start := strings.Index(errStr, "{")
 		if start != -1 {
 			var errorResp ErrorResponse
@@ -478,7 +443,6 @@ func ParseErrorResponse(err error) (string, string) {
 			}
 		}
 
-		// Try "code: X; source: Y" format (produced by parseAPIError in the HTTP client)
 		var iterCode, iterSource string
 		for part := range strings.SplitSeq(errStr, "; ") {
 			part = strings.TrimSpace(part)

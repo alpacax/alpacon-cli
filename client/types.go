@@ -28,10 +28,9 @@ type AlpaconClient struct {
 	// tokenMu guards accessToken, which sendRequest renews mid-flight. Unexporting
 	// the field keeps other packages out, token_boundary_test.go keeps this one out.
 	tokenMu sync.Mutex
-	// refreshMu serializes the refresh-token grant so one expiry costs one round
-	// trip. The grant is unbounded network I/O, so it runs under this lock and
-	// never under tokenMu—otherwise a slow Auth0 would stall every other request
-	// the client has in flight.
+	// refreshMu serializes the refresh-token grant so one expiry costs one round trip. The grant
+	// has no timeout (no HTTP client on that path sets one), so it never runs under tokenMu,
+	// which every request takes.
 	refreshMu sync.Mutex
 	loadOnce  sync.Once
 	loadErr   error

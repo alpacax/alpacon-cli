@@ -24,7 +24,8 @@ import (
 )
 
 const (
-	// DefaultApprovalWaitTimeout is the shared --wait default so exec, work-session create, and event wait match; not a ceiling (--wait-approval exceeds it), preserving the old 30 × 10s window.
+	// DefaultApprovalWaitTimeout is the shared --wait default, so exec, work-session create and
+	// event wait match; --wait-approval can exceed it.
 	DefaultApprovalWaitTimeout = 5 * time.Minute
 
 	// zipDirPerm is what a directory an archive asks for is created as. An archive
@@ -42,19 +43,12 @@ var (
 	ansiEscapeRE = regexp.MustCompile(`\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|[PX^_][^\x1b]*\x1b\\|\[[\x30-\x3f]*[\x20-\x2f]*[@-~]|[\x20-\x2f]*[\x40-\x7e])`)
 )
 
-// ShowLogo renders the Pacabot mascot with up to 3 lines of text. When the
-// terminal is wide enough the text sits to the right of the art (lines 1-3
-// align with art rows 1-3); otherwise it falls back to rendering text below
-// the art so wrapped lines don't break the half-block pixel art rendering.
+// ShowLogo renders the Pacabot mascot with up to 3 lines of text, beside the art when the terminal
+// is wide enough and below it otherwise, so wrapped lines cannot break the half-block pixel art.
 //
-// Pixel art ported from strategy/brand-assets/pacabot/pacabot.sh. In color
-// mode, body cells render as spaces with BG=cyan so the cell background
-// fills any inter-line gap. In plain mode (no TTY / NO_COLOR), body cells
-// substitute █ glyphs so the silhouette stays visible without ANSI codes.
-// Edge half-blocks (▄ ▀) are kept in both modes — they define the shape:
-// ▄ corners and ! bar bottom (FG cyan, glyph extends below the em-box in
-// most fonts), and ▀ for the eye (grey on cyan) and the mouth (grey FG).
-// Brand colors: primary #27AAE1, secondary #58595B.
+// In color mode body cells are spaces on a cyan background, which fills any gap between lines; in
+// plain mode (no TTY or NO_COLOR) they are █ glyphs. The ▄ and ▀ edge half-blocks stay in both
+// modes because they define the shape. Brand colors: primary #27AAE1, secondary #58595B.
 func ShowLogo(rightLines []string) {
 	useColor := os.Getenv("NO_COLOR") == "" && term.IsTerminal(int(os.Stderr.Fd()))
 
@@ -68,8 +62,6 @@ func ShowLogo(rightLines []string) {
 		r = "\033[0m"
 	}
 
-	// Clamp to 3 lines so inline and stacked layouts behave consistently
-	// regardless of how many lines the caller provides.
 	if len(rightLines) > 3 {
 		rightLines = rightLines[:3]
 	}
@@ -88,10 +80,8 @@ func ShowLogo(rightLines []string) {
 		return s + line + r
 	}
 
-	// Art occupies columns 0..22 (visual). If the terminal is too narrow to
-	// fit the longest right-side line beside the art, wrapped text would
-	// render between art rows and break the pixel art. Detect and fall back
-	// to printing text below the art.
+	// If the longest line does not fit beside the 22-column art, wrapped text would land between
+	// art rows, so the text goes below the art instead.
 	const artWidth = 22
 	maxRight := 0
 	for _, line := range rightLines {
@@ -99,14 +89,10 @@ func ShowLogo(rightLines []string) {
 			maxRight = n
 		}
 	}
-	// Default to the stacked layout when terminal size is unknown — we'd
-	// rather print a clean vertical layout than risk wrapping text into
-	// the middle of the pixel art.
+	// An unknown terminal size takes the stacked layout rather than risk wrapping into the art.
 	cols, _, err := term.GetSize(int(os.Stderr.Fd()))
 	inline := err == nil && cols >= artWidth+maxRight+1
 
-	// Body cells render as spaces with BG=cyan in color mode; in plain mode
-	// we substitute █ glyphs so the art stays visible without ANSI codes.
 	bodyEar, bodyEleven, bodyTen, bodyEight, bodyTwo, bodyBar := "  ", "           ", "          ", "        ", "  ", " "
 	if !useColor {
 		bodyEar, bodyEleven, bodyTen, bodyEight, bodyTwo, bodyBar = "██", "███████████", "██████████", "████████", "██", "█"
@@ -157,14 +143,13 @@ func ExtractBaseDomain(workspaceURL string) string {
 	return strings.Join(parts[len(parts)-2:], ".")
 }
 
-// ExtractWorkspaceName extracts workspace name from workspace URL
+// ExtractWorkspaceName extracts workspace name from workspace URL.
 func ExtractWorkspaceName(workspaceURL string) string {
 	parsedURL, err := url.Parse(workspaceURL)
 	if err != nil {
 		return ""
 	}
 
-	// Extract subdomain from hostname (e.g., myworkspace.us1.alpacon.io -> myworkspace)
 	hostname := parsedURL.Hostname()
 	parts := strings.Split(hostname, ".")
 	if len(parts) > 0 {
@@ -411,8 +396,8 @@ func Unzip(src string, dest string) error {
 	defer func() { _ = r.Close() }()
 
 	if len(r.File) == 0 {
-		// An empty archive creates nothing, as it did before the destination was
-		// pinned: the MkdirAll below would otherwise leave a directory behind.
+		// An empty archive creates nothing; the MkdirAll below would otherwise leave a directory
+		// behind.
 		return nil
 	}
 
@@ -442,8 +427,6 @@ func Unzip(src string, dest string) error {
 	roots := newZipRoots(rootNames...)
 
 	for _, f := range r.File {
-		// Prevent zip slip vulnerability by validating file path
-		// Reject absolute paths
 		if filepath.IsAbs(f.Name) {
 			return fmt.Errorf("invalid file path (absolute path): %s", f.Name)
 		}
@@ -735,7 +718,7 @@ func SplitAndTrim(s, sep string) []string {
 // RequirePositiveInt exits with a usage error when an integer flag is not positive.
 func RequirePositiveInt(flagName string, value int) {
 	if value <= 0 {
-		CliErrorWithExitCode(ExitCodeUsageError, "--%s must be a positive integer.", flagName)
+		CliUsageErrorWithExit("--%s must be a positive integer.", flagName)
 	}
 }
 

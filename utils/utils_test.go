@@ -165,10 +165,8 @@ func TestTimeUtils(t *testing.T) {
 		{"3 hours ago", now.Add(-3 * time.Hour), "3 hours ago"},
 		{"yesterday", now.Add(-30 * time.Hour), "yesterday"},
 		{"3 days ago", now.Add(-72 * time.Hour), "3 days ago"},
-		// Future cases use a buffer (e.g. +30s, +30m) to guard against integer
-		// truncation: time.Duration division truncates toward zero, so
-		// 5m0s becomes 4m59s by the time it reaches the threshold check.
-		// Past cases don't need a buffer because they are already in the past.
+		// Future cases add a buffer: time.Duration division truncates toward zero, so an exact 5m0s
+		// reads as 4m59s by the threshold check.
 		{"in a few seconds", now.Add(30 * time.Second), "in a few seconds"},
 		{"in 5 minutes", now.Add(5*time.Minute + 30*time.Second), "in 5 minutes"},
 		{"in 3 hours", now.Add(3*time.Hour + 30*time.Minute), "in 3 hours"},
@@ -235,8 +233,8 @@ func TestSaveFile_CreatesNestedDirectories(t *testing.T) {
 	assert.Equal(t, "hello world", string(content))
 }
 
-// TestSaveFile_RetainsExistingFileOnWriteError proves dest stays untouched when
-// the write can't even start; TestSaveStreamAtomic_RetainsExistingFileOnReadError covers the mid-copy case.
+// TestSaveFile_RetainsExistingFileOnWriteError covers a write that cannot start; the mid-copy case
+// is TestSaveStreamAtomic_RetainsExistingFileOnReadError.
 func TestSaveFile_RetainsExistingFileOnWriteError(t *testing.T) {
 	t.Parallel()
 	skipUnlessUnixModes(t)
@@ -712,8 +710,7 @@ func TestRequirePositiveIntExitsWithUsageErrorCode(t *testing.T) {
 	assert.Equal(t, ExitCodeUsageError, exitErr.ExitCode())
 }
 
-// Serial: the child process reaches an os.Exit, and the parent's own run of this
-// function is a two-line guard that parallelism buys nothing for.
+// Serial: the child process reaches an os.Exit, and the parent's own run returns at once.
 func TestRequirePositiveIntHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_REQUIRE_POSITIVE_INT_HELPER") != "1" {
 		return

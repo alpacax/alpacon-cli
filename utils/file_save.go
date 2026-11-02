@@ -14,7 +14,9 @@ import (
 
 const stagingPerm = 0600 // temporary while a replacement write is staged; the real mode lands once it completes
 
-const saveFilePerm = 0666 // matches os.Create's implicit mode so this fix doesn't narrow access to the non-secret certs, CRLs, and CSRs SaveFile's callers write; umask still applies
+// saveFilePerm is os.Create's mode, so the non-secret certs, CRLs and CSRs SaveFile writes stay
+// readable; umask applies.
+const saveFilePerm = 0666
 
 var replacementTempPattern = regexp.MustCompile(`^\.alpacon-\d+-\d+-\d+\.tmp$`)
 
@@ -26,7 +28,7 @@ func IsReplacementTempName(name string) bool {
 }
 
 func SaveFile(fileName string, data []byte) error {
-	_, err := SaveStreamAtomic(fileName, bytes.NewReader(data), saveFilePerm) // delegates rather than truncating fileName directly before the write succeeds
+	_, err := SaveStreamAtomic(fileName, bytes.NewReader(data), saveFilePerm)
 	return err
 }
 
@@ -56,11 +58,9 @@ func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (in
 	}
 	warnKeptWiderMode(fileName, replacing, finalPerm, newFilePerm)
 
-	// A replacement is staged narrow and widened once the content is complete, so
-	// a download that dies mid-stream never leaves its partial content readable
-	// to anyone else. A new file cannot be staged the same way: it would need a
-	// chmod that bypasses the umask, and a caller passing 0666 is asking for the
-	// umask to apply.
+	// A replacement is staged at stagingPerm and widened once complete, so a download that dies
+	// midway never leaves partial content readable to others. A new file is not: that would need a
+	// chmod that bypasses the umask, which a caller passing 0666 wants applied.
 	createPerm := finalPerm
 	if replacing {
 		createPerm = stagingPerm
@@ -106,16 +106,12 @@ func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (in
 	return written, nil
 }
 
-// warnKeptWiderMode signals when the kept mode leaves the content readable
-// beyond what a fresh download would be (a private key over a 0644 file). A
-// warning, not a chmod—re-permissioning a file the user set up is not the
-// CLI's call (#326).
-//
-// !replacing is redundant at today's only call site (keptPerm equals
-// newFilePerm there, which no comparison satisfies) and stays so the guard does
-// not rest on that invariant. The message names fileName rather than the
-// symlink-resolved targetName: removing the name the user typed is what gets
-// them a fresh owner-only file.
+// warnKeptWiderMode warns when the kept mode leaves the content readable beyond what a fresh
+// download would be (a private key over a 0644 file); re-permissioning a file the user set up is
+// not the CLI's call. The !replacing check is redundant at its only call site (keptPerm equals
+// newFilePerm there when not replacing) and is kept so the function does not rely on the caller.
+// The message names fileName, not the resolved target: removing the name the user typed is what
+// gets them a fresh owner-only file.
 func warnKeptWiderMode(fileName string, replacing bool, keptPerm, newFilePerm os.FileMode) {
 	if !replacing || !keptModeIsWider(keptPerm, newFilePerm) {
 		return
