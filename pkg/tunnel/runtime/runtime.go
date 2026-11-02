@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/alpacax/alpacon-cli/api"
 	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
@@ -85,9 +86,11 @@ func parsePorts(remotePort, localPort string) (target int, bind string, err erro
 
 // Start initializes a TCP tunnel runtime and starts accepting local TCP connections.
 func Start(opts StartOptions) (*Runtime, error) {
-	if opts.ServerName == "" {
-		return nil, errors.New("server name is required")
+	serverName, err := api.RequireName(opts.ServerName, "server name is required")
+	if err != nil {
+		return nil, err
 	}
+	opts.ServerName = serverName
 	if opts.Client == nil {
 		return nil, errors.New("client is required")
 	}

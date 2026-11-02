@@ -1382,7 +1382,6 @@ func TestWebshSessionCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) 
 		{"InviteToSession", func(ac *client.AlpaconClient) error {
 			return InviteToSession(ac, traversal, []string{"alice@example.com"}, false)
 		}},
-		{"SendTerminalSize", func(ac *client.AlpaconClient) error { return SendTerminalSize(ac, traversal) }},
 		{"JoinWebshSession_traversing_channel", func(ac *client.AlpaconClient) error {
 			_, err := JoinWebshSession(ac, "https://example.com/join?channel=%2E%2E%2F%2E%2E%2Fetc%2Ftest", "pw")
 			return err
@@ -1400,6 +1399,17 @@ func TestWebshSessionCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) 
 			require.ErrorIs(t, err, utils.ErrInvalidID)
 		})
 	}
+}
+
+func TestSendTerminalSizeRefusesAnUnusableSessionIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	ts := testutil.NewNoRequestServer(t)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	err := SendTerminalSize(ac, "../../etc/test")
+
+	require.ErrorIs(t, err, api.ErrUnusableID)
+	assert.False(t, utils.IsUsageError(err), "err: %v", err)
 }
 
 func TestShareCreatedSession_RefusesASessionIDThatIsNotOneSegment(t *testing.T) {

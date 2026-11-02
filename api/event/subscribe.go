@@ -83,7 +83,7 @@ func SubscribeEvent(ac *client.AlpaconClient, channelID string, eventType EventT
 // CloseEventSession closes an event session. The server keeps a closed session and
 // answers 204 for one that is already closed.
 func CloseEventSession(ctx context.Context, ac *client.AlpaconClient, id string) error {
-	pathID, err := api.RequireID(id, "event session")
+	pathID, err := api.RequireResponseID(id, "event session")
 	if err != nil {
 		return err
 	}

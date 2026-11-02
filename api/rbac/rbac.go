@@ -81,7 +81,7 @@ func ResolveRole(ac *client.AlpaconClient, nameOrID string) (*RoleResponse, erro
 }
 
 func GetRoleScopes(ac *client.AlpaconClient, roleID string) (*RoleScopesResponse, error) {
-	pathID, err := api.RequireID(roleID, "role")
+	pathID, err := api.RequireResponseID(roleID, "role")
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +256,7 @@ func GrantRole(ac *client.AlpaconClient, request BindingCreateRequest) error {
 }
 
 func RevokeRole(ac *client.AlpaconClient, bindingID, reason string) error {
-	pathID, err := api.RequireID(bindingID, "role binding")
+	pathID, err := api.RequireResponseID(bindingID, "role binding")
 	if err != nil {
 		return err
 	}

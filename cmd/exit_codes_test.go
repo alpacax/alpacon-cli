@@ -23,6 +23,7 @@ const (
 	exitHelperUnwritableEnv  = "GO_EXIT_HELPER_UNWRITABLE_STDOUT"
 	exitUserUUID             = "11111111-1111-1111-1111-111111111111"
 	exitMissingRoleUUID      = "22222222-2222-2222-2222-222222222222"
+	exitBadBindingUserUUID   = "33333333-3333-3333-3333-333333333333"
 	exitLargeFileServer      = "big-server"
 	exitLargeFileDownloadURL = "/downloads/big"
 )
@@ -68,10 +69,8 @@ func runExitCases(t *testing.T, cases []exitCase) {
 	}
 }
 
-// exitStubServer answers the lookups commands make before they refuse: the current user, a role
-// named admin, and a download of a file over edit's 10 MB limit from big-server; a role named
-// flaky answers 503, one named gone and the missing role ID 404, operator names both a role and a
-// user, and anything else is an empty list.
+// exitStubServer answers the lookups commands make before they refuse the command line;
+// anything it does not know answers an empty list.
 func exitStubServer() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -84,6 +83,10 @@ func exitStubServer() *httptest.Server {
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + exitMissingRoleUUID + `","name":"operator"}]}`))
 		case r.URL.Path == "/api/iam/users/" && r.URL.Query().Get("username") == "operator":
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + exitUserUUID + `","username":"operator"}]}`))
+		case r.URL.Path == "/api/rbac/roles/" && r.URL.Query().Get("name") == "viewer":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + exitMissingRoleUUID + `","name":"viewer"}]}`))
+		case r.URL.Path == "/api/rbac/user-roles/" && r.URL.Query().Get("user") == exitBadBindingUserUUID:
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"..","role":{"id":"` + exitMissingRoleUUID + `","name":"viewer"}}]}`))
 		case r.URL.Path == "/api/rbac/roles/" && r.URL.Query().Get("name") == "flaky":
 			w.WriteHeader(http.StatusServiceUnavailable)
 		case r.URL.Path == "/api/rbac/roles/" && r.URL.Query().Get("name") == "gone":
@@ -223,6 +226,23 @@ func TestCommandsExitOneWhenAValidCommandLineFails(t *testing.T) {
 		{name: "user role grant to a user who shares a role name", args: []string{"user", "role", "grant", "operator", "ghost"}, wantExit: utils.ExitCodeGeneralError, wantStderr: `no role named "ghost" is visible to you`},
 		{name: "user role revoke from a user who shares a role name", args: []string{"user", "role", "revoke", "operator", "ghost"}, wantExit: utils.ExitCodeGeneralError, wantStderr: `no role named "ghost" is visible to you`},
 		{name: "user role grant of a role the server does not have", args: []string{"user", "role", "grant", "alice", "ghost"}, wantExit: utils.ExitCodeGeneralError, wantStderr: `no role named "ghost" is visible to you`},
+		{name: "user role revoke of a binding the server names with an unusable ID", args: []string{"user", "role", "revoke", exitBadBindingUserUUID, "viewer"}, wantExit: utils.ExitCodeGeneralError, wantStderr: "the server returned an unusable role binding ID"},
+		{name: "user role revoke of a binding with an unusable ID under json output", args: []string{"user", "role", "revoke", exitBadBindingUserUUID, "viewer"}, wantExit: utils.ExitCodeGeneralError, wantStderr: "unusable role binding ID", wantCode: utils.ErrorCodeCLI},
+	})
+}
+
+func TestCommandsExitTwoWhenTheyRefuseAnIDOrNameBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const usage = utils.ExitCodeUsageError
+	runExitCases(t, []exitCase{
+		{name: "note delete with a dot-dot ID", args: []string{"note", "delete", "..", "--yes"}, wantExit: usage, wantStderr: "must be a single path segment"},
+		{name: "note delete with a dot-dot ID under json output", args: []string{"note", "delete", "..", "--yes"}, wantExit: usage, wantStderr: "must be a single path segment", wantCode: utils.ErrorCodeUsage},
+		{name: "user role grant with a blank role", args: []string{"user", "role", "grant", "alice", " "}, wantExit: usage, wantStderr: "role name is required"},
+		{name: "user role grant with a blank role under json output", args: []string{"user", "role", "grant", "alice", " "}, wantExit: usage, wantStderr: "role name is required", wantCode: utils.ErrorCodeUsage},
+		{name: "tunnel with a blank server", args: []string{"tunnel", " ", "-l", "0", "-r", "8082"}, wantExit: usage, wantStderr: "server name is required"},
+		{name: "tunnel with a blank server under json output", args: []string{"tunnel", " ", "-l", "0", "-r", "8082"}, wantExit: usage, wantStderr: "server name is required", wantCode: utils.ErrorCodeUsage},
+		{name: "tunnel with an empty server", args: []string{"tunnel", "", "-l", "0", "-r", "8082"}, wantExit: usage, wantStderr: "server name is required"},
+		{name: "tunnel with an empty server under json output", args: []string{"tunnel", "", "-l", "0", "-r", "8082"}, wantExit: usage, wantStderr: "server name is required", wantCode: utils.ErrorCodeUsage},
 	})
 }
 
