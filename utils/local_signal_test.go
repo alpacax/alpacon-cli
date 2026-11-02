@@ -20,6 +20,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type signalOriginStub localsignal.ConsoleOrigin
+
+func (s signalOriginStub) LocalSignalOrigin() localsignal.ConsoleOrigin {
+	return localsignal.ConsoleOrigin(s)
+}
+
 type signalRefusalStub struct {
 	code, gate string
 	status     int
@@ -304,4 +310,41 @@ func TestCommandPauseThenSinkDoesNotFold(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &state))
 	require.Contains(t, state, "paused:ses-1")
 	assert.Zero(t, state["paused:ses-1"].Folded)
+}
+
+func TestSignalPinnedOriginBypassesConfig(t *testing.T) {
+	old := LocalSignalConsoleOrigin
+	t.Cleanup(func() { LocalSignalConsoleOrigin = old })
+	LocalSignalConsoleOrigin = func() (string, string) {
+		t.Error("pinned signal must not reload config")
+		return "https://other.example", "example"
+	}
+	source := signalOriginStub{WorkspaceURL: "https://my-server.example", BaseDomain: "example"}
+	link := "https://my-server.example/commands/1"
+	refusal := signalRefusalStub{gate: "risk", payload: map[string]any{"console_url": link}}
+	for _, tc := range []struct {
+		name string
+		emit func()
+	}{
+		{"direct", func() { EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{ConsoleURL: link}, source) }},
+		{"wrapped refusal", func() {
+			err := WithSignalFields(refusal, localsignal.Fields{}, source)
+			err = WithSignalFields(err, localsignal.Fields{Server: "my-server"})
+			SignalRefusal(err)
+		}},
+		{"pending", func() {
+			err := WithSignalFields(refusal, localsignal.Fields{}, source)
+			SignalApprovalPending(err, localsignal.Fields{})
+		}},
+		{"raw response", func() {
+			SignalResponse(http.StatusForbidden, []byte(`{"code":"session_paused","console_url":"https://my-server.example/commands/1"}`), source)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("USERPROFILE", os.Getenv("HOME"))
+			_, stderr := testutil.CaptureOutput(t, tc.emit)
+			assert.Contains(t, stderr, "\n"+link+"\n")
+		})
+	}
 }

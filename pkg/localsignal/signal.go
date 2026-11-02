@@ -33,7 +33,13 @@ var assignmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 
 type Kind string
 
+type ConsoleOrigin struct {
+	WorkspaceURL string
+	BaseDomain   string
+}
+
 type Fields struct {
+	Origin     *ConsoleOrigin
 	Argv0      string
 	Server     string
 	Account    string

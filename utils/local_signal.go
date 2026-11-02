@@ -26,7 +26,11 @@ var deliverLocalSignal = func(kind localsignal.Kind, fields localsignal.Fields) 
 		return s
 	}
 	emitter := localsignal.New(TrackedStderr(), red, nil)
-	emitter.WorkspaceURL, emitter.BaseDomain = LocalSignalConsoleOrigin()
+	if fields.Origin != nil {
+		emitter.WorkspaceURL, emitter.BaseDomain = fields.Origin.WorkspaceURL, fields.Origin.BaseDomain
+	} else {
+		emitter.WorkspaceURL, emitter.BaseDomain = LocalSignalConsoleOrigin()
+	}
 	emitter.JSON = OutputFormat == OutputFormatJSON
 	emitter.Emit(kind, fields)
 }
@@ -39,19 +43,41 @@ type signalError struct {
 
 func (e *signalError) Unwrap() error { return e.error }
 
-func WithSignalFields(err error, fields localsignal.Fields) error {
+type SignalOriginSource interface {
+	LocalSignalOrigin() localsignal.ConsoleOrigin
+}
+
+func withSignalOrigin(fields localsignal.Fields, sources []SignalOriginSource) localsignal.Fields {
+	if len(sources) != 0 {
+		origin := sources[0].LocalSignalOrigin()
+		fields.Origin = &origin
+	}
+	return fields
+}
+
+func WithSignalFields(err error, fields localsignal.Fields, sources ...SignalOriginSource) error {
 	if err == nil {
 		return nil
 	}
-	return &signalError{error: err, fields: fields}
+	if fields.Origin == nil {
+		fields.Origin = SignalFields(err).Origin
+	}
+	return &signalError{error: err, fields: withSignalOrigin(fields, sources)}
 }
 
 func SignalFields(err error) localsignal.Fields {
+	var fields localsignal.Fields
 	var context *signalError
 	if errors.As(err, &context) {
-		return context.fields
+		fields = context.fields
 	}
-	return localsignal.Fields{}
+	if fields.Origin == nil {
+		var source SignalOriginSource
+		if errors.As(err, &source) {
+			fields = withSignalOrigin(fields, []SignalOriginSource{source})
+		}
+	}
+	return fields
 }
 
 func MarkApprovalSignaled(err error) error {
@@ -71,8 +97,8 @@ func SignalApprovalPending(err error, fields localsignal.Fields) {
 	EmitLocalSignal(localsignal.ApprovalPending, fields)
 }
 
-func EmitLocalSignal(kind localsignal.Kind, fields localsignal.Fields) {
-	deliverLocalSignal(kind, fields)
+func EmitLocalSignal(kind localsignal.Kind, fields localsignal.Fields, sources ...SignalOriginSource) {
+	deliverLocalSignal(kind, withSignalOrigin(fields, sources))
 }
 
 type responseRefusal struct {
@@ -89,7 +115,7 @@ func (e responseRefusal) ErrorMissing() []string      { return nil }
 func (e responseRefusal) ErrorFields() map[string]any { return e.payload }
 
 // SignalResponse handles a pause on raw responses without classifying raw API calls as commands.
-func SignalResponse(status int, body []byte) {
+func SignalResponse(status int, body []byte, sources ...SignalOriginSource) {
 	if !IsRefusalStatus(status) {
 		return
 	}
@@ -98,7 +124,7 @@ func SignalResponse(status int, body []byte) {
 		return
 	}
 	code, _ := payload["code"].(string)
-	SignalPaused(responseRefusal{Code: code, payload: payload})
+	SignalPaused(WithSignalFields(responseRefusal{Code: code, payload: payload}, localsignal.Fields{}, sources...))
 }
 
 // SignalRefusal is called only by command execution and file transfer paths.
@@ -187,6 +213,9 @@ func commandDenial(code, gate string) bool {
 }
 
 func responseSignalFields(err error, fields localsignal.Fields) localsignal.Fields {
+	if fields.Origin == nil {
+		fields.Origin = SignalFields(err).Origin
+	}
 	for e := range errorChain(err) {
 		if carrier, ok := e.(interface{ ErrorFields() map[string]any }); ok {
 			payload := carrier.ErrorFields()

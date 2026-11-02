@@ -175,7 +175,7 @@ func uploadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, file even
 	}
 	signalArgs := parsed
 	signalArgs.WorkSessionID = workSessionID
-	err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs))
+	err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), ac)
 	utils.SignalRefusal(err)
 	utils.HandleWorkSessionError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID)
 	var hint string
@@ -198,7 +198,7 @@ func downloadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, workSes
 	if err != nil {
 		signalArgs := parsed
 		signalArgs.WorkSessionID = workSessionID
-		err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs))
+		err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), ac)
 		utils.SignalRefusal(err)
 		utils.HandleWorkSessionError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID)
 		// reportCodedRefusal writes raw and appends its own period; drop one the

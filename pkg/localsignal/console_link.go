@@ -1,13 +1,13 @@
 package localsignal
 
 import (
-	"net"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
 	"unicode"
 
-	"golang.org/x/net/idna"
+	"github.com/alpacax/alpacon-cli/pkg/cloud"
 )
 
 func consoleLink(raw, workspaceURL, baseDomain string) string {
@@ -24,7 +24,9 @@ func consoleLink(raw, workspaceURL, baseDomain string) string {
 		return raw
 	}
 	base := consoleHost(baseDomain)
-	if base != "" && (host == base || strings.HasSuffix(host, "."+base)) && consolePort(link) == defaultConsolePort(link.Scheme) {
+	workspaceHost := consoleHost(workspace.Hostname())
+	workspaceIP, _ := netip.ParseAddr(workspaceHost)
+	if base == cloud.DefaultBaseDomain && !workspaceIP.IsValid() && strings.HasSuffix(workspaceHost, "."+base) && (host == base || strings.HasSuffix(host, "."+base)) && consolePort(link) == defaultConsolePort(link.Scheme) {
 		return raw
 	}
 	return ""
@@ -51,14 +53,15 @@ func consoleOrigin(raw string) *url.URL {
 }
 
 func consoleHost(host string) string {
-	if ip := net.ParseIP(host); ip != nil {
+	for _, c := range host {
+		if c > unicode.MaxASCII {
+			return ""
+		}
+	}
+	if ip, err := netip.ParseAddr(host); err == nil {
 		return ip.String()
 	}
-	ascii, err := idna.Lookup.ToASCII(host)
-	if err != nil {
-		return ""
-	}
-	return strings.ToLower(strings.TrimSuffix(ascii, "."))
+	return strings.ToLower(strings.TrimSuffix(host, "."))
 }
 
 func consolePort(u *url.URL) string {

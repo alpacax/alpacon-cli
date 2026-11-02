@@ -286,7 +286,7 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 		}
 	}
 
-	utils.SignalResponse(response.StatusCode, response.Body)
+	utils.SignalResponse(response.StatusCode, response.Body, ac)
 	if err := writeAPIResponse(opts, response, stdout); err != nil {
 		return utils.ExitCodeGeneralError, err
 	}

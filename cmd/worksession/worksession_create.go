@@ -273,7 +273,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 		}
 		approvalSignaled := session.Status == wsapi.StatusPending
 		if approvalSignaled {
-			utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: session.ID, ConsoleURL: session.ConsoleURL})
+			utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: session.ID, ConsoleURL: session.ConsoleURL}, ac)
 		}
 		afterApproval := afterApprovalAction(sessionRequesterType, session.ID, account)
 		if clusterName != "" {
@@ -730,7 +730,7 @@ func waitForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 			continue
 		}
 		if s.Status == wsapi.StatusPending && !signaled {
-			utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: id, ConsoleURL: s.ConsoleURL})
+			utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: id, ConsoleURL: s.ConsoleURL}, ac)
 			signaled = true
 		}
 		failures = 0

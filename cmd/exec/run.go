@@ -556,10 +556,11 @@ func RunFileExecWithApprovalWait(ac *client.AlpaconClient, serverName string, fi
 // first attempt and, once a reviewer grants the request, the re-run.
 func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout time.Duration, out io.Writer) (result error) {
 	err := run()
+	err = utils.WithSignalFields(err, utils.SignalFields(err), ac)
 	announced := false
 	defer func() {
 		fields := utils.SignalFields(err)
-		result = utils.WithSignalFields(result, fields)
+		result = utils.WithSignalFields(result, fields, ac)
 		utils.SignalRefusal(result)
 		if announced {
 			result = utils.MarkApprovalSignaled(result)

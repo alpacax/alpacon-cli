@@ -702,7 +702,7 @@ func TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait(t *testing.T) {
 
 	var err error
 	stderr := captureStderr(t, func() {
-		err = RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+		err = RunExecWithApprovalWait(&client.AlpaconClient{BaseURL: "https://console.example"}, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
 	})
 	assert.Contains(t, stderr, "==== ALPACON: COMMAND DENIED ====\n")
 	assert.Contains(t, stderr, "\nhttps://console.example/commands/1\n")

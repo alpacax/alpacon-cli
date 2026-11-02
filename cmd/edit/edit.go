@@ -150,7 +150,8 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 					return retryErr
 				}))
 			}
-			utils.SignalRefusal(utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}))
+			err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
+			utils.SignalRefusal(err)
 			return downloaded, err
 		},
 		upload: func(target editTarget, localPath, workSessionID string) error {
@@ -160,7 +161,8 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 					return ftpapi.UploadLocalFileAs(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, workSessionID)
 				}))
 			}
-			utils.SignalRefusal(utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}))
+			err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
+			utils.SignalRefusal(err)
 			return err
 		},
 		runEditor:    runLocalEditor,

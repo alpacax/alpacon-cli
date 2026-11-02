@@ -113,7 +113,8 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 				}))
 
 				if err != nil {
-					utils.SignalRefusal(utils.WithSignalFields(err, localsignal.Fields{Server: serverName, Account: username, Session: workSessionID}))
+					err = utils.WithSignalFields(err, localsignal.Fields{Server: serverName, Account: username, Session: workSessionID}, alpaconClient)
+					utils.SignalRefusal(err)
 					utils.HandleWorkSessionError(err, utils.OperationWebFTP, serverName, authMethod, workSessionID)
 					utils.CliErrorWithExit("Failed to upload to '%s': %s", dest, err)
 					return
@@ -130,7 +131,8 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 				}))
 
 				if err != nil {
-					utils.SignalRefusal(utils.WithSignalFields(err, localsignal.Fields{Server: serverName, Account: username, Session: workSessionID}))
+					err = utils.WithSignalFields(err, localsignal.Fields{Server: serverName, Account: username, Session: workSessionID}, alpaconClient)
+					utils.SignalRefusal(err)
 					utils.HandleWorkSessionError(err, utils.OperationWebFTP, serverName, authMethod, workSessionID)
 					wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
 					utils.CliErrorWithExit("Failed to download from '%s': %s", wrappedSrc, err)

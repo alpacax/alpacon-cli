@@ -63,7 +63,7 @@ Run the command again later to check for completion.`,
 			if details.WorkSession != nil {
 				fields.Session = details.WorkSession.ID
 			}
-			utils.EmitLocalSignal(localsignal.ApprovalPending, fields)
+			utils.EmitLocalSignal(localsignal.ApprovalPending, fields, alpaconClient)
 			requestID, lookupErr := approval.FindCommandApprovalRequestID(alpaconClient, details.ID)
 			if lookupErr != nil {
 				utils.CliWarning("failed to read approval request: %s", lookupErr)
@@ -84,7 +84,7 @@ Run the command again later to check for completion.`,
 		// another approval request.
 		if event.IsRejectedStatus(details.Status) {
 			rejected := &event.CommandRejectedError{CommandID: details.ID, Cause: details.RejectionCause, Gate: details.RejectionGate, ConsoleURL: details.ConsoleURL, WorkSessionID: details.WorkSessionID()}
-			utils.SignalRefusal(utils.WithSignalFields(rejected, localsignal.Fields{Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username}))
+			utils.SignalRefusal(utils.WithSignalFields(rejected, localsignal.Fields{Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username}, alpaconClient))
 			// A script-body refusal has file-execution guidance of its own.
 			if rejected.Cause == event.RejectionCauseUseFileExecution {
 				accountFlags, accountNote := logsAccountFlags(details)
