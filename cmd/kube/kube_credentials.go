@@ -199,9 +199,10 @@ func pickRecord(records []kubeSessionRecord, server, workspaceURL string) *kubeS
 // and an extended one moves the expiry. So is one the server will not show
 // this login: a 404 is a session this account cannot see, such as after
 // another account logged in without a logout, and a 401 or 403 is a refused
-// check (refusedCheck), and the token must not go on acting for either. Any other failed check, or a record of another workspace this login
-// cannot check (retrieve nil), falls back to the saved expiry, so a passing
-// outage does not lock kubectl out.
+// check (refusedCheck). The token must not go on acting for either. Any other
+// failed check, or a record of another workspace this login cannot check
+// (retrieve nil), falls back to the saved expiry, so a passing outage does
+// not lock kubectl out.
 func credentialExpiry(record *kubeSessionRecord, now time.Time, retrieve func() (*kubernetes.KubeSessionDetail, error)) (time.Time, error) {
 	saved := record.TokenExpiredAt
 	if retrieve == nil {
