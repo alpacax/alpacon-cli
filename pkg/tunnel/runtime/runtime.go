@@ -86,9 +86,11 @@ func parsePorts(remotePort, localPort string) (target int, bind string, err erro
 
 // Start initializes a TCP tunnel runtime and starts accepting local TCP connections.
 func Start(opts StartOptions) (*Runtime, error) {
-	if _, err := api.RequireName(opts.ServerName, "server name is required"); err != nil {
+	serverName, err := api.RequireName(opts.ServerName, "server name is required")
+	if err != nil {
 		return nil, err
 	}
+	opts.ServerName = serverName
 	if opts.Client == nil {
 		return nil, errors.New("client is required")
 	}
