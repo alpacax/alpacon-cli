@@ -22,9 +22,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testReconnectBaseDelay keeps reconnect assertions off the production 1s backoff.
-const testReconnectBaseDelay = 10 * time.Millisecond
-
 func provisionURL(wsURL string) func() (*EventSessionResponse, error) {
 	return func() (*EventSessionResponse, error) {
 		return &EventSessionResponse{ID: "session", WebsocketURL: wsURL}, nil

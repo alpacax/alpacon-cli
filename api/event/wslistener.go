@@ -37,11 +37,8 @@ type wsListener struct {
 	readLimit        int64 // 0 for gorilla's default of no limit
 	// The client's transport, whose dial and proxy the channel takes so it goes where the HTTP
 	// requests go; nil keeps the dialer's defaults.
-	transport *http.Transport
-	// The first backoff step, lowered by tests so a reconnect assertion does not have to
-	// sit through the production delay.
-	reconnectBaseDelay time.Duration
-	stableLifetime     time.Duration
+	transport      *http.Transport
+	stableLifetime time.Duration
 
 	done        chan struct{}
 	stopped     chan struct{} // closed when listenLoop exits
@@ -60,14 +57,13 @@ func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (*Event
 		wsHeader = ac.SetWebsocketHeader()
 	}
 	w := &wsListener{
-		provision:          provision,
-		wsHeader:           wsHeader,
-		handshakeTimeout:   handshakeTimeout,
-		reconnectBaseDelay: wsReconnectBaseDelay,
-		stableLifetime:     wsStableConnectionLifetime,
-		done:               make(chan struct{}),
-		stopped:            make(chan struct{}),
-		connected:          make(chan struct{}),
+		provision:        provision,
+		wsHeader:         wsHeader,
+		handshakeTimeout: handshakeTimeout,
+		stableLifetime:   wsStableConnectionLifetime,
+		done:             make(chan struct{}),
+		stopped:          make(chan struct{}),
+		connected:        make(chan struct{}),
 	}
 	w.closeUnopened = func(string) {}
 	if ac != nil {
@@ -128,7 +124,7 @@ func (w *wsListener) Stop() {
 }
 
 func (w *wsListener) listenLoop() {
-	delay := w.reconnectBaseDelay
+	delay := wsReconnectBaseDelay
 
 	for {
 		select {
@@ -138,7 +134,7 @@ func (w *wsListener) listenLoop() {
 		}
 
 		if w.connectAndListen() {
-			delay = w.reconnectBaseDelay
+			delay = wsReconnectBaseDelay
 		}
 
 		select {
