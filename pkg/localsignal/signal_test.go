@@ -299,7 +299,7 @@ func TestBannerDestination(t *testing.T) {
 			notified := make(chan string, 1)
 			e.notifier = notifyFunc(func(_ context.Context, _, body, link string) error {
 				notified <- link
-				assert.Contains(t, body, "https://console.example/commands/1")
+				assert.Equal(t, "sudo was refused and did not run. https://console.example/commands/1", body)
 				return nil
 			})
 			e.Emit(Denied, Fields{Argv0: "sudo", ConsoleURL: "https://console.example/commands/1"})
@@ -327,4 +327,42 @@ func TestServerValuesAreCleaned(t *testing.T) {
 	_, body := Format(Denied, Fields{Argv0: "sudo", Server: dirty, Account: dirty, Gate: dirty, Session: dirty}, 0)
 	assert.Equal(t, "sudo on safe as safe was refused by the safe gate and did not run. Session safe.", body)
 	assert.Equal(t, "safe", clean(dirty))
+}
+
+func TestConsoleURLValidation(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, link, want string }{
+		{"https", "https://console.example/commands/1", "https://console.example/commands/1"},
+		{"file", "file:///tmp/approval", ""},
+		{"search", "search-ms:query=approval", ""},
+		{"settings", "ms-settings:privacy", ""},
+		{"http", "http://console.example/commands/1", ""},
+		{"relative", "/commands/1", ""},
+		{"javascript", "javascript:alert(1)", ""},
+		{"no host", "https:///commands/1", ""},
+		{"invalid", "https://console.example/%zz", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var output bytes.Buffer
+			e := New(&output, nil, nil)
+			e.statePath = func() (string, error) { return "", errors.New("no state") }
+			e.headless = func() bool { return false }
+			e.notifier = notifyFunc(func(_ context.Context, _, body, link string) error {
+				assert.Equal(t, tc.want, link)
+				_, wantBody := Format(ApprovalPending, Fields{}, 0)
+				if tc.want != "" {
+					wantBody += " " + tc.want
+				}
+				assert.Equal(t, wantBody, body)
+				return nil
+			})
+			e.Emit(ApprovalPending, Fields{ConsoleURL: tc.link})
+			if tc.want == "" {
+				assert.NotContains(t, output.String(), tc.link)
+			} else {
+				assert.Contains(t, output.String(), "\n"+tc.want+"\n")
+			}
+		})
+	}
 }

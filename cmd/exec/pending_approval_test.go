@@ -318,7 +318,7 @@ func TestExecLogsRejectedExits6(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/"+jobID+"/" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": jobID, "status": "rejected"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": jobID, "status": "rejected", "rejection_gate": "approval"})
 			return
 		}
 		http.NotFound(w, r)

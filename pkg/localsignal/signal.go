@@ -5,16 +5,17 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/alpacax/alpacon-cli/pkg/configdir"
+	"golang.org/x/term"
 )
 
 const (
@@ -26,13 +27,7 @@ const (
 
 // These dependencies are replaceable for callers that embed the emitter.
 var NewNotifier = func() Notifier { return platformNotifier{} }
-var OpenTTY = func() (io.WriteCloser, error) {
-	name := "/dev/tty"
-	if runtime.GOOS == "windows" {
-		name = "CONOUT$"
-	}
-	return os.OpenFile(name, os.O_WRONLY, 0)
-}
+var OpenTTY = openTTY
 
 var executableName = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,64}$`)
 var assignmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
@@ -98,14 +93,21 @@ func (e *Emitter) Emit(kind Kind, fields Fields) {
 	if title == "" {
 		return
 	}
-	if link := clean(fields.ConsoleURL); link != "" {
-		body += "\n" + link
+	link := consoleLink(fields.ConsoleURL)
+	bannerBody := body
+	if link != "" {
+		bannerBody += "\n" + link
+		body += " " + link
 	}
-	banner := fmt.Sprintf("==== %s ====\n%s\n================================\n", strings.ToUpper(title), body)
+	banner := fmt.Sprintf("==== %s ====\n%s\n================================\n", strings.ToUpper(title), bannerBody)
 	if e.red != nil {
 		banner = e.red(banner)
 	}
-	if e.JSON {
+	ttyOutput := e.JSON
+	if file, ok := e.writer.(interface{ Fd() uintptr }); ok {
+		ttyOutput = ttyOutput || term.IsTerminal(int(file.Fd()))
+	}
+	if ttyOutput {
 		if tty, err := e.openTTY(); err == nil {
 			_, _ = io.WriteString(tty, banner)
 			_ = tty.Close()
@@ -119,7 +121,7 @@ func (e *Emitter) Emit(kind Kind, fields Fields) {
 	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- e.notifier.Notify(ctx, title, body, clean(fields.ConsoleURL)) }()
+	go func() { done <- e.notifier.Notify(ctx, title, body, link) }()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -193,6 +195,14 @@ func Argv0(command string) string {
 		return ""
 	}
 	return name
+}
+
+func consoleLink(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || !parsed.IsAbs() || parsed.Hostname() == "" {
+		return ""
+	}
+	return clean(raw)
 }
 
 func clean(s string) string {

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -2661,4 +2663,41 @@ func TestPendingCommandCarriesConsoleURL(t *testing.T) {
 	require.ErrorAs(t, err, &pending)
 	assert.Equal(t, "https://console.example/commands/1", pending.ConsoleURL)
 	assert.Equal(t, "ses-1", pending.WorkSessionID)
+}
+
+func TestRejectedCommandLocalSignal(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		rejection CommandRejectedError
+		want      bool
+	}{
+		{"reviewer refusal", CommandRejectedError{Gate: "approval", Cause: RejectionCauseApprovalRejected}, true},
+		{"expired flag", CommandRejectedError{Gate: "approval", Expired: true}, false},
+		{"expired overrides cause", CommandRejectedError{Gate: "approval", Expired: true, Cause: RejectionCauseApprovalRejected}, false},
+		{"expired cause", CommandRejectedError{Gate: "approval", Cause: RejectionCauseApprovalExpired}, false},
+		{"cancelled", CommandRejectedError{Gate: "approval", Cause: "approval_cancelled"}, false},
+		{"unknown gate", CommandRejectedError{Gate: "future_gate", Cause: RejectionCauseApprovalRejected}, false},
+		{"network gate", CommandRejectedError{Gate: "network", Cause: RejectionCauseApprovalRejected}, false},
+		{"plan gate", CommandRejectedError{Gate: "plan", Cause: RejectionCauseApprovalRejected}, false},
+		{"missing gate", CommandRejectedError{Cause: RejectionCauseApprovalRejected}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			_, stderr := testutil.CaptureOutput(t, func() { utils.SignalRefusal(&tc.rejection) })
+			state := filepath.Join(home, ".alpacon", "state", "signals.json")
+			if tc.want {
+				assert.Contains(t, stderr, "==== ALPACON: COMMAND DENIED ====")
+				data, err := os.ReadFile(state)
+				require.NoError(t, err)
+				var signals map[string]any
+				require.NoError(t, json.Unmarshal(data, &signals))
+				assert.Contains(t, signals, "denied")
+			} else {
+				assert.Empty(t, stderr)
+				assert.NoFileExists(t, state)
+			}
+		})
+	}
 }

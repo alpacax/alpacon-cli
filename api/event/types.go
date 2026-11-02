@@ -417,8 +417,10 @@ func IsStatusOnlyFailure(status string) bool {
 	return status == "stuck" || status == "error" || status == "cancelled"
 }
 
-func (e *CommandRejectedError) RejectedCommand() bool { return true }
-func (e *CommandRejectedError) ErrorGate() string     { return e.Gate }
+func (e *CommandRejectedError) RejectedCommand() bool {
+	return !e.Expired && e.Cause != RejectionCauseApprovalExpired && e.Cause != "approval_cancelled"
+}
+func (e *CommandRejectedError) ErrorGate() string { return e.Gate }
 func (e *CommandRejectedError) ErrorFields() map[string]any {
 	return map[string]any{"console_url": e.ConsoleURL, "work_session_id": e.WorkSessionID}
 }

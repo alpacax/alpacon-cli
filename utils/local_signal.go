@@ -5,11 +5,15 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"golang.org/x/term"
 )
+
+// The MCP client mirrors this command-denial gate allowlist.
+const commandDenialGates = "server_reach,command_preapproval,command_acl,file_acl,risk,approval,sudo,work_session,block"
 
 var deliverLocalSignal = func(kind localsignal.Kind, fields localsignal.Fields) {
 	red := func(s string) string {
@@ -94,6 +98,7 @@ func SignalResponse(status int, body []byte) {
 }
 
 // SignalRefusal is called only by command execution and file transfer paths.
+// Error sinks own pause signals so one pause never increments the folded count twice.
 func SignalRefusal(err error) { signalRefusal(err, true) }
 
 // SignalPaused applies to any operation, using only the structured pause code.
@@ -115,6 +120,9 @@ func signalRefusal(err error, command bool) {
 		}
 		kind := localsignal.Denied
 		if code == "session_paused" {
+			if command {
+				return
+			}
 			kind = localsignal.Paused
 		} else {
 			if !command {
@@ -126,9 +134,12 @@ func signalRefusal(err error, command bool) {
 				if !ok || status.HTTPStatusCode() != http.StatusForbidden {
 					return
 				}
-				if !commandDenial(code, fields.Gate) {
-					return
-				}
+			}
+			if !commandDenial(code, fields.Gate) {
+				return
+			}
+			if fields.Gate == "" {
+				fields.Gate = "work_session"
 			}
 		}
 		fields = responseSignalFields(e, fields)
@@ -165,15 +176,10 @@ func signalRefusal(err error, command bool) {
 }
 
 func commandDenial(code, gate string) bool {
-	if strings.HasPrefix(code, "auth_") || strings.HasPrefix(code, "api_token_") || strings.HasPrefix(code, "rbac_") {
-		return false
+	if gate == "" && isWorkSessionCode(code) {
+		gate = "work_session"
 	}
-	switch gate {
-	case "", "plan", "rate", "token_scope", "role", "presence", "mfa", "auth", "validation":
-		return gate == "" && isWorkSessionCode(code)
-	default:
-		return true
-	}
+	return slices.Contains(strings.Split(commandDenialGates, ","), gate)
 }
 
 func responseSignalFields(err error, fields localsignal.Fields) localsignal.Fields {

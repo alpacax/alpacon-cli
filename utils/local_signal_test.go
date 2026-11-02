@@ -3,6 +3,7 @@ package utils
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -47,13 +48,17 @@ func TestSignalRefusalClassification(t *testing.T) {
 		kind    localsignal.Kind
 		session string
 	}{
+		{"file ACL with token code", &signalRefusalStub{code: "api_token_acl_not_allowed", gate: "file_acl"}, localsignal.Denied, "ses-1"},
+		{"Work Session fallback", &signalRefusalStub{code: WorkSessionRequired}, localsignal.Denied, "ses-1"},
+		{"unknown gate", &signalRefusalStub{gate: "future_gate"}, "", ""},
+		{"network gate", &signalRefusalStub{gate: "network"}, "", ""},
 		{"gate refusal", &signalRefusalStub{code: "refused", gate: "risk"}, localsignal.Denied, "ses-1"},
-		{"paused wins over gate", &signalRefusalStub{code: "session_paused", gate: "session"}, localsignal.Paused, "ses-1"},
-		{"paused without gate", &signalRefusalStub{code: "session_paused"}, localsignal.Paused, "ses-1"},
+		{"paused wins over gate", &signalRefusalStub{code: "session_paused", gate: "session"}, "", ""},
+		{"paused without gate", &signalRefusalStub{code: "session_paused"}, "", ""},
 		{"response session", &signalRefusalStub{gate: "risk", payload: map[string]any{"work_session_id": "ses-2"}}, localsignal.Denied, "ses-2"},
 		{"response object", &signalRefusalStub{gate: "risk", payload: map[string]any{"work_session": map[string]any{"id": "ses-2"}}}, localsignal.Denied, "ses-2"},
 		{"batch refusal", &BatchError{Failures: []error{&signalRefusalStub{gate: "risk"}}}, localsignal.Denied, "ses-1"},
-		{"batch pause", &BatchError{Failures: []error{&signalRefusalStub{code: "session_paused"}}}, localsignal.Paused, "ses-1"},
+		{"batch pause", &BatchError{Failures: []error{&signalRefusalStub{code: "session_paused"}}}, "", ""},
 		{"plan", &signalRefusalStub{status: http.StatusPaymentRequired, gate: "risk"}, "", ""},
 		{"rate", &signalRefusalStub{status: http.StatusTooManyRequests, gate: "risk"}, "", ""},
 		{"validation", &signalRefusalStub{status: http.StatusBadRequest, gate: "risk"}, "", ""},
@@ -177,7 +182,7 @@ func TestBatchSignalKindsAndSessions(t *testing.T) {
 		&signalRefusalStub{code: "session_paused"}, &signalRefusalStub{code: "session_paused"},
 		&signalRefusalStub{gate: "risk", payload: map[string]any{"work_session_id": "ses-2", "console_url": "https://console.example/session/2"}},
 	}})
-	assert.Equal(t, []string{":denied", "ses-3:denied", "ses-4:denied", ":paused", "ses-2:denied"}, got)
+	assert.Equal(t, []string{":denied", "ses-3:denied", "ses-4:denied", "ses-2:denied"}, got)
 }
 
 type failingSignalNotifier struct{ mode, marker string }
@@ -256,4 +261,47 @@ func TestSignalFailurePreservesCommandResult(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCommandDenialAllowlist(t *testing.T) {
+	t.Parallel()
+	for _, gate := range []string{"server_reach", "command_preapproval", "command_acl", "file_acl", "risk", "approval", "sudo", "work_session", "block"} {
+		t.Run(gate, func(t *testing.T) {
+			t.Parallel()
+			assert.True(t, commandDenial("api_token_acl_not_allowed", gate), "gate %s must signal a command refusal", gate)
+		})
+	}
+	for _, gate := range []string{"", "plan", "rate", "token_scope", "role", "presence", "network", "future_gate"} {
+		name := gate
+		if name == "" {
+			name = "missing"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			assert.False(t, commandDenial("refused", gate), "gate %s must not signal a command refusal", gate)
+			assert.False(t, commandDenial(WorkSessionRequired, gate+"_unknown"), "unknown gate must not fall back to a Work Session code")
+		})
+	}
+	assert.False(t, commandDenial("refused", "risk,approval"), "a combined gate must not match the allowlist")
+	assert.False(t, commandDenial("refused", "risk|approval"), "a combined gate must not match the allowlist")
+	assert.True(t, commandDenial(WorkSessionRequired, ""), "a Work Session code without a gate must signal a refusal")
+}
+
+func TestCommandPauseThenSinkDoesNotFold(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	err := WithSignalFields(&signalRefusalStub{code: "session_paused"}, localsignal.Fields{Session: "ses-1"})
+	_, _ = testutil.CaptureOutput(t, func() {
+		SignalRefusal(err)
+		CliError("command failed: %s", err)
+	})
+	data, readErr := os.ReadFile(filepath.Join(home, ".alpacon", "state", "signals.json"))
+	require.NoError(t, readErr)
+	var state map[string]struct {
+		Folded int `json:"folded"`
+	}
+	require.NoError(t, json.Unmarshal(data, &state))
+	require.Contains(t, state, "paused:ses-1")
+	assert.Zero(t, state["paused:ses-1"].Folded)
 }
