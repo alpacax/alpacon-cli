@@ -128,3 +128,15 @@ func TestPromptForInputFailsWhenInputEnds(t *testing.T) {
 		})
 	}
 }
+
+// A confirmation names what the answer acts on; a server's value carrying an
+// escape sequence, a carriage return or a bidi override must not repaint it.
+func TestConfirmPrompt_RemovesControlCharacters(t *testing.T) {
+	t.Parallel()
+	prompt := confirmPrompt("Revoke the role from %s?", "alice@example.com\x1b[2K\rbob@example.com\u202e")
+
+	assert.NotContains(t, prompt, "\x1b")
+	assert.NotContains(t, prompt, "\r")
+	assert.NotContains(t, prompt, "\u202e")
+	assert.Contains(t, prompt, "alice@example.com")
+}

@@ -300,7 +300,6 @@ func TestOutputTimelineJSON_RecordingsEmptyArrayNotNull(t *testing.T) {
 	assert.Equal(t, "[]", string(result["recordings"]), "recordings must be [] not null")
 }
 
-// Both timeline and recordings keys must always be present in JSON output.
 func TestOutputTimelineJSON_BothKeysPresent(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
 		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, "ses-1", nil)

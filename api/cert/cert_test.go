@@ -323,13 +323,15 @@ func TestCreateSignRequest(t *testing.T) {
 
 func TestSubmitCSR(t *testing.T) {
 	t.Parallel()
+	csrData := []byte("-----BEGIN CERTIFICATE REQUEST-----\nMIIB...\n-----END CERTIFICATE REQUEST-----")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPatch, r.Method)
+		assert.Equal(t, "/api/cert/sign-requests/test-id/submit/", r.URL.Path)
 
 		var body CSRSubmit
 		err := json.NewDecoder(r.Body).Decode(&body)
 		assert.NoError(t, err)
-		assert.NotEmpty(t, body.CsrText)
+		assert.Equal(t, string(csrData), body.CsrText)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -337,9 +339,8 @@ func TestSubmitCSR(t *testing.T) {
 	defer server.Close()
 
 	ac := newTestClient(server)
-	csrData := []byte("-----BEGIN CERTIFICATE REQUEST-----\nMIIB...\n-----END CERTIFICATE REQUEST-----")
 
-	err := SubmitCSR(ac, csrData, "/api/cert/sign-requests/test-id/submit/")
+	err := SubmitCSR(ac, csrData, SignRequestResponse{SubmitURL: "/api/cert/sign-requests/test-id/submit/"})
 	assert.NoError(t, err)
 }
 

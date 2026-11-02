@@ -18,23 +18,19 @@ import (
 )
 
 func generateKey(keyPath string) (*rsa.PrivateKey, error) {
-	// 1. First, check if a key already exists at the provided path.
 	if _, err := os.Stat(keyPath); err == nil {
 		key, err := readPrivateKey(keyPath)
 		if err != nil {
-			// If there's an error reading the key, output an error message and exit CLI. User should retry.
 			return nil, err
 		}
 		return key, nil
 	}
 
-	// 2. If no key exists at the path, generate a new one.
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, err
 	}
 
-	// 3. After generation, save the key at the specified path.
 	err = savePrivateKey(keyPath, key)
 	if err != nil {
 		return nil, err
@@ -123,9 +119,8 @@ func savePrivateKey(fileName string, key *rsa.PrivateKey) error {
 		Bytes: x509.MarshalPKCS1PrivateKey(key),
 	})
 
-	// Goes through SaveStreamAtomic (stage in a temp file, then rename) rather
-	// than truncating fileName directly, so a write that fails partway never
-	// leaves a corrupt key on disk for generateKey to pick back up (#439).
+	// Staged in a temp file and renamed, so a write that fails partway never leaves a corrupt key
+	// for generateKey to pick back up.
 	if _, err := utils.SaveStreamAtomic(fileName, bytes.NewReader(keyPEM), 0600); err != nil {
 		return fmt.Errorf("failed to save private key file: %v", err)
 	}

@@ -49,7 +49,7 @@ var authorityDeleteCmd = &cobra.Command{
 
 		err = cert.DeleteCA(alpaconClient, authorityID)
 		if err != nil {
-			utils.CliErrorWithExit("%s", deleteCAErrorText(authorityName, err))
+			utils.CliErrorWithExit("%s", utils.Reword(err, deleteCAErrorText(authorityName, err)))
 		}
 
 		utils.CliSuccess("CA deleted: %s", authorityName)
@@ -57,7 +57,9 @@ var authorityDeleteCmd = &cobra.Command{
 }
 
 func deleteCAErrorText(authorityName string, err error) string {
-	if code, _ := utils.ParseErrorResponse(err); code == cert.CodeAuthorityCannotBeDeleted {
+	// A server hint is the guidance when the refusal carries one, and the error
+	// output prints it under this line.
+	if code, _ := utils.ParseErrorResponse(err); code == cert.CodeAuthorityCannotBeDeleted && utils.RefusalHint(err) == "" {
 		return fmt.Sprintf("CA '%s' has received certificate requests, so it cannot be deleted; "+
 			"its records are kept. To stop using it, remove the server it runs on (the Server column of "+
 			"'alpacon authority ls'): run 'alpamon unregister' on that host, then 'alpacon server delete' "+

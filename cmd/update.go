@@ -16,7 +16,8 @@ var checkOnly bool
 var updateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Update the CLI to the latest release",
-	Args:  cobra.NoArgs, // Without this, 'alpacon update check'—the typo for --check—is an argument nobody reads, and the binary gets replaced instead.
+	// 'alpacon update check', a typo for --check, must fail, not replace the binary.
+	Args: cobra.NoArgs,
 	Long: `Update the CLI to the latest release.
 
 A binary a package manager or a version manager installed is left to that tool:
@@ -44,7 +45,8 @@ never has to parse prose:
 			message, code := checkOutcome(utils.Version, release.Version)
 			utils.CliInfo("%s", message)
 			if code != 0 {
-				utils.CliInfo("%s", checkAction(installKind())) // CliInfo, not CliError: the check succeeded, and "Error" would contradict the exit code the README tells scripts to branch on.
+				// The check succeeded; "Error" would contradict the exit code scripts read.
+				utils.CliInfo("%s", checkAction(installKind()))
 				os.Exit(code)
 			}
 			return
@@ -74,7 +76,7 @@ never has to parse prose:
 		case result.AlreadyCurrent:
 			utils.CliInfo("%s", message)
 		default:
-			utils.CliSuccess("%s", message) // The binary was replaced; Info would read exactly like the "already up to date" line above.
+			utils.CliSuccess("%s", message) // Info would read like the "already up to date" line.
 		}
 	},
 }
@@ -94,7 +96,8 @@ func checkOutcome(current, latest string) (string, int) {
 	return fmt.Sprintf("A newer release is available: %s -> %s.", current, latest), utils.ExitCodeUpdateAvailable
 }
 
-func installKind() selfupdate.InstallKind { // --check installs nothing, so a binary it cannot find or place has nothing better to say than manual—'alpacon update' is where not knowing has to stop the work.
+// installKind reads an unresolvable binary as manual, since --check installs nothing.
+func installKind() selfupdate.InstallKind {
 	executable, err := selfupdate.ResolveExecutablePath()
 	if err != nil {
 		return selfupdate.InstallManual
@@ -106,7 +109,9 @@ func installKind() selfupdate.InstallKind { // --check installs nothing, so a bi
 	return kind
 }
 
-func checkAction(kind selfupdate.InstallKind) string { // Reads Kind rather than Guidance, for the reason reportResult gives below: an install kind whose wording nobody wrote must not be told to run 'alpacon update', which can only exit 1 on it.
+// checkAction reads Kind, not Guidance: a kind with no wording must not be sent to 'alpacon
+// update'.
+func checkAction(kind selfupdate.InstallKind) string {
 	if kind == selfupdate.InstallManual {
 		return "Run 'alpacon update' to install it."
 	}
@@ -130,9 +135,11 @@ func permissionHint(err error) string {
 	if !errors.Is(err, os.ErrPermission) {
 		return ""
 	}
-	if errors.Is(err, selfupdate.ErrWorkDirUnavailable) { // The temp directory is nobody's install location, so sudo is not the answer: the variable naming it belongs to the user who set it.
+	// The temp dir is no install location: the fix is the user's variable, not sudo.
+	if errors.Is(err, selfupdate.ErrWorkDirUnavailable) {
 		tempDirEnvVar := "TMPDIR"
-		if runtime.GOOS == "windows" { // os.TempDir calls GetTempPath there, which reads TMP, TEMP and USERPROFILE and never TMPDIR.
+		// os.TempDir reads TMP, TEMP and USERPROFILE there, never TMPDIR.
+		if runtime.GOOS == "windows" {
 			tempDirEnvVar = "TMP"
 		}
 		return fmt.Sprintf("The temporary directory is not writable by this user. Point %s at a writable directory and try again.", tempDirEnvVar)

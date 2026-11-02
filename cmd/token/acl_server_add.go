@@ -37,7 +37,7 @@ func runServerAclAdd(cmd *cobra.Command, args []string) {
 
 	serverName, serversCSV, err := validateServerAclFlags(serverName, serversCSV)
 	if err != nil {
-		utils.CliErrorWithExit("%s.", err)
+		utils.CliUsageErrorWithExit("%s.", err)
 	}
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
@@ -67,7 +67,7 @@ func runServerAclAdd(cmd *cobra.Command, args []string) {
 
 	names := utils.SplitAndTrim(serversCSV, ",")
 	if len(names) == 0 {
-		utils.CliErrorWithExit("--servers must contain at least one server name.")
+		utils.CliUsageErrorWithExit("--servers must contain at least one server name.")
 	}
 
 	serverIDs, err := resolveServerIDs(alpaconClient, names)

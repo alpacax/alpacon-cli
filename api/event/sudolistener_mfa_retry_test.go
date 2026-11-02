@@ -86,8 +86,6 @@ func TestSudoListener_HandleSudoMFA_RetriesVerifyUntilMFAPasses(t *testing.T) {
 	assert.Zero(t, stub.unexpected.Load())
 }
 
-// A verification the server keeps refusing ends at the timeout, with the
-// attempts bounded by it.
 func TestSudoListener_HandleSudoMFA_StopsRetryingVerifyAtTheTimeout(t *testing.T) {
 	stub := &sudoVerifyStub{refusals: 1 << 30}
 	sl := stub.listener(t)

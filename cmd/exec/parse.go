@@ -3,6 +3,7 @@ package exec
 import (
 	"fmt"
 	"os"
+	pathpkg "path"
 	"strconv"
 	"strings"
 	"time"
@@ -16,21 +17,16 @@ import (
 // costs a parked command its one demand.
 const PurposeMaxLength = 2000
 
-// checkPurpose validates a stated purpose against the server's rules, returning
-// the value to send and an empty string when it passes. subject names the thing
-// being validated—the flag for `exec --purpose`, the argument for
-// `exec purpose`—so one ceiling and one wording serve both.
+// checkPurpose validates a stated purpose, returning the value to send and an empty message when it
+// passes. subject names the flag or argument in the message, so `exec --purpose` and
+// `exec purpose` share one ceiling and one wording.
 //
-// Surrounding whitespace is trimmed, and the ceiling is counted on what is
-// actually sent, so the length checked is the length that travels. Trimming is
-// not sanitizing: stripping control characters out of a purpose would falsify a
-// statement the assessor and the audit record attribute to the requester, so
-// the text itself reaches the server as typed.
+// Surrounding whitespace is trimmed before the ceiling is counted, so the length checked is the
+// length sent. Nothing else is stripped: removing control characters would falsify a statement the
+// assessor and the audit record attribute to the requester.
 //
-// The ceiling is counted in runes, not bytes. The server limits purpose to
-// 2000 characters, counted in characters not bytes, so len() would refuse a
-// Korean purpose at roughly 666 of them—while telling the caller the server
-// would refuse it, which at that length is untrue.
+// The ceiling is counted in runes because the server counts characters; len() would refuse a Korean
+// purpose at roughly 666 of them.
 func checkPurpose(subject, purpose string) (string, string) {
 	trimmed := strings.TrimSpace(purpose)
 	if trimmed == "" {
@@ -75,29 +71,26 @@ type RemoteExecArgs struct {
 	Wait         bool
 	ShowHelp     bool
 	Err          string
-	// File is set by --file and selects the verified file lane, in which case
-	// Command is empty and the words after -- are the script's arguments. Nil
-	// on the generic lane, so every existing caller reads as before.
+	// File is set by --file and selects the verified file lane, in which case Command is empty and
+	// the words after -- are the script's arguments. Nil on the generic lane.
 	File *FileExecArgs
 }
 
-// ParseRemoteExecArgs parses raw CLI arguments with manual flag handling.
-// It recognizes -u/--username, -g/--groupname, and -h/--help flags before
-// the server name.
+// ParseRemoteExecArgs parses raw CLI arguments with manual flag handling. Flags are recognized
+// only before the server name.
 //
 // The -- separator has two roles depending on position:
-//   - After the server name: acts as a command separator. Everything after
-//     it is the remote command, with no further flag parsing.
-//   - Before the server name (e.g., after flags): acts as an end-of-flags
-//     marker. The first arg after -- becomes the server, the rest is the command.
+//   - After the server name: everything after it is the remote command, with no further flag
+//     parsing.
+//   - Before the server name: it ends the flags; the first arg after it is the server, the rest
+//     is the command.
 //
 // Without --, everything after the server name is the remote command.
 //
 // Layout: [flags] [USER@]SERVER [--] COMMAND...
 //
-// With --file the words after the server are the script's arguments and must
-// follow --: a command line and a verified file cannot be combined, and a word
-// list with no separator is how one would be mistaken for the other.
+// With --file the words after the server are the script's arguments and must follow --, so a
+// command line is never mistaken for a verified file's arguments.
 func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	var (
 		username, groupname, workSessionID, outputFormat, server string
@@ -106,21 +99,22 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		reuseDays                                                int
 		commandParts                                             []string
 		detach                                                   bool
+		upload, overwrite, fromServer                            bool
 		wait                                                     bool
 		separated                                                bool
 		waitApproval                                             time.Duration
 	)
 	env := map[string]string{}
+	fail := func(msg string) RemoteExecArgs { return RemoteExecArgs{Err: msg, OutputFormat: outputFormat} }
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 
-		// -- separator: everything remaining is the remote command
 		if arg == "--" {
 			separated = true
 			if server == "" {
-				// Nothing before -- that looked like a server name.
-				// Treat remaining args normally: first is server, rest is command.
+				// No server before --: the first arg after it is the server, the rest is the
+				// command.
 				remaining := args[i+1:]
 				if len(remaining) > 0 {
 					server = remaining[0]
@@ -132,13 +126,11 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			break
 		}
 
-		// Already found server: remaining args are the command
 		if server != "" {
 			commandParts = args[i:]
 			break
 		}
 
-		// Flag parsing (only before server is identified)
 		switch {
 		case arg == "-h" || arg == "--help":
 			return RemoteExecArgs{ShowHelp: true}
@@ -146,148 +138,171 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			var errMsg string
 			username, i, errMsg = extractFlagValue(args, i, "-u")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 		case matchShortOrLongFlag(arg, "-g", "--groupname"):
 			var errMsg string
 			groupname, i, errMsg = extractFlagValue(args, i, "-g")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 		case arg == "--work-session" || strings.HasPrefix(arg, "--work-session="):
 			var errMsg string
 			// No short form: pass the long name as sentinel to disable attached-value parsing.
 			workSessionID, i, errMsg = extractFlagValue(args, i, "--work-session")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 		case arg == "--purpose" || strings.HasPrefix(arg, "--purpose="):
 			var errMsg string
 			// No short form: pass the long name as sentinel to disable attached-value parsing.
 			purpose, i, errMsg = extractFlagValue(args, i, "--purpose")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 			var msg string
 			if purpose, msg = checkPurpose("--purpose", purpose); msg != "" {
-				return RemoteExecArgs{Err: msg}
+				return fail(msg)
 			}
 		case arg == "--output" || strings.HasPrefix(arg, "--output="):
 			var errMsg string
 			outputFormat, i, errMsg = extractFlagValue(args, i, "--output")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 			if outputFormat == "" {
-				return RemoteExecArgs{Err: "--output requires a value (table|json)"}
+				return fail("--output requires a value (table|json)")
 			}
 		case arg == "--env" || strings.HasPrefix(arg, "--env="):
 			if errMsg := ParseEnvArg(arg, env); errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 		case arg == "--file" || strings.HasPrefix(arg, "--file="):
 			var errMsg string
 			filePath, i, errMsg = extractFlagValue(args, i, "--file")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 			if filePath == "" {
-				return RemoteExecArgs{Err: "--file requires the script's absolute path on the target server"}
+				return fail("--file requires the script's absolute path on the target server")
 			}
 			if !strings.HasPrefix(filePath, "/") {
-				return RemoteExecArgs{Err: fmt.Sprintf("--file must be an absolute path on the target server (starting with /): %s", filePath)}
+				return fail(fmt.Sprintf("--file must be an absolute path on the target server (starting with /): %s", filePath))
 			}
 		case arg == "--file-from" || strings.HasPrefix(arg, "--file-from="):
 			var errMsg string
 			fileFrom, i, errMsg = extractFlagValue(args, i, "--file-from")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 			if fileFrom == "" {
-				return RemoteExecArgs{Err: "--file-from requires a local path to read the script from"}
+				return fail("--file-from requires a local path to read the script from")
 			}
 		case arg == "--interpreter" || strings.HasPrefix(arg, "--interpreter="):
 			var errMsg string
 			interpreter, i, errMsg = extractFlagValue(args, i, "--interpreter")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 			if interpreter == "" {
-				return RemoteExecArgs{Err: "--interpreter requires the interpreter's absolute path on the target server"}
+				return fail("--interpreter requires the interpreter's absolute path on the target server")
 			}
 			if !strings.HasPrefix(interpreter, "/") {
-				return RemoteExecArgs{Err: fmt.Sprintf("--interpreter must be an absolute path (starting with /): %s", interpreter)}
+				return fail(fmt.Sprintf("--interpreter must be an absolute path (starting with /): %s", interpreter))
 			}
 		case arg == "--reuse-days" || strings.HasPrefix(arg, "--reuse-days="):
 			var raw, errMsg string
 			raw, i, errMsg = extractFlagValue(args, i, "--reuse-days")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 			var msg string
 			if reuseDays, msg = checkReuseDays(raw); msg != "" {
-				return RemoteExecArgs{Err: msg}
+				return fail(msg)
 			}
+		case arg == "--upload":
+			upload = true
+		case strings.HasPrefix(arg, "--upload="):
+			return fail("--upload does not accept a value; use --upload alone")
+		case arg == "--overwrite":
+			overwrite = true
+		case strings.HasPrefix(arg, "--overwrite="):
+			return fail("--overwrite does not accept a value; use --overwrite alone")
+		case arg == "--from-server":
+			fromServer = true
+		case strings.HasPrefix(arg, "--from-server="):
+			return fail("--from-server does not accept a value; use --from-server alone")
 		case arg == "--detach":
 			detach = true
 		case strings.HasPrefix(arg, "--detach="):
-			return RemoteExecArgs{Err: "--detach does not accept a value; use --detach alone"}
+			return fail("--detach does not accept a value; use --detach alone")
 		case arg == "--wait":
 			wait = true
 		case strings.HasPrefix(arg, "--wait="):
-			return RemoteExecArgs{Err: "--wait does not accept a value; use --wait alone"}
+			return fail("--wait does not accept a value; use --wait alone")
 		case arg == "--wait-approval" || strings.HasPrefix(arg, "--wait-approval="):
 			var raw, errMsg string
 			raw, i, errMsg = extractFlagValue(args, i, "--wait-approval")
 			if errMsg != "" {
-				return RemoteExecArgs{Err: errMsg}
+				return fail(errMsg)
 			}
 			d, err := utils.ParsePositiveDuration("--wait-approval", raw)
 			if err != nil {
-				return RemoteExecArgs{Err: err.Error()}
+				return fail(err.Error())
 			}
 			waitApproval = d
 		case strings.HasPrefix(arg, "-"):
-			return RemoteExecArgs{Err: "unknown flag: " + arg}
+			return fail("unknown flag: " + arg)
 		default:
 			server = arg
 		}
 	}
 
 	if detach && wait {
-		return RemoteExecArgs{
-			Err: "--wait and --detach cannot be combined; --detach returns immediately and would ignore --wait",
-		}
+		return fail("--wait and --detach cannot be combined; --detach returns immediately and would ignore --wait")
 	}
 	if detach && waitApproval > 0 {
-		return RemoteExecArgs{
-			Err: "--wait-approval and --detach cannot be combined; --detach returns immediately and would ignore --wait-approval",
-		}
+		return fail("--wait-approval and --detach cannot be combined; --detach returns immediately and would ignore --wait-approval")
+	}
+	if overwrite && !upload {
+		return fail("--overwrite requires --upload; it only applies to the file --upload writes")
 	}
 	if filePath == "" {
 		if fileFrom != "" {
-			return RemoteExecArgs{Err: "--file-from requires --file"}
+			return fail("--file-from requires --file")
 		}
 		if interpreter != "" {
-			return RemoteExecArgs{Err: "--interpreter requires --file"}
+			return fail("--interpreter requires --file")
 		}
 		if reuseDays > 0 {
-			return RemoteExecArgs{Err: "--reuse-days requires --file; only a verified file execution can propose a reuse duration"}
+			return fail("--reuse-days requires --file; only a verified file execution can propose a reuse duration")
+		}
+		if upload {
+			return fail("--upload requires --file; it writes the script to the --file path on the server")
+		}
+		if fromServer {
+			return fail("--from-server requires --file; it reads the script from the --file path on the server")
 		}
 	} else {
 		if len(env) > 0 {
-			return RemoteExecArgs{
-				Err: "--env cannot be combined with --file; a verified file takes no environment—set the variables inside the script",
-			}
+			return fail("--env cannot be combined with --file; a verified file takes no environment—set the variables inside the script")
+		}
+		if fromServer && upload {
+			return fail("--from-server cannot be combined with --upload; --from-server submits the file already on the server, --upload writes a local copy there")
+		}
+		if fromServer && fileFrom != "" {
+			return fail("--from-server cannot be combined with --file-from; the content is read from the --file path on the server, not from a local file")
+		}
+		// The upload writes to the cleaned path while the agent opens the path as
+		// given, and a symlink before ".." makes those two different files.
+		if upload && pathpkg.Clean(filePath) != filePath {
+			return fail(fmt.Sprintf("--upload needs a clean --file path, without '.', '..', or repeated or trailing slashes: %s", filePath))
 		}
 		if len(commandParts) > 0 && !separated {
-			return RemoteExecArgs{
-				Err: "--file cannot be combined with a command line; put the script's arguments after --",
-			}
+			return fail("--file cannot be combined with a command line; put the script's arguments after --")
 		}
 	}
 
-	// Parse SSH-like user@host syntax
 	if server != "" && strings.Contains(server, "@") && !strings.Contains(server, ":") {
 		sshTarget := utils.ParseSSHTarget(server)
 		if username == "" && sshTarget.User != "" {
@@ -315,6 +330,9 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			Interpreter: interpreter,
 			Args:        commandParts,
 			ReuseDays:   reuseDays,
+			Upload:      upload,
+			Overwrite:   overwrite,
+			FromServer:  fromServer,
 		}
 		return parsed
 	}
@@ -407,7 +425,6 @@ func matchShortOrLongFlag(arg, short, long string) bool {
 	if len(arg) > len(short) && strings.HasPrefix(arg, short) && arg[len(short)] != '-' {
 		return true
 	}
-	// Long flag: exact (--username) or with = (--username=val)
 	return arg == long || strings.HasPrefix(arg, long+"=")
 }
 
@@ -419,16 +436,13 @@ func matchShortOrLongFlag(arg, short, long string) bool {
 // Returns the value, updated index, and an error message if no value was found.
 func extractFlagValue(args []string, i int, short string) (string, int, string) {
 	arg := args[i]
-	// --flag=value
 	if strings.Contains(arg, "=") {
 		parts := strings.SplitN(arg, "=", 2)
 		return parts[1], i, ""
 	}
-	// -uroot (short flag with attached value, no space)
 	if strings.HasPrefix(arg, short) && len(arg) > len(short) {
 		return arg[len(short):], i, ""
 	}
-	// -u root (next arg is the value)
 	if i+1 < len(args) {
 		return args[i+1], i + 1, ""
 	}

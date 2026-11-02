@@ -8,6 +8,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/cert"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -79,4 +80,22 @@ func TestDeleteCAErrorText(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A refusal carrying the server's hint gives way to it: the local sentence is
+// dropped and the reworded error the command prints keeps the hint.
+func TestDeleteCAErrorText_ServerHintReplacesTheLocalSentence(t *testing.T) {
+	t.Parallel()
+	const hint = "Your roles do not allow this action; it needs a role that covers it."
+	err := deleteError(t, http.StatusForbidden, "application/json", `{"code": "`+cert.CodeAuthorityCannotBeDeleted+`", "hint": "`+hint+`"}`)
+
+	got := deleteCAErrorText("my-authority", err)
+	assert.Equal(t, "Failed to delete the CA: "+err.Error()+".", got)
+	assert.NotContains(t, got, "alpamon unregister")
+	assert.Equal(t, hint, utils.RefusalHint(utils.Reword(err, got)))
+
+	// The same code without a hint reaches the local sentence, so the case
+	// above is the hint giving way and not a code the branch never matches.
+	plain := deleteError(t, http.StatusForbidden, "application/json", `{"code": "`+cert.CodeAuthorityCannotBeDeleted+`"}`)
+	assert.Contains(t, deleteCAErrorText("my-authority", plain), "alpamon unregister")
 }

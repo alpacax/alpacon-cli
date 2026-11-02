@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/client"
 	tunnelruntime "github.com/alpacax/alpacon-cli/pkg/tunnel/runtime"
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -22,11 +23,11 @@ const (
 	shellOneLinerHint        = "(for shell-style one-liner, use: -- sh -c \"<command>\")"
 )
 
-func executeTunnelRunWithInvocation(serverName string, localCommand []string) (int, error) {
-	runtime, err := tunnelruntime.Start(tunnelFlags.toStartOptions(serverName))
+func executeTunnelRunWithInvocation(ac *client.AlpaconClient, serverName string, localCommand []string) (int, error) {
+	runtime, err := tunnelruntime.Start(tunnelFlags.toStartOptions(ac, serverName))
 	if err != nil {
-		err = handleTunnelStartError(err, serverName, func() error {
-			runtime, err = tunnelruntime.Start(tunnelFlags.toStartOptions(serverName))
+		err = handleTunnelStartError(ac, err, serverName, func() error {
+			runtime, err = tunnelruntime.Start(tunnelFlags.toStartOptions(ac, serverName))
 			return err
 		})
 		if err != nil {
@@ -48,7 +49,7 @@ func executeTunnelRunWithInvocation(serverName string, localCommand []string) (i
 	localCmd := exec.Command(commandName, commandArgs...)
 	localCmd.Stdin = os.Stdin
 	localCmd.Stdout = os.Stdout
-	localCmd.Stderr = os.Stderr
+	localCmd.Stderr = utils.StderrForChild()
 
 	if err := localCmd.Start(); err != nil {
 		runtime.Close(nil)

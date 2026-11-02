@@ -16,9 +16,8 @@ const (
 	ansiBlue   = "\033[34m"
 )
 
-// colorEnabled reports whether stderr is a terminal. Color helpers are
-// only used for log/prompt output (which goes to stderr), so gating on
-// stderr avoids ANSI artifacts when logs are piped or redirected.
+// colorEnabled gates on stderr, where colored log and prompt output goes, so piped or redirected
+// logs carry no ANSI codes.
 var colorEnabled = term.IsTerminal(int(os.Stderr.Fd()))
 
 // Green returns a bold green string for terminal output.

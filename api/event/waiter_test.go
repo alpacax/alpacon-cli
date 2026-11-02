@@ -5,12 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,40 +31,41 @@ func holdOpen(conn *websocket.Conn, _ int32) {
 	}
 }
 
-func newTestWaiter(t *testing.T, ts *httptest.Server, opts WaitOptions) *Waiter {
+func newTestWaiter(t *testing.T, ts *testutil.PipeServer, opts WaitOptions) *Waiter {
 	t.Helper()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	w := NewWaiter(ac, "work_session", "ws-uuid", opts)
-	w.reconnectBaseDelay = testReconnectBaseDelay
 	return w
 }
 
 func TestWaiter_CatchUpRunsOnlyAfterTheSubscriptionStands(t *testing.T) {
 	t.Parallel()
-	var subscribes atomic.Int32
-	var catchUpSawSubscribes atomic.Int32
+	synctest.Test(t, func(t *testing.T) {
+		var subscribes atomic.Int32
+		var catchUpSawSubscribes atomic.Int32
 
-	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, func(n int32) int {
-		subscribes.Store(n)
-		return http.StatusCreated
-	}, holdOpen)
+		ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, func(n int32) int {
+			subscribes.Store(n)
+			return http.StatusCreated
+		}, holdOpen)
 
-	w := newTestWaiter(t, ts, WaitOptions{
-		CatchUp: func() (string, error) {
-			catchUpSawSubscribes.Store(subscribes.Load())
-			return "pending", nil
-		},
-		OK:      []string{"approved"},
-		Fail:    []string{"rejected"},
-		Timeout: testShortTimeout,
+		w := newTestWaiter(t, ts, WaitOptions{
+			CatchUp: func() (string, error) {
+				catchUpSawSubscribes.Store(subscribes.Load())
+				return "pending", nil
+			},
+			OK:      []string{"approved"},
+			Fail:    []string{"rejected"},
+			Timeout: testShortTimeout,
+		})
+
+		_, outcome, err := w.Wait()
+
+		require.NoError(t, err)
+		assert.Equal(t, OutcomeTimeout, outcome, "pending must not end the wait")
+		// If catch-up ran before subscribing, an event published in between would be lost.
+		assert.GreaterOrEqual(t, catchUpSawSubscribes.Load(), int32(1), "catch-up must run after the subscription stands")
 	})
-
-	_, outcome, err := w.Wait()
-
-	require.NoError(t, err)
-	assert.Equal(t, OutcomeTimeout, outcome, "pending must not end the wait")
-	// If catch-up ran before subscribing, an event published in between would be lost.
-	assert.GreaterOrEqual(t, catchUpSawSubscribes.Load(), int32(1), "catch-up must run after the subscription stands")
 }
 
 func TestWaiter_CatchUpDecidesWithoutAnEvent(t *testing.T) {
@@ -129,79 +131,87 @@ func TestWaiter_ClassifiesFrameSubTypes(t *testing.T) {
 
 func TestWaiter_IgnoresAnUnrelatedSubType(t *testing.T) {
 	t.Parallel()
-	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"event_type":"work_session","payload":{"sub_type":"extended"}}`))
-		holdOpen(conn, 0)
+	synctest.Test(t, func(t *testing.T) {
+		ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
+			_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"event_type":"work_session","payload":{"sub_type":"extended"}}`))
+			holdOpen(conn, 0)
+		})
+
+		w := newTestWaiter(t, ts, WaitOptions{
+			OK:      []string{"approved"},
+			Fail:    []string{"rejected"},
+			Timeout: testShortTimeout,
+		})
+
+		_, outcome, err := w.Wait()
+
+		require.NoError(t, err)
+		assert.Equal(t, OutcomeTimeout, outcome, "a sub type in neither set must not end the wait")
 	})
-
-	w := newTestWaiter(t, ts, WaitOptions{
-		OK:      []string{"approved"},
-		Fail:    []string{"rejected"},
-		Timeout: testShortTimeout,
-	})
-
-	_, outcome, err := w.Wait()
-
-	require.NoError(t, err)
-	assert.Equal(t, OutcomeTimeout, outcome, "a sub type in neither set must not end the wait")
 }
 
 func TestWaiter_UnparseableFrameDoesNotEndTheWait(t *testing.T) {
 	t.Parallel()
-	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("not json at all"))
-		holdOpen(conn, 0)
+	synctest.Test(t, func(t *testing.T) {
+		ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("not json at all"))
+			holdOpen(conn, 0)
+		})
+
+		w := newTestWaiter(t, ts, WaitOptions{OK: []string{"approved"}, Timeout: testShortTimeout})
+
+		_, outcome, err := w.Wait()
+
+		require.NoError(t, err)
+		assert.Equal(t, OutcomeTimeout, outcome)
 	})
-
-	w := newTestWaiter(t, ts, WaitOptions{OK: []string{"approved"}, Timeout: testShortTimeout})
-
-	_, outcome, err := w.Wait()
-
-	require.NoError(t, err)
-	assert.Equal(t, OutcomeTimeout, outcome)
 }
 
 func TestWaiter_StopCancelsTheWait(t *testing.T) {
 	t.Parallel()
-	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, holdOpen)
+	synctest.Test(t, func(t *testing.T) {
+		ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, holdOpen)
 
-	w := newTestWaiter(t, ts, WaitOptions{OK: []string{"approved"}, Timeout: time.Minute})
+		w := newTestWaiter(t, ts, WaitOptions{OK: []string{"approved"}, Timeout: time.Minute})
 
-	connected := make(chan bool, 1)
-	go func() {
-		connected <- w.WaitConnected(testWaitTimeout)
-		w.Stop()
-	}()
+		connected := make(chan bool, 1)
+		go func() {
+			connected <- w.WaitConnected(testWaitTimeout)
+			w.Stop()
+		}()
 
-	_, outcome, err := w.Wait()
+		_, outcome, err := w.Wait()
 
-	require.True(t, <-connected)
-	require.NoError(t, err)
-	assert.Equal(t, OutcomeCanceled, outcome)
+		require.True(t, <-connected)
+		require.NoError(t, err)
+		assert.Equal(t, OutcomeCanceled, outcome)
+	})
 }
 
 func TestWaiter_CatchUpErrorIsReportedButDoesNotEndTheWait(t *testing.T) {
 	t.Parallel()
-	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, holdOpen)
+	synctest.Test(t, func(t *testing.T) {
+		ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, holdOpen)
 
-	w := newTestWaiter(t, ts, WaitOptions{
-		CatchUp: func() (string, error) { return "", errors.New("rest is down") },
-		OK:      []string{"approved"},
-		Timeout: testShortTimeout,
+		w := newTestWaiter(t, ts, WaitOptions{
+			CatchUp: func() (string, error) { return "", errors.New("rest is down") },
+			OK:      []string{"approved"},
+			Timeout: testShortTimeout,
+		})
+
+		_, outcome, err := w.Wait()
+
+		require.NoError(t, err)
+		// The subscription already stands; a failed catch-up is not worth throwing it away.
+		assert.Equal(t, OutcomeTimeout, outcome)
+
+		select {
+		case reported := <-w.CatchUpFailed():
+			assert.Contains(t, reported.Error(), "rest is down")
+		case <-time.After(testWaitTimeout):
+			t.Fatal("a catch-up failure must be reported to the caller")
+		}
 	})
-
-	_, outcome, err := w.Wait()
-
-	require.NoError(t, err)
-	// The subscription already stands; a failed catch-up is not worth throwing it away.
-	assert.Equal(t, OutcomeTimeout, outcome)
-
-	select {
-	case reported := <-w.CatchUpFailed():
-		assert.Contains(t, reported.Error(), "rest is down")
-	case <-time.After(testWaitTimeout):
-		t.Fatal("a catch-up failure must be reported to the caller")
-	}
 }
 
 func TestWaiter_RejectedSubscriptionSurfacesTheServerMessage(t *testing.T) {
@@ -219,33 +229,35 @@ func TestWaiter_RejectedSubscriptionSurfacesTheServerMessage(t *testing.T) {
 
 func TestWaiter_ReconnectRerunsCatchUp(t *testing.T) {
 	t.Parallel()
-	var catchUps atomic.Int32
+	synctest.Test(t, func(t *testing.T) {
+		var catchUps atomic.Int32
 
-	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
-		if n == 1 {
-			// Drop the first connection: the token is single-use, so the watcher
-			// provisions a new session and re-subscribes.
-			_ = conn.Close()
-			return
-		}
-		holdOpen(conn, n)
-	})
-
-	w := newTestWaiter(t, ts, WaitOptions{
-		CatchUp: func() (string, error) {
-			if catchUps.Add(1) == 1 {
-				return "pending", nil
+		ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
+			if n == 1 {
+				// Drop the first connection: the token is single-use, so the watcher
+				// provisions a new session and re-subscribes.
+				_ = conn.Close()
+				return
 			}
-			return "approved", nil
-		},
-		OK:      []string{"approved"},
-		Timeout: testWaitTimeout,
+			holdOpen(conn, n)
+		})
+
+		w := newTestWaiter(t, ts, WaitOptions{
+			CatchUp: func() (string, error) {
+				if catchUps.Add(1) == 1 {
+					return "pending", nil
+				}
+				return "approved", nil
+			},
+			OK:      []string{"approved"},
+			Timeout: testWaitTimeout,
+		})
+
+		_, outcome, err := w.Wait()
+
+		require.NoError(t, err)
+		// Events published during the outage are gone; re-running catch-up is the only recovery.
+		assert.Equal(t, OutcomeMatched, outcome, "a reconnect must re-run catch-up")
+		assert.Equal(t, int32(2), catchUps.Load())
 	})
-
-	_, outcome, err := w.Wait()
-
-	require.NoError(t, err)
-	// Events published during the outage are gone; re-running catch-up is the only recovery.
-	assert.Equal(t, OutcomeMatched, outcome, "a reconnect must re-run catch-up")
-	assert.Equal(t, int32(2), catchUps.Load())
 }

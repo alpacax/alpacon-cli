@@ -60,7 +60,7 @@ func runKubeProxy(cmd *cobra.Command, args []string) {
 	clusterName := args[0]
 	port := kubeProxyFlags.port
 	if err := validatePort(port); err != nil {
-		utils.CliErrorWithExit("--port %s.", err)
+		utils.CliUsageErrorWithExit("--port %s.", err)
 	}
 
 	paths, err := kubeconfig.SearchPaths(kubeProxyFlags.kubeconfig)

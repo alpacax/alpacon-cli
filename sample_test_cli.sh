@@ -447,7 +447,7 @@ echo "2. Interactive websh as root:"
 echo "   alpacon websh -u root $SERVER_NAME"
 echo
 echo "3. Shared websh session:"
-echo "   alpacon websh $SERVER_NAME --share"
+echo "   alpacon websh --share $SERVER_NAME"
 echo
 echo "4. MFA authentication (if configured):"
 echo "   (Try any command and follow MFA prompts)"

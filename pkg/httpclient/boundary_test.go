@@ -15,7 +15,6 @@ import (
 )
 
 const (
-	// repoRoot is where the walk starts, relative to this package.
 	repoRoot = "../.."
 
 	gorillaWebsocket = "github.com/gorilla/websocket"
@@ -149,7 +148,6 @@ func importName(file *ast.File, importPath, defaultName string) (string, bool) {
 	return "", false
 }
 
-// setsField reports whether a keyed composite literal names field.
 func setsField(lit *ast.CompositeLit, field string) bool {
 	for _, elt := range lit.Elts {
 		if kv, ok := elt.(*ast.KeyValueExpr); ok {

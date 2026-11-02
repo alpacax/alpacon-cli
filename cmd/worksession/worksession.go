@@ -45,6 +45,8 @@ Gated operations (require an active WorkSession under interactive auth):
   webftp—'alpacon cp' (file transfer)
   tunnel—'alpacon tunnel' (port forwarding)
   sudo—'Privilege elevation' on Alpacon web (binding op: pending/approved/active allowed)
+  kube—'alpacon kube login' and 'kube config' (Kubernetes API; needs a session that
+    targets the cluster with --cluster); kube_exec adds exec, attach and port-forward
 
 Bypass: Token auth (API token or Service token) skips the requirement for 'exec', 'cp',
 'edit', and 'websh SERVER COMMAND', but cannot run an interactive 'websh' terminal,
@@ -59,6 +61,7 @@ Error codes returned when a session check fails:
   work_session_expired            session has expired
   work_session_scope_not_allowed  operation not in session scopes
   work_session_server_not_allowed target server not in session
+  work_session_cluster_not_allowed target cluster not in session
   work_session_assignee_mismatch  session assigned to another principal
   work_session_agent_session_required  the CLI runs under an AI agent; use an agent session
   work_session_not_usable         session is no longer usable

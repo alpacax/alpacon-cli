@@ -16,12 +16,13 @@ import (
 const configPkgPath = "github.com/alpacax/alpacon-cli/config"
 
 // configReaders answer a question out of the config file, LoadConfig by way of
-// the other three calling it inside. Writes load it too but hand nothing back.
+// the others calling it inside. Writes load it too but hand nothing back.
 var configReaders = map[string]bool{
-	"LoadConfig":           true,
-	"IsSaaS":               true,
-	"GetActiveWorkSession": true,
-	"ResolveAuthMethod":    true,
+	"LoadConfig":              true,
+	"IsSaaS":                  true,
+	"GetActiveWorkSession":    true,
+	"GetActiveWorkSessionFor": true,
+	"ResolveAuthMethod":       true,
 }
 
 // The walk matches on name, so renaming a reader would leave it nothing to find
@@ -30,19 +31,20 @@ var (
 	_ = config.LoadConfig
 	_ = config.IsSaaS
 	_ = config.GetActiveWorkSession
+	_ = config.GetActiveWorkSessionFor
 	_ = config.ResolveAuthMethod
 )
 
-// TestAPILayerNeverReadsConfig keeps the api layer off the config file: a read
-// here can name a workspace the request is no longer going to (issue #401). It
-// walks the AST, so a comment naming config.LoadConfig is not one and an alias is.
+// TestAPILayerNeverReadsConfig keeps the api layer off the config file: a read here can name a
+// workspace the request is no longer going to. It walks the AST, so a comment naming
+// config.LoadConfig is not one and an alias is.
 func TestAPILayerNeverReadsConfig(t *testing.T) {
 	t.Parallel()
-	dirs, err := nonTestGoFiles()
+	pkgs, err := nonTestGoFiles("./...")
 	require.NoError(t, err)
 
 	var offenders []string
-	for _, paths := range dirs {
+	for _, paths := range pkgs {
 		for _, path := range paths {
 			file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 			require.NoError(t, err)

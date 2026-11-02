@@ -13,9 +13,8 @@ const (
 	pollSlowTick      = 10
 	pollBackoffFactor = 2
 
-	// PollMaxBackoffTick is exported so a poll loop's own test (api/event,
-	// cmd/exec, cmd/worksession) can state its capped wait as a constant
-	// expression.
+	// PollMaxBackoffTick caps a backoff gap, in multiples of the base tick. It is exported so a
+	// poll loop's own test can state its capped wait as a constant expression.
 	PollMaxBackoffTick = 60
 
 	// MaxConsecutivePollFailures bounds a wait's ride through failed polls: a run
@@ -74,11 +73,9 @@ func (b *ThrottleBudget) ShouldWarn() bool {
 	return true
 }
 
-// WarnThrottled prints the rate-limit notice the first time a throttled stretch
-// calls it, and stays quiet for the rest of that stretch. Every wait loop that
-// spends a budget shows the same line, so the wording lives here rather than at
-// each call site. CliWarning steps off a running spinner's line itself, so a
-// caller animating one need not stop it first.
+// WarnThrottled prints the rate-limit notice once per throttled stretch, so every wait loop shows
+// the same line. CliWarning steps off a running spinner's line itself, so the caller need not stop
+// one first.
 func (b *ThrottleBudget) WarnThrottled(delay time.Duration) {
 	if b.ShouldWarn() {
 		CliWarning("rate limited by the server, retrying in %s", delay)

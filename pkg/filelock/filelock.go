@@ -21,10 +21,8 @@ type Lock struct {
 	file *os.File
 }
 
-// Acquire creates the directory and the lock file as needed and takes a
-// non-blocking exclusive lock on it. perm applies only to a file this call
-// creates; the caller picks it, since who else must be able to open the file
-// is the caller's question.
+// Acquire creates the directory and the lock file as needed and takes a non-blocking exclusive
+// lock on it. perm applies only to a file this call creates.
 func Acquire(path string, perm os.FileMode) (*Lock, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err

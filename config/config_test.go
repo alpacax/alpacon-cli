@@ -10,16 +10,23 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// setupTestConfig overrides the home directory so tests write to a temp dir.
-// t.Setenv automatically restores the original value when the test finishes.
+// setupTestConfig points HOME at a temp dir so tests write there.
 func setupTestConfig(t *testing.T) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+}
+
+func loadedConfig(t *testing.T) Config {
+	t.Helper()
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	return cfg
 }
 
 func TestIsMultiWorkspaceMode(t *testing.T) {
@@ -128,7 +135,6 @@ func TestCreateConfig_BaseDomainOmittedFromJSON(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Read raw JSON to verify omitempty works
 	homeDir, _ := os.UserHomeDir()
 	data, err := os.ReadFile(filepath.Join(homeDir, ConfigFileDir, ConfigFileName))
 	require.NoError(t, err)
@@ -143,7 +149,6 @@ func TestCreateConfig_BaseDomainOmittedFromJSON(t *testing.T) {
 func TestSwitchWorkspace(t *testing.T) {
 	setupTestConfig(t)
 
-	// Create initial config
 	err := CreateConfig(
 		"https://ws1.us1.alpacon.io", "ws1",
 		"", "", "access-token", "refresh-token",
@@ -151,11 +156,9 @@ func TestSwitchWorkspace(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Switch workspace
-	err = SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2", false)
+	err = SwitchWorkspace(loadedConfig(t), "https://ws2.us1.alpacon.io", "ws2", false)
 	require.NoError(t, err)
 
-	// Verify only URL and name changed
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "https://ws2.us1.alpacon.io", cfg.WorkspaceURL)
@@ -169,23 +172,24 @@ func TestSwitchWorkspace_RecordsKubernetesSurface(t *testing.T) {
 	setupTestConfig(t)
 
 	require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "", "", "access-token", "", "alpacon.io", 3600, false))
-	require.NoError(t, SetKubernetesSurface("https://ws1.us1.alpacon.io", true))
+	require.NoError(t, SetWorkspaceEnv("https://ws1.us1.alpacon.io", "", true))
+	orig := loadedConfig(t)
 
 	// A switch writes the new workspace's answer in the same save.
-	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2", false))
+	require.NoError(t, SwitchWorkspace(orig, "https://ws2.us1.alpacon.io", "ws2", false))
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "ws2", cfg.WorkspaceName)
 	assert.False(t, cfg.KubernetesSurface)
 
-	require.NoError(t, SwitchWorkspace("https://ws3.us1.alpacon.io", "ws3", true))
+	require.NoError(t, SwitchWorkspace(loadedConfig(t), "https://ws3.us1.alpacon.io", "ws3", true))
 	cfg, err = LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "ws3", cfg.WorkspaceName)
 	assert.True(t, cfg.KubernetesSurface)
 
 	// A failed switch restores the original workspace's answer in the same write.
-	require.NoError(t, RestoreWorkspace("https://ws1.us1.alpacon.io", "ws1", "", true))
+	require.NoError(t, RestoreWorkspace("https://ws3.us1.alpacon.io", orig))
 	cfg, err = LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "ws1", cfg.WorkspaceName)
@@ -193,13 +197,13 @@ func TestSwitchWorkspace_RecordsKubernetesSurface(t *testing.T) {
 	assert.Equal(t, "access-token", cfg.AccessToken)
 }
 
-func TestSetKubernetesSurface_PreservesOtherFields(t *testing.T) {
+func TestSetWorkspaceEnv_KubernetesSurfacePreservesOtherFields(t *testing.T) {
 	setupTestConfig(t)
 
 	require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "", "", "access-token", "refresh-token", "alpacon.io", 3600, false))
 	require.NoError(t, SetActiveWorkSession("ses-1"))
 
-	require.NoError(t, SetKubernetesSurface("https://ws1.us1.alpacon.io", true))
+	require.NoError(t, SetWorkspaceEnv("https://ws1.us1.alpacon.io", "", true))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -210,7 +214,7 @@ func TestSetKubernetesSurface_PreservesOtherFields(t *testing.T) {
 	assert.Equal(t, "alpacon.io", cfg.BaseDomain)
 	assert.Equal(t, map[string]string{"ws1": "ses-1"}, cfg.ActiveWorkSessions)
 
-	require.NoError(t, SetKubernetesSurface("https://ws1.us1.alpacon.io", false))
+	require.NoError(t, SetWorkspaceEnv("https://ws1.us1.alpacon.io", "", false))
 
 	homeDir, err := os.UserHomeDir()
 	require.NoError(t, err)
@@ -222,36 +226,169 @@ func TestSetKubernetesSurface_PreservesOtherFields(t *testing.T) {
 	assert.Equal(t, "access-token", raw["access_token"])
 }
 
-func TestSetKubernetesSurface_NoExistingConfig(t *testing.T) {
+func TestSetWorkspaceEnv_NoExistingConfig(t *testing.T) {
 	setupTestConfig(t)
 
-	err := SetKubernetesSurface("https://ws1.us1.alpacon.io", true)
+	err := SetWorkspaceEnv("https://ws1.us1.alpacon.io", "", true)
 	require.ErrorIs(t, err, fs.ErrNotExist)
 }
 
-func TestSetKubernetesSurface_RefusesAnotherWorkspace(t *testing.T) {
+func TestSetWorkspaceEnv_RefusesAnotherWorkspace(t *testing.T) {
 	setupTestConfig(t)
 
 	require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "token", "", "", "", "", 0, false))
-	require.NoError(t, SetKubernetesSurface("https://ws1.us1.alpacon.io", true))
+	require.NoError(t, SetWorkspaceEnv("https://ws1.us1.alpacon.io", "", true))
 
 	// Another shell switched to ws2 while ws1's answer was being fetched.
-	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2", false))
+	require.NoError(t, SwitchWorkspace(loadedConfig(t), "https://ws2.us1.alpacon.io", "ws2", false))
 
-	err := SetKubernetesSurface("https://ws1.us1.alpacon.io", true)
+	err := SetWorkspaceEnv("https://ws1.us1.alpacon.io", "frozen", true)
 	require.ErrorIs(t, err, ErrWorkspaceChanged)
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "https://ws2.us1.alpacon.io", cfg.WorkspaceURL)
+	assert.Equal(t, "ws2", cfg.SchemaName)
 	assert.False(t, cfg.KubernetesSurface)
+}
+
+// Each of these writers decided what to write before a network call, during which another shell logged
+// in, elsewhere or to the same workspace as another account; the write must leave that login alone.
+func TestWritersDecidedBeforeAnotherLoginWriteNothing(t *testing.T) {
+	const ws1, ws2, ws9 = "https://ws1.us1.alpacon.io", "https://ws2.us1.alpacon.io", "https://ws9.zz9.alpacon.io"
+	tests := []struct {
+		name         string
+		anotherLogin string
+		write        func(started Config) error
+		wantErr      error
+	}{
+		{name: "switch after a login elsewhere", anotherLogin: ws9, wantErr: ErrWorkspaceChanged, write: func(started Config) error {
+			return SwitchWorkspace(started, ws2, "ws2", true)
+		}},
+		{name: "switch after another account logged in to the same workspace", anotherLogin: ws1, wantErr: ErrLoginChanged, write: func(started Config) error {
+			return SwitchWorkspace(started, ws2, "ws2", true)
+		}},
+		{name: "revert after a login elsewhere", anotherLogin: ws9, wantErr: ErrWorkspaceChanged, write: func(started Config) error {
+			return RestoreWorkspace(ws2, started)
+		}},
+		{name: "revert after another account logged in to the workspace switched to", anotherLogin: ws2, wantErr: ErrLoginChanged, write: func(started Config) error {
+			return RestoreWorkspace(ws2, started)
+		}},
+		{name: "workspace env fetched for the old workspace", anotherLogin: ws9, wantErr: ErrWorkspaceChanged, write: func(Config) error {
+			return SetWorkspaceEnv(ws1, "frozen", true)
+		}},
+		{name: "token refreshed after a login elsewhere", anotherLogin: ws9, wantErr: ErrLoginChanged, write: func(started Config) error {
+			return SaveRefreshedAuth0Token(started.RefreshToken, "access-from-ws1", 3600)
+		}},
+		{name: "token refreshed after another account logged in to the same workspace", anotherLogin: ws1, wantErr: ErrLoginChanged, write: func(started Config) error {
+			return SaveRefreshedAuth0Token(started.RefreshToken, "access-from-ws1", 3600)
+		}},
+		{name: "logout after a login elsewhere", anotherLogin: ws9, wantErr: ErrLoginChanged, write: func(started Config) error {
+			return DeleteConfig(started)
+		}},
+		{name: "logout after another account logged in to the same workspace", anotherLogin: ws1, wantErr: ErrLoginChanged, write: func(started Config) error {
+			return DeleteConfig(started)
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupTestConfig(t)
+			require.NoError(t, CreateConfig(ws1, "ws1", "", "", "access-1", "refresh-1", "alpacon.io", 3600, false))
+			started := loadedConfig(t)
+			require.NoError(t, CreateConfig(tt.anotherLogin, "other", "", "", "access-9", "refresh-9", "alpacon.io", 3600, false))
+			want := loadedConfig(t)
+
+			err := tt.write(started)
+
+			require.ErrorIs(t, err, tt.wantErr)
+			assert.Equal(t, want, loadedConfig(t))
+		})
+	}
+}
+
+func TestWritersDecidedBeforeAnotherSwitchStillWrite(t *testing.T) {
+	const ws1, ws2 = "https://ws1.us1.alpacon.io", "https://ws2.us1.alpacon.io"
+
+	t.Run("token refresh", func(t *testing.T) {
+		setupTestConfig(t)
+		require.NoError(t, CreateConfig(ws1, "ws1", "", "", "access-1", "refresh-1", "alpacon.io", 3600, false))
+		started := loadedConfig(t)
+		require.NoError(t, SwitchWorkspace(started, ws2, "ws2", false))
+
+		err := SaveRefreshedAuth0Token(started.RefreshToken, "access-2", 3600)
+
+		require.NoError(t, err)
+		cfg := loadedConfig(t)
+		assert.Equal(t, ws2, cfg.WorkspaceURL)
+		assert.Equal(t, "access-2", cfg.AccessToken)
+	})
+
+	t.Run("logout", func(t *testing.T) {
+		setupTestConfig(t)
+		require.NoError(t, CreateConfig(ws1, "ws1", "", "", "access-1", "refresh-1", "alpacon.io", 3600, false))
+		started := loadedConfig(t)
+		require.NoError(t, SwitchWorkspace(started, ws2, "ws2", false))
+
+		err := DeleteConfig(started)
+
+		require.NoError(t, err)
+		_, err = LoadConfig()
+		require.ErrorIs(t, err, fs.ErrNotExist)
+	})
+}
+
+func TestDeleteConfig_RemovesTheLoginItWasGiven(t *testing.T) {
+	tests := []struct {
+		name  string
+		login func() error
+	}{
+		{name: "browser login", login: func() error {
+			return CreateConfig("https://ws1.us1.alpacon.io", "ws1", "", "", "access-1", "refresh-1", "alpacon.io", 3600, false)
+		}},
+		{name: "API key login", login: func() error {
+			return CreateConfig("https://alpacon.example.com", "", "key-1", "", "", "", "", 0, false)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupTestConfig(t)
+			require.NoError(t, tt.login())
+
+			err := DeleteConfig(loadedConfig(t))
+
+			require.NoError(t, err)
+			_, err = LoadConfig()
+			require.ErrorIs(t, err, fs.ErrNotExist)
+		})
+	}
+}
+
+func TestDeleteConfig_KeepsAnotherAPIKeyLoginToTheSameServer(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://alpacon.example.com", "", "key-1", "", "", "", "", 0, false))
+	started := loadedConfig(t)
+	require.NoError(t, CreateConfig("https://alpacon.example.com", "", "key-2", "", "", "", "", 0, false))
+
+	err := DeleteConfig(started)
+
+	require.ErrorIs(t, err, ErrLoginChanged)
+	assert.Equal(t, "key-2", loadedConfig(t).Token)
+}
+
+func TestDeleteConfig_AlreadyGoneIsNotAnError(t *testing.T) {
+	setupTestConfig(t)
+
+	err := DeleteConfig(Config{Token: "key-1"})
+
+	require.NoError(t, err)
 }
 
 func TestCreateConfig_ResetsKubernetesSurface(t *testing.T) {
 	setupTestConfig(t)
 
 	require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "token", "", "", "", "", 0, false))
-	require.NoError(t, SetKubernetesSurface("https://ws1.us1.alpacon.io", true))
+	require.NoError(t, SetWorkspaceEnv("https://ws1.us1.alpacon.io", "", true))
 
 	// A fresh login rebuilds the file; the capability belongs to the old
 	// login until the new one records its own answer.
@@ -265,8 +402,8 @@ func TestCreateConfig_ResetsKubernetesSurface(t *testing.T) {
 func TestSwitchWorkspace_NoExistingConfig(t *testing.T) {
 	setupTestConfig(t)
 
-	err := SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2", false)
-	assert.Error(t, err)
+	err := SwitchWorkspace(Config{WorkspaceURL: "https://ws1.us1.alpacon.io"}, "https://ws2.us1.alpacon.io", "ws2", false)
+	require.ErrorIs(t, err, fs.ErrNotExist)
 }
 
 func TestLoadConfig_LegacyWithoutActiveWorkSessions(t *testing.T) {
@@ -282,6 +419,31 @@ func TestLoadConfig_LegacyWithoutActiveWorkSessions(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, cfg.ActiveWorkSessions)
 	assert.False(t, cfg.KubernetesSurface)
+}
+
+func TestLoadConfig_MissingFileIsNotLoggedIn(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	_, err := LoadConfig()
+
+	require.ErrorIs(t, err, utils.ErrNotLoggedIn)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	assert.NotContains(t, err.Error(), utils.ErrNotLoggedIn.Error())
+	assert.Equal(t, utils.ErrorCodeNotLoggedIn, utils.ClassifyError(err))
+}
+
+func TestLoadConfig_MalformedFileIsNotMissing(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	cfgDir := filepath.Join(tmpHome, ConfigFileDir)
+	require.NoError(t, os.MkdirAll(cfgDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, ConfigFileName), []byte("{not json"), 0600))
+
+	_, err := LoadConfig()
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, utils.ErrNotLoggedIn)
+	assert.Equal(t, utils.ErrorCodeCLI, utils.ClassifyError(err))
 }
 
 func TestActiveWorkSession_RoundTrip(t *testing.T) {
@@ -321,14 +483,14 @@ func TestActiveWorkSession_PerWorkspaceIsolation(t *testing.T) {
 	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
 	require.NoError(t, SetActiveWorkSession("uuid-A"))
 
-	require.NoError(t, SwitchWorkspace("https://ws-b.example.com", "ws-b", false))
+	require.NoError(t, SwitchWorkspace(loadedConfig(t), "https://ws-b.example.com", "ws-b", false))
 	got, err := GetActiveWorkSession()
 	require.NoError(t, err)
 	assert.Empty(t, got, "switching workspace should yield empty active session for new workspace")
 
 	require.NoError(t, SetActiveWorkSession("uuid-B"))
 
-	require.NoError(t, SwitchWorkspace("https://ws-a.example.com", "ws-a", false))
+	require.NoError(t, SwitchWorkspace(loadedConfig(t), "https://ws-a.example.com", "ws-a", false))
 	got, err = GetActiveWorkSession()
 	require.NoError(t, err)
 	assert.Equal(t, "uuid-A", got, "switching back should restore original active session")
@@ -400,9 +562,8 @@ func TestGetAuthMethod(t *testing.T) {
 	}
 }
 
-// Another alpacon process can be saving a renewed token at the same moment, and
-// whatever the two writers do to each other, a reader must never find a config
-// it cannot parse—that failure reaches the user as a forced re-login.
+// Readers take no lock, so while writers replace the config one after another a reader
+// must never find a config it cannot parse—that failure reaches the user as a forced re-login.
 func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://alpacon.io", "alpacon", "", "", "eyJ", "refresh", "", 3600, false))
@@ -421,7 +582,7 @@ func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
 			// Varying lengths so a half-written file differs in size from the
 			// one it replaced, which is what a reader would catch.
 			for i := range 300 {
-				if err := SaveRefreshedAuth0Token(strings.Repeat(string(rune('a'+w)), 1+i%400), 3600); err != nil {
+				if err := SaveRefreshedAuth0Token("refresh", strings.Repeat(string(rune('a'+w)), 1+i%400), 3600); err != nil {
 					writeErrs[w] = err
 					return
 				}
@@ -455,9 +616,7 @@ func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
 
 func TestGetActiveWorkSessionReportsNoSessionWhenNoConfigExists(t *testing.T) {
 	setupTestConfig(t)
-	// LoadConfig wraps the missing-file error with %w, and os.IsNotExist unwraps
-	// only the error types the os package defines—so the promise this makes had
-	// been reporting the absence of a config as a failure to read one.
+	// LoadConfig wraps the missing-file error with %w, which os.IsNotExist does not unwrap.
 	uuid, err := GetActiveWorkSession()
 	require.NoError(t, err)
 	assert.Empty(t, uuid)
@@ -482,11 +641,11 @@ func TestWorkspaceIdentity(t *testing.T) {
 	}
 }
 
-func TestSetSchemaName_KeepsEverythingElse(t *testing.T) {
+func TestSetWorkspaceEnv_SchemaNameKeepsEverythingElse(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "access", "refresh", "alpacon.io", 3600, false))
 
-	require.NoError(t, SetSchemaName("frozen"))
+	require.NoError(t, SetWorkspaceEnv("https://new-slug.us1.alpacon.io", "frozen", false))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -496,13 +655,13 @@ func TestSetSchemaName_KeepsEverythingElse(t *testing.T) {
 	assert.Equal(t, "access", cfg.AccessToken)
 }
 
-func TestSetSchemaName_EmptyKeepsTheStoredValue(t *testing.T) {
+func TestSetWorkspaceEnv_EmptySchemaNameKeepsTheStoredValue(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://ws.us1.alpacon.io", "ws", "", "", "access", "", "alpacon.io", 0, false))
-	require.NoError(t, SetSchemaName("frozen"))
+	require.NoError(t, SetWorkspaceEnv("https://ws.us1.alpacon.io", "frozen", false))
 
 	// An older server omits schema_name from the env response.
-	require.NoError(t, SetSchemaName(""))
+	require.NoError(t, SetWorkspaceEnv("https://ws.us1.alpacon.io", "", false))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -512,7 +671,7 @@ func TestSetSchemaName_EmptyKeepsTheStoredValue(t *testing.T) {
 func TestCreateConfig_ResetsSchemaNameUntilLoginRecordsIt(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://a.us1.alpacon.io", "a", "", "", "", "", "", 0, false))
-	require.NoError(t, SetSchemaName("schema-a"))
+	require.NoError(t, SetWorkspaceEnv("https://a.us1.alpacon.io", "schema-a", false))
 
 	require.NoError(t, CreateConfig("https://b.us1.alpacon.io", "b", "", "", "", "", "", 0, false))
 
@@ -524,9 +683,9 @@ func TestCreateConfig_ResetsSchemaNameUntilLoginRecordsIt(t *testing.T) {
 func TestSwitchWorkspace_ReplacesSchemaName(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "access", "", "alpacon.io", 0, false))
-	require.NoError(t, SetSchemaName("frozen"))
+	require.NoError(t, SetWorkspaceEnv("https://new-slug.us1.alpacon.io", "frozen", false))
 
-	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2", false))
+	require.NoError(t, SwitchWorkspace(loadedConfig(t), "https://ws2.us1.alpacon.io", "ws2", false))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -536,7 +695,7 @@ func TestSwitchWorkspace_ReplacesSchemaName(t *testing.T) {
 func TestActiveWorkSession_KeyedBySchemaName(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "", "", "", 0, false))
-	require.NoError(t, SetSchemaName("frozen"))
+	require.NoError(t, SetWorkspaceEnv("https://new-slug.us1.alpacon.io", "frozen", false))
 
 	require.NoError(t, SetActiveWorkSession("uuid-1"))
 
@@ -552,7 +711,7 @@ func TestGetActiveWorkSession_FindsSessionStoredUnderTheHostLabel(t *testing.T) 
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "", "", "", 0, false))
 	require.NoError(t, SetActiveWorkSession("uuid-old"))
-	require.NoError(t, SetSchemaName("frozen"))
+	require.NoError(t, SetWorkspaceEnv("https://new-slug.us1.alpacon.io", "frozen", false))
 
 	got, err := GetActiveWorkSession()
 
@@ -560,14 +719,77 @@ func TestGetActiveWorkSession_FindsSessionStoredUnderTheHostLabel(t *testing.T) 
 	assert.Equal(t, "uuid-old", got, "a session saved before the upgrade stays reachable")
 }
 
+func TestGetActiveWorkSessionFor_ReadsTheNamedWorkspaceNotTheCurrentOne(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+	require.NoError(t, SetActiveWorkSession("uuid-A"))
+	require.NoError(t, SwitchWorkspace(loadedConfig(t), "https://ws-b.example.com", "ws-b", false))
+	require.NoError(t, SetActiveWorkSession("uuid-B"))
+	require.NoError(t, SwitchWorkspace(loadedConfig(t), "https://ws-c.example.com", "ws-c", false))
+	require.NoError(t, SetActiveWorkSession("uuid-C"))
+
+	tests := []struct {
+		name      string
+		workspace string
+		want      string
+	}{
+		{"named workspace that is no longer current", "ws-a", "uuid-A"},
+		{"another named workspace that is no longer current", "ws-b", "uuid-B"},
+		{"current workspace with its own session", "ws-c", "uuid-C"},
+		{"workspace the config never saw", "ws-z", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := GetActiveWorkSessionFor(tt.workspace)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetActiveWorkSessionFor_HostLabelFallbackOnlyForTheCurrentWorkspace(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace string
+		want      string
+	}{
+		{"current workspace falls back to the host label", "frozen", "uuid-old"},
+		{"another workspace does not", "other", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupTestConfig(t)
+			require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "", "", "", 0, false))
+			require.NoError(t, SetActiveWorkSession("uuid-old"))
+			require.NoError(t, SetWorkspaceEnv("https://new-slug.us1.alpacon.io", "frozen", false))
+
+			got, err := GetActiveWorkSessionFor(tt.workspace)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetActiveWorkSessionFor_ReportsNoSessionWhenNoConfigExists(t *testing.T) {
+	setupTestConfig(t)
+
+	uuid, err := GetActiveWorkSessionFor("ws-a")
+
+	require.NoError(t, err)
+	assert.Empty(t, uuid)
+}
+
 func TestRestoreWorkspace_PutsBackHostLabelAndSchemaName(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "access", "", "alpacon.io", 0, false))
-	require.NoError(t, SetSchemaName("frozen"))
+	require.NoError(t, SetWorkspaceEnv("https://new-slug.us1.alpacon.io", "frozen", false))
 	require.NoError(t, SetActiveWorkSession("uuid-1"))
-	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2", false))
+	orig := loadedConfig(t)
+	require.NoError(t, SwitchWorkspace(orig, "https://ws2.us1.alpacon.io", "ws2", false))
 
-	require.NoError(t, RestoreWorkspace("https://new-slug.us1.alpacon.io", "new-slug", "frozen", false))
+	require.NoError(t, RestoreWorkspace("https://ws2.us1.alpacon.io", orig))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -583,9 +805,10 @@ func TestRestoreWorkspace_LegacyConfigStaysWithoutSchemaName(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "", "", "access", "", "alpacon.io", 0, false))
 	require.NoError(t, SetActiveWorkSession("uuid-old"))
-	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2", false))
+	orig := loadedConfig(t)
+	require.NoError(t, SwitchWorkspace(orig, "https://ws2.us1.alpacon.io", "ws2", false))
 
-	require.NoError(t, RestoreWorkspace("https://ws1.us1.alpacon.io", "ws1", "", false))
+	require.NoError(t, RestoreWorkspace("https://ws2.us1.alpacon.io", orig))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -599,7 +822,7 @@ func TestUnsetActiveWorkSession_ClearsTheLegacyHostLabelKeyToo(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "", "", "", 0, false))
 	require.NoError(t, SetActiveWorkSession("uuid-old"))
-	require.NoError(t, SetSchemaName("frozen"))
+	require.NoError(t, SetWorkspaceEnv("https://new-slug.us1.alpacon.io", "frozen", false))
 
 	// Only the legacy key exists: the unset must still reach it.
 	require.NoError(t, SetActiveWorkSession(""))
@@ -612,7 +835,7 @@ func TestUnsetActiveWorkSession_DoesNotRevealTheLegacySession(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "", "", "", 0, false))
 	require.NoError(t, SetActiveWorkSession("uuid-old"))
-	require.NoError(t, SetSchemaName("frozen"))
+	require.NoError(t, SetWorkspaceEnv("https://new-slug.us1.alpacon.io", "frozen", false))
 	require.NoError(t, SetActiveWorkSession("uuid-new"))
 
 	require.NoError(t, SetActiveWorkSession(""))
@@ -668,7 +891,7 @@ func TestClearActiveWorkSessionFor_ReachesTheLegacyHostLabelKey(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "", "", "", 0, false))
 	require.NoError(t, SetActiveWorkSession("uuid-old"))
-	require.NoError(t, SetSchemaName("frozen"))
+	require.NoError(t, SetWorkspaceEnv("https://new-slug.us1.alpacon.io", "frozen", false))
 
 	cleared, err := ClearActiveWorkSessionFor("frozen", "uuid-old")
 
@@ -688,6 +911,16 @@ func TestClearActiveWorkSessionFor_NoConfigIsNotAnError(t *testing.T) {
 	assert.False(t, cleared)
 }
 
+func TestClearActiveWorkSessionFor_NoIDTouchesNothing(t *testing.T) {
+	setupTestConfig(t)
+
+	cleared, err := ClearActiveWorkSessionFor("ws-a", "")
+
+	require.NoError(t, err)
+	assert.False(t, cleared)
+	assert.NoDirExists(t, filepath.Join(os.Getenv("HOME"), ConfigFileDir))
+}
+
 func TestClearActiveWorkSessionFor_MatchesAnIDThatDiffersOnlyInCase(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
@@ -700,4 +933,55 @@ func TestClearActiveWorkSessionFor_MatchesAnIDThatDiffersOnlyInCase(t *testing.T
 	got, err := GetActiveWorkSession()
 	require.NoError(t, err)
 	assert.Empty(t, got)
+}
+
+func TestDeleteConfigRemovesTheSavedKubeSessions(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+	kubeDir := filepath.Join(os.Getenv("HOME"), ConfigFileDir, KubeSessionDir)
+	require.NoError(t, os.MkdirAll(kubeDir, 0700))
+	record := filepath.Join(kubeDir, "0123456789abcdef.json")
+	staging := filepath.Join(kubeDir, "0123456789abcdef.123.tmp")
+	lock := filepath.Join(kubeDir, "0123456789abcdef.lock")
+	for _, path := range []string{record, staging, lock} {
+		require.NoError(t, os.WriteFile(path, []byte(`{"channel_token":"tok"}`), 0600))
+	}
+
+	require.NoError(t, DeleteConfig(loadedConfig(t)))
+
+	assert.NoFileExists(t, record)
+	assert.NoFileExists(t, staging)
+	assert.FileExists(t, lock, "a kube login waiting on approval may hold it")
+}
+
+func TestDeleteConfigRemovesOnlyKubeSessionFiles(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+	kubeDir := filepath.Join(os.Getenv("HOME"), ConfigFileDir, KubeSessionDir)
+	require.NoError(t, os.MkdirAll(kubeDir, 0700))
+	for _, name := range []string{"notes.json", "0123456789ABCDEF.json", "0123456789abcdef.x.tmp", "backup.tmp"} {
+		require.NoError(t, os.WriteFile(filepath.Join(kubeDir, name), []byte("keep"), 0600))
+	}
+
+	require.NoError(t, DeleteConfig(loadedConfig(t)))
+
+	entries, err := os.ReadDir(kubeDir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 4, "files kube login never writes stay")
+}
+
+func TestWhileLoggedInRunsOnlyForTheSameLogin(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "access-1", "refresh-1", "", 3600, false))
+	login := loadedConfig(t)
+
+	ran := false
+	require.NoError(t, WhileLoggedIn(login, func() error { ran = true; return nil }))
+	assert.True(t, ran, "fn runs for the login it was given")
+
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "access-2", "refresh-2", "", 3600, false))
+	require.ErrorIs(t, WhileLoggedIn(login, func() error { t.Error("ran under another login"); return nil }), ErrLoginChanged)
+
+	require.NoError(t, DeleteConfig(loadedConfig(t)))
+	require.ErrorIs(t, WhileLoggedIn(login, func() error { t.Error("ran after a logout"); return nil }), ErrLoginChanged)
 }

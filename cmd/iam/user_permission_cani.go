@@ -85,7 +85,7 @@ tell them apart in a script, drop -q and read the allowed field of --output json
 }
 
 func init() {
-	userPermissionCanICmd.Flags().BoolP("quiet", "q", false, "Print nothing; the exit code is the answer (0 allowed, 1 denied or the check failed)")
+	userPermissionCanICmd.Flags().BoolP("quiet", "q", false, "Print nothing; the exit code is the answer (0 allowed, 1 denied or the check failed, 2 a rejected argument)")
 	userPermissionCanICmd.Flags().Bool("explain", false, "Print the server's account of how the decision was reached")
 
 	// --explain answers with an account rather than a boolean, so there is nothing for
@@ -102,7 +102,7 @@ func splitCanIArgs(args []string) ([]string, string) {
 	// Other CLIs put the subject last or not at all, so a transposed command line is worth
 	// naming rather than sending as a permission nobody holds.
 	if looksLikePermission(args[0]) && !looksLikePermission(args[1]) {
-		utils.CliErrorWithExit("The user comes first: 'alpacon user permission can-i %s %s'.", args[1], args[0])
+		utils.CliUsageErrorWithExit("The user comes first: 'alpacon user permission can-i %s %s'.", args[1], args[0])
 	}
 
 	requirePermission(args[1])
@@ -111,7 +111,7 @@ func splitCanIArgs(args []string) ([]string, string) {
 
 func requirePermission(arg string) {
 	if !looksLikePermission(arg) {
-		utils.CliErrorWithExit("%q is not a permission. Write it as resource:action, for example server:update, or use a wildcard such as server:* or '*'.", arg)
+		utils.CliUsageErrorWithExit("%q is not a permission. Write it as resource:action, for example server:update, or use a wildcard such as server:* or '*'.", arg)
 	}
 }
 

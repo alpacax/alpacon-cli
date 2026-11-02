@@ -192,10 +192,10 @@ func TestLogsCommandOutcome(t *testing.T) {
 	}
 }
 
-// The stderr line bypasses the Cli* helpers, so each case injects into the one
-// field the server controls on that branch: Status must equal a known value to
-// reach the running and failed branches, so ID and ErrorPhase carry the payload
-// there, while the unrecognised-status fallback renders Status itself (#364).
+// The stderr line bypasses the Cli* helpers, so each case injects into the one field the server
+// controls on that branch: Status must equal a known value to reach the running and failed
+// branches, so ID and ErrorPhase carry the payload there, while the unrecognized-status fallback
+// renders Status itself.
 func TestLogsCommandOutcomeSanitizesServerText(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -331,6 +331,48 @@ func TestExecLogsChunkFetchFailureYieldsToTheCommandsOwnFailure(t *testing.T) {
 				assert.Zero(t, chunkReads.Load(), "the outcome prints no output, so nothing is fetched")
 			}
 			assert.Empty(t, stdout)
+		})
+	}
+}
+
+func TestExecLogsSuccessfulCompletionLine(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		status    string
+		purpose   string
+		expiresAt any
+		wantLine  bool
+	}{
+		{name: "ordinary completed", status: "completed"},
+		{name: "ordinary success", status: "success"},
+		{name: "supplied purpose", status: "completed", purpose: "check disk space"},
+		{name: "answered purpose demand", status: "completed", purpose: "check disk space", expiresAt: "2026-10-01T12:00:00Z", wantLine: true},
+		{name: "lapsed purpose demand", status: "completed", expiresAt: "2026-10-01T12:00:00Z", wantLine: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"id": rejectedCommandID, "status": tc.status, "result": "done",
+					"purpose": tc.purpose, "purpose_expires_at": tc.expiresAt,
+				})
+			}))
+			defer ts.Close()
+
+			stdout, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, rejectedCommandID)
+			assert.Equal(t, 0, exitCode)
+			assert.Equal(t, "done\n", strings.TrimSuffix(stdout, "PASS\n"))
+			if tc.wantLine {
+				assert.Contains(t, stderr, "command finished (status: "+tc.status+").\n")
+			} else {
+				assert.NotContains(t, stderr, "command finished")
+				if tc.purpose == "" {
+					assert.Empty(t, stderr)
+				}
+			}
 		})
 	}
 }

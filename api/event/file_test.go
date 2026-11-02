@@ -35,8 +35,6 @@ func (c *fileLaneBodyCapture) snapshot() []byte {
 	return c.body
 }
 
-// newFileLaneCaptureServer resolves one server and records the raw body of the
-// command submission, answering a minimal command list.
 func newFileLaneCaptureServer(t *testing.T, capture *fileLaneBodyCapture) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -185,9 +183,6 @@ func TestFileLaneRequestMirrorsCommandRequest(t *testing.T) {
 	assert.Equal(t, generic.NumField()-len(refused), fileLane.NumField(), "fileLaneRequest carries a field CommandRequest does not")
 }
 
-// TestCommandRequestMarshal_GenericLaneUnchanged pins that a request without
-// File keeps its shape: line, data and env are sent as they always were, and no
-// file key appears.
 func TestCommandRequestMarshal_GenericLaneUnchanged(t *testing.T) {
 	t.Parallel()
 	req := &CommandRequest{

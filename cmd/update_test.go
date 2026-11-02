@@ -80,7 +80,8 @@ func TestPermissionHint(t *testing.T) {
 
 func TestPermissionHintStillNamesSudoWhenTheLockIsWhatWasRefused(t *testing.T) {
 	t.Parallel()
-	hint := permissionHint(fmt.Errorf("%w: %w", selfupdate.ErrLockUnavailable, os.ErrPermission)) // The lock sits in the install directory, so this is that directory refusing a write—the first one the command attempts.
+	// The lock is in the install directory, the command's first write.
+	hint := permissionHint(fmt.Errorf("%w: %w", selfupdate.ErrLockUnavailable, os.ErrPermission))
 
 	assert.Contains(t, hint, "install location")
 	if runtime.GOOS == "windows" {
@@ -181,9 +182,9 @@ func TestUpdateCommandRefusesAPositionalArgument(t *testing.T) {
 	assert.NoError(t, updateCmd.Args(updateCmd, nil))
 }
 
-// The three tests below drive the real command in a child process: what Run
-// decides after its first branch is an os.Exit, so deleting the dev-build guard
-// or the os.Exit(8) leaves every in-process test green.
+// These tests drive the real command in a child process: Run ends in an os.Exit
+// after its first branch, so deleting the dev-build guard or the os.Exit(8) leaves
+// every in-process test green.
 func TestUpdateCommandRefusesADevBuild(t *testing.T) {
 	t.Parallel()
 	stderr, exitCode := runUpdateCommandHelper(t, []string{"update"})
@@ -244,12 +245,10 @@ func TestUpdateCommandHelperProcess(t *testing.T) {
 
 	args, ok := helperArgsAfter(os.Args, "update-helper")
 	if !ok {
-		os.Exit(2)
+		os.Exit(99)
 	}
-	RootCmd.SetArgs(args)
-	if err := RootCmd.Execute(); err != nil {
-		os.Exit(1)
-	}
+	os.Args = append([]string{"alpacon"}, args...)
+	Execute()
 	os.Exit(0)
 }
 

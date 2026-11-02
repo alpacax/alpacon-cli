@@ -16,9 +16,8 @@ import (
 // fallback Start uses when the field holds something a ticker cannot take.
 const defaultSpinnerInterval = 100 * time.Millisecond
 
-// activeSpinners counts the spinners currently animating stderr. A warning
-// printed while one is running lands mid-frame, so CliWarning breaks to a new
-// line first—but only then, since off a TTY there is no frame to step off.
+// activeSpinners counts the spinners animating stderr, so CliWarning and CliDebug break to a new
+// line before printing only while one is mid-frame.
 var activeSpinners atomic.Int32
 
 // Spinner displays an animated spinner with a message.
@@ -57,7 +56,7 @@ func NewSpinner(message string) *Spinner {
 	}
 }
 
-// Start begins the spinner animation
+// Start begins the spinner animation.
 func (s *Spinner) Start() {
 	s.mu.Lock()
 	if s.running {
@@ -77,17 +76,15 @@ func (s *Spinner) Start() {
 	frames, dots := s.frames, s.dots
 	interval := s.interval
 	if interval <= 0 {
-		// time.NewTicker panics where the sleep this replaced took a zero
-		// happily, and a stderr animation must never take the CLI down with it.
+		// time.NewTicker panics on a non-positive period, and a stderr animation must never take
+		// the CLI down with it.
 		interval = defaultSpinnerInterval
 	}
 	s.mu.Unlock()
 
 	if !s.enabled {
-		// Print a static message so users still see progress in non-TTY output.
-		// Printed on every Start, so a caller that restarts the spinner prints
-		// again; no caller does that on a timer any more, and a long wait shows
-		// one line in a redirected log rather than a heartbeat.
+		// Off a TTY, print the message as one static line per Start. No caller restarts it on a
+		// timer, so a long wait shows one line in a redirected log rather than a heartbeat.
 		fmt.Fprintln(os.Stderr, msg)
 		return
 	}
@@ -106,7 +103,6 @@ func (s *Spinner) Start() {
 		for {
 			frame := frames[frameIdx%len(frames)]
 
-			// Animate dots if message ends with "..."
 			displayMsg := msg
 			if baseMsg, ok := strings.CutSuffix(msg, "..."); ok {
 				displayMsg = baseMsg + dots[dotIdx%len(dots)]
@@ -115,7 +111,6 @@ func (s *Spinner) Start() {
 			fmt.Fprintf(os.Stderr, "\r%s %s", Yellow(frame), displayMsg)
 			frameIdx++
 
-			// Update dots every 3 frames (300ms)
 			dotCounter++
 			if dotCounter >= 3 {
 				dotIdx++
@@ -126,7 +121,6 @@ func (s *Spinner) Start() {
 			// closes stopCh rather than up to a frame later.
 			select {
 			case <-stopCh:
-				// Clear the spinner line
 				fmt.Fprint(os.Stderr, "\r\033[K")
 				return
 			case <-ticker.C:
@@ -135,7 +129,7 @@ func (s *Spinner) Start() {
 	}()
 }
 
-// Stop stops the spinner animation
+// Stop stops the spinner animation.
 func (s *Spinner) Stop() {
 	s.mu.Lock()
 	if !s.running {
@@ -158,13 +152,10 @@ func (s *Spinner) Stop() {
 	activeSpinners.Add(-1)
 }
 
-// StopWriter wraps w so the spinner stops before the first byte written to it
-// reaches the terminal. A spinner animates the line a caller is about to write
-// to and Stop erases that line, so output streamed while one is running gets
-// drawn over and then wiped. Callers that wait on something which may start
-// producing output—an approved command resuming, an operation retried after
-// MFA—hand their writer through here instead of having to know when the first
-// byte arrives. An empty write is not output, so it leaves the spinner alone.
+// StopWriter wraps w so the spinner stops before the first byte written to it reaches the
+// terminal; otherwise output streamed under a running spinner is drawn over, then erased by Stop.
+// Callers waiting on something that may start producing output hand their writer through here. An
+// empty write leaves the spinner alone.
 func (s *Spinner) StopWriter(w io.Writer) io.Writer {
 	return &spinnerStopWriter{spinner: s, w: w}
 }

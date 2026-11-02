@@ -13,9 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// filterCaseName keeps the empty filter identifiable. t.Run("") names the subtest
-// #00, which says nothing about the row that failed, and the case that matters
-// most here is exactly the empty one: it is what an unset flag sends.
+// filterCaseName names the empty filter "empty": t.Run("") would name it #00, and the empty
+// filter is the case that matters most, since it is what an unset flag sends.
 func filterCaseName(input string) string {
 	if input == "" {
 		return "empty"

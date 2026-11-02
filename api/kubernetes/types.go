@@ -69,7 +69,8 @@ type groupSummary struct {
 const ClientTypeCLI = "cli"
 
 // KubeSessionCreateRequest opens a proxy session to one cluster. Cluster and
-// WorkSession are UUIDs; WorkSession is left out when no session is active.
+// WorkSession are UUIDs; WorkSession is left out when neither --work-session
+// nor ALPACON_WORK_SESSION names a session.
 type KubeSessionCreateRequest struct {
 	Cluster     string `json:"cluster"`
 	WorkSession string `json:"work_session,omitempty"`
@@ -85,4 +86,13 @@ type KubeSessionResponse struct {
 	ChannelToken   string    `json:"channel_token"`
 	TokenExpiredAt time.Time `json:"token_expired_at"`
 	ProxyURL       string    `json:"proxy_url"`
+}
+
+// KubeSessionDetail is a kube session as it is read back. It never carries
+// the channel token. TokenExpiredAt follows an extended work session, and
+// ClosedAt is set once the session has ended for any reason.
+type KubeSessionDetail struct {
+	ID             string     `json:"id"`
+	TokenExpiredAt *time.Time `json:"token_expired_at"`
+	ClosedAt       *time.Time `json:"closed_at"`
 }

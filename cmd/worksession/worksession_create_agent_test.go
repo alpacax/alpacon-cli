@@ -274,9 +274,9 @@ func TestAgentSessionScope_PassesValidateAgentScopes(t *testing.T) {
 		t.Run(operation, func(t *testing.T) {
 			t.Parallel()
 			scope := utils.AgentSessionScope(operation)
-			require.NoError(t, validateAgentScopes("agent", []string{scope}))
+			require.NoError(t, ValidateAgentScopes("agent", []string{scope}))
 			if utils.IsAgentForbiddenScope(operation) {
-				assert.Error(t, validateAgentScopes("agent", []string{operation}))
+				assert.Error(t, ValidateAgentScopes("agent", []string{operation}))
 			} else {
 				assert.Equal(t, operation, scope, "an allowed scope is recommended as is")
 			}

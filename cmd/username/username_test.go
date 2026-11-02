@@ -8,6 +8,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -53,4 +54,23 @@ func TestUsernameGetCommand_StripsControlSequences(t *testing.T) {
 	assert.NotContains(t, got, "\r")
 	assert.Contains(t, got, "alice")
 	assert.Contains(t, got, "root")
+}
+
+type hintedRefusal struct{ code, hint string }
+
+func (e hintedRefusal) Error() string       { return "request refused (code: " + e.code + ")" }
+func (e hintedRefusal) ErrorCode() string   { return e.code }
+func (e hintedRefusal) ErrorSource() string { return "" }
+func (e hintedRefusal) ErrorHint() string   { return e.hint }
+
+func TestSetUsernameErrorText_ServerHintReplacesTheLocalSentence(t *testing.T) {
+	t.Parallel()
+	const hint = "Pick a username nobody else in the workspace uses."
+	err := hintedRefusal{code: "user_username_in_use", hint: hint}
+
+	got := setUsernameErrorText(err)
+	assert.Equal(t, "Failed to set username: "+err.Error(), got)
+	assert.Equal(t, hint, utils.RefusalHint(utils.Reword(err, got)))
+
+	assert.Contains(t, setUsernameErrorText(hintedRefusal{code: "user_username_in_use"}), "already in use")
 }

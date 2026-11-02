@@ -5,10 +5,13 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/httpclient"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -59,6 +62,38 @@ func TestObjectStorageTransferErrorsOmitTheSignedQuery(t *testing.T) {
 			err := uploadToS3(client, presignedURL, strings.NewReader("data"), 4)
 			assertRedacted(t, err)
 			match(t, err)
+		})
+	}
+}
+
+// A redirect the client refuses keeps its status on the error, behind the redaction.
+func TestObjectStorageTransferErrorsKeepARefusedRedirectStatus(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, presignedURL, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(ts.Close)
+
+	tests := []struct {
+		name     string
+		transfer func(*http.Client) error
+	}{
+		{"download fetch", func(c *http.Client) error {
+			_, err := fetchFromURLToFile(c, ts.URL, filepath.Join(t.TempDir(), "out"), 1)
+			return err
+		}},
+		{"upload put", func(c *http.Client) error {
+			return uploadToS3(c, ts.URL, strings.NewReader("data"), 4)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.transfer(httpclient.New(false))
+
+			assertRedacted(t, err)
+			assert.Equal(t, http.StatusTemporaryRedirect, utils.HTTPStatusCode(err))
 		})
 	}
 }

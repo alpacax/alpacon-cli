@@ -18,7 +18,6 @@ func TestGetPreferences(t *testing.T) {
 		"timezone":              "Asia/Seoul",
 		"invite_ttl":            172800,
 		"websh_session_timeout": 3600,
-		"auto_agent_upgrade":    true,
 		"package_proxy":         nil,
 		"front_url":             "https://example.alpacon.io",
 		"country":               "KR",

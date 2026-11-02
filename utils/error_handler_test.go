@@ -218,8 +218,6 @@ func TestHandleCommonErrors_MFA_RidesThroughUnprocessedAttempts(t *testing.T) {
 	assert.Equal(t, int32(4), retryCount.Load())
 }
 
-// The ride-through is bounded: that many unprocessed attempts in a row end the
-// wait with the last one's error.
 func TestHandleCommonErrors_MFA_EndsAfterConsecutiveUnprocessedAttempts(t *testing.T) {
 	withFastRetry(t)
 	var retryCount atomic.Int32

@@ -10,10 +10,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// noLimitText replaces a null service limit for display: a null limit means
-// unlimited or fair use (never a plan-limit refusal on that axis), and a raw
-// JSON `null` reads as a bug in the terminal rather than as the fair-use
-// answer it is.
+// noLimitText replaces a null service limit for display: null means unlimited or
+// fair use (never a plan-limit refusal on that axis), and a raw JSON null reads as
+// a bug in the terminal.
 const noLimitText = "fair use / no cap"
 
 // renderedServiceUsage mirrors workspace.ServiceUsage for display, with Limit
@@ -27,8 +26,6 @@ type renderedServiceUsage struct {
 	OverageCost  *string `json:"overage_cost"`
 }
 
-// renderedUsageEstimate mirrors workspace.UsageEstimate for display, with
-// Services rendered through renderedServiceUsage.
 type renderedUsageEstimate struct {
 	BillingPeriod workspace.BillingPeriod         `json:"billing_period"`
 	Currency      string                          `json:"currency"`

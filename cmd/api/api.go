@@ -102,7 +102,7 @@ func newCommand() *cobra.Command {
 		Example: "  alpacon api /api/iam/users/\n  alpacon api -X POST -F name=my-server /api/servers/servers/\n  alpacon api -i /api/iam/users/-/",
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {
-				utils.CliErrorWithExitCode(utils.ExitCodeUsageError, "expected one ENDPOINT")
+				utils.CliUsageErrorWithExit("expected one ENDPOINT")
 			}
 			opts.Endpoint = args[0]
 			opts.MethodSet = cmd.Flags().Changed("method")

@@ -571,7 +571,7 @@ func TestLoginNonInteractiveNoTargetCommand(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, stderr, exitCode := runLoginCommandHelper(t, tt.args)
 
-			assert.Equal(t, 1, exitCode)
+			assert.Equal(t, utils.ExitCodeUsageError, exitCode)
 			assert.Contains(t, stderr, "login target is required in non-interactive mode")
 			assert.Contains(t, stderr, "--workspace and --region")
 			assert.NotContains(t, stderr, "Using saved workspace")
@@ -813,11 +813,8 @@ func TestLoginFailureMessages_VerificationUnavailableAsksToRetry(t *testing.T) {
 
 func TestShouldFailOnProfileError(t *testing.T) {
 	t.Parallel()
-	// Browser/password login (no token) → profile failure is fatal.
 	assert.True(t, shouldFailOnProfileError(""))
-	// Any token login → profile failure is non-fatal (credential already validated via
-	// /api/status/). Service tokens skip the preload entirely; these cases cover the
-	// personal-token path and the pure predicate.
+	// Service tokens skip the preload; the alpst case checks the predicate alone.
 	assert.False(t, shouldFailOnProfileError("alpst-x"))
 	assert.False(t, shouldFailOnProfileError("alpat-x"))
 }
@@ -870,12 +867,10 @@ func TestLoginCommandHelperProcess(t *testing.T) {
 	}
 	args, ok := helperArgsAfter(os.Args, "login-helper")
 	if !ok {
-		os.Exit(2)
+		os.Exit(99)
 	}
-	RootCmd.SetArgs(args)
-	if err := RootCmd.Execute(); err != nil {
-		os.Exit(1)
-	}
+	os.Args = append([]string{"alpacon"}, args...)
+	Execute()
 	os.Exit(0)
 }
 
@@ -964,44 +959,83 @@ func TestPrintDeviceCodePrompt(t *testing.T) {
 	}
 }
 
-func TestPersistKubernetesSurface(t *testing.T) {
+func TestPersistWorkspaceEnv(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	require.NoError(t, config.CreateConfig("https://ws.example.com", "ws", "token", "", "", "", "", 0, false))
 
-	persistKubernetesSurface("https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
+	persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
+	assert.Equal(t, "frozen", cfg.SchemaName)
 	assert.True(t, cfg.KubernetesSurface)
 	assert.Equal(t, "token", cfg.Token)
 
-	// A server that stops reporting the surface turns it back off.
-	persistKubernetesSurface("https://ws.example.com", &auth0.AuthEnvResponse{})
+	// A server that stops reporting either keeps the schema name and turns the surface back off.
+	persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{})
 	cfg, err = config.LoadConfig()
 	require.NoError(t, err)
+	assert.Equal(t, "frozen", cfg.SchemaName)
 	assert.False(t, cfg.KubernetesSurface)
 }
 
-func TestPersistKubernetesSurface_WarnsWithoutConfig(t *testing.T) {
+func TestPersistWorkspaceEnv_WarnsWithoutConfig(t *testing.T) {
 	setTestHome(t, t.TempDir())
 
 	_, stderr := testutil.CaptureOutput(t, func() {
-		persistKubernetesSurface("https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
+		persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
 	})
 
-	assert.Contains(t, stderr, "Could not save whether this workspace supports Kubernetes")
+	assert.Contains(t, stderr, "Could not save the workspace identity and Kubernetes support")
 }
 
-func TestPersistKubernetesSurface_SkipsAnotherWorkspace(t *testing.T) {
+func TestPersistWorkspaceEnv_SkipsAnotherWorkspace(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	// Another shell's login replaced the config while this login was in flight.
 	require.NoError(t, config.CreateConfig("https://other.example.com", "other", "token", "", "", "", "", 0, false))
 
 	_, stderr := testutil.CaptureOutput(t, func() {
-		persistKubernetesSurface("https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
+		persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
 	})
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
+	assert.Empty(t, cfg.SchemaName)
 	assert.False(t, cfg.KubernetesSurface)
-	assert.Contains(t, stderr, "Did not save Kubernetes support for https://ws.example.com")
+	assert.Contains(t, stderr, "Did not save the workspace identity and Kubernetes support for https://ws.example.com")
+}
+
+type loginRefusal struct{ code, hint string }
+
+func (e loginRefusal) Error() string       { return "permission denied (HTTP 403, code: " + e.code + ")" }
+func (e loginRefusal) ErrorCode() string   { return e.code }
+func (e loginRefusal) ErrorSource() string { return "" }
+func (e loginRefusal) ErrorHint() string   { return e.hint }
+
+// After a login, a verification refusal carrying the server's hint drops the
+// local "log in again" sentence, and the reworded error the command prints
+// keeps the hint.
+func TestLoginVerificationFailure_ServerHintReplacesTheLocalSentence(t *testing.T) {
+	t.Parallel()
+	const hint = "This account or credential does not have permission for this action."
+	hinted := loginRefusal{code: "permission_denied", hint: hint}
+	plain := loginRefusal{code: "permission_denied"}
+
+	tests := []struct {
+		name    string
+		message func(error) string
+	}{
+		{name: "whoami", message: whoamiFailureMessage},
+		{name: "profile", message: profileFailureMessage},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := tt.message(hinted)
+			assert.NotContains(t, got, "logging in again")
+			assert.Contains(t, got, hinted.Error())
+			assert.Equal(t, hint, utils.RefusalHint(utils.Reword(hinted, got)))
+
+			assert.Contains(t, tt.message(plain), "Please try logging in again.")
+		})
+	}
 }

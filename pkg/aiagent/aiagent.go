@@ -82,7 +82,6 @@ type signal struct {
 	matches func(value string) bool
 }
 
-// row names one agent and the signals that identify it.
 type row struct {
 	name    string
 	signals []signal

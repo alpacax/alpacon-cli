@@ -61,7 +61,8 @@ var userCreateCmd = &cobra.Command{
 	},
 }
 
-// Callers must call LoadCurrentUser first; ac.Privileges determines which fields are presented.
+// promptForUser offers the privilege fields only to a superuser, so the caller must run
+// LoadCurrentUser first.
 func promptForUser(ac *client.AlpaconClient) iam.UserCreateRequest {
 	var userRequest iam.UserCreateRequest
 

@@ -2,6 +2,7 @@ package edit
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -386,4 +387,26 @@ func TestRunEditLargeFileDeclineRemovesTempAndSkipsEditor(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr), "declined large file edit should remove temp file")
 	_, dirErr := os.Stat(filepath.Dir(result.TempPath))
 	assert.True(t, os.IsNotExist(dirErr), "declined large file edit should remove temp directory")
+}
+
+func TestRefusedForWantOfForce(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		err         error
+		interactive bool
+		want        bool
+	}{
+		{name: "large file without a terminal", err: errLargeFile, want: true},
+		{name: "large file wrapped without a terminal", err: fmt.Errorf("edit: %w", errLargeFile), want: true},
+		{name: "large file declined at a prompt", err: errLargeFile, interactive: true},
+		{name: "other failure without a terminal", err: errors.New("boom")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, refusedForWantOfForce(tt.err, tt.interactive))
+		})
+	}
 }

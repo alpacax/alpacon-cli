@@ -18,7 +18,8 @@ import (
 func ReplaceBinary(targetPath, newBinaryPath string) error {
 	now := time.Now()
 	stagedPath := StagedName(targetPath, now)
-	if err := copyFile(newBinaryPath, stagedPath); err != nil { // copyFile removes its own partial file, as the unix twin also relies on.
+	// copyFile removes its own partial file; both ReplaceBinary implementations rely on it.
+	if err := copyFile(newBinaryPath, stagedPath); err != nil {
 		return err
 	}
 

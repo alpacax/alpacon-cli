@@ -31,7 +31,11 @@ var noteCreateCmd = &cobra.Command{
 		}
 
 		if len(noteRequest.Content) > 512 {
-			utils.CliErrorWithExit("Note content exceeds the 512 character limit (current length: %d). Please shorten your note and try again", len(noteRequest.Content))
+			const tooLong = "Note content exceeds the 512 character limit (current length: %d). Please shorten your note and try again"
+			if cmd.Flags().Changed("content") {
+				utils.CliUsageErrorWithExit(tooLong, len(noteRequest.Content))
+			}
+			utils.CliErrorWithExit(tooLong, len(noteRequest.Content))
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()

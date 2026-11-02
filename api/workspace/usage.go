@@ -3,9 +3,11 @@ package workspace
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 const (
@@ -17,11 +19,11 @@ const (
 // It follows pagination until the workspace is found or all pages are exhausted.
 // The payment API uses page-number pagination: next/previous are integers, not URLs.
 func GetWorkspaceID(ac *client.AlpaconClient, paymentBaseURL, workspaceName string) (api.PathID, error) {
-	baseURL := paymentBaseURL + paymentWorkspacesURL
 	page := 1
 
 	for {
-		body, err := ac.SendGetRequestToURL(fmt.Sprintf("%s?page=%d", baseURL, page))
+		pageURL := utils.BuildURL(paymentBaseURL, paymentWorkspacesURL, map[string]string{"page": strconv.Itoa(page)})
+		body, err := ac.SendGetRequestToURL(pageURL)
 		if err != nil {
 			return api.PathID{}, fmt.Errorf("failed to list workspaces from payment API: %w", err)
 		}

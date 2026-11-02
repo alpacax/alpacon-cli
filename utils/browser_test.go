@@ -95,19 +95,13 @@ func TestShouldOpenBrowser(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// t.Setenv registers cleanup automatically; setting then
-			// unsetting ensures the var is absent for the test body.
-			// os.Unsetenv, not t.Setenv(key, ""): shouldOpenBrowser reads
-			// ALPACON_NO_BROWSER with os.LookupEnv and blocks whenever it is
-			// present at all, even set to "", so a present-empty value is not
-			// equivalent to an absent one here. t.Setenv above only registers
-			// the restore; the following Unsetenv is what makes the var absent
-			// for the test body.
+			// t.Setenv only registers the restore; Unsetenv makes the var absent, which differs
+			// from present-empty: shouldOpenBrowser blocks on ALPACON_NO_BROWSER whenever it is set
+			// at all.
 			for _, key := range []string{"SSH_CONNECTION", "SSH_TTY", "ALPACON_NO_BROWSER"} {
 				t.Setenv(key, "")
 				_ = os.Unsetenv(key)
 			}
-			// Ensure DISPLAY is set so Linux headless check doesn't interfere
 			if runtime.GOOS == "linux" {
 				t.Setenv("DISPLAY", ":0")
 			}
@@ -122,30 +116,23 @@ func TestShouldOpenBrowser(t *testing.T) {
 }
 
 func TestAcquireBrowserLock(t *testing.T) {
-	// Use a temp dir as home to isolate the lock file
 	tmpDir := t.TempDir()
 	alpaconDir := filepath.Join(tmpDir, ".alpacon")
 	lockFile := filepath.Join(alpaconDir, ".browser_lock")
 
-	// Patch browserLockPath for this test
 	origFunc := browserLockPathFunc
 	browserLockPathFunc = func() string { return lockFile }
 	t.Cleanup(func() { browserLockPathFunc = origFunc })
 
-	// First call should succeed
 	assert.True(t, acquireBrowserLock(), "first acquire should succeed")
 
-	// Lock file should exist
 	_, err := os.Stat(lockFile)
 	require.NoError(t, err, "lock file should exist after acquire")
 
-	// Second call within debounce window should be blocked
 	assert.False(t, acquireBrowserLock(), "second acquire within debounce should be blocked")
 
-	// Backdate the lock file to simulate expiry
 	expired := time.Now().Add(-browserDebounce - time.Second)
 	require.NoError(t, os.Chtimes(lockFile, expired, expired))
 
-	// Now acquire should succeed again
 	assert.True(t, acquireBrowserLock(), "acquire after debounce expiry should succeed")
 }

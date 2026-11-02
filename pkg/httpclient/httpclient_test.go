@@ -74,8 +74,6 @@ func TestRedirectAllowed(t *testing.T) {
 	}
 }
 
-// Every hop is judged against the request that started the chain, so a
-// chain cannot step off the origin through an allowed intermediate hop.
 func TestSameOriginRedirect_ComparesWithTheFirstRequest(t *testing.T) {
 	t.Parallel()
 	first := request(t, "https://ws.example.com/a")

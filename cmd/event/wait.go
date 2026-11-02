@@ -112,15 +112,11 @@ func runWait(cmd *cobra.Command, _ []string) {
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	// Covers the plain-return path (no signal ever arrived); harmless and idempotent
-	// alongside the Stop call below.
 	defer signal.Stop(sigChan)
 	go func() {
 		<-sigChan
-		// Disarmed here, not only in the deferred call above: waiter.Stop can hang closing
-		// the WebSocket, and every exit path below it uses os.Exit, which skips defers—so
-		// this goroutine is the only place a second Ctrl+C is guaranteed to restore the
-		// default terminate disposition before the (possibly stuck) Stop call.
+		// Disarmed here too: waiter.Stop can hang closing the WebSocket and every exit below uses
+		// os.Exit, which skips defers, so only this goroutine lets a second Ctrl+C terminate.
 		signal.Stop(sigChan)
 		waiter.Stop()
 	}()
@@ -175,9 +171,10 @@ func reportOutages(waiter *eventapi.Waiter) {
 	for {
 		select {
 		case err := <-waiter.CatchUpFailed():
-			utils.CliWarning("Could not read the current state: %s. Still waiting for an event.", strip(err.Error()))
+			// Reworded rather than flattened, so a refusal's hint still prints.
+			utils.CliWarning("Could not read the current state: %s. Still waiting for an event.", utils.Reword(err, strip(err.Error())))
 		case err := <-waiter.ReconnectFailed():
-			utils.CliWarning("Lost the event channel and still reconnecting: %s. No events are being delivered until it recovers.", strip(err.Error()))
+			utils.CliWarning("Lost the event channel and still reconnecting: %s. No events are being delivered until it recovers.", utils.Reword(err, strip(err.Error())))
 		}
 	}
 }

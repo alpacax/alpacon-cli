@@ -42,10 +42,10 @@ requests you submitted.`,
   alpacon approval ls --my --status approved`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := validateStatusFilter(statusFilter); err != nil {
-			utils.CliErrorWithExit("%s.", err)
+			utils.CliUsageErrorWithExit("%s.", err)
 		}
 		if err := validateTypeFilter(typeFilter); err != nil {
-			utils.CliErrorWithExit("%s.", err)
+			utils.CliUsageErrorWithExit("%s.", err)
 		}
 
 		ac, err := client.NewAlpaconAPIClient()

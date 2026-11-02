@@ -70,13 +70,11 @@ func TestCommandParsing(t *testing.T) {
 			expectCommandArgs: []string{"ls", "-l", "/var/www"},
 		},
 		{
-			testName:          "UnrecognizedFlagWithEchoCommand",
-			args:              []string{"-x", "unknown-server", "echo", "Hello World"},
-			expectUsername:    "",
-			expectGroupname:   "",
+			testName:          "UnknownFlagAfterTheServerGoesToTheCommand",
+			args:              []string{"my-server", "-x", "cmd"},
 			expectEnv:         map[string]string{},
-			expectServerName:  "-x",
-			expectCommandArgs: []string{"unknown-server", "echo", "Hello World"},
+			expectServerName:  "my-server",
+			expectCommandArgs: []string{"-x", "cmd"},
 		},
 		{
 			testName:          "AdminSysadminAccessToMultiFlagServer",
@@ -104,33 +102,6 @@ func TestCommandParsing(t *testing.T) {
 			expectEnv:         map[string]string{},
 			expectServerName:  "server-name",
 			expectCommandArgs: []string{"echo", "hello world"},
-		},
-		{
-			testName:          "HelpRequestedViaCombinedFlags",
-			args:              []string{"-rh"},
-			expectUsername:    "",
-			expectGroupname:   "",
-			expectEnv:         map[string]string{},
-			expectServerName:  "-rh",
-			expectCommandArgs: nil,
-		},
-		{
-			testName:          "InvalidUsageDetected",
-			args:              []string{"-u", "user", "-x", "unknown-flag", "server-name", "cmd"},
-			expectUsername:    "user",
-			expectGroupname:   "",
-			expectEnv:         map[string]string{},
-			expectServerName:  "-x",
-			expectCommandArgs: []string{"unknown-flag", "server-name", "cmd"},
-		},
-		{
-			testName:          "ValidFlagsFollowedByInvalidFlag",
-			args:              []string{"-u", "user", "-g", "group", "-x", "server-name", "cmd"},
-			expectUsername:    "user",
-			expectGroupname:   "group",
-			expectEnv:         map[string]string{},
-			expectServerName:  "-x",
-			expectCommandArgs: []string{"server-name", "cmd"},
 		},
 		{
 			testName:          "FlagsIntermixedWithCommandArgs",
@@ -182,6 +153,24 @@ func TestCommandParsing(t *testing.T) {
 			expectCommandArgs: nil,
 			expectShare:       true,
 			expectReadOnly:    true,
+		},
+		{
+			testName:          "ReadOnlyWithoutAValue",
+			args:              []string{"--share", "--read-only", "test-server"},
+			expectEnv:         map[string]string{},
+			expectServerName:  "test-server",
+			expectCommandArgs: nil,
+			expectShare:       true,
+			expectReadOnly:    true,
+		},
+		{
+			testName:          "UsernameJoinedByEquals",
+			args:              []string{"-u=admin", "--groupname=sysadmin", "test-server", "whoami"},
+			expectUsername:    "admin",
+			expectGroupname:   "sysadmin",
+			expectEnv:         map[string]string{},
+			expectServerName:  "test-server",
+			expectCommandArgs: []string{"whoami"},
 		},
 		{
 			testName:          "SingleEnvVariable",
@@ -323,7 +312,7 @@ func executeTestCommand(t *testing.T, args []string) (string, string, string, []
 	username := parsed.Username
 	serverName := parsed.ServerName
 
-	// Parse SSH-like syntax for user@host (same logic as in the main command)
+	// Same user@host parsing as Run.
 	if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
 		sshTarget := utils.ParseSSHTarget(serverName)
 		if username == "" && sshTarget.User != "" {
@@ -358,13 +347,32 @@ func TestParseWebshArgs_EnvErrorHidesSecret(t *testing.T) {
 	assert.NotContains(t, err.Error(), "hunter2", "malformed --env error must not echo the value")
 }
 
-func TestParseWebshArgs_EnvPrefixIsExact(t *testing.T) {
+func TestParseWebshArgsRejectsAnUnknownFlagBeforeTheServer(t *testing.T) {
 	t.Parallel()
-	// --env-file must not be swallowed by --env matching; websh has no
-	// unknown-flag rejection, so it falls through to the server-name slot.
-	got, err := ParseWebshArgs([]string{"--env-file=secrets", "ls"})
-	require.NoError(t, err)
-	assert.Equal(t, "--env-file=secrets", got.ServerName)
+	tests := []struct {
+		name string
+		args []string
+		flag string
+	}{
+		{name: "unknown flag", args: []string{"-x", "my-server", "echo", "hi"}, flag: "-x"},
+		{name: "combined short flags", args: []string{"-rh"}, flag: "-rh"},
+		{name: "unknown flag after known ones", args: []string{"-u", "user", "-g", "group", "-x", "my-server", "cmd"}, flag: "-x"},
+		{name: "a flag that only shares the env prefix", args: []string{"--env-file=secrets", "ls"}, flag: "--env-file=secrets"},
+		{name: "a separator, which websh has no use for", args: []string{"--", "my-server", "ls"}, flag: "--"},
+		{name: "a flag that only shares the username prefix", args: []string{"--username-typo", "my-server"}, flag: "--username-typo"},
+		{name: "a flag that only shares the groupname prefix", args: []string{"--groupname-extra", "my-server"}, flag: "--groupname-extra"},
+		{name: "a flag that only shares the read-only prefix", args: []string{"--read-onlyx", "my-server"}, flag: "--read-onlyx"},
+		{name: "a short username with its value attached", args: []string{"-uadmin", "my-server"}, flag: "-uadmin"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := ParseWebshArgs(tt.args)
+
+			require.EqualError(t, err, "unknown flag: "+tt.flag)
+		})
+	}
 }
 
 func TestParseWebshArgs_CommandAfterServerNotConsumed(t *testing.T) {
@@ -382,7 +390,6 @@ func TestSanitizeRecord(t *testing.T) {
 	in := "\x1b[31mdocker\x1b[0m ps\n  -a\tfoo"
 	assert.Equal(t, "docker ps -a foo", sanitizeRecord(in, 100))
 
-	// Truncation applies after cleaning.
 	assert.Equal(t, "docke...", sanitizeRecord("docker ps", 5))
 
 	// OSC window-title sequences are stripped, not leaked into output.
@@ -423,10 +430,8 @@ func TestPrintWatchHeader_StripsControlSequences(t *testing.T) {
 	assert.Contains(t, got, "Username: alice\n")
 }
 
-// TestBuildRemoteExecArgsPinsWebshInvocation pins InvokedAs to WebshInvocation:
-// the one line that makes a refusal hint render websh syntax instead of exec's.
-// Without it every field still flows and the whole suite stays green, so this
-// is the only guard against a refactor dropping the field.
+// TestBuildRemoteExecArgsPinsWebshInvocation is the only guard on InvokedAs: without it a refusal
+// hint renders exec syntax while every other field still flows and the suite stays green.
 func TestBuildRemoteExecArgsPinsWebshInvocation(t *testing.T) {
 	parsed := WebshArgs{
 		Groupname:     "devs",
@@ -511,5 +516,47 @@ func TestSetupSudoListener_WarningReturnsTheCursor(t *testing.T) {
 	for line := range strings.SplitSeq(strings.TrimSuffix(stderr, "\n"), "\n") {
 		assert.True(t, strings.HasSuffix(line, "\r"),
 			"websh may already hold the terminal in raw mode, where a bare newline leaves the cursor mid-line: %q", line)
+	}
+}
+
+// A refused event session carries the server's hint under the warning, on a
+// line that still returns the cursor in raw mode.
+func TestSetupSudoListener_WarningCarriesTheServerHint(t *testing.T) {
+	const hint = "This credential cannot stand for a person at the keyboard; sign in to the CLI instead."
+	ts := newSudoListenerTestServer(t, http.StatusForbidden, `{"code": "auth_interactive_channel_requires_presence", "hint": "`+hint+`"}`)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		_ = setupSudoListener(ac, "my-server", "session-1")
+	})
+
+	assert.Contains(t, stderr, "Sudo MFA listener unavailable")
+	assert.Equal(t, 1, strings.Count(stderr, hint), "stderr: %q", stderr)
+	assert.Contains(t, stderr, hint+"\r\n")
+	for line := range strings.SplitSeq(strings.TrimSuffix(stderr, "\n"), "\n") {
+		assert.True(t, strings.HasSuffix(line, "\r"), "line: %q", line)
+	}
+}
+
+func TestParseWebshArgsRefusalCarriesTheOutputReadBeforeIt(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "output ahead of an unknown flag", args: []string{"--output", "json", "--bogus", "my-server"}, want: "json"},
+		{name: "output after an unknown flag", args: []string{"--bogus", "--output", "json", "my-server"}},
+		{name: "output after read-only false and an unknown flag", args: []string{"--read-only", "false", "--bogus", "--output", "json", "my-server"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			parsed, err := ParseWebshArgs(tt.args)
+
+			require.Error(t, err)
+			assert.Equal(t, tt.want, parsed.OutputFormat)
+		})
 	}
 }

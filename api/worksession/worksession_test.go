@@ -2,6 +2,7 @@ package worksession
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -215,10 +216,6 @@ func TestExtendWorkSession(t *testing.T) {
 	assert.Nil(t, session.PendingExtensionRequest)
 }
 
-// TestExtendWorkSession_ReasonSent covers the wire shape the extend action
-// expects: reason is required on every request, auto-approved or queued
-// alike, and the CLI sends --reason as 'reason' on the same request body, not
-// a separate call.
 func TestExtendWorkSession_ReasonSent(t *testing.T) {
 	t.Parallel()
 	newExpiry := time.Now().UTC().Add(4 * time.Hour).Format(time.RFC3339)
@@ -235,10 +232,6 @@ func TestExtendWorkSession_ReasonSent(t *testing.T) {
 	assert.Equal(t, "customer escalation", gotBody.Reason)
 }
 
-// TestExtendWorkSession_PendingApproval covers the 202 shape: same WorkSession
-// body, with PendingExtensionRequest populated instead of ExpiresAt already
-// advanced, and the 202 status returned alongside it—the caller distinguishes
-// 200 from 202 by the status, so it is asserted explicitly here too.
 func TestExtendWorkSession_PendingApproval(t *testing.T) {
 	t.Parallel()
 	addedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
@@ -276,7 +269,6 @@ func TestExtendWorkSession_PendingApproval(t *testing.T) {
 	assert.True(t, requestDeadline.Equal(session.PendingExtensionRequest.ExpiresAt))
 	assert.Equal(t, "customer escalation", session.PendingExtensionRequest.Reason)
 	assert.True(t, addedAt.Equal(session.PendingExtensionRequest.AddedAt))
-	// The session's own expiry is unchanged—the extension has not applied yet.
 	assert.True(t, currentExpiry.Equal(session.ExpiresAt))
 }
 
@@ -528,14 +520,12 @@ func TestUpdateWorkSession(t *testing.T) {
 	defer ts.Close()
 
 	req := WorkSessionUpdateRequest{SudoPolicies: []SudoPolicyInline{
-		{ID: "pol-1", Commands: []string{"systemctl restart nginx"}, AllowBypassMFA: true},
-		{Commands: []string{"tail -f /var/log/nginx/*.log"}, AllowBypassMFA: true},
+		{ID: "pol-1", Commands: []string{"systemctl restart nginx"}, SessionAuthorized: true},
+		{Commands: []string{"tail -f /var/log/nginx/*.log"}, SessionAuthorized: true},
 	}}
 	session, err := UpdateWorkSession(newTestClient(ts), "ses-abc", req)
 	require.NoError(t, err)
 	assert.Equal(t, "ses-abc", session.ID)
-	// Full desired set is sent: existing policy echoed back with its ID
-	// plus the new addition without one.
 	assert.Len(t, gotBody.SudoPolicies, 2)
 	assert.Equal(t, "pol-1", gotBody.SudoPolicies[0].ID)
 	assert.Empty(t, gotBody.SudoPolicies[1].ID)
@@ -700,4 +690,120 @@ func TestEndedStatuses_CallerCannotChangeTheList(t *testing.T) {
 
 	assert.False(t, IsEndedStatus("active"), "mutating the returned slice must not reach the shared list")
 	assert.Len(t, EndedStatuses(), 5)
+}
+
+func TestProjectAttributesShowsTheCluster(t *testing.T) {
+	t.Parallel()
+	row := ProjectAttributes(&WorkSession{
+		ID:       "ses-k",
+		Scopes:   []string{"kube", "kube_exec"},
+		Clusters: []types.ClusterSummary{{ID: "c-1", Name: "prod-east"}},
+	})
+	assert.Equal(t, "prod-east", row.Clusters)
+	assert.Empty(t, row.Servers)
+	assert.Empty(t, row.ExpiresAt, "no expiry until a duration session activates")
+	assert.Equal(t, "kube, kube_exec", row.Scopes)
+}
+
+func TestGetClusterWorkSessions(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/work-sessions/sessions/", r.URL.Path)
+		q := r.URL.Query()
+		assert.Equal(t, "c-1", q.Get("cluster"))
+		assert.Equal(t, "user", q.Get("requester_type"))
+		assert.Equal(t, "u-1", q.Get("assigned_user"))
+		assert.False(t, q.Has("status"), "an empty filter is not sent")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"ses-k","status":"pending","clusters":[{"id":"c-1","name":"prod-east"}]}]}`))
+	}))
+	defer ts.Close()
+
+	sessions, err := GetClusterWorkSessions(newTestClient(ts), ClusterSessionFilter{ClusterID: "c-1", RequesterType: "user", AssignedUser: "u-1"})
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+	assert.True(t, TargetsCluster(&sessions[0], "C-1"), "clusters %v", sessions[0].Clusters)
+	assert.False(t, TargetsCluster(&sessions[0], "c-2"), "clusters %v", sessions[0].Clusters)
+
+	_, err = GetClusterWorkSessions(newTestClient(ts), ClusterSessionFilter{})
+	require.Error(t, err, "without a cluster the list would be every session")
+}
+
+func TestFormatDuration(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		in   time.Duration
+		want string
+	}{
+		{90 * time.Minute, "01:30:00"},
+		{30 * time.Hour, "30:00:00"},
+		{45 * time.Second, "00:00:45"},
+		{1500 * time.Millisecond, "00:00:02"},
+		{400 * time.Millisecond, "00:00:01"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, FormatDuration(tt.in))
+		})
+	}
+}
+
+func TestGetClusterWorkSessionsRefusesAnUnusableID(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"../other","status":"pending"}]}`))
+	}))
+	defer ts.Close()
+
+	_, err := GetClusterWorkSessions(newTestClient(ts), ClusterSessionFilter{ClusterID: "c-1"})
+
+	require.ErrorIs(t, err, api.ErrUnusableID)
+}
+
+func TestSudoPolicyInlineMarshalJSON(t *testing.T) {
+	t.Parallel()
+	for _, enabled := range []bool{false, true} {
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			t.Parallel()
+			policy := SudoPolicyInline{ID: "pol-1", Commands: []string{"systemctl restart nginx"}, Reason: "maintenance", SessionAuthorized: enabled}
+			body, err := json.Marshal(policy)
+			require.NoError(t, err)
+			assert.JSONEq(t, fmt.Sprintf(`{"id":"pol-1","commands":["systemctl restart nginx"],"reason":"maintenance","allow_bypass_mfa":%t,"session_authorized":%t}`, enabled, enabled), string(body))
+		})
+	}
+	t.Run("optional fields stay omitted", func(t *testing.T) {
+		t.Parallel()
+		body, err := json.Marshal(SudoPolicyInline{})
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"commands":null,"allow_bypass_mfa":false,"session_authorized":false}`, string(body))
+	})
+}
+
+func TestSudoPolicyInlineUnmarshalJSON(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, fields string
+		want         bool
+	}{
+		{"old true", `"allow_bypass_mfa":true`, true},
+		{"old false", `"allow_bypass_mfa":false`, false},
+		{"new true", `"session_authorized":true`, true},
+		{"new false", `"session_authorized":false`, false},
+		{"both true", `"allow_bypass_mfa":true,"session_authorized":true`, true},
+		{"both false", `"allow_bypass_mfa":false,"session_authorized":false`, false},
+		{"new false wins", `"allow_bypass_mfa":true,"session_authorized":false`, false},
+		{"new true wins", `"session_authorized":true,"allow_bypass_mfa":false`, true},
+		{"new key ignores invalid old value", `"session_authorized":true,"allow_bypass_mfa":"unused"`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var policy SudoPolicyInline
+			err := json.Unmarshal([]byte(`{"id":"pol-1","commands":["systemctl restart nginx"],"reason":"maintenance",`+tt.fields+`}`), &policy)
+			require.NoError(t, err)
+			assert.Equal(t, SudoPolicyInline{ID: "pol-1", Commands: []string{"systemctl restart nginx"}, Reason: "maintenance", SessionAuthorized: tt.want}, policy)
+		})
+	}
 }

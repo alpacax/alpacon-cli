@@ -15,10 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A folder is zipped only once the server accepts the create request, so the
-// attempts an MFA step-up refuses cost no zip. An unreadable folder shows the
-// order: zipping first would fail on it, while the refusal comes first when the
-// request goes first.
+// A folder is zipped only after the server accepts the create, so an MFA-refused attempt
+// costs no zip. An unreadable folder shows the order: zipping first would fail on it.
 func TestUploadFolder_RefusedCreateZipsNothing(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("needs a folder this process cannot read")
@@ -52,7 +50,6 @@ func TestUploadFolder_RefusedCreateZipsNothing(t *testing.T) {
 	}
 }
 
-// A folder that does not exist fails before the server is asked for anything.
 func TestUploadFolder_MissingFolderSendsNoCreate(t *testing.T) {
 	var posts atomic.Int32
 	ac := &client.AlpaconClient{
@@ -72,8 +69,7 @@ func TestUploadFolder_MissingFolderSendsNoCreate(t *testing.T) {
 	assert.Zero(t, posts.Load())
 }
 
-// A folder that cannot be listed fails before the server is asked for anything,
-// so no upload slot is left orphaned.
+// An unlistable folder fails before the create, so no upload slot is left orphaned.
 func TestUploadFolder_UnreadableFolderSendsNoCreate(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("needs a folder this process cannot read")

@@ -91,7 +91,6 @@ func TestRecordingIndex_WalksTimelineOnceThenOnlyThatSessionsRecords(t *testing.
 			records = append(records, req)
 		}
 	}
-	// Two timeline pages (one walk), three records pages (one walk).
 	require.Len(t, timeline, 2)
 	assert.Contains(t, timeline[0], "cursor=")
 	assert.Contains(t, timeline[1], "cursor=p2")

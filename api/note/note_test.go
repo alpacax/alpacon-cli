@@ -108,9 +108,8 @@ func TestGetNoteList_SendsFilterOrderingAndPinnedParams(t *testing.T) {
 	}
 }
 
-// The page walk itself is pinned in api.TestFetchPagesUpTo_*; what is specific to GetNoteList
-// is that tail reaches the helper as its limit, so a server offering endless pages still
-// yields exactly tail notes.
+// api.TestFetchPagesUpTo_* pins the page walk; this pins that tail reaches it as the limit, so a
+// server offering endless pages still yields exactly tail notes.
 func TestGetNoteList_PassesTailAsTheLimit(t *testing.T) {
 	t.Parallel()
 	var mu sync.Mutex

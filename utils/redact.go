@@ -2,6 +2,8 @@ package utils
 
 import (
 	"errors"
+	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -39,14 +41,35 @@ func RedactURLHostOnly(raw string) string {
 	if parsed, err := url.Parse(redacted); err == nil && parsed.Host != "" {
 		return (&url.URL{Scheme: parsed.Scheme, Host: parsed.Host}).String()
 	}
-	// RedactURL left an unparsable string: cut it after the authority.
-	if scheme := strings.Index(redacted, "://"); scheme >= 0 {
-		start := scheme + len("://")
-		if slash := strings.IndexByte(redacted[start:], '/'); slash >= 0 {
-			return redacted[:start+slash]
+	// No host parsed: keep the scheme and an authority opened by "//", never what follows.
+	scheme, rest := "", redacted
+	if colon := strings.IndexByte(redacted, ':'); colon > 0 && isURLScheme(redacted[:colon]) {
+		scheme, rest = redacted[:colon+1], redacted[colon+1:]
+	}
+	authority, ok := strings.CutPrefix(rest, "//")
+	if !ok {
+		return scheme
+	}
+	if slash := strings.IndexByte(authority, '/'); slash >= 0 {
+		authority = authority[:slash]
+	}
+	if at := strings.LastIndexByte(authority, '@'); at >= 0 {
+		authority = authority[at+1:]
+	}
+	return scheme + "//" + authority
+}
+
+// isURLScheme reports whether s has the shape RFC 3986 gives a scheme.
+func isURLScheme(s string) bool {
+	for i, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+		case i > 0 && (r >= '0' && r <= '9' || r == '+' || r == '-' || r == '.'):
+		default:
+			return false
 		}
 	}
-	return redacted
+	return s != ""
 }
 
 // redactedURLError prints a transport error with its URL redacted. Its cause is
@@ -81,6 +104,16 @@ func RedactURLError(err error) error { return redactURLError(err, RedactURL) }
 // as well: it keeps only the scheme and host, so even a malformed URL that a
 // parser quotes whole reveals nothing past the host.
 func RedactURLErrorHostOnly(err error) error { return redactURLError(err, RedactURLHostOnly) }
+
+// WebsocketDialError reports a failed WebSocket dial whose URL path carries a channel token,
+// keeping only its host and adding the handshake status a bad handshake alone never names.
+func WebsocketDialError(prefix string, err error, resp *http.Response) error {
+	err = RedactURLErrorHostOnly(err)
+	if resp == nil {
+		return fmt.Errorf("%s: %w", prefix, err)
+	}
+	return fmt.Errorf("%s: %w (status %s)", prefix, err, SanitizeTerminalText(resp.Status))
+}
 
 func redactURLError(err error, redact func(string) string) error {
 	var urlErr *url.Error

@@ -25,7 +25,6 @@ func GetWorkspacesFromToken(accessToken string) ([]Workspace, error) {
 		return nil, fmt.Errorf("workspaces claim not found in token")
 	}
 
-	// Re-marshal and unmarshal to convert from any to []Workspace
 	data, err := json.Marshal(rawWorkspaces)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal workspaces claim: %v", err)
@@ -80,7 +79,7 @@ func ResolveWorkspaceURL(accessToken, targetName, baseDomain string) (newURL, ne
 	return "", "", fmt.Errorf("workspace %q not found in your account", targetName)
 }
 
-// ValidateAndBuildWorkspaceURL finds the target workspace in the JWT and builds its full URL.
+// ValidateAndBuildWorkspaceURL is ResolveWorkspaceURL with cfg's access token and base domain.
 func ValidateAndBuildWorkspaceURL(cfg config.Config, targetName string) (newURL, newName string, err error) {
 	return ResolveWorkspaceURL(cfg.AccessToken, targetName, cfg.BaseDomain)
 }

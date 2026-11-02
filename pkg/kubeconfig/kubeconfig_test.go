@@ -637,3 +637,85 @@ func TestLookupReadsAppliedEntry(t *testing.T) {
 	assert.Equal(t, testServer, server)
 	assert.Equal(t, testProxy, proxyURL)
 }
+
+func execEntry(cluster string) Entry {
+	return Entry{
+		Name:   "alpacon-" + cluster,
+		Server: testServer,
+		Exec:   &ExecUser{Command: "alpacon", Args: []string{"kube", "credentials", "--cluster", cluster}},
+	}
+}
+
+func TestApplyWritesAnExecUser(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config")
+
+	applyAndSave(t, path, execEntry("prod-east"))
+
+	assert.Equal(t, `apiVersion: v1
+clusters:
+- cluster:
+    server: https://my-workspace.us1.example.com/kube/0b7f3c1e
+  name: alpacon-prod-east
+contexts:
+- context:
+    cluster: alpacon-prod-east
+    user: alpacon-prod-east
+  name: alpacon-prod-east
+current-context: alpacon-prod-east
+kind: Config
+preferences: {}
+users:
+- name: alpacon-prod-east
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1
+      args:
+      - kube
+      - credentials
+      - --cluster
+      - prod-east
+      command: alpacon
+      interactiveMode: Never
+      provideClusterInfo: true
+`, readFile(t, path))
+}
+
+// A cluster name that reads as another YAML type still reaches the plugin as
+// the string it is.
+func TestApplyQuotesExecArgsThatLookLikeAnotherType(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config")
+
+	applyAndSave(t, path, execEntry("123"))
+
+	users := decode(t, readFile(t, path))["users"].([]any)
+	user := users[0].(map[string]any)["user"].(map[string]any)
+	exec := user["exec"].(map[string]any)
+	assert.Equal(t, map[string]any{
+		"apiVersion":         "client.authentication.k8s.io/v1",
+		"args":               []any{"kube", "credentials", "--cluster", "123"},
+		"command":            "alpacon",
+		"interactiveMode":    "Never",
+		"provideClusterInfo": true,
+	}, exec)
+}
+
+// The exec user replaces the token a static context left, and the rerun of
+// the same entry rewrites nothing.
+func TestApplyExecReplacesATokenUser(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config")
+	applyAndSave(t, path, Entry{Name: "alpacon-prod-east", Server: testServer, Token: "tok-1"})
+
+	applyAndSave(t, path, execEntry("prod-east"))
+	first := readFile(t, path)
+	applyAndSave(t, path, execEntry("prod-east"))
+
+	assert.Equal(t, first, readFile(t, path))
+	users := decode(t, first)["users"].([]any)
+	require.Len(t, users, 1)
+	user := users[0].(map[string]any)["user"].(map[string]any)
+	assert.NotContains(t, user, "token")
+	assert.Contains(t, user, "exec")
+}

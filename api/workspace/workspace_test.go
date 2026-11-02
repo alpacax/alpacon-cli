@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// buildTestJWT creates a minimal JWT string with the given payload claims.
 func buildTestJWT(t *testing.T, claims map[string]any) string {
 	t.Helper()
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))

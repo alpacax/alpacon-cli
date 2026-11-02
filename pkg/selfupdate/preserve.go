@@ -11,12 +11,10 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// staleTempAge is how long a utils.SaveStreamAtomic temp file must have sat
-// before the sweep will take it. The update lock is no help: 'alpacon cp' and
-// 'alpacon package download' write the same name shape into whatever directory
-// they were pointed at, and take no lock. Age is what separates a killed run's
-// litter from a download still streaming—a leftover is permanent, so collecting
-// it a day late costs nothing.
+// staleTempAge is how old a utils.SaveStreamAtomic temp file must be before the sweep takes
+// it. The update lock does not help: 'alpacon cp' and 'alpacon package download' write the same
+// name shape anywhere without it. Only age tells a killed run's leftover from a live download; a
+// leftover is permanent, so collecting it a day late costs nothing.
 const staleTempAge = 24 * time.Hour
 
 const (
@@ -30,7 +28,9 @@ func PreservedName(path string, now time.Time) string {
 	return timestampedName(path, preservedSuffix, now)
 }
 
-func StagedName(path string, now time.Time) string { // A run killed mid-copy leaves the staging file behind, and a fixed name would have the next run write into it.
+// StagedName returns a fresh staging name per run: a fixed name would reuse a staging file a killed
+// run left.
+func StagedName(path string, now time.Time) string {
 	return timestampedName(path, stagedSuffix, now)
 }
 

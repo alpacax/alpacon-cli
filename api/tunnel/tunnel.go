@@ -1,9 +1,11 @@
 package tunnel
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 )
@@ -12,10 +14,9 @@ const (
 	tunnelSessionURL = "/api/websh/tunnels/"
 )
 
-// CreateTunnelSession creates a new tunnel session for the specified server.
-// It returns the WebSocket URL to connect to.
-// workSessionID, when non-empty, attaches the tunnel to a work-session via the
-// "work_session" body field (omitted when empty thanks to omitempty).
+// CreateTunnelSession creates a tunnel session for the server and returns the
+// WebSocket URL to connect to. A non-empty workSessionID attaches the tunnel to
+// that work session.
 func CreateTunnelSession(ac *client.AlpaconClient, serverName, username, groupname string, targetPort int, workSessionID string) (*TunnelSessionResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
@@ -42,4 +43,22 @@ func CreateTunnelSession(ac *client.AlpaconClient, serverName, username, groupna
 	}
 
 	return &response, nil
+}
+
+// GetTunnelSession fetches a tunnel session's detail, sessionID being the ID CreateTunnelSession returned.
+func GetTunnelSession(ctx context.Context, ac *client.AlpaconClient, sessionID string) (*TunnelSessionDetail, error) {
+	pathID, err := api.RequireResponseID(sessionID, "tunnel session")
+	if err != nil {
+		return nil, err
+	}
+	responseBody, err := ac.SendGetRequestWithContext(ctx, api.IDURL(tunnelSessionURL, pathID, "", nil))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tunnel session: %w", err)
+	}
+
+	var detail TunnelSessionDetail
+	if err := json.Unmarshal(responseBody, &detail); err != nil {
+		return nil, fmt.Errorf("failed to parse tunnel session detail: %w", err)
+	}
+	return &detail, nil
 }

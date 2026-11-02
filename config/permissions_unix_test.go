@@ -402,7 +402,7 @@ func TestDeleteConfigRemovesWhatASymlinkedConfigFileNames(t *testing.T) {
 	setupTestConfig(t)
 	stored, configFile := symlinkedConfigFile(t, &Config{Token: "first"})
 
-	require.NoError(t, DeleteConfig())
+	require.NoError(t, DeleteConfig(Config{Token: "first"}))
 
 	// Removing the link alone would leave the refresh token in the dotfiles tree
 	// after a logout that reported success.
@@ -461,11 +461,9 @@ func narrowConfigFile(path string) error {
 	return file.Close()
 }
 
-// TestLoadConfigWarnsOnASymlinkedConfigFileOnlyWhenItsTargetIsWide pins what the
-// warning is about. A link is refused a chmod, not a read, and the README calls
-// a config.json kept in a dotfiles tree a supported setup—so warning on the link
-// alone told that user, on every single command, about an exposure that was not
-// there.
+// TestLoadConfigWarnsOnASymlinkedConfigFileOnlyWhenItsTargetIsWide: a link is refused a chmod,
+// not a read, and a config.json kept in a dotfiles tree is supported, so warning on the link
+// alone would flag a nonexistent exposure on every command.
 func TestLoadConfigWarnsOnASymlinkedConfigFileOnlyWhenItsTargetIsWide(t *testing.T) {
 	// Serial: it sets HOME, swaps os.Stderr, and clears a package-level map.
 	for _, tc := range []struct {
@@ -538,5 +536,48 @@ func TestRestrictConfigDirectoryModeReportsASymlinkOnlyWhenItsTargetIsWide(t *te
 			}
 			assert.ErrorIs(t, err, errSymlink)
 		})
+	}
+}
+
+// A logout that could not delete the saved kube sessions keeps the config, so
+// the retry still matches the login and deletes them.
+func TestDeleteConfigRetriesTheKubeSessionsItCouldNotDelete(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root removes files from a read-only directory")
+	}
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+	login := loadedConfig(t)
+	kubeDir := filepath.Join(os.Getenv("HOME"), ConfigFileDir, KubeSessionDir)
+	require.NoError(t, os.MkdirAll(kubeDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(kubeDir, "0123456789abcdef.json"), []byte(`{"channel_token":"tok"}`), 0600))
+	require.NoError(t, os.Chmod(kubeDir, 0500))
+	t.Cleanup(func() { _ = os.Chmod(kubeDir, 0700) })
+
+	require.Error(t, DeleteConfig(login))
+	assert.FileExists(t, filepath.Join(os.Getenv("HOME"), ConfigFileDir, ConfigFileName), "the config stays for the retry")
+
+	require.NoError(t, os.Chmod(kubeDir, 0700))
+	require.NoError(t, DeleteConfig(login))
+	assert.NoFileExists(t, filepath.Join(kubeDir, "0123456789abcdef.json"))
+	assert.NoFileExists(t, filepath.Join(os.Getenv("HOME"), ConfigFileDir, ConfigFileName))
+}
+
+// kube login never writes through a symbolic link at the session directory,
+// so a logout does not follow one into files it never wrote.
+func TestDeleteConfigLeavesASymlinkedKubeSessionDirectory(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+	target := t.TempDir()
+	files := []string{"0123456789abcdef.json", "notes.json", "draft.tmp"}
+	for _, name := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(target, name), []byte("keep"), 0600))
+	}
+	require.NoError(t, os.Symlink(target, filepath.Join(os.Getenv("HOME"), ConfigFileDir, KubeSessionDir)))
+
+	require.NoError(t, DeleteConfig(loadedConfig(t)))
+
+	for _, name := range files {
+		assert.FileExists(t, filepath.Join(target, name))
 	}
 }

@@ -66,8 +66,6 @@ func (s *stepStub) client() *client.AlpaconClient {
 	}
 }
 
-// After MFA only the refused request is sent again: the transfer the server
-// already created is not created a second time.
 func TestTransfer_MFARefusalAfterTheCreateRetriesOnlyTheRefusedRequest(t *testing.T) {
 	t.Setenv("ALPACON_NO_BROWSER", "1")
 	t.Setenv("HOME", t.TempDir())

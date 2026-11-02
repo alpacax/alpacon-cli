@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
+	"strings"
 
+	"github.com/alpacax/alpacon-cli/cmd/acl"
 	"github.com/alpacax/alpacon-cli/cmd/agent"
 	apicmd "github.com/alpacax/alpacon-cli/cmd/api"
 	"github.com/alpacax/alpacon-cli/cmd/approval"
@@ -40,9 +43,11 @@ import (
 var showVersion bool
 
 var RootCmd = &cobra.Command{
-	Use:     "alpacon",
-	Aliases: []string{"ac"},
-	Short:   "Use Alpacon, the AI-native PAM, from the terminal",
+	Use:           "alpacon",
+	Aliases:       []string{"ac"},
+	SilenceErrors: true, // Execute reports every error once, in the --output format
+	SilenceUsage:  true,
+	Short:         "Use Alpacon, the AI-native PAM, from the terminal",
 	Long: `Alpacon CLI is the command-line client for Alpacon, the AI-native PAM.
 Humans, AI agents, and CI/CD run commands—each judged, recorded, and bounded.
 
@@ -62,15 +67,13 @@ AI agents add --requester-type agent to step 2 and drop --use and websh, which a
 agent session refuses; step 3 then names the session before the server:
   alpacon exec --work-session <SESSION_ID> <SERVER> -- <COMMAND>
 
+For a Kubernetes cluster, 'alpacon kube login <CLUSTER>' finds or creates a
+session that targets the cluster (scopes kube, kube_exec) and writes the
+kubeconfig context kubectl uses.
+
 See 'alpacon work-session --help' for session lifecycle and error codes.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		switch utils.OutputFormat {
-		case utils.OutputFormatTable, utils.OutputFormatJSON:
-			return nil
-		default:
-			return fmt.Errorf("invalid --output value %q (expected %q or %q)",
-				utils.OutputFormat, utils.OutputFormatTable, utils.OutputFormatJSON)
-		}
+		return utils.SetOutputFormat(utils.OutputFormat)
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		if showVersion {
@@ -83,9 +86,78 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 
 func Execute() {
 	kube.ApplySurfaceGate(RootCmd, kubernetesSurfaceEnabled())
-	if err := RootCmd.Execute(); err != nil {
+	RootCmd.InitDefaultCompletionCmd()
+	markHookErrors(RootCmd)
+	keepWithOwnParser(RootCmd, os.Args[1:])
+	cmd, err := RootCmd.ExecuteC()
+	switch {
+	case err == nil:
+		return
+	case !errors.As(err, new(hookError)):
+		utils.CliParseErrorWithExit(cmd, utils.OutputFormatIn(os.Args[1:]), err.Error())
+	case utils.IsUsageError(err):
+		utils.CliUsageErrorWithExit("%s", err)
+	default:
 		utils.CliErrorWithExit("While executing the command: %s", err)
 	}
+}
+
+// keepWithOwnParser detaches the subcommands of a command that parses its own flags when a flag Cobra
+// does not know comes before the subcommand's name: Cobra took the server for that flag's value.
+func keepWithOwnParser(root *cobra.Command, args []string) {
+	cmd, _, err := root.Find(args)
+	if err != nil || !cmd.HasParent() || cmd.Parent() == root {
+		return
+	}
+	parent := cmd.Parent()
+	if parent.Parent() != root || !parent.DisableFlagParsing {
+		return
+	}
+	at := slices.IndexFunc(args, func(arg string) bool { return arg == parent.Name() || parent.HasAlias(arg) })
+	for _, arg := range args[at+1:] {
+		if arg == cmd.Name() || cmd.HasAlias(arg) {
+			return
+		}
+		if strings.HasPrefix(arg, "-") && !knownFlag(parent, arg) {
+			parent.RemoveCommand(parent.Commands()...)
+			return
+		}
+	}
+}
+
+func knownFlag(c *cobra.Command, arg string) bool {
+	if name, ok := strings.CutPrefix(arg, "--"); ok {
+		name, _, _ = strings.Cut(name, "=")
+		return c.Flags().Lookup(name) != nil
+	}
+	return len(arg) == 2 && c.Flags().ShorthandLookup(arg[1:]) != nil
+}
+
+// hookError marks an error a command's own hook returned; any other error is Cobra rejecting the command line.
+type hookError struct{ err error }
+
+func (e hookError) Error() string { return e.err.Error() }
+func (e hookError) Unwrap() error { return e.err }
+
+// markHookErrors wraps what every error-returning hook of c and its subcommands returns.
+func markHookErrors(c *cobra.Command) {
+	for _, hook := range []*func(*cobra.Command, []string) error{
+		&c.PersistentPreRunE, &c.PreRunE, &c.RunE, &c.PostRunE, &c.PersistentPostRunE,
+	} {
+		if run := *hook; run != nil {
+			*hook = func(cmd *cobra.Command, args []string) error { return markHookError(run(cmd, args)) }
+		}
+	}
+	for _, sub := range c.Commands() {
+		markHookErrors(sub)
+	}
+}
+
+func markHookError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return hookError{err: err}
 }
 
 // kubernetesSurfaceEnabled reads the answer the last login or switch recorded;
@@ -99,120 +171,89 @@ func kubernetesSurfaceEnabled() bool {
 }
 
 func init() {
-	// Global output format flag
 	RootCmd.PersistentFlags().StringVar(
 		&utils.OutputFormat, "output", utils.OutputFormatTable,
 		"Output format: table or json",
 	)
 
-	// version
 	RootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, versionCmd.Short)
 	RootCmd.AddCommand(versionCmd)
 
-	// update
 	RootCmd.AddCommand(updateCmd)
 
-	// login
 	RootCmd.AddCommand(loginCmd)
 
-	// logout
 	RootCmd.AddCommand(logoutCmd)
 
-	// iam
 	RootCmd.AddCommand(iam.UserCmd)
 	RootCmd.AddCommand(iam.GroupCmd)
 
-	// server
 	RootCmd.AddCommand(server.ServerCmd)
 
-	// agent
 	RootCmd.AddCommand(agent.AgentCmd)
 
-	// api
 	RootCmd.AddCommand(apicmd.ApiCmd)
 
-	// websh
 	RootCmd.AddCommand(websh.WebshCmd)
 
-	// exec
 	RootCmd.AddCommand(exec.ExecCmd)
 
-	// ftp
 	RootCmd.AddCommand(ftp.CpCmd)
 
-	// edit
 	RootCmd.AddCommand(edit.EditCmd)
 
-	// packages
 	RootCmd.AddCommand(packages.PackagesCmd)
 
-	// log
 	RootCmd.AddCommand(log.LogCmd)
 
-	// event
 	RootCmd.AddCommand(event.EventCmd)
 
-	// note
 	RootCmd.AddCommand(note.NoteCmd)
 
-	// authority
 	RootCmd.AddCommand(authority.AuthorityCmd)
 
-	// csr
 	RootCmd.AddCommand(csr.CsrCmd)
 
-	// certificate
 	RootCmd.AddCommand(cert.CertCmd)
 
-	// token
 	RootCmd.AddCommand(token.TokenCmd)
 
-	// tunnel
 	RootCmd.AddCommand(tunnel.TunnelCmd)
 
-	// username
 	RootCmd.AddCommand(username.UsernameCmd)
 
-	// workspace
 	RootCmd.AddCommand(workspace.WorkspaceCmd)
 
-	// revoke
 	RootCmd.AddCommand(revoke.RevokeCmd)
 
-	// audit
 	RootCmd.AddCommand(audit.AuditCmd)
 
-	// webhook
 	RootCmd.AddCommand(webhook.WebhookCmd)
 
-	// webftp
 	RootCmd.AddCommand(webftp.WebFTPCmd)
 
-	// work-session
 	RootCmd.AddCommand(worksession.WorkSessionCmd)
 
-	// approval
 	RootCmd.AddCommand(approval.ApprovalCmd)
 
-	// kube
 	RootCmd.AddCommand(kube.KubeCmd)
 
-	// whoami
+	RootCmd.AddCommand(acl.AclCmd)
+
 	RootCmd.AddCommand(whoamiCmd)
 }
 
-// buildWelcomeLines composes the right-side text lines rendered next to the
-// Pacabot art when `alpacon` is invoked with no subcommand. Three lines:
-// version, workspace URL (or login prompt / config error), help hint.
+// buildWelcomeLines composes the lines shown beside the Pacabot art when alpacon
+// runs with no subcommand: version, workspace URL (or login prompt or config
+// error), and a help hint.
 func buildWelcomeLines() []string {
 	header := fmt.Sprintf("alpacon %s", utils.GetCLIVersion())
 	helpHint := "'alpacon --help' for commands"
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		// Missing config file → expected case, treat as not logged in.
-		// Other errors (permissions, malformed JSON) surface so the user
-		// can act on them instead of seeing a misleading login prompt.
+		// A missing config means not logged in; any other error surfaces so the user can
+		// act on it rather than see a misleading login prompt.
 		if errors.Is(err, os.ErrNotExist) {
 			return []string{header, "Not logged in — run 'alpacon login'", helpHint}
 		}

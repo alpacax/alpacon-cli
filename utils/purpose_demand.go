@@ -11,8 +11,7 @@ import (
 // open demand. `exec` and `exec logs` differ only in what they add after it, so
 // keeping the shared half here stops one from being reworded without the other.
 const PurposeDemandLead = "Purpose required—the verification gate held this command and is asking what it is for. " +
-	"No approver has been notified: state the purpose and it is judged again, once, with that in hand. " +
-	"Stay silent and the command is not blocked—it takes the ordinary path when the demand expires."
+	"No approver has been notified: state the purpose and it is judged again, once, with that in hand."
 
 // purposeGuidance says what makes a purpose worth stating. It travels in the
 // response rather than living only in help text: an agent reads the answer to
@@ -20,12 +19,10 @@ const PurposeDemandLead = "Purpose required—the verification gate held this co
 // have dropped.
 const purposeGuidance = "State a fact local to this host that the work session's description does not already imply—clock skew against a certificate's notBefore window, a duplicate config block overriding the edited value, contention for a single JVM attach slot. General knowledge adds nothing: the assessor already has it. A purpose cannot lower a command's intrinsic risk, cannot outrank the session description, and cannot make an unmeasurable command measurable; an attempt to argue the verdict down is reported and denied."
 
-// purposeRequiredCtx is the machine-readable context for a purpose demand. The
-// command id is what the answer is addressed to. DeadlineSeconds is what remains
-// of the window, computed from the server's own timestamp; it is omitted rather
-// than guessed when the server did not supply one, because
-// COMMAND_PURPOSE_DEADLINE is env-overridable and a copied default would be a
-// deadline that does not exist on a workspace which raised it.
+// purposeRequiredCtx is the machine-readable context for a purpose demand, addressed by command
+// id. DeadlineSeconds is what remains of the window by the server's own timestamp, omitted when
+// the server sent none: the server's deployment can change the window's length, so a copied default
+// could name a deadline that does not exist.
 type purposeRequiredCtx struct {
 	CommandID       string `json:"command_id"`
 	DeadlineSeconds *int   `json:"deadline_seconds,omitempty"`
@@ -52,12 +49,9 @@ type purposeRequiredJSON struct {
 	NextActions           []NextAction       `json:"next_actions,omitempty"`
 }
 
-// remainingPurposeWindow reports the seconds left before the demand expires, or
-// nil when the server sent no expiry. The expiry is server-derived because the
-// window's length is COMMAND_PURPOSE_DEADLINE and no endpoint publishes it, so
-// there is no length for this client to assume and nothing here can be wrong
-// about one. A window already elapsed reports 0 rather than a negative: the
-// answer is late either way, and a negative invites arithmetic on it.
+// remainingPurposeWindow reports the seconds left before the demand expires, or nil when the server
+// sent no expiry; no endpoint publishes the window's length, so the client assumes none. An
+// elapsed window reports 0: the answer is late either way, and a negative invites arithmetic.
 func remainingPurposeWindow(expiresAt *time.Time) *int {
 	if expiresAt == nil {
 		return nil
@@ -82,18 +76,19 @@ func purposeNextActions(commandID string) []NextAction {
 	}
 }
 
-// PrintPurposeDemand emits the structured "state the purpose" feedback for a
-// command the gate parked. Under --output json it writes a
-// {"status":"purpose_required", ...} envelope to stdout; otherwise it writes an
-// actionable message to stderr. expiresAt may be nil, in which case no deadline
-// is reported rather than one being invented.
-// It never exits—the caller owns process exit so the exit-code contract stays in
-// one place.
+// PrintPurposeDemand reports a command the gate parked to ask its purpose: a
+// {"status":"purpose_required", ...} envelope on stdout under --output json, else an actionable
+// message on stderr. A nil expiresAt reports no deadline. It never exits, so the exit-code
+// contract stays with the caller.
 func PrintPurposeDemand(message, commandID string, expiresAt *time.Time) {
-	// Sanitized once, here: the id is server-supplied and every line below
-	// interpolates it into text written straight to the terminal (#364).
+	// Sanitized once: the id is server-supplied and every line below writes it to the terminal.
 	commandID = SanitizeTerminalText(commandID)
 	remaining := remainingPurposeWindow(expiresAt)
+	deadline := "the deadline"
+	if remaining != nil {
+		deadline = fmt.Sprintf("%s (about %d s)", expiresAt.Local().Format("15:04:05"), *remaining)
+	}
+	message += fmt.Sprintf(" If no purpose arrives by %s, the command is judged again without one: it runs, waits for a human approver (who is notified then), or is refused. Read the result with `alpacon exec logs %s`; do not resubmit.", deadline, commandID)
 
 	if OutputFormat == OutputFormatJSON {
 		envelope := purposeRequiredJSON{
@@ -117,20 +112,14 @@ func PrintPurposeDemand(message, commandID string, expiresAt *time.Time) {
 	}
 
 	CliWarning("%s", message)
-	if remaining != nil {
-		fmt.Fprintf(os.Stderr, "  About %ds left to answer.\n", *remaining)
-	}
 	fmt.Fprintf(os.Stderr, "  %s\n", purposeGuidance)
 	for _, action := range purposeNextActions(commandID) {
 		fmt.Fprintf(os.Stderr, "  %s\n", action.PlainText())
 	}
 }
 
-// purposeAnswerJSON is the envelope `alpacon exec purpose` prints under
-// --output json. The purpose flow is agent-facing end to end: `exec` and
-// `exec logs` both emit a machine-readable result, and the command that answers
-// them has to as well, or an agent that branched on exit 7 and answered has the
-// exit code and nothing else.
+// purposeAnswerJSON is the envelope `alpacon exec purpose` prints under --output json, so an agent
+// that branched on exit 7 and answered gets a machine-readable result too.
 type purposeAnswerJSON struct {
 	OK          bool         `json:"ok"`
 	Status      string       `json:"status"`
@@ -181,10 +170,17 @@ func PrintPurposeRefused(commandID string, cause error) {
 			"or this credential may not be the one that submitted the command.",
 		commandID, cause,
 	)
+	// The server's hint, when the refusal carries one, says why in place of the
+	// local guess, and leads the follow-ups.
+	actions := RefusalNextActions(cause)
+	if RefusalHint(cause) != "" {
+		message = fmt.Sprintf("failed to state the purpose for %s: %s.", commandID, cause)
+	}
 	next := NextAction{
 		Command:     fmt.Sprintf("alpacon exec logs %s", commandID),
 		Description: "Read the command's state; do not re-submit it, which would create a second command",
 	}
+	actions = append(actions, next)
 
 	if OutputFormat == OutputFormatJSON {
 		envelope := purposeAnswerJSON{
@@ -193,7 +189,7 @@ func PrintPurposeRefused(commandID string, cause error) {
 			ExitCode:    ExitCodeGeneralError,
 			Message:     message,
 			CommandID:   commandID,
-			NextActions: []NextAction{next},
+			NextActions: actions,
 		}
 		if err := PrintJSONValue(os.Stdout, envelope); err != nil {
 			_, _ = fmt.Fprintf(os.Stdout, `{"ok":false,"status":"purpose_refused"}`+"\n")
@@ -202,5 +198,7 @@ func PrintPurposeRefused(commandID string, cause error) {
 	}
 
 	CliWarning("%s", message)
-	fmt.Fprintf(os.Stderr, "  %s\n", next.PlainText())
+	for _, action := range actions {
+		fmt.Fprintf(os.Stderr, "  %s\n", action.PlainText())
+	}
 }

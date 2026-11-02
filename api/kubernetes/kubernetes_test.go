@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -527,6 +528,10 @@ func TestClusterCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 			_, err := GetClusterDetail(ac, badID)
 			return err
 		}},
+		{"GetSession", func(ac *client.AlpaconClient) error {
+			_, err := GetSession(ac, badID)
+			return err
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -537,6 +542,41 @@ func TestClusterCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 			err := tt.call(ac)
 
 			require.ErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
+}
+
+func TestGetSession_Decodes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		body   string
+		closed bool
+	}{
+		{name: "open", body: `{"id":"s-1","token_expired_at":"2026-10-08T09:40:00Z","closed_at":null}`},
+		{name: "closed", body: `{"id":"s-1","token_expired_at":"2026-10-08T09:40:00Z","closed_at":"2026-10-08T09:00:00Z"}`, closed: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "/api/kubernetes/sessions/s-1/", r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer ts.Close()
+
+			session, err := GetSession(newTestClient(ts), "s-1")
+
+			require.NoError(t, err)
+			require.NotNil(t, session.TokenExpiredAt)
+			assert.Equal(t, time.Date(2026, 10, 8, 9, 40, 0, 0, time.UTC), session.TokenExpiredAt.UTC())
+			if !tt.closed {
+				assert.Nil(t, session.ClosedAt)
+				return
+			}
+			require.NotNil(t, session.ClosedAt)
+			assert.Equal(t, time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC), session.ClosedAt.UTC())
 		})
 	}
 }
@@ -578,6 +618,33 @@ func TestGetClusterIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, id)
+		})
+	}
+}
+
+type statusErr struct{ code int }
+
+func (e statusErr) Error() string       { return fmt.Sprintf("status %d", e.code) }
+func (e statusErr) HTTPStatusCode() int { return e.code }
+
+func TestIsSurfaceOff(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{name: "not found", err: statusErr{http.StatusNotFound}, expected: true},
+		{name: "wrapped not found", err: fmt.Errorf("fetching page 1: %w", statusErr{http.StatusNotFound}), expected: true},
+		{name: "server error", err: statusErr{http.StatusInternalServerError}},
+		{name: "forbidden", err: statusErr{http.StatusForbidden}},
+		{name: "no status", err: errors.New("connection refused")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.expected, IsSurfaceOff(tt.err))
 		})
 	}
 }

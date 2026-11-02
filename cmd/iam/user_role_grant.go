@@ -2,8 +2,10 @@ package iam
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 
+	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/rbac"
 	"github.com/alpacax/alpacon-cli/client"
@@ -96,17 +98,18 @@ func init() {
 	userRoleGrantCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
 }
 
-// On failure, check for transposed arguments first: most CLIs in this space put the role
-// before the user, so 'grant admin john' is the mistake an operator arrives with.
+// resolveRoleForBinding checks for transposed arguments on failure: most CLIs in this space put
+// the role before the user, so 'grant admin john' is the mistake an operator arrives with.
 func resolveRoleForBinding(ac *client.AlpaconClient, verb, userArg, roleArg string) *rbac.RoleResponse {
 	role, err := rbac.ResolveRole(ac, roleArg)
 	if err == nil {
 		return role
 	}
 
-	if !errors.Is(err, rbac.ErrBlankName) {
-		if _, swapErr := rbac.ResolveRole(ac, userArg); swapErr == nil {
-			utils.CliErrorWithExit("No role named %q, but %q is one. The user comes first: 'alpacon user role %s %s %s'.",
+	missingID := utils.IsUUID(strings.TrimSpace(roleArg)) && utils.HTTPStatusCode(err) == http.StatusNotFound
+	if errors.Is(err, rbac.ErrNotFound) || missingID {
+		if _, swapErr := rbac.ResolveRole(ac, userArg); swapErr == nil && !mayNameAUser(ac, userArg) {
+			utils.CliUsageErrorWithExit("No role named %q, but %q is one. The user comes first: 'alpacon user role %s %s %s'.",
 				roleArg, userArg, verb, roleArg, userArg)
 		}
 	}
@@ -115,22 +118,33 @@ func resolveRoleForBinding(ac *client.AlpaconClient, verb, userArg, roleArg stri
 	return nil
 }
 
-// Trim once, so the value warnMissingReason judges is the value the server records.
+// mayNameAUser is false only when the lookup answered that no user has this name, so the
+// order is certain; a role ID given first names no user.
+func mayNameAUser(ac *client.AlpaconClient, arg string) bool {
+	if utils.IsUUID(strings.TrimSpace(arg)) {
+		return false
+	}
+	_, err := iam.GetUserIDByName(ac, arg)
+	return !errors.Is(err, rbac.ErrNotFound)
+}
+
+// reasonFlag trims once, so the value warnMissingReason judges is the value the server records.
 func reasonFlag(cmd *cobra.Command) string {
 	reason, _ := cmd.Flags().GetString("reason")
 
 	return strings.TrimSpace(reason)
 }
 
-// The server accepts a blank justification and records the omission, so warn, never refuse.
+// warnMissingReason warns, never refuses: the server accepts a blank justification and records
+// the omission.
 func warnMissingReason(reason string) {
 	if reason == "" {
 		utils.CliWarning("No --reason given, so the audit entry for this change will carry no justification.")
 	}
 }
 
-// Re-read rather than trust the 2xx: a superuser grant creates a second binding the
-// client never asked for, and revoke can leave one behind.
+// reportWorkspaceRoles re-reads rather than trust the 2xx: a superuser grant creates a second
+// binding the client never asked for, and revoke can leave one behind.
 func reportWorkspaceRoles(ac *client.AlpaconClient, userID, userLabel string) {
 	bindings, err := rbac.GetUserBindings(ac, userID)
 	if err != nil {

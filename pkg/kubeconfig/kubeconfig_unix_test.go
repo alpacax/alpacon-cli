@@ -104,3 +104,31 @@ func TestSaveKeepsExistingModeAndWarnsWhenReadableByOthers(t *testing.T) {
 		})
 	}
 }
+
+// Serial: it captures os.Stderr. An exec user holds no secret, so a file
+// other accounts can read draws no bearer-token warning.
+func TestSaveDoesNotWarnForAnExecUser(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	writeFile(t, path, kubectlFixture)
+	require.NoError(t, os.Chmod(path, 0644))
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		applyAndSave(t, path, execEntry("prod-east"))
+	})
+
+	assert.Empty(t, stderr)
+}
+
+// Serial: it captures os.Stderr. A token another context left in the file is
+// still exposed after an exec user is written beside it.
+func TestSaveWarnsForATokenLeftByAnotherContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	applyAndSave(t, path, Entry{Name: "alpacon-prod-west", Server: testServer, Token: "tok-west"})
+	require.NoError(t, os.Chmod(path, 0644))
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		applyAndSave(t, path, execEntry("prod-east"))
+	})
+
+	assert.Contains(t, stderr, path+" holds a bearer token and is readable by other accounts")
+}

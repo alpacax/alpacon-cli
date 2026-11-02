@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/mfa"
@@ -32,6 +34,9 @@ intended for the remote command (e.g., -U, -d) are not interpreted as alpacon fl
 
 All flags must be placed before the server name.
 
+The session purpose is what the assessor judges each command against. An agent
+should pass --purpose with each command, which skips the purpose demand entirely.
+
 Subcommand names (ls, logs, purpose) win over a server of the same name. To reach
 a server literally named 'ls', 'logs' or 'purpose', put -- before it:
 alpacon exec -- ls uptime
@@ -42,20 +47,25 @@ To send a literal metacharacter, wrap the argument in quotes:
 
 Verified file execution (--file) submits a script as structure instead of a
 command line: the platform hashes the bytes the reviewer sees, and the agent
-proves at execution time that the file it runs on the server is those bytes.
-The file must already exist at that path on the target server; the CLI reads
-the content from the same path locally (or from --file-from) so the reviewer
-and the assessor judge what you are about to run. An approval binds exactly
-those bytes, on that server, as that account, with those arguments—it does not
-mean "the file is safe". Environment, libraries, the interpreter's version and
-anything the script fetches at run time are yours; only the first entrypoint
-is verified. Composition (pipes, redirection, &&) goes inside the script, where
-it is reviewed and hashed with it; a one-off composition around a script stays
-on the ordinary command line. A reviewer can mark an approval standing, and an
-unchanged re-run then stops asking anyone—one changed byte re-queues review.
-The approver decides whether to grant reuse, and a grant always expires: after
-the days --reuse-days proposed, or at the workspace ceiling (1 to 366 days,
-default 90).
+proves at execution time that the file it runs on the server is those bytes. The
+file must already exist at that path on the target server, or --upload writes it
+there first; the CLI reads the content from the same path locally (or from
+--file-from) so the reviewer and the assessor judge what you are about to run.
+A script that exists only on the server takes --from-server: the CLI reads the
+file from the server as the account the script runs as, and submits those
+bytes, so no local copy is needed. With --upload the bytes written are the bytes submitted, and the agent still
+hashes the file at execution and refuses a mismatch. A file --upload wrote stays
+on the server even when the submission is then refused. An approval binds
+exactly those bytes, on that server, as that account, with those arguments—it
+does not mean "the file is safe". Environment, libraries, the interpreter's
+version and anything the script fetches at run time are yours; only the first
+entrypoint is verified. Composition (pipes, redirection, &&) goes inside the
+script, where it is reviewed and hashed with it; a one-off composition around a
+script stays on the ordinary command line. A reviewer can mark an approval
+standing, and an unchanged re-run then stops asking anyone—one changed byte
+re-queues review. The approver decides whether to grant reuse, and a grant
+always expires: after the days --reuse-days proposed, or at the workspace
+ceiling (1 to 366 days, default 90).
 
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
@@ -80,6 +90,24 @@ Flags:
   --file-from LOCAL_PATH        Read the script's content from LOCAL_PATH instead of
                                 PATH. The file on the server must be byte-identical,
                                 or the agent refuses to run it.
+  --upload                      Write the script to PATH on the server first, then
+                                submit it, in one step. The file is written as the
+                                account and group the script runs as (-u or USER@,
+                                -g, or the server's default account when neither
+                                is given): a new file takes that account's umask,
+                                missing directories are created, and the
+                                interpreter reads the file, so no execute bit is
+                                needed. An existing file is refused unless
+                                --overwrite is given. PATH must be clean: no
+                                '.' or '..' and no repeated or trailing slash.
+  --overwrite                   With --upload, replace a file already at PATH. The
+                                file keeps its owner and mode.
+  --from-server                 Read the script's content from PATH on the server
+                                instead of a local file, as the account and group
+                                the script runs as, and submit those bytes. Use it
+                                for a script that already exists only on the
+                                server. Cannot be combined with --upload or
+                                --file-from.
   --interpreter PATH            Interpreter for --file (default /bin/bash). Must be
                                 an absolute path; a bare name would let the server's
                                 PATH decide what runs.
@@ -107,9 +135,11 @@ Flags:
                                 Use 'alpacon exec logs JOB_ID' to retrieve the result.
                                 Inside an agent-requester work session, a command
                                 the gate holds for its purpose can sit for about a
-                                minute before taking the ordinary path—nothing here
-                                waits, but the command does. Pass --purpose to skip
-                                the hold, or read the demand with 'exec logs'.
+                                minute. Without a purpose it is judged again: it
+                                runs, waits for a human approver (who is notified
+                                then), or is refused. Pass --purpose to skip the
+                                hold, or read the result with 'exec logs'; do not
+                                resubmit.
   --wait                        When a sudo command needs human approval, block and
                                 re-attempt until a reviewer approves it in the Alpacon
                                 console (web), or the wait times out (default 5m).
@@ -137,6 +167,15 @@ secret with --env="KEY" instead. A --file script that carries a credential is
 refused the same way; take the secret out of the script and have the script
 read it on the host at run time. --output json emits an error envelope on
 stderr with error_code command_inline_credential.
+A command whose line carries a script body—a heredoc, a multi-line -c or -e
+body, or a decoded payload piped into a shell—can be refused when the
+workspace approval policy blocks script bodies, with exit code 6 and the code
+use_file_execution. Then save the script to a local file and run it on the
+same server as the same account with --upload --file PATH --file-from
+LOCAL_PATH, which writes it to PATH and runs it in one step, or with --file
+PATH --from-server when the script is already at PATH on the server. Add
+--interpreter ABSOLUTE_PATH for a script /bin/bash does not run, such as a perl
+-e body.
 Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
 	Example: `  # Simple command execution
   alpacon exec prod-docker docker ps
@@ -173,11 +212,15 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   alpacon exec --file /opt/deploy.sh root@prod-web -- --fast
   alpacon exec --file /opt/deploy.sh --file-from ./deploy.sh --interpreter /bin/sh prod-web
 
+  # Run a script that exists only on the server; its content is read from there.
+  alpacon exec --file /opt/deploy.sh --from-server root@prod-web -- --fast
+
+  # Write a local script to the server and run it as a verified file, in one step.
+  alpacon exec --upload --file /opt/deploy.sh --file-from ./deploy.sh root@prod-web -- --fast
+
   # Propose that the approval stay reusable for 30 days; the approver decides
   alpacon exec --file /opt/deploy.sh --reuse-days 30 root@prod-web -- --fast`,
-	// DisableFlagParsing is required because remote command arguments (e.g., -U, -d)
-	// would otherwise be consumed by Cobra's flag parser.
-	// All flags are parsed manually in the Run function.
+	// Cobra would otherwise consume remote command flags (e.g. -U, -d); Run parses flags itself.
 	DisableFlagParsing: true,
 	Run: func(cmd *cobra.Command, args []string) {
 		parsed := ParseRemoteExecArgs(args)
@@ -186,20 +229,24 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			_ = cmd.Help()
 			return
 		}
-
 		if parsed.Err != "" {
-			utils.CliErrorWithExit("%s", parsed.Err)
+			utils.CliParseErrorWithExit(cmd, parsed.OutputFormat, parsed.Err)
 			return
+		}
+		if parsed.OutputFormat != "" {
+			if err := utils.SetOutputFormat(parsed.OutputFormat); err != nil {
+				utils.CliUsageErrorWithExit("%s", err)
+			}
 		}
 
 		if parsed.Server == "" {
 			_ = cmd.Help()
-			utils.CliErrorWithExit("server name is required.")
+			utils.CliUsageErrorWithExit("server name is required.")
 			return
 		}
 
 		if parsed.Command == "" && parsed.File == nil {
-			utils.CliErrorWithExit("You must specify a command to execute, or a script with --file.")
+			utils.CliUsageErrorWithExit("You must specify a command to execute, or a script with --file.")
 			return
 		}
 
@@ -208,20 +255,12 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 }
 
 // RunRemoteExec is the shared post-parse execution path for exec and websh
-// command mode. Requires Server and either Command or File to be set.
+// command mode. Requires Server, Command or File, and the parsed --output applied.
 func RunRemoteExec(parsed RemoteExecArgs) {
-	if parsed.OutputFormat != "" {
-		if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
-			utils.CliErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
-		}
-		utils.OutputFormat = parsed.OutputFormat
-	}
-
-	// The script is read before anything reaches the network: a missing or
-	// oversized local file is answered here, not by a 400 after the session and
-	// the client were resolved.
+	// A local script is read before any network call, so a missing or oversized file fails here;
+	// a --from-server script is read once the client exists.
 	var file *event.FileExecution
-	if parsed.File != nil {
+	if parsed.File != nil && !parsed.File.FromServer {
 		loaded, msg := loadFileExecution(*parsed.File)
 		if msg != "" {
 			utils.CliErrorWithExit("%s", msg)
@@ -230,14 +269,22 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 		file = &loaded
 	}
 
-	workSessionID := worksession.ResolveOrExit(parsed.WorkSessionID)
-
 	authMethod := config.ResolveAuthMethod()
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
 		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		return
+	}
+
+	workSessionID := worksession.ResolveOrExit(alpaconClient, parsed.WorkSessionID)
+
+	if file != nil && parsed.File.Upload {
+		uploadFileOrExit(alpaconClient, parsed, *file, workSessionID, authMethod)
+	}
+	if parsed.File != nil && parsed.File.FromServer {
+		loaded := downloadFileOrExit(alpaconClient, parsed, workSessionID, authMethod)
+		file = &loaded
 	}
 
 	env := parsed.Env
@@ -285,8 +332,8 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 		return
 	}
 
-	// JSON mode buffers output to keep stdout clean for a pending-approval
-	// signal; it is flushed below on success or plain failure. Table mode streams live.
+	// JSON mode buffers output so stdout stays clean for a pending-approval signal; table mode
+	// streams live.
 	var out io.Writer = os.Stdout
 	var buf *bytes.Buffer
 	if utils.OutputFormat == utils.OutputFormatJSON {
@@ -300,16 +347,18 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 		err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
 	}
 	utils.HandleWorkSessionError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID)
-	// A command parked for its purpose is reported first: it has no approval
-	// request yet, so the pending-approval path below would name a queue it is
-	// not in.
+	// A purpose demand has no approval request yet, so it is reported before the pending-approval
+	// path, which would name a queue the command is not in.
 	if HandlePurposeDemand(err) {
 		return
 	}
-	// A sudo command left pending human approval, not waited on, emits a
-	// machine-readable pending signal and exits before the normal result
-	// handling treats the denial as a plain failure.
-	if HandlePendingApproval(err, reRunHint(parsed)) {
+	// Before HandleCommandResult, which would treat the pending denial as a plain failure.
+	if HandlePendingApproval(err, parsed) {
+		return
+	}
+	// The command never ran, so under --output json nothing reaches stdout: the
+	// buffer holds only the server's own wording of the refusal.
+	if HandleUseFileExecutionRefusal(err, parsed) {
 		return
 	}
 	if buf != nil {
@@ -329,33 +378,21 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	HandleCommandResult(err, parsed.InvokedAs)
 }
 
-// reRunHint reconstructs the exec invocation (server, command, and any
-// user/group, work-session, or --env keys) so the pending-approval message can
-// tell a human exactly what to re-run once the request is approved. It uses --
-// before the command so remote flags are never re-parsed as alpacon flags.
-// The Command stays a pure, executable string; when --env keys are present the
-// caveat rides in Description, since the rerun re-reads each value from the
-// shell and a machine consumer replaying Command verbatim would otherwise
-// submit without those keys.
-// It names exec even when InvokedAs is websh: websh has no --wait, so the rerun
-// genuinely has to go through exec (README "Exit codes", row 4).
-// On the file lane it repeats the --file flags as the user gave them, so a
-// defaulted --file-from or --interpreter is not spelled out, and quotes each
-// value with argvQuote: those were argv, never a shell line, so the hint must
-// keep a metacharacter from being interpreted when it is pasted.
+// reRunHint reconstructs the exec invocation (server, command, any -u/-g/--work-session flags and
+// --env keys) so the pending-approval message shows what to re-run once the request is approved.
+// -- precedes the command so remote flags are never re-parsed as alpacon flags. The server is
+// quoted with argvQuote and the -u/-g/--work-session values come quoted from runAsFlags; --env
+// keys are not quoted. Command stays executable as is; with --env keys the caveat goes in
+// Description, since a consumer replaying Command would otherwise submit without them.
+// It names exec even when invoked as websh, which has no --wait.
+// On the file lane it repeats only the --file flags the user gave, each quoted with argvQuote since
+// they were argv, never a shell line. It drops --upload and --overwrite, because the first run
+// already wrote the file and the re-run verifies it in place, and keeps --from-server, since there
+// may be no local copy to read.
 func reRunHint(parsed RemoteExecArgs) utils.NextAction {
-	parts := []string{string(ExecInvocation)}
-	if parsed.Username != "" {
-		parts = append(parts, "-u "+parsed.Username)
-	}
-	if parsed.Groupname != "" {
-		parts = append(parts, "-g "+parsed.Groupname)
-	}
-	if parsed.WorkSessionID != "" {
-		parts = append(parts, "--work-session "+parsed.WorkSessionID)
-	}
-	// Emit env keys only (never values): the rerun re-reads each value from the
-	// shell, so the secret stays off this hint on stderr and out of the logs.
+	parts := append([]string{string(ExecInvocation)}, runAsFlags(parsed)...)
+	// Env keys only, never values: the rerun re-reads each value from the shell, keeping secrets
+	// off stderr and out of the logs.
 	keys := make([]string, 0, len(parsed.Env))
 	for k := range parsed.Env {
 		keys = append(keys, k)
@@ -369,13 +406,16 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 		if parsed.File.From != "" {
 			parts = append(parts, "--file-from "+argvQuote(parsed.File.From))
 		}
+		if parsed.File.FromServer {
+			parts = append(parts, "--from-server")
+		}
 		if parsed.File.Interpreter != "" {
 			parts = append(parts, "--interpreter "+argvQuote(parsed.File.Interpreter))
 		}
 		if parsed.File.ReuseDays > 0 {
 			parts = append(parts, "--reuse-days "+strconv.Itoa(parsed.File.ReuseDays))
 		}
-		parts = append(parts, parsed.Server)
+		parts = append(parts, argvQuote(parsed.Server))
 		if len(parsed.File.Args) > 0 {
 			parts = append(parts, "--")
 			for _, a := range parsed.File.Args {
@@ -383,7 +423,7 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 			}
 		}
 	} else {
-		parts = append(parts, parsed.Server, "--", parsed.Command)
+		parts = append(parts, argvQuote(parsed.Server), "--", parsed.Command)
 	}
 
 	action := utils.NextAction{Command: strings.Join(parts, " ")}
@@ -391,4 +431,78 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 		action.Description = "--env values are re-read from your shell; export them before re-running"
 	}
 	return action
+}
+
+// fileSuggestionAction renders the server's file_execution_suggestion for a
+// held command line as the --file --from-server command that submits the same
+// script on the verified file lane, keeping the account, group and work
+// session of the original. A suggestion whose interpreter was a bare name
+// (interpreter null, interpreter_name set) gets an --interpreter placeholder
+// instead, since --file takes only an absolute interpreter and only the target
+// knows where that name resolves. It answers false when there is no
+// suggestion, when the command was already on the file lane, when it carried
+// --env (the file lane cannot, so the script would run without them), or when
+// the suggestion names a path or interpreter --file would refuse or holds a
+// control character argvQuote would print as is.
+func fileSuggestionAction(parsed RemoteExecArgs, s *event.FileExecutionSuggestion) (utils.NextAction, bool) {
+	if s == nil || parsed.File != nil || len(parsed.Env) > 0 || !strings.HasPrefix(s.Path, "/") {
+		return utils.NextAction{}, false
+	}
+	if slices.ContainsFunc(append([]string{s.Path, s.Interpreter}, s.Args...), hasControlChar) {
+		return utils.NextAction{}, false
+	}
+	// The CLI cannot cancel the held command, which runs if approved, so submitting this as well
+	// would file a second approval request for the same script.
+	const heldNote = "; the held command stays queued and runs if approved, so cancel it in the Alpacon console (Commands) before submitting this"
+	description := "to run the script as a verified file instead, whose content the reviewer reads and whose approval an unchanged re-run can reuse" + heldNote
+	interpreter := s.Interpreter
+	switch {
+	case interpreter == DefaultInterpreter:
+		interpreter = ""
+	case interpreter != "":
+		if !strings.HasPrefix(interpreter, "/") {
+			return utils.NextAction{}, false
+		}
+	case isInterpreterName(s.InterpreterName):
+		interpreter = "<absolute-path-of-" + s.InterpreterName + ">"
+		description = fmt.Sprintf("to run the script as a verified file instead, replace %s with the absolute path of %s on the server, which 'command -v %s' prints there"+heldNote,
+			interpreter, s.InterpreterName, s.InterpreterName)
+	default:
+		return utils.NextAction{}, false
+	}
+	suggested := RemoteExecArgs{
+		Username:      parsed.Username,
+		Groupname:     parsed.Groupname,
+		WorkSessionID: parsed.WorkSessionID,
+		Server:        parsed.Server,
+		File: &FileExecArgs{
+			Path:        s.Path,
+			Interpreter: interpreter,
+			Args:        s.Args,
+			FromServer:  true,
+		},
+	}
+	return utils.NextAction{
+		Command:     reRunHint(suggested).Command,
+		Description: description,
+	}, true
+}
+
+// hasControlChar reports whether s holds a C0 or C1 control character.
+func hasControlChar(s string) bool {
+	return strings.ContainsFunc(s, unicode.IsControl)
+}
+
+// isInterpreterName reports whether name is a bare command name safe to print
+// in a placeholder and a 'command -v' hint: no path separator, no quoting.
+func isInterpreterName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	for _, r := range name {
+		if r == '/' || !isArgvSafe(r) {
+			return false
+		}
+	}
+	return true
 }

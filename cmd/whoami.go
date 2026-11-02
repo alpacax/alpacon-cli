@@ -9,6 +9,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/iam"
+	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	wscmd "github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
@@ -50,9 +51,8 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 			return
 		}
 
-		// Only a service token can be an application principal. Service tokens have no
-		// user profile, so resolve identity via whoami and return without falling
-		// through to the user-only IAM endpoint, which would always fail for them.
+		// Only a service token can be an application principal. It has no user profile,
+		// so identity comes from whoami and the user-only IAM endpoint is skipped.
 		if config.IsServiceToken(cfg.Token) {
 			who, whoErr := auth.GetWhoami(ac)
 			switch {
@@ -96,22 +96,8 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 			if wsErr != nil {
 				utils.CliWarning("Could not fetch active work-session: %s", wsErr)
 			} else if ws != nil {
-				serverNames := make([]string, len(ws.Servers))
-				for i, srv := range ws.Servers {
-					serverNames[i] = srv.Name
-				}
-				expiresAt := ""
-				if !ws.ExpiresAt.IsZero() {
-					expiresAt = ws.ExpiresAt.UTC().Format(time.RFC3339)
-				}
 				// normalized() mirrors this into ActiveWorksessionCanonical.
-				output.ActiveWorksession = &activeWorkSessionSummary{
-					ID:        ws.ID,
-					Status:    ws.Status,
-					Scopes:    ws.Scopes,
-					Servers:   serverNames,
-					ExpiresAt: expiresAt,
-				}
+				output.ActiveWorksession = summarizeWorkSession(ws)
 			}
 		}
 
@@ -120,11 +106,28 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 	},
 }
 
+// summarizeWorkSession is what whoami reports of the work session in use.
+func summarizeWorkSession(ws *wsapi.WorkSession) *activeWorkSessionSummary {
+	expiresAt := ""
+	if !ws.ExpiresAt.IsZero() {
+		expiresAt = ws.ExpiresAt.UTC().Format(time.RFC3339)
+	}
+	return &activeWorkSessionSummary{
+		ID:        ws.ID,
+		Status:    ws.Status,
+		Scopes:    ws.Scopes,
+		Servers:   wsapi.ServerNames(ws),
+		Clusters:  wsapi.ClusterNames(ws),
+		ExpiresAt: expiresAt,
+	}
+}
+
 type activeWorkSessionSummary struct {
 	ID        string   `json:"id"`
 	Status    string   `json:"status"`
 	Scopes    []string `json:"scopes"`
 	Servers   []string `json:"servers"`
+	Clusters  []string `json:"clusters,omitempty"`
 	ExpiresAt string   `json:"expires_at,omitempty"`
 }
 
@@ -187,7 +190,6 @@ func getExpiresAt(cfg config.Config) string {
 	return ""
 }
 
-// applyApplicationPrincipal fills out's application fields from an application-principal whoami response.
 func applyApplicationPrincipal(out whoamiOutput, who *auth.WhoamiResponse) whoamiOutput {
 	out.PrincipalType = auth.PrincipalTypeApplication
 	if who.Application != nil {
@@ -209,10 +211,8 @@ func getRole(isStaff, isSuperuser bool) string {
 	return "user"
 }
 
-// getAuthClassification returns the machine-readable auth classification for cfg.
-// It delegates to GetAuthMethod + authClassificationFromMethod so the auth-method
-// buckets live in exactly one place (config.GetAuthMethod) rather than being
-// re-derived here.
+// getAuthClassification returns the machine-readable auth classification for cfg. The
+// buckets live only in config.GetAuthMethod and are not re-derived here.
 func getAuthClassification(cfg config.Config) string {
 	return authClassificationFromMethod(config.GetAuthMethod(cfg))
 }

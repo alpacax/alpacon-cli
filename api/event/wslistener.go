@@ -35,10 +35,10 @@ type wsListener struct {
 	wsHeader         http.Header
 	handshakeTimeout time.Duration
 	readLimit        int64 // 0 for gorilla's default of no limit
-	// The first backoff step, lowered by tests so a reconnect assertion does not have to
-	// sit through the production delay.
-	reconnectBaseDelay time.Duration
-	stableLifetime     time.Duration
+	// The client's transport, whose dial and proxy the channel takes so it goes where the HTTP
+	// requests go; nil keeps the dialer's defaults.
+	transport      *http.Transport
+	stableLifetime time.Duration
 
 	done        chan struct{}
 	stopped     chan struct{} // closed when listenLoop exits
@@ -57,18 +57,20 @@ func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (*Event
 		wsHeader = ac.SetWebsocketHeader()
 	}
 	w := &wsListener{
-		provision:          provision,
-		wsHeader:           wsHeader,
-		handshakeTimeout:   handshakeTimeout,
-		reconnectBaseDelay: wsReconnectBaseDelay,
-		stableLifetime:     wsStableConnectionLifetime,
-		done:               make(chan struct{}),
-		stopped:            make(chan struct{}),
-		connected:          make(chan struct{}),
+		provision:        provision,
+		wsHeader:         wsHeader,
+		handshakeTimeout: handshakeTimeout,
+		stableLifetime:   wsStableConnectionLifetime,
+		done:             make(chan struct{}),
+		stopped:          make(chan struct{}),
+		connected:        make(chan struct{}),
 	}
 	w.closeUnopened = func(string) {}
 	if ac != nil {
 		w.closeUnopened = func(id string) { go closeSession(ac, id, eventSessionCloseTimeout) }
+		if ac.HTTPClient != nil {
+			w.transport, _ = ac.HTTPClient.Transport.(*http.Transport)
+		}
 	}
 	return w
 }
@@ -122,7 +124,7 @@ func (w *wsListener) Stop() {
 }
 
 func (w *wsListener) listenLoop() {
-	delay := w.reconnectBaseDelay
+	delay := wsReconnectBaseDelay
 
 	for {
 		select {
@@ -132,7 +134,7 @@ func (w *wsListener) listenLoop() {
 		}
 
 		if w.connectAndListen() {
-			delay = w.reconnectBaseDelay
+			delay = wsReconnectBaseDelay
 		}
 
 		select {
@@ -163,12 +165,13 @@ func (w *wsListener) connectAndListen() bool {
 	}
 
 	dialer := newListenerDialer(w.handshakeTimeout)
-	conn, _, dialErr := dialer.Dial(session.WebsocketURL, w.wsHeader)
+	if t := w.transport; t != nil {
+		dialer.NetDialContext, dialer.Proxy = t.DialContext, t.Proxy
+	}
+	conn, resp, dialErr := dialer.Dial(session.WebsocketURL, w.wsHeader)
 	if dialErr != nil {
 		if w.onDialFailed != nil {
-			// The URL carries a channel token in its path, which a URL error prints
-			// whole, so only the host is kept.
-			w.onDialFailed(utils.RedactURLErrorHostOnly(dialErr))
+			w.onDialFailed(utils.WebsocketDialError("failed to connect to the event channel", dialErr, resp))
 		}
 		w.closeUnopenedSession(session.ID)
 		return false

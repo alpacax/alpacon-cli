@@ -26,13 +26,11 @@ func TestUnzip_ValidFiles(t *testing.T) {
 		}
 	})
 
-	// Test extraction
 	err := Unzip(zipPath, extractDir)
 	if err != nil {
 		t.Errorf("Unzip failed for valid archive: %v", err)
 	}
 
-	// Verify files were extracted
 	if _, err := os.Stat(filepath.Join(extractDir, "test.txt")); os.IsNotExist(err) {
 		t.Error("Expected file test.txt was not extracted")
 	}
@@ -105,7 +103,6 @@ func TestUnzip_PathTraversalAttack(t *testing.T) {
 				require.NoError(t, err)
 			})
 
-			// Test extraction
 			err := Unzip(zipPath, extractDir)
 			if tt.wantErr && err == nil {
 				t.Errorf("Expected error for malicious path %q, but got none", tt.filename)
@@ -133,14 +130,12 @@ func TestUnzip_DirectoryTraversal(t *testing.T) {
 	extractDir := filepath.Join(tmpDir, "extract")
 
 	zipPath := writeUnzipArchive(t, tmpDir, func(zw *zip.Writer) {
-		// Add a directory with parent path
 		header := &zip.FileHeader{Name: "../evil-dir/", Method: zip.Deflate}
 		header.SetMode(os.ModeDir | 0755)
 		_, err := zw.CreateHeader(header)
 		require.NoError(t, err)
 	})
 
-	// Test extraction should fail
 	if err := Unzip(zipPath, extractDir); err == nil {
 		t.Error("Expected error for directory with path traversal, but got none")
 	}

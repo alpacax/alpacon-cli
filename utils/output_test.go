@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	osexec "os/exec"
 	"strings"
@@ -266,6 +267,44 @@ func TestFormatJSON_DisablesHTMLEscaping(t *testing.T) {
 	assert.NotContains(t, got, "\\u003c")
 }
 
+func TestPrintJSONError_SingleLineFillsCommandAndKeepsExitCode(t *testing.T) {
+	withCommandName(t, "server ls")
+	var buf bytes.Buffer
+	PrintJSONError(&buf, JSONErrorEnvelope[map[string]string]{
+		Message: "a <b>\u202e",
+		Context: map[string]string{},
+	})
+
+	out := buf.String()
+	assert.Equal(t, 1, strings.Count(out, "\n"))
+	assert.JSONEq(t, `{"ok":false,"exit_code":0,"error_code":"cli_error","message":"a <b>\u202e","command":"server ls","context":{}}`, out)
+}
+
+func TestPrintJSONError_KeepsExplicitCommandAndOptionalFields(t *testing.T) {
+	withCommandName(t, "server ls")
+	code := 3
+	var buf bytes.Buffer
+	PrintJSONError(&buf, JSONErrorEnvelope[map[string]string]{
+		ExitCode: 1, ErrorCode: "x", Message: "m", Command: "own",
+		HTTPStatus: 429, RetryAfter: 5, Server: map[string]any{"gate": "plan"},
+		RemoteExitCode: &code, Partial: &PartialInfo{Count: 2},
+	})
+
+	assert.JSONEq(t, `{"ok":false,"exit_code":1,"error_code":"x","message":"m","command":"own","context":null,
+		"http_status":429,"retry_after":5,"server":{"gate":"plan"},"remote_exit_code":3,"partial":{"count":2}}`, buf.String())
+}
+
+func TestPrintJSONError_FallsBackWhenMarshalFails(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	PrintJSONError(&buf, JSONErrorEnvelope[func()]{
+		ExitCode: 4, ErrorCode: "e\"x", Message: "line\nbreak", Context: func() {},
+	})
+
+	assert.Equal(t, 1, strings.Count(buf.String(), "\n"))
+	assert.JSONEq(t, `{"ok":false,"exit_code":4,"error_code":"e\"x","message":"line\nbreak","context":{}}`, buf.String())
+}
+
 func TestPrintJSONError(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
@@ -289,8 +328,8 @@ func TestPrintJSONError(t *testing.T) {
 	}`, buf.String())
 }
 
-// Callers write PlainText raw, outside the Cli* helpers, and interpolate
-// server-returned ids into Command (#364).
+// Callers write PlainText raw, outside the Cli* helpers, and interpolate server-returned ids into
+// Command.
 func TestNextActionPlainTextSanitizesTerminalText(t *testing.T) {
 	t.Parallel()
 	const (
@@ -439,4 +478,55 @@ func TestPartialListOutputHelperProcess(t *testing.T) {
 		PrintListOrExit([]outputTestItem{}, boom, "Failed to get logs")
 	}
 	os.Exit(0)
+}
+
+func TestOutputFormatInReadsTheLastOutputFlagBeforeTheSeparator(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "no output flag", args: []string{"server", "ls", "--bogus"}},
+		{name: "separate value", args: []string{"server", "ls", "--bogus", "--output", "json"}, want: "json"},
+		{name: "equals form", args: []string{"server", "ls", "--bogus", "--output=json"}, want: "json"},
+		{name: "last one wins", args: []string{"--output", "json", "server", "ls", "--output=table"}, want: "table"},
+		{name: "flag without a value", args: []string{"server", "ls", "--output"}},
+		{name: "after the separator", args: []string{"tunnel", "my-server", "--", "tool", "--output", "json"}},
+		{name: "before the separator", args: []string{"tunnel", "--output=json", "my-server", "--", "tool", "--output", "table"}, want: "json"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, OutputFormatIn(tt.args))
+		})
+	}
+}
+
+func TestSetOutputFormatAppliesTableOrJSON(t *testing.T) {
+	for _, value := range []string{OutputFormatTable, OutputFormatJSON} {
+		t.Run(value, func(t *testing.T) {
+			withFormat("", func() {
+				err := SetOutputFormat(value)
+
+				require.NoError(t, err)
+				assert.Equal(t, value, OutputFormat)
+			})
+		})
+	}
+}
+
+func TestSetOutputFormatRefusesAnyOtherValueAsAUsageError(t *testing.T) {
+	for _, tt := range []struct{ name, value string }{{name: "xml", value: "xml"}, {name: "empty", value: ""}} {
+		t.Run(tt.name, func(t *testing.T) {
+			withFormat(OutputFormatTable, func() {
+				err := SetOutputFormat(tt.value)
+
+				require.EqualError(t, err, fmt.Sprintf("invalid --output value %q (expected \"table\" or \"json\")", tt.value))
+				assert.True(t, IsUsageError(err), "err: %v", err)
+				assert.Equal(t, OutputFormatTable, OutputFormat)
+			})
+		})
+	}
 }

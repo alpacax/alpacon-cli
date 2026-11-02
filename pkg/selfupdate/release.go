@@ -17,8 +17,8 @@ import (
 // for a release carrying every platform's asset.
 const maxReleaseMetadataSize = 1 << 20
 
-// releaseMetadataTimeout is what 'alpacon version' already waited: one small
-// JSON fetch, on a client that never sees the archive download.
+// releaseMetadataTimeout bounds one small JSON fetch, on a client that never sees the
+// archive download.
 const releaseMetadataTimeout = 5 * time.Second
 
 // DefaultReleaseAPIURL is a var so a test can point a real alpacon process at a
@@ -62,7 +62,7 @@ func LatestRelease(apiURL string) (*Release, error) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, utils.WithRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

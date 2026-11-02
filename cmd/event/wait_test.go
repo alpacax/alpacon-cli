@@ -70,7 +70,7 @@ func TestRunWaitAndWatch_RefuseAnInvalidTargetAsAUsageError(t *testing.T) {
 				Message   string `json:"message"`
 			}
 			require.NoError(t, json.Unmarshal(stderr.Bytes(), &envelope), "stderr: %s", stderr.String())
-			assert.Equal(t, utils.UsageErrorCode, envelope.ErrorCode)
+			assert.Equal(t, utils.ErrorCodeUsage, envelope.ErrorCode)
 			assert.Contains(t, envelope.Message, "invalid target ID")
 		})
 	}

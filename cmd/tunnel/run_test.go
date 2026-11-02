@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/alpacax/alpacon-cli/client"
 )
 
 type fakeRunRuntime struct {
@@ -183,8 +185,7 @@ func TestExitCodeFromProcessError(t *testing.T) {
 	}
 }
 
-// Serial: the child process reaches an os.Exit, and the parent's own run of this
-// function is a two-line guard that parallelism buys nothing for.
+// Serial: the child process reaches an os.Exit, and the parent's own run returns at once.
 func TestExitCodeFromProcessErrorHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
@@ -250,7 +251,7 @@ func TestExecuteTunnelRunWithInvocationInvalidRemotePort(t *testing.T) {
 	tunnelFlags.localPort = "5432"
 	tunnelFlags.remotePort = "invalid"
 
-	exitCode, err := executeTunnelRunWithInvocation("prod-db", []string{"psql"})
+	exitCode, err := executeTunnelRunWithInvocation(&client.AlpaconClient{}, "prod-db", []string{"psql"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -262,8 +263,7 @@ func TestExecuteTunnelRunWithInvocationInvalidRemotePort(t *testing.T) {
 	}
 }
 
-// Serial: the child process reaches an os.Exit, and the parent's own run of this
-// function is a two-line guard that parallelism buys nothing for.
+// Serial: the child process reaches an os.Exit, and the parent's own run returns at once.
 func TestRunHelperProcess(t *testing.T) {
 	mode, ok := parseRunHelperInvocation(os.Args)
 	if !ok {

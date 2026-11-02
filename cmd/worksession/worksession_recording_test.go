@@ -19,8 +19,6 @@ func TestPrintRecordingHeader_SanitizesTimestamp(t *testing.T) {
 	assert.Equal(t, "Terminal 1/1 — SPOOFED\n\n", buf.String())
 }
 
-// printRecordingContent
-
 func TestPrintRecordingContent_StripsFormatChars(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
@@ -70,8 +68,6 @@ func TestPrintRecordingContent_StripsUnmatchedEscapeIntroducers(t *testing.T) {
 
 func TestPrintRecordingContent_KeepsControlBytes(t *testing.T) {
 	t.Parallel()
-	// The C0 pass is deliberately absent here: a recording shown as it was keeps
-	// \r and its line endings.
 	var buf bytes.Buffer
 	printRecordingContent(&buf, "a\rb")
 	assert.Equal(t, "a\rb\n", buf.String())

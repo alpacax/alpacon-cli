@@ -62,17 +62,12 @@ func refuseHardLinked(file *os.File) error {
 	return nil
 }
 
-// refuseForeignOwner rejects a handle on a file this process does not own. A
-// chmod would fail on it regardless; the point is the read that follows. A file
-// another account owns is one another account can rewrite, and under a sudo
-// that keeps HOME this is what stops an unprivileged user's own file from
-// standing in as root's device id—where mode bits alone say nothing, because
-// root can read anything.
-//
-// The uid this process runs as is named alongside the file's own, because the
-// two ordinary ways to arrive here are `sudo -E` and a bind-mounted config
-// directory in a container, and a message that quotes only the file sends the
-// reader off to delete credentials that are working.
+// refuseForeignOwner rejects a handle on a file this process does not own: another account can
+// rewrite it, and under a sudo that keeps HOME mode bits say nothing because root reads anything.
+// A chmod would fail on it regardless; the point is the read that follows, which would take an
+// unprivileged user's file as root's device id.
+// The message names this process's uid too, since `sudo -E` and a bind-mounted config directory
+// are the usual causes and the user should not delete working credentials.
 func refuseForeignOwner(file *os.File, info os.FileInfo) error {
 	sys, err := statT(file, info)
 	if err != nil {

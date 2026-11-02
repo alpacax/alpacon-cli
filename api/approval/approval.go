@@ -2,6 +2,9 @@ package approval
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -88,4 +91,49 @@ func CancelRequest(ac *client.AlpaconClient, id string) error {
 	}
 	_, err = ac.SendPostRequest(api.IDURL(approvalURL, pathID, "cancel", nil), struct{}{})
 	return err
+}
+
+// FindCommandApprovalRequestID reads the requester's pending command approvals:
+// the command detail does not carry the approval request's id.
+func FindCommandApprovalRequestID(ac *client.AlpaconClient, commandID string) (string, error) {
+	if _, err := api.RequireID(commandID, "command"); err != nil {
+		return "", err
+	}
+	params := map[string]string{
+		"status": "pending", "request_type": "command_exec", "page_size": "100",
+	}
+	for page := 1; ; page++ {
+		params["page"] = strconv.Itoa(page)
+		body, err := ac.SendGetRequest(utils.BuildURL(myRequestsURL, "", params))
+		if err != nil {
+			// This optional lookup may be unavailable to the viewer or on an older server.
+			if status := utils.HTTPStatusCode(err); status == http.StatusForbidden || status == http.StatusNotFound {
+				return "", nil
+			}
+			return "", fmt.Errorf("fetching approval page %d: %w", page, err)
+		}
+		var response api.ListResponse[ApprovalRequest]
+		if err := json.Unmarshal(body, &response); err != nil {
+			return "", err
+		}
+		for _, request := range response.Results {
+			if request.Metadata == nil {
+				continue
+			}
+			matchedCommandID := request.Metadata.CommandID
+			if request.Metadata.Command != nil && request.Metadata.Command.CommandID != "" {
+				matchedCommandID = request.Metadata.Command.CommandID
+			}
+			if matchedCommandID == commandID {
+				id, err := api.RequireResponseID(request.ID, "approval request")
+				if err != nil {
+					return "", err
+				}
+				return id.String(), nil
+			}
+		}
+		if response.Next == 0 || len(response.Results) == 0 {
+			return "", nil
+		}
+	}
 }

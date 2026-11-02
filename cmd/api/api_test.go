@@ -38,8 +38,7 @@ func apiTestResponse(status int, contentType, body string) *http.Response {
 	return &http.Response{Status: strings.TrimSpace(strings.Join([]string{strconv.Itoa(status), http.StatusText(status)}, " ")), StatusCode: status, Proto: "HTTP/1.1", Header: http.Header{"Content-Type": []string{contentType}, "X-Trace": []string{"trace-1"}}, Body: io.NopCloser(strings.NewReader(body))}
 }
 
-// runAPITest chains prepareRequest and runAPI the way the command's Run does,
-// so tests written against the pre-split runAPI signature keep working.
+// runAPITest chains prepareRequest and runAPI the way the command's Run does.
 func runAPITest(ac *client.AlpaconClient, opts options, stdout, stderr io.Writer, stdin io.Reader) (int, error) {
 	request, code, err := prepareRequest(opts, stdin)
 	if err != nil {

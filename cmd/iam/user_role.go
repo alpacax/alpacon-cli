@@ -54,11 +54,10 @@ role_audit_log:read scope, on either deployment.`,
 	},
 }
 
-// subject is who a command acts on. PK addresses the user in the path, where the self form
-// sends "-", the server's own self route; an own UUID passes the object permission check
-// too, via the auto-granted user:owner role, so the UUID branch needs no self case. ID is
-// the resolved UUID, for endpoints taking the user in a query filter or a body, where "-"
-// is not a value the server accepts.
+// subject is who a command acts on. PK addresses the user in the path: "-", the server's self
+// route, for the caller, else the UUID; the caller's own UUID also passes the object check through
+// the auto-granted user:owner role, so the UUID branch needs no self case. ID is always the
+// resolved UUID, for a query filter or a body, where "-" is not accepted.
 type subject struct {
 	PK    string
 	ID    string

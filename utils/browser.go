@@ -9,16 +9,13 @@ import (
 	"time"
 )
 
-// browserDebounce is the minimum interval between browser opens.
-// Multiple CLI processes hitting MFA simultaneously will only open one tab.
+// browserDebounce spaces browser opens so CLI processes that hit MFA at once open one tab.
 const browserDebounce = 30 * time.Second
 
-// OpenBrowser attempts to open the given URL in the user's default browser.
-// It silently falls back to doing nothing if the browser cannot be opened
-// (e.g., headless server, SSH session, container) or if another process
-// recently opened a browser (debounce).
+// OpenBrowser opens url in the user's default browser. It does nothing when the browser cannot be
+// opened (headless server, SSH session, container) or another process opened one recently.
 //
-// Set ALPACON_NO_BROWSER=1 to disable browser auto-open globally.
+// Set ALPACON_NO_BROWSER=1 to disable it.
 func OpenBrowser(url string) {
 	if !shouldOpenBrowser(url) {
 		return
@@ -40,9 +37,8 @@ func OpenBrowser(url string) {
 		return
 	}
 
-	// Fire and forget — reap the child process asynchronously to avoid zombies.
-	// Release the lock if the browser fails to start or exits with an error
-	// (e.g., xdg-open returns non-zero when no browser is configured).
+	// Release the lock if the browser fails to start or exits non-zero (xdg-open with no browser
+	// configured); waiting in a goroutine also reaps the child.
 	if err := cmd.Start(); err == nil {
 		go func() {
 			if err := cmd.Wait(); err != nil {
@@ -54,19 +50,15 @@ func OpenBrowser(url string) {
 	}
 }
 
-// shouldOpenBrowser checks whether it makes sense to attempt opening a browser.
 func shouldOpenBrowser(url string) bool {
-	// Only open http/https URLs
 	if !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://") {
 		return false
 	}
 
-	// Respect explicit opt-out via environment variable
 	if v, ok := os.LookupEnv("ALPACON_NO_BROWSER"); ok && !strings.EqualFold(v, "0") && !strings.EqualFold(v, "false") {
 		return false
 	}
 
-	// Skip on SSH sessions
 	if _, ok := os.LookupEnv("SSH_CONNECTION"); ok {
 		return false
 	}
@@ -74,7 +66,6 @@ func shouldOpenBrowser(url string) bool {
 		return false
 	}
 
-	// On Linux, skip if no display server is available (headless/container)
 	if runtime.GOOS == "linux" {
 		display, hasDisplay := os.LookupEnv("DISPLAY")
 		_, hasWayland := os.LookupEnv("WAYLAND_DISPLAY")
@@ -86,13 +77,11 @@ func shouldOpenBrowser(url string) bool {
 	return true
 }
 
-// browserLockPathFunc is the function used to resolve the lock file path.
-// Overridden in tests.
+// browserLockPathFunc is a test seam for browserLockPath.
 var browserLockPathFunc = browserLockPath
 
-// acquireBrowserLock checks a timestamp file to prevent multiple CLI processes
-// from opening the browser simultaneously. Returns true if this process should
-// open the browser, false if another process opened it recently.
+// acquireBrowserLock reports whether this process may open the browser: false when another process
+// touched the lock file within browserDebounce.
 func acquireBrowserLock() bool {
 	lockPath := browserLockPathFunc()
 	if lockPath == "" {
@@ -101,11 +90,9 @@ func acquireBrowserLock() bool {
 
 	info, err := os.Stat(lockPath)
 	if err == nil && time.Since(info.ModTime()) < browserDebounce {
-		// Another process opened the browser recently
 		return false
 	}
 
-	// Touch the lock file
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0700); err != nil {
 		return true
 	}
@@ -125,7 +112,6 @@ func releaseBrowserLock() {
 	}
 }
 
-// browserLockPath returns the path to the browser debounce lock file.
 func browserLockPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {

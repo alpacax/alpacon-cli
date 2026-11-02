@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/signal"
 	"runtime"
@@ -277,7 +278,6 @@ func TestBuildSessionRequest_OmitsEmptyWorkSession(t *testing.T) {
 	assert.Equal(t, 24, req.Rows)
 	assert.Equal(t, 80, req.Cols)
 
-	// Verify omitempty: the JSON wire form must not include "work_session".
 	body, err := json.Marshal(req)
 	require.NoError(t, err)
 	assert.NotContains(t, string(body), "work_session")
@@ -586,9 +586,14 @@ func TestFinish_SettlesASingleCloseByItsCode(t *testing.T) {
 		keepAsErr  bool
 	}{
 		{
-			name:       "session end with a reason",
+			name:       "idle timeout closes the shell",
 			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
-			wantStderr: "\r\nsession closed: the session reached its time limit\r\n",
+			wantStderr: "\r\nsession closed after inactivity\r\n",
+		},
+		{
+			name:       "idle detach keeps the shell running",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_detached"},
+			wantStderr: "\r\nsession disconnected after inactivity; the shell keeps running on the server until the work session ends\r\n",
 		},
 		{
 			name:       "session end with no reason",
@@ -725,14 +730,14 @@ func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
 		{
 			name:    "earlier failure over a later session end",
 			first:   errors.New("write failed on the closed connection"),
-			second:  &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
+			second:  &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_detached"},
 			wantErr: errors.New("write failed on the closed connection"),
 		},
 		{
 			name:       "duplicate session end prints once",
-			first:      &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
-			second:     &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
-			wantStderr: "\r\nsession closed: the session reached its time limit\r\n",
+			first:      &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_detached"},
+			second:     &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_detached"},
+			wantStderr: "\r\nsession disconnected after inactivity; the shell keeps running on the server until the work session ends\r\n",
 		},
 	}
 
@@ -756,9 +761,9 @@ func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
 	}
 }
 
-// The dial succeeds and raw mode then fails, and nothing on that return calls
-// finish. Today every go statement sits below enterRawMode, so none has started
-// and the count holds; this fails if one is ever moved back above it.
+// The dial succeeds and raw mode then fails, with no finish on that return. Every
+// go statement sits below enterRawMode, so none has started; this fails if one
+// moves above it.
 func TestOpenReadOnlyTerminal_LeavesNoGoroutineWhenSetupFails(t *testing.T) {
 	// SetWebsocketHeader sends an Origin, which the default CheckOrigin rejects
 	// as cross-origin against the httptest host.
@@ -959,7 +964,6 @@ func TestEndsSession_SeparatesAnEndFromADrop(t *testing.T) {
 		want bool
 	}{
 		{
-			// What the proxy actually sends at the end of a session.
 			name: "session end",
 			err:  &websocket.CloseError{Code: sessionEndCloseCode},
 			want: true,
@@ -991,7 +995,6 @@ func TestEndsSession_SeparatesAnEndFromADrop(t *testing.T) {
 			err:  &websocket.CloseError{Code: websocket.CloseInternalServerErr},
 		},
 		{
-			// A link that went away without a close frame of any kind.
 			name: "transport failure",
 			err:  errors.New("connection reset by peer"),
 		},
@@ -1106,7 +1109,7 @@ func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, UserAgent: "alpacon-cli/test"}
-	wsClient := newWebsocketClient(ac.SetWebsocketHeaderWithCapabilities(client.CapabilityWebsocketReconnect))
+	wsClient := newWebsocketClient(ac.SetWebsocketHeaderWithCapabilities(client.CapabilityWebsocketReconnect, client.CapabilityIdleWarning))
 	wsClient.reconnect = newReconnector(ac, "sess-1")
 	wsClient.reconnect.baseDelay = time.Millisecond
 	wsClient.reconnect.notice = io.Discard
@@ -1145,7 +1148,7 @@ func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
 	for dial := 1; dial <= 2; dial++ {
 		select {
 		case header := <-dialHeaders:
-			assert.Equal(t, client.CapabilityWebsocketReconnect,
+			assert.Equal(t, "websocket-reconnect, idle-warning",
 				header.Get(client.ClientCapabilitiesHeader), "dial %d", dial)
 			assert.Equal(t, "alpacon-cli/test", header.Get("User-Agent"), "dial %d", dial)
 		default:
@@ -1158,6 +1161,49 @@ func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
 		require.Fail(t, "a service restart must not end the session", "err=%v", wsClient.err)
 	default:
 	}
+}
+
+func TestServeConnections_IdleDetachDoesNotReconnect(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var dials atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dials.Add(1)
+		ws, err := upgrader.Upgrade(w, r, nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer func() { _ = ws.Close() }()
+		assert.NoError(t, ws.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(sessionEndCloseCode, "idle_detached")))
+	}))
+	t.Cleanup(ts.Close)
+
+	wsClient := newWebsocketClient(nil)
+	var attempts int
+	var notices strings.Builder
+	wsClient.reconnect = &reconnector{
+		provision: func() (string, error) {
+			attempts++
+			return "", errors.New("unexpected reconnect after idle detach")
+		},
+		notice: &notices, baseDelay: time.Millisecond, maxAttempts: 1,
+	}
+	require.NoError(t, wsClient.dial("ws"+strings.TrimPrefix(ts.URL, "http")))
+	t.Cleanup(wsClient.closeConn)
+
+	stdout, stderr := testutil.CaptureOutput(t, func() {
+		awaitReturn(t, "idle detach did not end the client", func() {
+			wsClient.serveConnections(make(chan string))
+		})
+	})
+
+	assertReported(t, wsClient)
+	require.NoError(t, wsClient.err)
+	assert.Zero(t, attempts)
+	assert.Equal(t, int32(1), dials.Load())
+	assert.Empty(t, stdout)
+	assert.Empty(t, notices.String())
+	assert.Equal(t, "\r\nsession disconnected after inactivity; the shell keeps running on the server until the work session ends\r\n", stderr)
 }
 
 func TestRedial_StopsWhenTheServerRefusesANewChannel(t *testing.T) {
@@ -1222,7 +1268,7 @@ func TestRedial_StopsWhenTheSessionEndsMidWait(t *testing.T) {
 	assert.Zero(t, attempts.Load())
 }
 
-// newTestReconnectClient is a client whose reconnect talks to ts and waits in
+// newTestReconnectClient is a client whose reconnect talks to baseURL and waits in
 // milliseconds rather than seconds.
 func newTestReconnectClient(baseURL string) *WebsocketClient {
 	ac := &client.AlpaconClient{HTTPClient: &http.Client{}, BaseURL: baseURL}
@@ -1247,7 +1293,7 @@ func pinTerminalSize(t *testing.T, rows, cols int) {
 
 // What reaches the server on the real entry points' first dial. Raw mode fails on
 // a pipe, so each call returns right after the handshake the assertions read.
-func TestOpenTerminal_AdvertisesTheCapabilityOnlyWhereItReconnects(t *testing.T) {
+func TestOpenTerminal_AdvertisesIdleWarningAndReconnectCapabilities(t *testing.T) {
 	tests := []struct {
 		name string
 		open func(*client.AlpaconClient, SessionResponse) error
@@ -1256,13 +1302,19 @@ func TestOpenTerminal_AdvertisesTheCapabilityOnlyWhereItReconnects(t *testing.T)
 		{
 			name: "an interactive session reconnects",
 			open: OpenNewTerminal,
-			want: client.CapabilityWebsocketReconnect,
+			want: "websocket-reconnect, idle-warning",
 		},
 		{
 			// The joiner may not open a channel on someone else's session, so
-			// claiming the capability would promise a recovery it cannot make.
-			name: "a joined session does not",
+			// claiming the reconnect capability would promise a recovery it cannot make.
+			name: "a joined session warns without reconnecting",
 			open: OpenSharedTerminal,
+			want: "idle-warning",
+		},
+		{
+			name: "a watched session warns without reconnecting",
+			open: OpenReadOnlyTerminal,
+			want: "idle-warning",
 		},
 	}
 
@@ -1397,6 +1449,275 @@ func TestShareCreatedSession_ReturnsTheTrimmedSessionID(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.uri, uri)
 			assert.Equal(t, "session-1", session.ID)
+		})
+	}
+}
+
+func TestReplay_FirstDialOptsIn(t *testing.T) {
+	queries, _, stderr := runReplaySession(t, replayRound{})
+	assert.Equal(t, []string{""}, queries[0]["replay_epoch"])
+	assert.Equal(t, "1", queries[0].Get("replay"))
+	assert.NotContains(t, queries[0], "replay_from")
+	assert.Empty(t, stderr)
+}
+
+func TestReplay_OriginAndBinaryFramesSetReconnectOffset(t *testing.T) {
+	queries, stdout, _ := runReplaySession(t,
+		replayRound{frames: []replayFrame{
+			{websocket.TextMessage, `{"type":"replay_origin","epoch":"epoch-1","offset":100,"truncated":false}`},
+			{websocket.BinaryMessage, "hello"},
+			{websocket.TextMessage, `{"type":"future_control","offset":999}`},
+			{websocket.BinaryMessage, "🙂"},
+		}, closeCode: websocket.CloseServiceRestart},
+		replayRound{},
+	)
+	assert.Equal(t, "hello🙂", stdout)
+	assert.Equal(t, "epoch-1", queries[1].Get("replay_epoch"))
+	assert.Equal(t, "109", queries[1].Get("replay_from"))
+	assert.Equal(t, "1", queries[1].Get("replay"))
+}
+
+func TestReplay_TruncationWarnsOncePerReconnect(t *testing.T) {
+	origin := replayFrame{websocket.TextMessage, `{"type":"replay_origin","epoch":"epoch-1","offset":20,"truncated":true}`}
+	queries, stdout, notices := runReplaySession(t,
+		replayRound{frames: []replayFrame{origin}, closeCode: websocket.CloseServiceRestart},
+		replayRound{frames: []replayFrame{origin, origin, {websocket.BinaryMessage, "retained"}}, closeCode: websocket.CloseServiceRestart},
+		replayRound{frames: []replayFrame{origin, {websocket.BinaryMessage, "tail"}}},
+	)
+	assert.Len(t, queries, 3)
+	assert.Equal(t, "retainedtail", stdout)
+	assert.Equal(t, strings.Repeat("\r\nConnection lost, reconnecting...\r\n[Some output from the disconnect was not kept; showing what remains.]\r\n", 2), notices)
+}
+
+func TestReplay_StaleEpochReplaysBacklogAndResetsOffset(t *testing.T) {
+	queries, stdout, _ := runReplaySession(t,
+		replayRound{epoch: "old", offset: 100, backlog: "old", closeCode: websocket.CloseServiceRestart},
+		replayRound{epoch: "new", offset: 7, backlog: "new", closeCode: websocket.CloseServiceRestart},
+		replayRound{epoch: "new", offset: 7, backlog: "newtail"},
+	)
+	assert.Equal(t, "oldnewtail", stdout)
+	assert.Equal(t, "old", queries[1].Get("replay_epoch"))
+	assert.Equal(t, "103", queries[1].Get("replay_from"))
+	assert.Equal(t, "1", queries[1].Get("replay"))
+	assert.Equal(t, "new", queries[2].Get("replay_epoch"))
+	assert.Equal(t, "10", queries[2].Get("replay_from"))
+}
+
+func TestReplay_OlderProxyKeepsReconnectWithoutOffset(t *testing.T) {
+	queries, stdout, notices := runReplaySession(t,
+		replayRound{frames: []replayFrame{
+			{websocket.TextMessage, `{"type":"replay_origin","epoch":"epoch-1","offset":100}`},
+			{websocket.BinaryMessage, "first"},
+		}, closeCode: websocket.CloseServiceRestart},
+		replayRound{frames: []replayFrame{
+			{websocket.BinaryMessage, "legacy"},
+			{websocket.TextMessage, `{"type":"replay_origin","epoch":"too-late","offset":99,"truncated":true}`},
+		}, closeCode: websocket.CloseServiceRestart},
+		replayRound{frames: []replayFrame{{websocket.BinaryMessage, "output"}}},
+	)
+	assert.Equal(t, "firstlegacyoutput", stdout)
+	assert.Equal(t, strings.Repeat("\r\nConnection lost, reconnecting...\r\n", 2), notices)
+	assert.Equal(t, "epoch-1", queries[1].Get("replay_epoch"))
+	assert.Equal(t, "105", queries[1].Get("replay_from"))
+	assert.Equal(t, []string{""}, queries[2]["replay_epoch"])
+	assert.NotContains(t, queries[2], "replay_from")
+	assert.NotContains(t, queries[2], "replay")
+}
+
+func TestReplay_OlderProxyReconnectDoesNotDuplicateBacklog(t *testing.T) {
+	queries, stdout, _ := runReplaySession(t,
+		replayRound{backlog: "history", closeCode: websocket.CloseServiceRestart},
+		replayRound{closeCode: websocket.CloseAbnormalClosure},
+		replayRound{backlog: "history", frames: []replayFrame{{websocket.BinaryMessage, "live"}}},
+	)
+	assert.Equal(t, "historylive", stdout)
+	for _, query := range queries[1:] {
+		assert.Equal(t, []string{""}, query["replay_epoch"])
+		assert.NotContains(t, query, "replay")
+		assert.NotContains(t, query, "replay_from")
+	}
+}
+
+func TestReplay_DropBeforeFirstFrameReplaysBacklogOnce(t *testing.T) {
+	queries, stdout, _ := runReplaySession(t,
+		replayRound{closeCode: websocket.CloseAbnormalClosure},
+		replayRound{backlog: "history", closeCode: websocket.CloseServiceRestart},
+		replayRound{backlog: "history", frames: []replayFrame{{websocket.BinaryMessage, "live"}}},
+	)
+	assert.Equal(t, []string{""}, queries[1]["replay_epoch"])
+	assert.Equal(t, "1", queries[1].Get("replay"))
+	assert.NotContains(t, queries[1], "replay_from")
+	assert.Equal(t, "historylive", stdout)
+	assert.Equal(t, []string{""}, queries[2]["replay_epoch"])
+	assert.NotContains(t, queries[2], "replay")
+	assert.NotContains(t, queries[2], "replay_from")
+}
+
+func TestReplay_UnknownTextBeforeOriginIsIgnored(t *testing.T) {
+	queries, stdout, _ := runReplaySession(t,
+		replayRound{frames: []replayFrame{
+			{websocket.TextMessage, `{"type":"future_control","epoch":"ignored","offset":999}`},
+			{websocket.TextMessage, `{"type":"replay_origin","epoch":"epoch-1","offset":50}`},
+			{websocket.BinaryMessage, "hello"},
+		}, closeCode: websocket.CloseServiceRestart},
+		replayRound{},
+	)
+	assert.Equal(t, "hello", stdout)
+	assert.Equal(t, "epoch-1", queries[1].Get("replay_epoch"))
+	assert.Equal(t, "55", queries[1].Get("replay_from"))
+}
+
+func TestReplay_OverflowCloseReconnects(t *testing.T) {
+	queries, stdout, _ := runReplaySession(t,
+		replayRound{frames: []replayFrame{
+			{websocket.TextMessage, `{"type":"replay_origin","epoch":"epoch-1","offset":50}`},
+			{websocket.BinaryMessage, "flood"},
+		}, closeCode: websocket.CloseAbnormalClosure},
+		replayRound{frames: []replayFrame{{websocket.BinaryMessage, "recovered"}}},
+	)
+	assert.Len(t, queries, 2)
+	assert.Equal(t, "floodrecovered", stdout)
+	assert.Equal(t, "epoch-1", queries[1].Get("replay_epoch"))
+	assert.Equal(t, "55", queries[1].Get("replay_from"))
+}
+
+type replayFrame struct {
+	kind int
+	body string
+}
+
+type replayRound struct {
+	epoch     string
+	offset    uint64
+	backlog   string
+	frames    []replayFrame
+	closeCode int
+}
+
+func runReplaySession(t *testing.T, rounds ...replayRound) ([]url.Values, string, string) {
+	t.Helper()
+	var upgrades atomic.Int32
+	requests := make(chan url.Values, len(rounds)+1)
+	upgrader := websocket.Upgrader{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		requests <- query
+		index := int(upgrades.Add(1)) - 1
+		ws, err := upgrader.Upgrade(w, r, nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer func() { _ = ws.Close() }()
+		if index >= len(rounds) {
+			_ = ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			return
+		}
+		round := rounds[index]
+		if round.epoch != "" {
+			end := round.offset + uint64(len(round.backlog))
+			start := end
+			truncated := false
+			if query.Get("replay_epoch") == round.epoch && query.Has("replay_from") {
+				from, err := strconv.ParseUint(query.Get("replay_from"), 10, 64)
+				if !assert.NoError(t, err) {
+					return
+				}
+				start = min(max(from, round.offset), end)
+				truncated = from < round.offset
+			} else if query.Get("replay") == "1" {
+				start = round.offset
+			}
+			if !assert.NoError(t, ws.WriteJSON(map[string]any{
+				"type": "replay_origin", "epoch": round.epoch, "offset": start, "truncated": truncated,
+			})) {
+				return
+			}
+			if start < end && !assert.NoError(t, ws.WriteMessage(websocket.BinaryMessage, []byte(round.backlog[start-round.offset:]))) {
+				return
+			}
+		} else if query.Get("replay") == "1" && round.backlog != "" {
+			// Older proxies replay the whole backlog without an origin frame.
+			if !assert.NoError(t, ws.WriteMessage(websocket.BinaryMessage, []byte(round.backlog))) {
+				return
+			}
+		}
+		for _, frame := range round.frames {
+			if !assert.NoError(t, ws.WriteMessage(frame.kind, []byte(frame.body))) {
+				return
+			}
+		}
+		if round.closeCode == websocket.CloseAbnormalClosure {
+			return // a full outbound queue drops the transport without a close frame
+		}
+		code := round.closeCode
+		if code == 0 {
+			code = websocket.CloseNormalClosure
+		}
+		_ = ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(code, ""))
+	}))
+	t.Cleanup(ts.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "?token=keep&replay=1&replay_from=999"
+	wsClient := newWebsocketClient(nil)
+	var notices strings.Builder
+	wsClient.reconnect = &reconnector{
+		provision: func() (string, error) { return wsURL, nil },
+		notice:    &notices, baseDelay: time.Millisecond, maxAttempts: 2,
+	}
+	require.NoError(t, wsClient.dial(wsURL))
+	t.Cleanup(wsClient.closeConn)
+	stdout, stderr := testutil.CaptureOutput(t, func() {
+		awaitReturn(t, "replay session did not finish", func() {
+			wsClient.serveConnections(make(chan string))
+		})
+	})
+	require.NoError(t, wsClient.err)
+	assert.Empty(t, stderr)
+	var queries []url.Values
+	for range upgrades.Load() {
+		q := <-requests
+		assert.Equal(t, "keep", q.Get("token"))
+		queries = append(queries, q)
+	}
+	require.Len(t, queries, len(rounds))
+	return queries, stdout, notices.String()
+}
+
+func TestReplay_OnlyReconnectingEntryPointOptsIn(t *testing.T) {
+	tests := []struct {
+		name   string
+		open   func(*client.AlpaconClient, SessionResponse) error
+		replay bool
+	}{
+		{name: "interactive", open: OpenNewTerminal, replay: true},
+		{name: "join", open: OpenSharedTerminal},
+		{name: "watch", open: OpenReadOnlyTerminal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			queries := make(chan url.Values, 1)
+			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				queries <- r.URL.Query()
+				ws, err := upgrader.Upgrade(w, r, nil)
+				if assert.NoError(t, err) {
+					_ = ws.Close()
+				}
+			}))
+			t.Cleanup(ts.Close)
+			pipeStdin(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			err := tt.open(ac, SessionResponse{ID: "sess-1", WebsocketURL: "ws" + strings.TrimPrefix(ts.URL, "http")})
+			require.ErrorContains(t, err, "stdin is not a terminal")
+			q := <-queries
+			if tt.replay {
+				assert.Equal(t, []string{""}, q["replay_epoch"])
+				assert.Equal(t, "1", q.Get("replay"))
+			} else {
+				assert.NotContains(t, q, "replay_epoch")
+				assert.NotContains(t, q, "replay")
+			}
+			assert.NotContains(t, q, "replay_from")
 		})
 	}
 }

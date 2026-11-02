@@ -53,8 +53,6 @@ func TestKubeProxyLockPath(t *testing.T) {
 	assert.Equal(t, dir, filepath.Dir(kubeProxyLockPath(dir, "../../etc/passwd", 1)), "a cluster name never leaves the directory")
 }
 
-// One proxy per cluster and port: a second one on the same pair is refused,
-// while another port, or another cluster, takes a lock of its own.
 func TestKubeProxyLockIsPerClusterAndPort(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

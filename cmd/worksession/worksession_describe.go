@@ -42,11 +42,6 @@ var workSessionDescribeCmd = &cobra.Command{
 			utils.CliErrorEnvelopeWithExit(opDescribe, err, "Failed to retrieve work session: %s.", err)
 		}
 
-		serverNames := make([]string, len(session.Servers))
-		for i, s := range session.Servers {
-			serverNames[i] = s.Name
-		}
-
 		createdBy := ""
 		if session.CreatedBy != nil {
 			createdBy = session.CreatedBy.Name
@@ -70,10 +65,11 @@ var workSessionDescribeCmd = &cobra.Command{
 			{"Status", session.Status},
 			{"Requester type", session.RequesterType},
 			{"Scopes", strings.Join(session.Scopes, ", ")},
-			{"Servers", strings.Join(serverNames, ", ")},
+			{"Servers", strings.Join(wsapi.ServerNames(session), ", ")},
+			{"Clusters", strings.Join(wsapi.ClusterNames(session), ", ")},
 			{"Created by", createdBy},
 			{"Assigned user", assignedUser},
-			{"Expires at", session.ExpiresAt.Local().Format("2006-01-02 15:04")},
+			{"Expires at", wsapi.FormatExpiresAt(session.ExpiresAt)},
 			{"Started at", startedAt},
 			{"Completed at", completedAt},
 			{"Added at", session.AddedAt.Local().Format("2006-01-02 15:04")},

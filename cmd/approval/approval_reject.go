@@ -17,8 +17,7 @@ the CLI credential channel. Use 'alpacon approval ls' to track status.`,
 	Example: `  # Reject in the Alpacon console (web), then track status here:
   alpacon approval ls --status rejected`,
 	Run: func(cmd *cobra.Command, args []string) {
-		// Exit non-zero so a script that expected the reject to happen does not
-		// mistake this for success—the CLI must never pretend to reject.
+		// Non-zero exit: a script that expected the reject must not read this as success.
 		utils.CliErrorWithExit("%s", approveRejectExcludedMessage)
 	},
 }

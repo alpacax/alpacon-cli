@@ -195,7 +195,6 @@ func TestEnsureSecureConnection_HTTPS(t *testing.T) {
 		BaseURL:    "https://secure.example.com",
 	}
 
-	// HTTPS should pass without prompting or exiting
 	assert.NotPanics(t, func() {
 		EnsureSecureConnection(ac)
 	})

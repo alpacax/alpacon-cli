@@ -21,24 +21,59 @@ const (
 )
 
 // OutputFormat holds the value of the --output persistent flag.
-// Bound by cmd/root.go; read by PrintTable and PrintJson.
 var OutputFormat string
 
-type JSONErrorEnvelope[T any] struct {
-	OK          bool         `json:"ok"`
-	ExitCode    int          `json:"exit_code,omitempty"`
-	ErrorCode   string       `json:"error_code,omitempty"`
-	Message     string       `json:"message"`
-	Reason      string       `json:"reason,omitempty"`
-	Context     T            `json:"context"`
-	NextActions []NextAction `json:"next_actions,omitempty"`
+// SetOutputFormat applies an --output value, refusing anything but table or json as a usage error.
+func SetOutputFormat(value string) error {
+	if value != OutputFormatTable && value != OutputFormatJSON {
+		return MarkUsageError(fmt.Errorf("invalid --output value %q (expected %q or %q)", value, OutputFormatTable, OutputFormatJSON))
+	}
+	OutputFormat = value
+	return nil
 }
 
-// NextAction is one actionable follow-up. Command is a pure, runnable command
-// (no inline comments) for machine consumers; Description carries the human hint.
-// Either may be empty—a pure command needs no hint, and a guidance-only pointer
-// (e.g. "approve it in the console") carries no runnable command—so both fields
-// are omitempty.
+// OutputFormatIn is the last --output value before any "--" in args, for a command line
+// whose parse stopped before reaching it.
+func OutputFormatIn(args []string) string {
+	var format string
+	for i, arg := range args {
+		if arg == "--" {
+			break
+		}
+		if value, ok := strings.CutPrefix(arg, "--output="); ok {
+			format = value
+		} else if arg == "--output" && i+1 < len(args) {
+			format = args[i+1]
+		}
+	}
+	return format
+}
+
+type PartialInfo struct {
+	Count int `json:"count"`
+}
+
+// JSONErrorEnvelope is the --output json failure line. Fields are additive only; exit_code
+// and error_code are always present.
+type JSONErrorEnvelope[T any] struct {
+	OK             bool           `json:"ok"`
+	ExitCode       int            `json:"exit_code"`
+	ErrorCode      string         `json:"error_code"`
+	Message        string         `json:"message"`
+	Command        string         `json:"command,omitempty"`
+	Reason         string         `json:"reason,omitempty"`
+	Context        T              `json:"context"`
+	HTTPStatus     int            `json:"http_status,omitempty"`
+	RetryAfter     int            `json:"retry_after,omitempty"`
+	Server         map[string]any `json:"server,omitempty"`
+	RemoteExitCode *int           `json:"remote_exit_code,omitempty"`
+	Partial        *PartialInfo   `json:"partial,omitempty"`
+	NextActions    []NextAction   `json:"next_actions,omitempty"`
+}
+
+// NextAction is one actionable follow-up: Command is a runnable command with no inline comment,
+// for machine consumers, and Description the human hint. Either may be empty, as a guidance-only
+// pointer carries no command.
 type NextAction struct {
 	Command     string `json:"command,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -98,14 +133,19 @@ func appendUnicodeEscape(out []byte, r rune) []byte {
 }
 
 func FormatJSON(value any) (string, error) {
+	out, err := encodeJSON(value, "  ")
+	return string(out), err
+}
+
+func encodeJSON(value any, indent string) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
+	enc.SetIndent("", indent)
 	if err := enc.Encode(value); err != nil {
-		return "", err
+		return nil, err
 	}
-	return strings.TrimRight(string(escapeJSONControls(buf.Bytes())), "\n"), nil
+	return escapeJSONControls(bytes.TrimRight(buf.Bytes(), "\n")), nil
 }
 
 func PrintJSONValue(w io.Writer, value any) error {
@@ -119,9 +159,25 @@ func PrintJSONValue(w io.Writer, value any) error {
 
 func PrintJSONError[T any](w io.Writer, envelope JSONErrorEnvelope[T]) {
 	envelope.OK = false
-	if err := PrintJSONValue(w, envelope); err != nil {
-		_, _ = fmt.Fprintf(w, `{"ok":false,"error_code":%q}`+"\n", envelope.ErrorCode)
+	if envelope.Command == "" {
+		envelope.Command = CommandName
 	}
+	if envelope.ErrorCode == "" {
+		envelope.ErrorCode = exitCodeFallback(envelope.ExitCode)
+	}
+	line, err := encodeJSON(envelope, "")
+	if err != nil {
+		line, _ = encodeJSON(JSONErrorEnvelope[struct{}]{
+			ExitCode: envelope.ExitCode, ErrorCode: envelope.ErrorCode, Message: envelope.Message, Command: envelope.Command,
+		}, "")
+	}
+	line = append(line, '\n')
+	if w == os.Stderr {
+		if stderrMidLine.Swap(false) || activeSpinners.Load() > 0 {
+			line = append([]byte{'\n'}, line...)
+		}
+	}
+	_, _ = w.Write(line)
 }
 
 func PrintTable(slice any) {
@@ -168,9 +224,9 @@ func PrintTable(slice any) {
 	for i := range s.Len() {
 		row := make([]string, len(fields))
 		for j, field := range fields {
-			// API values are untrusted: a control sequence here rewrites the reader's terminal.
-			// Newlines drop instead of becoming spaces as in cmd/event/render.go: a cell must
-			// not spill into a second row. --output json returns the value whole.
+			// API values are untrusted, so control sequences are stripped; newlines drop too, not
+			// becoming spaces as in cmd/event/render.go, so a cell cannot spill into a second row.
+			// --output json returns the value whole.
 			row[j] = SanitizeTerminalText(fmt.Sprintf("%v", s.Index(i).Field(field)))
 		}
 		_, _ = fmt.Fprintln(tw, strings.Join(row, "\t"))
@@ -240,7 +296,6 @@ func camelToWords(s string) string {
 
 	for i := 1; i < len(runes); i++ {
 		if unicode.IsUpper(runes[i]) {
-			// Check if this is start of a new word
 			if unicode.IsLower(runes[i-1]) {
 				// "requestedAt" → split before "A"
 				words = append(words, string(runes[start:i]))

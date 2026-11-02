@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/client"
@@ -45,19 +48,34 @@ var logoutCmd = &cobra.Command{
 			if validConfig.AccessToken != "" && validConfig.RefreshToken != "" {
 				_, err := ac.SendPostRequest(blacklistURL, nil)
 				if err != nil {
-					utils.CliErrorWithExit("Failed to set black list. Please try again later.")
+					utils.CliErrorWithExit("%s", blacklistFailure(err))
 				}
 			}
 			err = auth0.Logout(httpClient, validConfig)
-			if err != nil {
-				utils.CliErrorWithExit("Log out from Alpacon failed: %s.", err)
-			}
 		} else {
-			err := auth.Logout(ac)
-			if err != nil {
-				utils.CliErrorWithExit("Log out from Alpacon failed: %s.", err)
-			}
+			err = auth.Logout(ac, validConfig)
 		}
-		utils.CliSuccess("Logout succeeded!")
+		reportLogout(err)
 	},
+}
+
+func reportLogout(err error) {
+	switch {
+	case errors.Is(err, config.ErrLoginChanged):
+		utils.CliWarning("Logged out, but kept the config: another shell logged in since this command started.")
+	case err != nil:
+		utils.CliErrorWithExit("Log out from Alpacon failed: %s.", err)
+	default:
+		utils.CliSuccess("Logout succeeded!")
+	}
+}
+
+// blacklistFailure words a failed token blacklist. A refusal carrying the
+// server's hint keeps it, printed under the error, in place of the advice to
+// try again later.
+func blacklistFailure(err error) error {
+	if utils.RefusalHint(err) != "" {
+		return utils.Reword(err, fmt.Sprintf("Failed to set black list: %s.", err))
+	}
+	return utils.Reword(err, "Failed to set black list. Please try again later.")
 }

@@ -64,7 +64,7 @@ func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.Fil
 
 		cmd.Stdin = bytes.NewReader(output)
 		cmd.Stdout = stdout
-		cmd.Stderr = os.Stderr
+		cmd.Stderr = StderrForChild()
 
 		if err := cmd.Run(); err != nil {
 			_, _ = stdout.Write(output)

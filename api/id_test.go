@@ -88,7 +88,7 @@ func TestRequireIDCarriesUsageCodeWithoutParsingTheID(t *testing.T) {
 			require.ErrorIs(t, err, utils.ErrInvalidID)
 			assert.Equal(t, tc.want, err.Error())
 			code, source := utils.ParseErrorResponse(err)
-			assert.Equal(t, utils.UsageErrorCode, code)
+			assert.Equal(t, utils.ErrorCodeUsage, code)
 			assert.Empty(t, source)
 		})
 	}

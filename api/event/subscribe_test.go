@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
@@ -235,43 +236,48 @@ func TestCloseSession_TriesAFailedCloseOnce(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			var deletes atomic.Int32
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				deletes.Add(1)
-				w.WriteHeader(tc.status)
-			}))
-			defer ts.Close()
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			synctest.Test(t, func(t *testing.T) {
+				var deletes atomic.Int32
+				ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					deletes.Add(1)
+					w.WriteHeader(tc.status)
+				}))
+				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-			closeSession(ac, "session-1", time.Second)
+				start := time.Now()
+				closeSession(ac, "session-1", time.Second)
+				synctest.Wait()
 
-			assert.Equal(t, int32(1), deletes.Load())
+				assert.Equal(t, int32(1), deletes.Load())
+				assert.Zero(t, time.Since(start), "a failed close must not be retried after a pause")
+			})
 		})
 	}
 }
 
 func TestCloseSession_GivesUpAtItsDeadline(t *testing.T) {
 	t.Parallel()
-	arrived := make(chan struct{}, 1)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		arrived <- struct{}{}
+	synctest.Test(t, func(t *testing.T) {
+		arrived := make(chan struct{}, 1)
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			arrived <- struct{}{}
+			select {
+			case <-r.Context().Done():
+			case <-time.After(5 * time.Second): // a request sent without the deadline fails the elapsed check, not the run
+			}
+		}))
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+		start := time.Now()
+		closeSession(ac, "session-1", 50*time.Millisecond)
+
+		assert.Equal(t, 50*time.Millisecond, time.Since(start))
 		select {
-		case <-r.Context().Done():
-		case <-time.After(5 * time.Second): // a request sent without the deadline fails the elapsed check, not the run
+		case <-arrived:
+		default:
+			t.Error("the close never reached the server, so the deadline was not what ended it")
 		}
-	}))
-	defer ts.Close()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
-	start := time.Now()
-	closeSession(ac, "session-1", 50*time.Millisecond)
-
-	assert.Less(t, time.Since(start), 2*time.Second)
-	select {
-	case <-arrived:
-	case <-time.After(time.Second):
-		t.Error("the close never reached the server, so the deadline was not what ended it")
-	}
+	})
 }
 
 // Websh holds the terminal in raw mode, so a failed close must print nothing
@@ -285,14 +291,17 @@ func TestCloseSession_PrintsAFailureOnlyWithTheDebugSwitch(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(utils.DebugEnvVar, tc.debug)
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-			}))
-			defer ts.Close()
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
+			// The capture pipe is a real file, so it stays outside the bubble.
 			_, stderr := testutil.CaptureOutput(t, func() {
-				closeSession(ac, "session-1", time.Second)
+				synctest.Test(t, func(t *testing.T) {
+					ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.WriteHeader(http.StatusInternalServerError)
+					}))
+					ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+					closeSession(ac, "session-1", time.Second)
+				})
 			})
 
 			if tc.want == "" {

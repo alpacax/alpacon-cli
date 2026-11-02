@@ -89,3 +89,23 @@ func TestApplySurfaceGate_EnabledRootHelpListsKube(t *testing.T) {
 
 	assert.Regexp(t, `(?m)^\s+kube\s`, out.String())
 }
+
+// A child the gate keeps is still found under the stand-in, so kubectl can
+// run it for a context an earlier login wrote.
+func TestApplySurfaceGate_DisabledKeepsAPassThroughChild(t *testing.T) {
+	t.Parallel()
+	root, real := newGateTree()
+	ran := false
+	keep := &cobra.Command{Use: "credentials", Hidden: true, Run: func(*cobra.Command, []string) { ran = true }}
+	real.AddCommand(keep)
+
+	applySurfaceGate(root, real, false, keep)
+
+	found, _, err := root.Find([]string{"kube", "credentials", "--cluster", "prod-east"})
+	require.NoError(t, err)
+	assert.Same(t, keep, found)
+	assert.NotSame(t, real, found.Parent())
+	root.SetArgs([]string{"kube", "credentials"})
+	require.NoError(t, root.Execute())
+	assert.True(t, ran, "the kept child runs instead of the not-enabled notice")
+}

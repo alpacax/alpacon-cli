@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/alpacax/alpacon-cli/api/event"
+	ftpapi "github.com/alpacax/alpacon-cli/api/ftp"
+	"github.com/alpacax/alpacon-cli/api/mfa"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
@@ -25,12 +29,10 @@ const (
 	reuseDaysMax = 366
 )
 
-// fileExecRefusals maps the server's file-lane error codes to guidance. Codes
-// mirror the server by hand—nothing enforces the sync, so fileExecRefusal
-// answers only for codes it carries and leaves the rest to the generic error
-// path. The two clientBug entries name fields this CLI never sends on the file
-// lane: reaching one means the request builder regressed, not that the user
-// did anything wrong.
+// fileExecRefusals maps the server's file-lane error codes to guidance. The codes mirror the server
+// by hand, so fileExecRefusal answers only for codes listed here and leaves the rest to the generic
+// error path. A clientBug entry names a field this CLI never sends on the file lane, so reaching
+// one means the request builder regressed.
 var fileExecRefusals = []struct {
 	code, message, hint string
 	// needsServer says message and hint are Sprintf formats taking the server
@@ -40,8 +42,8 @@ var fileExecRefusals = []struct {
 }{
 	{
 		code:        "file_exec_unsupported_agent",
-		message:     "the agent on '%s' cannot verify a file digest; Alpamon 2.6.0 or newer is required",
-		hint:        "update Alpamon on the server, or run the script as an ordinary command until then:\n  alpacon exec %s -- /bin/bash /path/to/script.sh\n",
+		message:     "the agent on '%s' does not offer the file lane; it needs Alpamon 2.8.3 or newer on a platform that has the file lane",
+		hint:        "if the server runs Alpamon older than 2.8.3, update it to 2.8.3 or newer.\nOn a platform without the file lane, such as Windows, updating does not help.\nEither way, run the script as an ordinary command with an interpreter the server has, for example:\n  alpacon exec %s -- /bin/bash /path/to/script.sh\n",
 		needsServer: true,
 	},
 	{
@@ -95,11 +97,10 @@ var fileExecRefusals = []struct {
 	},
 }
 
-// FileExecArgs is the file lane as the user asked for it on the command line:
-// --file, --file-from, --interpreter, --reuse-days and the arguments after --.
-// From and Interpreter are as typed, empty when the flag was not given;
-// loadFileExecution fills the defaults, so a re-run hint can repeat only what
-// the user said.
+// FileExecArgs is the file lane as given on the command line: --file, --file-from, --interpreter,
+// --reuse-days, --upload, --overwrite, --from-server and the arguments after --. From and
+// Interpreter stay empty when their flag was not given, so a re-run hint repeats only what the
+// user typed.
 type FileExecArgs struct {
 	// Path is the script's location on the target server, and by default the
 	// local file the content is read from.
@@ -112,6 +113,15 @@ type FileExecArgs struct {
 	Args []string
 	// ReuseDays is the proposed reuse duration in days; 0 means none was given.
 	ReuseDays int
+	// Upload writes the content to Path on the server before the submission,
+	// so the file need not be there already.
+	Upload bool
+	// Overwrite lets Upload replace a file already at Path; without it the
+	// agent refuses an existing file.
+	Overwrite bool
+	// FromServer reads the content from Path on the server instead of a local
+	// file, for a script that exists only there.
+	FromServer bool
 }
 
 // loadFileExecution reads the script's bytes and builds the submission, or
@@ -125,16 +135,18 @@ func loadFileExecution(spec FileExecArgs) (event.FileExecution, string) {
 	if from == "" {
 		from = spec.Path
 	}
-	interpreter := spec.Interpreter
-	if interpreter == "" {
-		interpreter = DefaultInterpreter
-	}
-
 	content, msg := readFileContent(from, spec.From == "")
 	if msg != "" {
 		return event.FileExecution{}, msg
 	}
+	return newFileExecution(spec, content), ""
+}
 
+func newFileExecution(spec FileExecArgs, content string) event.FileExecution {
+	interpreter := spec.Interpreter
+	if interpreter == "" {
+		interpreter = DefaultInterpreter
+	}
 	// Args may be nil here; SubmitFileCommand sends it as the empty list the
 	// server defaults to.
 	return event.FileExecution{
@@ -143,7 +155,76 @@ func loadFileExecution(spec FileExecArgs) (event.FileExecution, string) {
 		Args:        spec.Args,
 		Content:     content,
 		ReuseDays:   spec.ReuseDays,
-	}, ""
+	}
+}
+
+// uploadFileOrExit writes file.Content to its --file path on the server as the run-as account and
+// group, so what lands there is what the reviewer sees. It exits on failure, since a script that
+// was not written must not be submitted.
+func uploadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, file event.FileExecution, workSessionID, authMethod string) {
+	upload := func() error {
+		return ftpapi.UploadContentAs(ac, parsed.Server, file.Path, []byte(file.Content),
+			parsed.Username, parsed.Groupname, workSessionID, parsed.File.Overwrite)
+	}
+	err := upload()
+	if err != nil {
+		err = utils.HandleCommonErrors(err, parsed.Server, mfa.ErrorCallbacks(ac, upload))
+	}
+	if err == nil {
+		return
+	}
+	utils.HandleWorkSessionError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID)
+	var hint string
+	// The agent answers "PATH already exists." for an existing file.
+	if !parsed.File.Overwrite && strings.Contains(err.Error(), "already exists") {
+		hint = denialHintLine("pass --overwrite to replace the file on the server, or use --from-server instead of --upload (and drop --file-from) to submit the copy already there.\n")
+	}
+	// reportCodedRefusal writes raw and appends its own period; drop the one the
+	// agent's message ends with.
+	msg := strings.TrimSuffix(utils.SanitizeTerminalText(fmt.Sprintf("failed to upload the script to '%s:%s': %s", parsed.Server, file.Path, err)), ".")
+	reportCodedRefusal(utils.OperationWebFTP, err, msg, hint)
+}
+
+// downloadFileOrExit reads the script from its --file path on the server as the run-as account and
+// group, and builds the submission from those bytes. It exits on failure, since a script that could
+// not be read must not be submitted.
+func downloadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, workSessionID, authMethod string) event.FileExecution {
+	label := parsed.Server + ":" + parsed.File.Path
+	content, msg, err := fetchServerScript(ac, parsed, label, workSessionID)
+	if err != nil {
+		utils.HandleWorkSessionError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID)
+		// reportCodedRefusal writes raw and appends its own period; drop one the
+		// agent's message ends with.
+		msg = strings.TrimSuffix(utils.SanitizeTerminalText(fmt.Sprintf("cannot read the script from '%s' on the server: %s", label, err)), ".")
+		reportCodedRefusal(utils.OperationWebFTP, err, msg, "")
+		return event.FileExecution{}
+	}
+	if msg != "" {
+		utils.CliErrorWithExit("%s", msg)
+		return event.FileExecution{}
+	}
+	return newFileExecution(*parsed.File, content)
+}
+
+// fetchServerScript reads the --file path from the server into memory, at
+// most FileContentMaxBytes+1 bytes of it, and checks it as readFileContent
+// checks a local script. err is a failed download; msg is a copy the file lane
+// cannot take.
+func fetchServerScript(ac *client.AlpaconClient, parsed RemoteExecArgs, label, workSessionID string) (content, msg string, err error) {
+	var data []byte
+	download := func() (err error) {
+		data, err = ftpapi.DownloadFileContent(ac, parsed.Server, parsed.File.Path,
+			parsed.Username, parsed.Groupname, workSessionID, FileContentMaxBytes+1)
+		return err
+	}
+	if err = download(); err != nil {
+		err = utils.HandleCommonErrors(err, parsed.Server, mfa.ErrorCallbacks(ac, download))
+	}
+	if err != nil {
+		return "", "", err
+	}
+	content, msg = readScriptContent(bytes.NewReader(data), label)
+	return content, msg, nil
 }
 
 // readFileContent reads at most FileContentMaxBytes+1 bytes of the file at
@@ -160,28 +241,31 @@ func readFileContent(path string, defaultedPath bool) (string, string) {
 		return "", msg
 	}
 	defer func() { _ = f.Close() }()
+	return readScriptContent(f, path)
+}
 
-	data, err := io.ReadAll(io.LimitReader(f, FileContentMaxBytes+1))
+// readScriptContent reads at most FileContentMaxBytes+1 bytes from r and checks
+// them against what the file lane accepts. label names the script in the
+// message.
+func readScriptContent(r io.Reader, label string) (string, string) {
+	data, err := io.ReadAll(io.LimitReader(r, FileContentMaxBytes+1))
 	if err != nil {
-		return "", fmt.Sprintf("cannot read the script from '%s': %s", path, describeOpenError(err))
+		return "", fmt.Sprintf("cannot read the script from '%s': %s", label, describeOpenError(err))
 	}
 	switch {
 	case len(data) == 0:
-		return "", fmt.Sprintf("'%s' is empty; a verified file needs content to hash", path)
+		return "", fmt.Sprintf("'%s' is empty; a verified file needs content to hash", label)
 	case len(data) > FileContentMaxBytes:
-		return "", fmt.Sprintf("'%s' exceeds %d bytes (64 KB), the ceiling for a verified file", path, FileContentMaxBytes)
+		return "", fmt.Sprintf("'%s' exceeds %d bytes (64 KB), the ceiling for a verified file", label, FileContentMaxBytes)
 	case !utf8.Valid(data):
-		return "", fmt.Sprintf("'%s' is not valid UTF-8; the content travels as JSON text, which would alter the bytes the agent hashes", path)
+		return "", fmt.Sprintf("'%s' is not valid UTF-8; the content travels as JSON text, which would alter the bytes the agent hashes", label)
 	}
 	return string(data), ""
 }
 
-// argvQuote quotes one file-lane value for the re-run hint. These values were
-// argv on the first run and reached the server as a JSON list, so no shell ever
-// interpreted them; shellQuote quotes only on whitespace because the generic
-// lane wants metacharacters to reach the remote shell, and that would let `a;b`
-// or `$(...)` execute locally when the hint is pasted. Anything outside a
-// conservative POSIX-safe set is single-quoted.
+// argvQuote quotes one value for a pasteable hint, single-quoting anything outside a conservative
+// POSIX-safe set. File-lane values were argv, never a shell line; shellQuote, which leaves
+// metacharacters for the remote shell, would let `a;b` or `$(...)` run locally when pasted.
 func argvQuote(s string) string {
 	if s == "" {
 		return "''"
@@ -212,11 +296,9 @@ func describeOpenError(err error) string {
 	return err.Error()
 }
 
-// fileExecRefusal renders a file-lane refusal from the server as a message and
-// an optional hint, both without a trailing newline on the message and with one
-// on the hint, matching the credential and sudo hints. serverName fills the
-// placeholders. It answers false for every other error, so the caller falls
-// through to the generic path.
+// fileExecRefusal renders a file-lane refusal as a message without a trailing newline and an
+// optional hint with one, as the credential and sudo hints are. serverName fills the placeholders.
+// It answers false for any other error.
 func fileExecRefusal(err error, serverName string) (message, hint string, ok bool) {
 	if err == nil {
 		return "", "", false
@@ -287,4 +369,95 @@ func HandleFileExecInlineCredential(err error) bool {
 	}
 	reportCodedRefusal("command", err, message, hint)
 	return true
+}
+
+// useFileExecutionRefusal renders a use_file_execution rejection as a message and the file-lane
+// commands that replace it. The script was on the command line, so the commands carry placeholder
+// paths. --file reads the local copy unless --file-from or --from-server says otherwise: the first
+// command writes a local copy to the server and runs it in one step, the second runs a copy already
+// there. Both repeat the refused run's account flags, since the file lane must run on the same
+// server as the same account, and quote the server with argvQuote so a pasted command keeps it one
+// argument. withEnv adds a warning that the script must read the --env values on the host.
+// accountNote, when set, follows the message; exec logs passes one to mark the account flags as
+// placeholders.
+func useFileExecutionRefusal(commandID, server string, accountFlags []string, withEnv bool, accountNote string) (message string, actions []utils.NextAction) {
+	server = utils.SanitizeTerminalText(server) // reportUseFileExecution writes raw
+	if server == "" {
+		server = "SERVER"
+	}
+	message = fmt.Sprintf("the server refused command %s on '%s': its command line carries a script body, which runs only as a verified file (%s)",
+		utils.SanitizeTerminalText(commandID), server, event.RejectionCauseUseFileExecution)
+	if withEnv {
+		message += ". --env values cannot ride the file lane, so the script must read them on the host"
+	}
+	if accountNote != "" {
+		message += ". " + accountNote
+	}
+	prefix := strings.Join(append([]string{string(ExecInvocation)}, accountFlags...), " ")
+	serverArg := argvQuote(server)
+	// The refused body may be perl -e or another interpreter's, and --file runs
+	// the script with DefaultInterpreter unless --interpreter names another.
+	const interpreterNote = "--interpreter ABSOLUTE_PATH for a script " + DefaultInterpreter + " does not run"
+	actions = []utils.NextAction{
+		{
+			Command:     prefix + " --upload --file /path/to/script.sh --file-from ./script.sh " + serverArg,
+			Description: "save the script to a local file, then write it to the server and run it in one step, adding --overwrite to replace a file already at that path and " + interpreterNote,
+		},
+		{
+			Command:     prefix + " --file /path/to/script.sh --from-server " + serverArg,
+			Description: "when a copy is already saved at that path on the server, run it there, adding " + interpreterNote,
+		},
+	}
+	return message, actions
+}
+
+// runAsFlags returns a run's -u, -g and --work-session flags for a hint to repeat, sanitized for a
+// raw write and quoted with argvQuote so a pasted command keeps each value one argument. reRunHint
+// and the use_file_execution guidance both build their flags here.
+func runAsFlags(parsed RemoteExecArgs) []string {
+	quote := func(s string) string { return argvQuote(utils.SanitizeTerminalText(s)) }
+	var flags []string
+	if parsed.Username != "" {
+		flags = append(flags, "-u "+quote(parsed.Username))
+	}
+	if parsed.Groupname != "" {
+		flags = append(flags, "-g "+quote(parsed.Groupname))
+	}
+	if parsed.WorkSessionID != "" {
+		flags = append(flags, "--work-session "+quote(parsed.WorkSessionID))
+	}
+	return flags
+}
+
+// HandleUseFileExecutionRefusal reports a use_file_execution refusal with the
+// file lane guidance and exits 6, or returns false when err is something else.
+// It runs ahead of HandleCommandResult, which knows neither the server nor the
+// account flags the guidance repeats.
+func HandleUseFileExecutionRefusal(err error, parsed RemoteExecArgs) bool {
+	var rejected *event.CommandRejectedError
+	if !errors.As(err, &rejected) || rejected.Cause != event.RejectionCauseUseFileExecution {
+		return false
+	}
+	reportUseFileExecution(rejected, parsed.Server, runAsFlags(parsed), len(parsed.Env) > 0, "")
+	return true
+}
+
+// reportUseFileExecution prints the use_file_execution refusal and exits 6, the
+// code every settled-without-a-grant command exits with: running the same line
+// again is refused the same way. Under --output json the envelope carries the
+// code as error_code and the replacement commands as next_actions.
+func reportUseFileExecution(rejected *event.CommandRejectedError, server string, accountFlags []string, withEnv bool, accountNote string) {
+	message, actions := useFileExecutionRefusal(rejected.CommandID, server, accountFlags, withEnv, accountNote)
+	var hint strings.Builder
+	for i, action := range actions {
+		line := action.Description + ":\n  " + action.Command + "\n"
+		switch i {
+		case 0:
+			line = denialHintLine(line)
+		case 1:
+			line = "or, " + line
+		}
+		hint.WriteString(line)
+	}
+	reportCodedRefusalWithExit(utils.ExitCodeNotApproved, "command", rejected, message, hint.String(), actions)
 }

@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// captureStderr returns everything fn writes to stderr.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	_, stderr := testutil.CaptureOutput(t, fn)
@@ -47,9 +46,8 @@ func TestDebugEnabled(t *testing.T) {
 			if tt.set {
 				t.Setenv(DebugEnvVar, tt.value)
 			} else {
-				// t.Setenv only restores the variable afterwards; the absent case
-				// is a different branch of os.LookupEnv than an empty value, so it
-				// has to be unset for real.
+				// Unset for real: an absent variable takes a different os.LookupEnv branch than an
+				// empty one, and t.Setenv only registers the restore.
 				t.Setenv(DebugEnvVar, "")
 				require.NoError(t, os.Unsetenv(DebugEnvVar))
 			}
@@ -130,19 +128,16 @@ func TestCliHelpers_KeepCallerNewlines(t *testing.T) {
 	assert.Contains(t, stderr, "first line\nsecond line: value\n")
 }
 
-// The choke point strips its arguments too, so a pre-colored value comes out
-// plain. cmd/server relies on the reverse order—sanitize the key, then color
-// it—to keep the "copy this" highlight on a registration key.
+// The choke point strips its arguments too, so a pre-colored value comes out plain; cmd/server
+// colors a registration key after sanitizing it to keep the highlight.
 func TestCliMessage_StripsColorFromArguments(t *testing.T) {
 	pinColor(t, true)
 
 	assert.Equal(t, "Save this key: secret", cliMessage("Save this key: %s", Green("secret")))
 }
 
-// The break is gated on a running spinner rather than on stderr being a
-// terminal, and it is a newline rather than an erase escape: a spinner can
-// still be running while stdout is streamed, and erasing the line would take
-// that output with it.
+// The break is gated on a running spinner, not a terminal, and is a newline rather than an erase
+// escape, which would take streamed stdout with it.
 func TestCliWarning_BreaksTheLineOnlyWhileASpinnerRuns(t *testing.T) {
 	t.Run("nothing is animating stderr", func(t *testing.T) {
 		stderr := captureStderr(t, func() { CliWarning("output may be incomplete") })

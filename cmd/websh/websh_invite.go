@@ -22,7 +22,7 @@ An invitation email will be sent to each specified address.`,
 		readOnly, _ := cmd.Flags().GetBool("read-only")
 
 		if len(emails) == 0 {
-			utils.CliErrorWithExit("At least one --email is required.")
+			utils.CliUsageErrorWithExit("At least one --email is required.")
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()

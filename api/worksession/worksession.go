@@ -2,8 +2,10 @@ package worksession
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -36,21 +38,103 @@ func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType, assigne
 	return result, nil
 }
 
-// ProjectAttributes converts a full WorkSession into the WorkSessionAttributes
-// shape used by table outputs (ls, current). Single source of truth for column projection.
+// ProjectAttributes converts a WorkSession into its table row.
 func ProjectAttributes(ws *WorkSession) WorkSessionAttributes {
-	serverNames := make([]string, len(ws.Servers))
-	for i, srv := range ws.Servers {
-		serverNames[i] = srv.Name
-	}
 	return WorkSessionAttributes{
 		ID:          ws.ID,
 		Description: utils.TruncateString(ws.Description, 70),
 		Status:      ws.Status,
 		Scopes:      strings.Join(ws.Scopes, ", "),
-		Servers:     strings.Join(serverNames, ", "),
-		ExpiresAt:   ws.ExpiresAt.Local().Format("2006-01-02 15:04"),
+		Servers:     strings.Join(ServerNames(ws), ", "),
+		Clusters:    strings.Join(ClusterNames(ws), ", "),
+		ExpiresAt:   FormatExpiresAt(ws.ExpiresAt),
 	}
+}
+
+// FormatExpiresAt leaves blank the expiry of a session created with a
+// duration, which has none until it activates.
+func FormatExpiresAt(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Local().Format("2006-01-02 15:04")
+}
+
+// ServerNames lists the names of the servers ws targets.
+func ServerNames(ws *WorkSession) []string {
+	names := make([]string, len(ws.Servers))
+	for i, srv := range ws.Servers {
+		names[i] = srv.Name
+	}
+	return names
+}
+
+// ClusterNames lists the names of the clusters ws targets.
+func ClusterNames(ws *WorkSession) []string {
+	names := make([]string, len(ws.Clusters))
+	for i, c := range ws.Clusters {
+		names[i] = c.Name
+	}
+	return names
+}
+
+// TargetsCluster reports whether ws names clusterID among its targets.
+func TargetsCluster(ws *WorkSession, clusterID string) bool {
+	for _, c := range ws.Clusters {
+		if strings.EqualFold(c.ID, clusterID) {
+			return true
+		}
+	}
+	return false
+}
+
+// ClusterSessionFilter narrows GetClusterWorkSessions. Empty fields are not
+// sent; Status takes several statuses separated by commas.
+type ClusterSessionFilter struct {
+	ClusterID     string
+	Status        string
+	RequesterType string
+	AssignedUser  string
+}
+
+// GetClusterWorkSessions returns, whole, the work sessions that target one
+// cluster, through the server's cluster filter.
+func GetClusterWorkSessions(ac *client.AlpaconClient, filter ClusterSessionFilter) ([]WorkSession, error) {
+	if strings.TrimSpace(filter.ClusterID) == "" {
+		return nil, errors.New("cluster ID is required")
+	}
+	params := map[string]string{"cluster": filter.ClusterID}
+	if filter.Status != "" {
+		params["status"] = filter.Status
+	}
+	if filter.RequesterType != "" {
+		params["requester_type"] = filter.RequesterType
+	}
+	if filter.AssignedUser != "" {
+		params["assigned_user"] = filter.AssignedUser
+	}
+	sessions, err := api.FetchAllPages[WorkSession](ac, workSessionURL, params)
+	if err != nil {
+		return nil, err
+	}
+	// A listed ID goes on to a read or an approval wait, so it is held to what
+	// a server-sent ID must be before any of it reaches a path.
+	for i := range sessions {
+		pathID, err := api.RequireResponseID(sessions[i].ID, "work session")
+		if err != nil {
+			return nil, err
+		}
+		sessions[i].ID = pathID.String()
+	}
+	return sessions, nil
+}
+
+// FormatDuration renders d the way the server reads a duration, HH:MM:SS
+// with the hours left unbounded, rounding up to the whole second so a
+// sub-second remainder is never dropped to zero.
+func FormatDuration(d time.Duration) string {
+	seconds := int64((d + time.Second - 1) / time.Second)
+	return fmt.Sprintf("%02d:%02d:%02d", seconds/3600, seconds/60%60, seconds%60)
 }
 
 func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (*WorkSession, error) {
@@ -70,10 +154,8 @@ func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (
 	return &session, nil
 }
 
-// UpdateWorkSession PATCHes a work session. Used to attach sudo policies to an
-// existing session (e.g. after an 'exec' sudo was denied). The server
-// may queue the change for approval, in which case it takes effect only once
-// approved.
+// UpdateWorkSession PATCHes a work session. The server may queue the change for approval, in
+// which case it takes effect only once approved.
 func UpdateWorkSession(ac *client.AlpaconClient, id string, req WorkSessionUpdateRequest) (*WorkSession, error) {
 	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
@@ -124,16 +206,10 @@ func CompleteWorkSession(ac *client.AlpaconClient, id string) error {
 	return err
 }
 
-// ExtendWorkSession requests a new expires_at for a running session. The
-// server answers 200 with the session already extended, or—when the
-// workspace's approval policy holds this request for a decision instead of
-// auto-approving it—202 with the session's PendingExtensionRequest populated
-// instead. The returned status is what tells the two apart, not
-// PendingExtensionRequest on its own: a 200 body can still carry a stale one
-// (the workspace's approval policy changed to auto-approve after the request
-// was filed, or a lapsed request the periodic sweep has not reached yet), so
-// a caller that branched on the field alone would report an already-applied
-// extension as still pending.
+// ExtendWorkSession requests a new expires_at for a running session and returns the HTTP status:
+// 200 when the session is already extended, 202 when the workspace's approval policy holds the
+// request and PendingExtensionRequest is populated. Branch on the status, not the field: a 200
+// body can still carry a stale request, such as a lapsed one the server has not yet cleared.
 func ExtendWorkSession(ac *client.AlpaconClient, id string, req WorkSessionExtendRequest) (*WorkSession, int, error) {
 	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
@@ -159,7 +235,8 @@ func RevokeWorkSession(ac *client.AlpaconClient, id string) error {
 	return err
 }
 
-// CancelWorkSession withdraws the requester's own pending session; the server restricts it to the creator/superuser and rejects non-pending sessions (unlike superuser-only RevokeWorkSession).
+// CancelWorkSession withdraws a pending session. Unlike the superuser-only RevokeWorkSession, the
+// server restricts it to the creator or a superuser, and it rejects a session no longer pending.
 func CancelWorkSession(ac *client.AlpaconClient, id string) error {
 	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
@@ -216,10 +293,9 @@ func ListTerminalSessionIDs(ac *client.AlpaconClient, id string) ([]string, erro
 	return ids, nil
 }
 
-// GetTerminalRecording reads one Websh session's recording through the work
-// session's records route, concatenating the chunks in order. The walk ends on a
-// null `next` or an empty page; a short page is not the last one. addedAt is the
-// first chunk's added_at, and found is false when the session has no recording.
+// GetTerminalRecording reads one Websh session's recording through the work session's records
+// route, joining the chunks in order. addedAt is the first chunk's added_at, and found is false
+// when the session has no recording.
 func GetTerminalRecording(ac *client.AlpaconClient, id, webshSessionID string) (record, addedAt string, found bool, err error) {
 	pathID, err := api.RequireID(id, "work session")
 	if err != nil {

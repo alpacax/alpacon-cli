@@ -50,12 +50,15 @@ This command requires staff or superuser privileges.`,
 			email = args[0]
 		} else {
 			if !utils.IsInteractiveShell() {
-				utils.CliErrorWithExit("email argument is required in non-interactive mode")
+				utils.CliUsageErrorWithExit("email argument is required in non-interactive mode")
 			}
 			email = utils.PromptForRequiredInput("Email: ")
 		}
 
 		if !strings.Contains(email, "@") {
+			if len(args) > 0 {
+				utils.CliUsageErrorWithExit("invalid email address: %s", email)
+			}
 			utils.CliErrorWithExit("invalid email address: %s", email)
 		}
 

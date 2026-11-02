@@ -37,7 +37,7 @@ names and status and tags as the server stores them.`,
 		if err != nil {
 			// Only the list endpoint's 404 means the surface is off; a 404 on
 			// the detail below is a cluster deleted since it was resolved.
-			if isSurfaceOff(err) {
+			if kubernetes.IsSurfaceOff(err) {
 				exitNotEnabled()
 			}
 			utils.CliErrorWithExit("Failed to retrieve the cluster: %s.", err)

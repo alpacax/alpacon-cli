@@ -25,8 +25,8 @@ type eventFrame struct {
 	} `json:"payload"`
 }
 
-// Writes nothing at all on failure, so stdout stays parseable. now and target are params
-// because frames carry no common timestamp and target belongs to the subscription.
+// renderEvent writes nothing on failure, so stdout stays parseable. now and target are
+// parameters because frames carry no common timestamp and target belongs to the subscription.
 func renderEvent(w io.Writer, raw []byte, format, target string, now time.Time) error {
 	if format == utils.OutputFormatJSON {
 		var line bytes.Buffer
