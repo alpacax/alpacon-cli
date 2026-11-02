@@ -15,8 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// setupTestConfig overrides the home directory so tests write to a temp dir.
-// t.Setenv automatically restores the original value when the test finishes.
+// setupTestConfig points HOME at a temp dir so tests write there.
 func setupTestConfig(t *testing.T) {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -136,7 +135,6 @@ func TestCreateConfig_BaseDomainOmittedFromJSON(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Read raw JSON to verify omitempty works
 	homeDir, _ := os.UserHomeDir()
 	data, err := os.ReadFile(filepath.Join(homeDir, ConfigFileDir, ConfigFileName))
 	require.NoError(t, err)
@@ -151,7 +149,6 @@ func TestCreateConfig_BaseDomainOmittedFromJSON(t *testing.T) {
 func TestSwitchWorkspace(t *testing.T) {
 	setupTestConfig(t)
 
-	// Create initial config
 	err := CreateConfig(
 		"https://ws1.us1.alpacon.io", "ws1",
 		"", "", "access-token", "refresh-token",
@@ -159,11 +156,9 @@ func TestSwitchWorkspace(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Switch workspace
 	err = SwitchWorkspace(loadedConfig(t), "https://ws2.us1.alpacon.io", "ws2", false)
 	require.NoError(t, err)
 
-	// Verify only URL and name changed
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "https://ws2.us1.alpacon.io", cfg.WorkspaceURL)
@@ -621,9 +616,7 @@ func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
 
 func TestGetActiveWorkSessionReportsNoSessionWhenNoConfigExists(t *testing.T) {
 	setupTestConfig(t)
-	// LoadConfig wraps the missing-file error with %w, and os.IsNotExist unwraps
-	// only the error types the os package defines—so the promise this makes had
-	// been reporting the absence of a config as a failure to read one.
+	// LoadConfig wraps the missing-file error with %w, which os.IsNotExist does not unwrap.
 	uuid, err := GetActiveWorkSession()
 	require.NoError(t, err)
 	assert.Empty(t, uuid)
@@ -724,6 +717,68 @@ func TestGetActiveWorkSession_FindsSessionStoredUnderTheHostLabel(t *testing.T) 
 
 	require.NoError(t, err)
 	assert.Equal(t, "uuid-old", got, "a session saved before the upgrade stays reachable")
+}
+
+func TestGetActiveWorkSessionFor_ReadsTheNamedWorkspaceNotTheCurrentOne(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+	require.NoError(t, SetActiveWorkSession("uuid-A"))
+	require.NoError(t, SwitchWorkspace(loadedConfig(t), "https://ws-b.example.com", "ws-b", false))
+	require.NoError(t, SetActiveWorkSession("uuid-B"))
+	require.NoError(t, SwitchWorkspace(loadedConfig(t), "https://ws-c.example.com", "ws-c", false))
+	require.NoError(t, SetActiveWorkSession("uuid-C"))
+
+	tests := []struct {
+		name      string
+		workspace string
+		want      string
+	}{
+		{"named workspace that is no longer current", "ws-a", "uuid-A"},
+		{"another named workspace that is no longer current", "ws-b", "uuid-B"},
+		{"current workspace with its own session", "ws-c", "uuid-C"},
+		{"workspace the config never saw", "ws-z", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := GetActiveWorkSessionFor(tt.workspace)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetActiveWorkSessionFor_HostLabelFallbackOnlyForTheCurrentWorkspace(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace string
+		want      string
+	}{
+		{"current workspace falls back to the host label", "frozen", "uuid-old"},
+		{"another workspace does not", "other", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupTestConfig(t)
+			require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "", "", "", 0, false))
+			require.NoError(t, SetActiveWorkSession("uuid-old"))
+			require.NoError(t, SetWorkspaceEnv("https://new-slug.us1.alpacon.io", "frozen", false))
+
+			got, err := GetActiveWorkSessionFor(tt.workspace)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetActiveWorkSessionFor_ReportsNoSessionWhenNoConfigExists(t *testing.T) {
+	setupTestConfig(t)
+
+	uuid, err := GetActiveWorkSessionFor("ws-a")
+
+	require.NoError(t, err)
+	assert.Empty(t, uuid)
 }
 
 func TestRestoreWorkspace_PutsBackHostLabelAndSchemaName(t *testing.T) {

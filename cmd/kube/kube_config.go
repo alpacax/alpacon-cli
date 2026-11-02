@@ -102,7 +102,7 @@ func runKubeConfig(cmd *cobra.Command, args []string) {
 	proxyPort := 0
 	if cmd.Flags().Changed("proxy-port") {
 		if err := validatePort(kubeConfigFlags.proxyPort); err != nil {
-			utils.CliErrorWithExit("--proxy-port %s.", err)
+			utils.CliUsageErrorWithExit("--proxy-port %s.", err)
 		}
 		proxyPort = kubeConfigFlags.proxyPort
 	}
@@ -254,6 +254,11 @@ func exitKubeSessionError(err error, clusterName, workSessionID string, fail fun
 // kubeSessionErrorHint says what to do about a refusal the server names with
 // a kube-session code, or returns "" for any other error.
 func kubeSessionErrorHint(err error, clusterName string) string {
+	// The server's hint is the guidance when the refusal carries one, and the
+	// caller's fallback line prints it under the error.
+	if utils.RefusalHint(err) != "" {
+		return ""
+	}
 	code, _ := utils.ParseErrorResponse(err)
 	switch code {
 	case utils.ClusterNotConnected:

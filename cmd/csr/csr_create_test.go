@@ -9,6 +9,7 @@ import (
 
 	certApi "github.com/alpacax/alpacon-cli/api/cert"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -168,4 +169,24 @@ func TestCreateSignRequestErrorText(t *testing.T) {
 			assert.Equal(t, want, createSignRequestErrorText(err, tt.validDays))
 		})
 	}
+}
+
+// hintedRefusal is a coded refusal carrying the server's hint.
+type hintedRefusal struct{ code, hint string }
+
+func (e hintedRefusal) Error() string       { return "request refused (code: " + e.code + ")" }
+func (e hintedRefusal) ErrorCode() string   { return e.code }
+func (e hintedRefusal) ErrorSource() string { return "" }
+func (e hintedRefusal) ErrorHint() string   { return e.hint }
+
+func TestCreateSignRequestErrorText_ServerHintReplacesTheLocalSentence(t *testing.T) {
+	t.Parallel()
+	const hint = "Request a validity within the CA's maximum."
+	err := hintedRefusal{code: certApi.CodeInvalidPeriod, hint: hint}
+
+	got := createSignRequestErrorText(err, 90)
+	assert.Equal(t, "Failed to send sign request to server: "+err.Error()+".", got)
+	assert.Equal(t, hint, utils.RefusalHint(utils.Reword(err, got)))
+
+	assert.Contains(t, createSignRequestErrorText(hintedRefusal{code: certApi.CodeInvalidPeriod}, 90), "The CA refused a validity of 90 days")
 }

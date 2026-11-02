@@ -36,9 +36,12 @@ const (
 // ordinary not-found.
 var ErrBlankName = api.ErrBlankName
 
-// auto_assigned asks the server which roles it counts as assigned on its own; false is not
-// a list of what the caller may grant. Which roles count differs by Alpacon release and the
-// response carries no such field, so only the server can tell.
+// ErrNotFound is re-exported for the same reason: ResolveRole's miss, told from a failed request.
+var ErrNotFound = api.ErrNotFound
+
+// GetRoleCatalog sends auto_assigned when set, asking the server which roles it counts as assigned
+// on its own; false is not a list of what the caller may grant. Which roles count differs by
+// Alpacon release and the response carries no such field, so only the server can tell.
 func GetRoleCatalog(ac *client.AlpaconClient, autoAssigned *bool) ([]RoleResponse, error) {
 	var params map[string]string
 	if autoAssigned != nil {
@@ -95,8 +98,8 @@ func GetRoleScopes(ac *client.AlpaconClient, roleID string) (*RoleScopesResponse
 	return &scopes, nil
 }
 
-// The endpoint offers no scope filter, so the workspace-wide row is picked out here. The
-// list is also narrowed to what the caller may see and answered 200, never 403, so an empty
+// GetUserBindings lists the user's bindings at every scope; the endpoint offers no scope filter.
+// The list is narrowed to what the caller may see and answered 200, never 403, so an empty
 // result reads exactly like "holds nothing"—no caller may take it as proof of absence.
 func GetUserBindings(ac *client.AlpaconClient, userID string) ([]UserRoleResponse, error) {
 	return api.FetchAllPages[UserRoleResponse](ac, userRolesURL, map[string]string{"user": userID})
@@ -114,8 +117,8 @@ func GetRoleHistory(ac *client.AlpaconClient, userID string, limit int) ([]RoleA
 	return api.FetchPagesUpTo[RoleAuditLogResponse](ac, roleAuditLogsURL, params, limit)
 }
 
-// The server refuses a second binding of the same role with both scope fields unset, so the
-// first workspace-wide match is the only one.
+// FindWorkspaceBinding returns the user's workspace-wide binding of roleID. The server refuses a
+// second binding of the same role with both scope fields unset, so the first match is the only one.
 func FindWorkspaceBinding(bindings []UserRoleResponse, roleID string) *UserRoleResponse {
 	for i := range bindings {
 		if bindings[i].Role.ID == roleID && bindings[i].IsWorkspaceWide() {
@@ -126,7 +129,8 @@ func FindWorkspaceBinding(bindings []UserRoleResponse, roleID string) *UserRoleR
 	return nil
 }
 
-// Matching by name lets a revoke find the admin companion without resolving a second role.
+// FindWorkspaceBindingByName matches by name, so a revoke can find the admin companion without
+// resolving a second role.
 func FindWorkspaceBindingByName(bindings []UserRoleResponse, roleName string) *UserRoleResponse {
 	for i := range bindings {
 		if bindings[i].Role.Name == roleName && bindings[i].IsWorkspaceWide() {
@@ -182,8 +186,9 @@ func BindingAttributesFrom(bindings []UserRoleResponse) []UserRoleAttributes {
 	return result
 }
 
-// A nil usernames map means names were never resolved, so the id—the value other commands
-// accept—stands in; the display name is a fallback only when resolution ran and missed.
+// HolderAttributesFrom labels holders by username. A nil usernames map means names were never
+// resolved, so the id—the value other commands accept—stands in; the display name is a fallback
+// only when resolution ran and missed.
 func HolderAttributesFrom(bindings []UserRoleResponse, usernames map[string]string) []RoleHolderAttributes {
 	var result []RoleHolderAttributes
 	for _, binding := range bindings {
@@ -206,7 +211,7 @@ func HolderAttributesFrom(bindings []UserRoleResponse, usernames map[string]stri
 	return result
 }
 
-// Wildcards first: they subsume the concrete rows below them.
+// ScopeAttributesFrom lists wildcards first: they subsume the concrete rows below them.
 func ScopeAttributesFrom(scopes *RoleScopesResponse) []RoleScopeAttributes {
 	var result []RoleScopeAttributes
 	for _, wildcard := range scopes.Wildcards {
@@ -271,8 +276,8 @@ func IsDuplicateBinding(err error) bool {
 	return code == CodeRoleAssignmentDuplicate
 }
 
-// The IAM user endpoint, not /api/rbac/: an API token reaches it where the RBAC routes
-// refuse one.
+// GetEffectivePermissions reads the IAM user endpoint, not /api/rbac/: an API token reaches it
+// where the RBAC routes refuse one.
 func GetEffectivePermissions(ac *client.AlpaconClient, userID string) (*EffectivePermissionsResponse, error) {
 	pathID, err := api.RequireID(userID, "user")
 	if err != nil {
@@ -309,8 +314,8 @@ func GetPermissionPatterns(ac *client.AlpaconClient, userID string) (*Permission
 	return &patterns, nil
 }
 
-// Workspace-wide question only: a permission held through an object-scoped binding
-// answers false here, because no object is named.
+// CheckPermission asks a workspace-wide question only: a permission held through an object-scoped
+// binding answers false here, because no object is named.
 func CheckPermission(ac *client.AlpaconClient, userID, permission string) (bool, error) {
 	pathID, err := api.RequireID(userID, "user")
 	if err != nil {

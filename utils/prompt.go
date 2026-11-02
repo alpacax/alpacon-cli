@@ -17,7 +17,6 @@ func PromptForPassword(promptText string) string {
 
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
-		// Fallback to standard hidden input
 		bytePassword, err := term.ReadPassword(int(os.Stdin.Fd()))
 		if err != nil {
 			return ""
@@ -48,7 +47,7 @@ func PromptForPassword(promptText string) string {
 			_ = term.Restore(int(os.Stdin.Fd()), oldState)
 			os.Exit(1)
 		default:
-			if buf[0] >= 32 { // printable characters only
+			if buf[0] >= 32 {
 				password = append(password, buf[0])
 				_, _ = fmt.Fprint(TrackedStderr(), "*")
 			}
@@ -140,12 +139,18 @@ func PromptForListInput(promptText string) []string {
 // Returns on confirm; exits the program on decline.
 func ConfirmAction(msg string, args ...any) {
 	if !IsInteractiveShell() {
-		CliErrorWithExit("This operation requires confirmation. Use --yes (-y) to skip the prompt in non-interactive mode.")
+		CliErrorWithCode(ExitCodeUsageError, ErrorCodeConfirmationRequired, "This operation requires confirmation. Use --yes (-y) to skip the prompt in non-interactive mode.")
 	}
-	message := fmt.Sprintf(msg, args...)
-	if !PromptForBool(message) {
+	if !PromptForBool(confirmPrompt(msg, args...)) {
 		CliInfoWithExit("Operation cancelled.")
 	}
+}
+
+// confirmPrompt formats a confirmation prompt without control characters, so a
+// server's value such as an email cannot repaint what the answer acts on.
+func confirmPrompt(msg string, args ...any) string {
+	prompt, _ := SanitizeTerminalLine(fmt.Sprintf(msg, args...))
+	return prompt
 }
 
 func PromptForBool(prompt string) bool {
@@ -173,4 +178,20 @@ func promptForBool(r io.Reader, prompt string) bool {
 		}
 		CliWarning("Invalid input. Please enter 'y' (yes) or 'n' (no).")
 	}
+}
+
+// PrintDeviceCodePrompt prints the device code prompt and returns the URL it printed, the one the
+// browser must open, so the operator lands on the address they read. Both values come from the
+// authorization server: each is sanitized as a single line, since a newline would let the server
+// write its own line into the prompt. Sanitizing runs before Blue and Bold, since sanitizing
+// afterward would strip their escape sequences.
+func PrintDeviceCodePrompt(w io.Writer, verificationURI, userCode string) (printedURI string) {
+	uri, uriAltered := SanitizeTerminalLine(verificationURI)
+	code, codeAltered := SanitizeTerminalLine(userCode)
+	if uriAltered || codeAltered {
+		WarnTerminalTextAltered(w, "")
+	}
+	_, _ = fmt.Fprintf(w, "\nPlease authenticate by visiting:\n%s\n\n", Blue(uri))
+	_, _ = fmt.Fprintf(w, "Verification code: %s\n\n", Bold(code))
+	return uri
 }

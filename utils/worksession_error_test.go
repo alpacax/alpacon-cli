@@ -51,7 +51,7 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {
-			got := buildWorkSessionDiagnostic(tt.code, "websh", "prod-1", "Browser login", "")
+			got := buildWorkSessionDiagnostic(tt.code, "websh", "prod-1", "Browser login", "", "")
 			assert.Contains(t, got, "the websh operation requires an active WorkSession")
 			assert.Contains(t, got, tt.wantReason)
 			assert.Contains(t, got, tt.wantNext)
@@ -74,7 +74,7 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 
 func TestBuildWorkSessionDiagnostic_APIToken(t *testing.T) {
 	t.Parallel()
-	got := buildWorkSessionDiagnostic(WorkSessionRequired, "command", "srv-1", "API token", "")
+	got := buildWorkSessionDiagnostic(WorkSessionRequired, "command", "srv-1", "API token", "", "")
 	assert.Contains(t, got, "API token")
 	assert.NotContains(t, got, "(interactive)")
 }
@@ -94,7 +94,7 @@ func TestBuildWorkSessionDiagnostic_TokenNoteMatchesOperation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := buildWorkSessionDiagnostic(WorkSessionRequired, tt.operation, "prod-1", "Browser login", "")
+			got := buildWorkSessionDiagnostic(WorkSessionRequired, tt.operation, "prod-1", "Browser login", "", "")
 			assert.Contains(t, got, tt.want)
 			assert.NotContains(t, got, tt.notWant)
 		})
@@ -115,7 +115,7 @@ func TestBuildWorkSessionErrorEnvelope(t *testing.T) {
 
 	for _, code := range tests {
 		t.Run(code, func(t *testing.T) {
-			envelope := buildWorkSessionErrorEnvelope(code, "command", "srv-1", "API token", "")
+			envelope := buildWorkSessionErrorEnvelope(code, "command", "srv-1", "API token", "", "")
 
 			assert.False(t, envelope.OK)
 			assert.Equal(t, ExitCodeWorkSessionDenied, envelope.ExitCode)
@@ -132,7 +132,7 @@ func TestBuildWorkSessionErrorEnvelope(t *testing.T) {
 
 func TestBuildWorkSessionErrorEnvelope_WithActiveWS(t *testing.T) {
 	t.Parallel()
-	envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, "webftp", "srv-2", "Browser login", "abc-123-uuid")
+	envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, "webftp", "srv-2", "Browser login", "abc-123-uuid", "")
 
 	assert.NotNil(t, envelope.Context.CurrentWorksession)
 	assert.Equal(t, "abc-123-uuid", *envelope.Context.CurrentWorksession)
@@ -159,7 +159,7 @@ func TestBuildWorkSessionErrorEnvelope_WebshAgentActionAvoidsWebshScope(t *testi
 		t.Run(code, func(t *testing.T) {
 			t.Parallel()
 
-			envelope := buildWorkSessionErrorEnvelope(code, OperationWebsh, "srv-1", "Browser login", "")
+			envelope := buildWorkSessionErrorEnvelope(code, OperationWebsh, "srv-1", "Browser login", "", "")
 
 			agentCmd := `alpacon work-session create --scope command --server srv-1 --expires-in 1h --purpose "<intent>" --requester-type agent`
 			assert.Contains(t, nextActionCommands(envelope.NextActions), agentCmd)
@@ -184,8 +184,7 @@ func nextActionCommands(actions []NextAction) []string {
 
 func TestBuildWorkSessionErrorEnvelope_ExpiredWithoutActiveWS(t *testing.T) {
 	t.Parallel()
-	// When activeWS is unknown, the placeholder must remain.
-	envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, "webftp", "srv-2", "Browser login", "")
+	envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, "webftp", "srv-2", "Browser login", "", "")
 
 	assert.Contains(t, nextActionCommands(envelope.NextActions), "alpacon work-session extend <ID>")
 }
@@ -194,18 +193,16 @@ func TestBuildWorkSessionErrorEnvelope_RequiredKeepsPlaceholder(t *testing.T) {
 	t.Parallel()
 	// For work_session_required, activeWS is unrelated to the suggested `use <ID>`,
 	// so the placeholder must NOT be substituted even when activeWS is known.
-	envelope := buildWorkSessionErrorEnvelope(WorkSessionRequired, "command", "srv-1", "Browser login", "abc-123-uuid")
+	envelope := buildWorkSessionErrorEnvelope(WorkSessionRequired, "command", "srv-1", "Browser login", "abc-123-uuid", "")
 
 	assert.Contains(t, nextActionCommands(envelope.NextActions), "alpacon work-session use <ID>")
 }
 
 func TestHandleWorkSessionError_NoOp(t *testing.T) {
 	t.Parallel()
-	// Non-WorkSession errors must not trigger any exit — just return.
-	// If HandleWorkSessionError calls os.Exit for this error, the test process dies.
+	// If HandleWorkSessionError exits on a non-WorkSession error, the test process dies.
 	err := errors.New("some unrelated error")
 	HandleWorkSessionError(err, "websh", "srv", "Browser login", "")
-	// reaching here means no exit — test passes
 }
 
 func TestHandleWorkSessionError_NilError(t *testing.T) {
@@ -267,7 +264,7 @@ func diagnosticNextCommands(t *testing.T, diagnostic string) []string {
 
 func TestBuildWorkSessionDiagnostic_KubeWithoutClusterKeepsPlaceholder(t *testing.T) {
 	t.Parallel()
-	got := buildWorkSessionDiagnostic(WorkSessionRequired, OperationKube, "", "Browser login", "")
+	got := buildWorkSessionDiagnostic(WorkSessionRequired, OperationKube, "", "Browser login", "", "")
 	assert.NotContains(t, got, "target cluster")
 	assert.Equal(t, []string{
 		"alpacon work-session ls --status active",
@@ -292,7 +289,7 @@ func TestBuildWorkSessionDiagnostic_Kube(t *testing.T) {
 	for _, tc := range kubeWorkSessionCases() {
 		t.Run(kubeCaseName(tc.code, tc.activeWS), func(t *testing.T) {
 			t.Parallel()
-			got := buildWorkSessionDiagnostic(tc.code, OperationKube, "prod-east", "Browser login", tc.activeWS)
+			got := buildWorkSessionDiagnostic(tc.code, OperationKube, "prod-east", "Browser login", tc.activeWS, "")
 
 			lines := strings.Split(got, "\n")
 			require.NotEmpty(t, lines)
@@ -316,7 +313,7 @@ func TestBuildWorkSessionErrorEnvelope_Kube(t *testing.T) {
 	for _, tc := range kubeWorkSessionCases() {
 		t.Run(kubeCaseName(tc.code, tc.activeWS), func(t *testing.T) {
 			t.Parallel()
-			envelope := buildWorkSessionErrorEnvelope(tc.code, OperationKube, "prod-east", "Browser login", tc.activeWS)
+			envelope := buildWorkSessionErrorEnvelope(tc.code, OperationKube, "prod-east", "Browser login", tc.activeWS, "")
 
 			assert.False(t, envelope.OK)
 			assert.Equal(t, ExitCodeWorkSessionDenied, envelope.ExitCode)
@@ -372,7 +369,7 @@ func TestWorkSessionNextActions_AgentRecoveryAvoidsForbiddenScope(t *testing.T) 
 		})
 	}
 
-	got := buildWorkSessionDiagnostic(WorkSessionAgentSessionRequired, OperationWebsh, "prod-1", "Browser login", "")
+	got := buildWorkSessionDiagnostic(WorkSessionAgentSessionRequired, OperationWebsh, "prod-1", "Browser login", "", "")
 	assert.Contains(t, got, "--scope command --server prod-1")
 	assert.NotContains(t, got, "--scope websh")
 	assert.Contains(t, got, "an agent session cannot hold websh")
@@ -402,11 +399,11 @@ func TestWorkSessionNextActions_AgentRecoveryKeepsAllowedScope(t *testing.T) {
 
 func TestBuildWorkSessionErrorEnvelope_TargetClustersOnlyForKube(t *testing.T) {
 	t.Parallel()
-	body, err := json.Marshal(buildWorkSessionErrorEnvelope(WorkSessionRequired, OperationCommand, "web-01", "Browser login", ""))
+	body, err := json.Marshal(buildWorkSessionErrorEnvelope(WorkSessionRequired, OperationCommand, "web-01", "Browser login", "", ""))
 	require.NoError(t, err)
 	assert.NotContains(t, string(body), "target_clusters")
 
-	body, err = json.Marshal(buildWorkSessionErrorEnvelope(WorkSessionRequired, OperationKube, "", "Browser login", ""))
+	body, err = json.Marshal(buildWorkSessionErrorEnvelope(WorkSessionRequired, OperationKube, "", "Browser login", "", ""))
 	require.NoError(t, err)
 	assert.Contains(t, string(body), `"target_servers":[]`)
 	assert.NotContains(t, string(body), "target_clusters")
@@ -426,7 +423,7 @@ func TestKubeWorkSessionNextActions_Descriptions(t *testing.T) {
 
 func TestKubeWorkSessionAgentSessionRequired(t *testing.T) {
 	t.Setenv("AI_AGENT", "test-agent")
-	got := buildWorkSessionDiagnostic(WorkSessionAgentSessionRequired, OperationKube, "prod-east", "Browser login", "")
+	got := buildWorkSessionDiagnostic(WorkSessionAgentSessionRequired, OperationKube, "prod-east", "Browser login", "", "")
 	assert.Contains(t, got, "Detected AI agent")
 	assert.Contains(t, got, "--requester-type agent")
 	assert.NotContains(t, diagnosticNextCommands(t, got), "alpacon kube login prod-east")
@@ -446,11 +443,11 @@ func TestWorkSessionAccountNotApproved(t *testing.T) {
 	assert.NotContains(t, actions[1].Command, "--use")
 	assert.Equal(t, "or create a session for this account", actions[1].Description)
 
-	got := buildWorkSessionDiagnostic(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", "")
+	got := buildWorkSessionDiagnostic(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", "", "")
 	assert.Contains(t, got, reason)
 	assert.Contains(t, got, "alpacon exec -u <approved account> web-01")
 
-	envelope := buildWorkSessionErrorEnvelope(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", "")
+	envelope := buildWorkSessionErrorEnvelope(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", "", "")
 	assert.Equal(t, WorkSessionAccountNotApproved, envelope.ErrorCode)
 	assert.Equal(t, reason, envelope.Reason)
 }
@@ -477,9 +474,42 @@ func TestWorkSessionAccountNotApproved_RetryCarriesSession(t *testing.T) {
 			actions := workSessionNextActions(WorkSessionAccountNotApproved, OperationCommand, "web-01", tc.activeWS)
 			require.NotEmpty(t, actions)
 			assert.Equal(t, tc.want, actions[0].Command)
-			envelope := buildWorkSessionErrorEnvelope(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", tc.activeWS)
+			envelope := buildWorkSessionErrorEnvelope(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", tc.activeWS, "")
 			assert.Equal(t, tc.want, envelope.NextActions[0].Command)
-			assert.Contains(t, buildWorkSessionDiagnostic(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", tc.activeWS), tc.want)
+			assert.Contains(t, buildWorkSessionDiagnostic(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", tc.activeWS, ""), tc.want)
 		})
 	}
+}
+
+// The server's hint leads the Next list in both outputs, and the code-built
+// actions follow it; without a hint the list is what the code builds.
+func TestWorkSessionGuidance_ServerHintComesFirst(t *testing.T) {
+	t.Parallel()
+	const hint = "This agent session runs only as the account its approval covered; use that account, or request a work session for the account you need."
+
+	plain := workSessionGuidance(WorkSessionAccountNotApproved, OperationCommand, "web-01", "", "")
+	assert.Equal(t, workSessionNextActions(WorkSessionAccountNotApproved, OperationCommand, "web-01", ""), plain)
+
+	hinted := workSessionGuidance(WorkSessionAccountNotApproved, OperationCommand, "web-01", "", hint)
+	require.Len(t, hinted, len(plain)+1)
+	assert.Equal(t, NextAction{Description: hint}, hinted[0])
+	for i, action := range plain {
+		assert.Equal(t, action.Command, hinted[i+1].Command)
+	}
+	// The hint already says to request a session for the account, so the
+	// matching description goes and its command stays.
+	assert.Equal(t, NextAction{Command: plain[1].Command}, hinted[2])
+	assert.Equal(t, plain[0].Description, hinted[1].Description)
+
+	envelope := buildWorkSessionErrorEnvelope(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", "", hint)
+	assert.Equal(t, hinted, envelope.NextActions)
+	assert.Equal(t, ExitCodeWorkSessionDenied, envelope.ExitCode)
+
+	diagnostic := buildWorkSessionDiagnostic(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", "", hint)
+	assert.Contains(t, diagnostic, "Next:\n  "+hint+"\n  "+plain[0].Command)
+	assert.NotContains(t, diagnostic, accountSessionCreateDescription)
+
+	// A code with no matching description keeps every description.
+	required := workSessionGuidance(WorkSessionRequired, OperationCommand, "web-01", "", hint)
+	assert.Equal(t, append([]NextAction{{Description: hint}}, workSessionNextActions(WorkSessionRequired, OperationCommand, "web-01", "")...), required)
 }

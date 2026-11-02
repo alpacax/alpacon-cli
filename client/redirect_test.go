@@ -22,7 +22,6 @@ const (
 )
 
 type (
-	// recordedRequest is what reached a redirect target.
 	recordedRequest struct {
 		Authorization string
 		Body          string

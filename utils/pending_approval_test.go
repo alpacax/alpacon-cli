@@ -38,9 +38,7 @@ func TestPrintPendingApproval_JSONOutput(t *testing.T) {
 	assert.Equal(t, "apr-123", got.Context.RequestID)
 	assert.Equal(t, "needs approval", got.Message)
 	require.NotEmpty(t, got.NextActions)
-	// The re-run hint leads the next actions as a pure, executable command.
 	assert.Equal(t, "alpacon exec srv -- sudo reboot", got.NextActions[0].Command)
-	// The console-approval pointer is guidance only—no runnable command.
 	last := got.NextActions[len(got.NextActions)-1]
 	assert.Empty(t, last.Command, "the console-approval pointer carries no command")
 	assert.Contains(t, last.Description, "Alpacon console")
@@ -54,8 +52,6 @@ func TestPrintPendingApproval_JSONOutput_OmitsEmptyCommand(t *testing.T) {
 		})
 	})
 
-	// command has omitempty, so the description-only console pointer must not
-	// serialize an empty "command" field. Only the leading re-run hint carries one.
 	assert.Equal(t, 1, strings.Count(out, `"command"`), "empty command must be omitted, not serialized as \"\"\noutput: %s", out)
 }
 
@@ -67,9 +63,7 @@ func TestPrintPendingApproval_JSONOutput_OmitsEmptyRequestID(t *testing.T) {
 		})
 	})
 
-	// request_id has omitempty, so an absent id must not appear as an empty string.
 	assert.NotContains(t, out, `"request_id"`, "empty request_id must be omitted, not serialized as \"\"")
-	// status stays present and stable even without a request id.
 	assert.Contains(t, out, `"status": "`+PendingApprovalStatus+`"`)
 }
 
@@ -85,9 +79,26 @@ func TestPrintPendingApproval_JSONOutput_OmitsEmptyRetry(t *testing.T) {
 		NextActions []NextAction `json:"next_actions"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &got), "output: %s", out)
-	// An empty retry hint must not add a blank leading action; only the console
-	// pointer remains.
 	require.Len(t, got.NextActions, 1)
 	assert.Empty(t, got.NextActions[0].Command)
 	assert.Contains(t, got.NextActions[0].Description, "Alpacon console")
+}
+
+// The extra follow-ups a caller passes, such as a refusal's hint, ride in the
+// pending envelope's next_actions after the retry.
+func TestPrintPendingApproval_CarriesARefusalHint(t *testing.T) {
+	const hint = "Too many requests were made in a short time; wait, then retry."
+	var out string
+	withFormat(OutputFormatJSON, func() {
+		out = testutil.CaptureStdout(t, func() {
+			PrintPendingApproval("Work session ws-1: timed out. The outcome is still open.", "",
+				NextAction{Command: "alpacon work-session use ws-1"},
+				RefusalNextActions(&hintedError{hint: hint})...)
+		})
+	})
+	var got struct {
+		NextActions []NextAction `json:"next_actions"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &got), "stdout: %s", out)
+	assert.Contains(t, got.NextActions, NextAction{Description: hint})
 }

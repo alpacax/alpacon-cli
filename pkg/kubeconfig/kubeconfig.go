@@ -483,11 +483,9 @@ func (ed *Editor) Save() error {
 		return fmt.Errorf("failed to encode %s: %w", ed.path, err)
 	}
 
-	// An existing file keeps its mode, and it is passed as the mode for a new
-	// file too: SaveStreamAtomic warns when the kept mode is wider than the one
-	// requested and advises removing the file, which is wrong for a kubeconfig
-	// that holds the user's other clusters. The warning below says what to do
-	// instead. Re-permissioning the user's file is not this command's call.
+	// An existing file keeps its mode, also passed as the new-file mode: otherwise
+	// SaveStreamAtomic warns and advises removing a file that holds the user's other
+	// clusters. The warning below says what to do; re-permissioning is not our call.
 	perm := os.FileMode(newFilePerm)
 	existing := false
 	if info, err := os.Stat(ed.path); err == nil && info.Mode().IsRegular() {

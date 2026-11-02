@@ -229,10 +229,8 @@ type statusOnlyError struct{ status int }
 func (e statusOnlyError) Error() string       { return "forbidden" }
 func (e statusOnlyError) HTTPStatusCode() int { return e.status }
 
-// codedForbiddenError is a 403 that also carries the code/gate/missing a real
-// server RBAC or token-scope refusal sends—everything the new routing
-// in describeRBACError reads, without round-tripping through an httptest
-// server and the client package's JSON parsing to get there.
+// codedForbiddenError is a 403 carrying the code/gate/missing a real RBAC or token-scope refusal
+// sends, so describeRBACError's routing is tested without an httptest server.
 type codedForbiddenError struct {
 	code    string
 	gate    string
@@ -424,6 +422,31 @@ func TestResolveSubject(t *testing.T) {
 	}
 }
 
+// hintedForbiddenError is codedForbiddenError carrying the server's hint.
+type hintedForbiddenError struct {
+	codedForbiddenError
+	hint string
+}
+
+func (e hintedForbiddenError) ErrorHint() string { return e.hint }
+
+// The server's hint is the guidance, so the refusal passes through unchanged
+// for the error output to print the hint under it; without a hint the local
+// sentence still answers.
+func TestDescribeRBACError_DefersToTheServerHint(t *testing.T) {
+	t.Parallel()
+	ac := &client.AlpaconClient{}
+	ac.SetAccessToken("bearer-token")
+	coded := codedForbiddenError{code: codeRolePermissionRequired, gate: "role", missing: []string{"role"}}
+
+	hinted := hintedForbiddenError{codedForbiddenError: coded, hint: "Your roles do not allow this action; it needs a role that covers it."}
+	assert.Equal(t, error(hinted), describeRBACError(ac, gateRoleWrite, hinted))
+
+	got := describeRBACError(ac, gateRoleWrite, coded)
+	require.Error(t, got)
+	assert.Contains(t, got.Error(), "requires the superuser role")
+}
+
 // A coded 403 never reaches the codeless branch, so it needs a case of its own.
 func TestDescribeRBACError_MapsPermissionDenied(t *testing.T) {
 	t.Parallel()
@@ -436,10 +459,8 @@ func TestDescribeRBACError_MapsPermissionDenied(t *testing.T) {
 	assert.Contains(t, got.Error(), "not an account you may read")
 }
 
-// codePermissionDenied's wording assumed a read (a permission list
-// or a permission check); describeRBACError is reachable from the role-write
-// gate too, where "that is not an account you may read" misdescribes a write
-// refusal as a visibility problem.
+// describeRBACError is reachable from the role-write gate too, where codePermissionDenied's read
+// wording would misdescribe a write refusal as a visibility problem.
 func TestDescribeRBACError_MapsPermissionDeniedForWrite(t *testing.T) {
 	t.Parallel()
 	ac := &client.AlpaconClient{}
@@ -452,10 +473,8 @@ func TestDescribeRBACError_MapsPermissionDeniedForWrite(t *testing.T) {
 	assert.Contains(t, got.Error(), "permission to make that change")
 }
 
-// The server's role gate now answers a refusal with a coded 403 instead of
-// a bare {"detail": ...}. The guidance must not change with it: a coded
-// refusal and the code-less one it replaces name exactly the same fix, for
-// every gate and both credential kinds.
+// A coded role-gate 403 and the code-less one must name the same fix, for every gate and both
+// credential kinds.
 func TestDescribeRBACError_CodedRoleGateMatchesCodelessWording(t *testing.T) {
 	t.Parallel()
 	bearer := &client.AlpaconClient{}

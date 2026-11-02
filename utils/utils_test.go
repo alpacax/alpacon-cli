@@ -94,6 +94,62 @@ func TestBuildURL(t *testing.T) {
 	}
 }
 
+func TestSetQuery(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		rawURL string
+		set    map[string]string
+		del    []string
+		want   string
+	}{
+		{
+			name:   "preserves URL components without adding a slash",
+			rawURL: "wss://alice:password@example.com:8443/ws/a%2Fb#part%2Fone",
+			set:    map[string]string{"replay": "1"},
+			want:   "wss://alice:password@example.com:8443/ws/a%2Fb?replay=1#part%2Fone",
+		},
+		{
+			name:   "preserves other keys and repeated values",
+			rawURL: "wss://example.com/ws?empty=&token=keep&tag=one&tag=two",
+			set:    map[string]string{"replay": "1"},
+			want:   "wss://example.com/ws?empty=&replay=1&tag=one&tag=two&token=keep",
+		},
+		{
+			name:   "deletes keys and all their values",
+			rawURL: "wss://example.com/ws?replay=1&replay=2&replay_from=99&token=keep",
+			del:    []string{"replay", "replay_from", "missing"},
+			want:   "wss://example.com/ws?token=keep",
+		},
+		{
+			name:   "sets keys after deleting and encodes values",
+			rawURL: "wss://example.com/ws?k=old&k=older",
+			set:    map[string]string{"k": "a&b c", "replay_epoch": ""},
+			del:    []string{"k"},
+			want:   "wss://example.com/ws?k=a%26b+c&replay_epoch=",
+		},
+		{
+			name:   "replaces repeated values",
+			rawURL: "wss://example.com/ws?k=old&k=older",
+			set:    map[string]string{"k": "new"},
+			want:   "wss://example.com/ws?k=new",
+		},
+		{
+			name:   "parse error returns original URL",
+			rawURL: "wss://example.com/ws/%zz?replay=old",
+			set:    map[string]string{"replay": "1"},
+			del:    []string{"replay"},
+			want:   "wss://example.com/ws/%zz?replay=old",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, SetQuery(tt.rawURL, tt.set, tt.del...))
+		})
+	}
+}
+
 func TestTimeUtils(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
@@ -109,10 +165,8 @@ func TestTimeUtils(t *testing.T) {
 		{"3 hours ago", now.Add(-3 * time.Hour), "3 hours ago"},
 		{"yesterday", now.Add(-30 * time.Hour), "yesterday"},
 		{"3 days ago", now.Add(-72 * time.Hour), "3 days ago"},
-		// Future cases use a buffer (e.g. +30s, +30m) to guard against integer
-		// truncation: time.Duration division truncates toward zero, so
-		// 5m0s becomes 4m59s by the time it reaches the threshold check.
-		// Past cases don't need a buffer because they are already in the past.
+		// Future cases add a buffer: time.Duration division truncates toward zero, so an exact 5m0s
+		// reads as 4m59s by the threshold check.
 		{"in a few seconds", now.Add(30 * time.Second), "in a few seconds"},
 		{"in 5 minutes", now.Add(5*time.Minute + 30*time.Second), "in 5 minutes"},
 		{"in 3 hours", now.Add(3*time.Hour + 30*time.Minute), "in 3 hours"},
@@ -179,8 +233,8 @@ func TestSaveFile_CreatesNestedDirectories(t *testing.T) {
 	assert.Equal(t, "hello world", string(content))
 }
 
-// TestSaveFile_RetainsExistingFileOnWriteError proves dest stays untouched when
-// the write can't even start; TestSaveStreamAtomic_RetainsExistingFileOnReadError covers the mid-copy case.
+// TestSaveFile_RetainsExistingFileOnWriteError covers a write that cannot start; the mid-copy case
+// is TestSaveStreamAtomic_RetainsExistingFileOnReadError.
 func TestSaveFile_RetainsExistingFileOnWriteError(t *testing.T) {
 	t.Parallel()
 	skipUnlessUnixModes(t)
@@ -656,8 +710,7 @@ func TestRequirePositiveIntExitsWithUsageErrorCode(t *testing.T) {
 	assert.Equal(t, ExitCodeUsageError, exitErr.ExitCode())
 }
 
-// Serial: the child process reaches an os.Exit, and the parent's own run of this
-// function is a two-line guard that parallelism buys nothing for.
+// Serial: the child process reaches an os.Exit, and the parent's own run returns at once.
 func TestRequirePositiveIntHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_REQUIRE_POSITIVE_INT_HELPER") != "1" {
 		return

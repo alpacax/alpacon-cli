@@ -5,12 +5,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// approveRejectExcludedMessage explains why the CLI no longer performs approve or
-// reject. The CLI is an execution/request surface only: approval happens out of
-// band in the Alpacon console (web/Slack), and the server now refuses (HTTP 403)
-// any approve/reject coming from the CLI credential channel. The subcommands
-// remain registered so the message is discoverable and existing scripts get an
-// actionable, intentional exit instead of an "unknown command".
+// approveRejectExcludedMessage explains why the CLI no longer approves or rejects. The server
+// refuses (HTTP 403) approve/reject from the CLI credential channel; the subcommands stay
+// registered so existing scripts get this message and a non-zero exit instead of "unknown command".
 const approveRejectExcludedMessage = "Approvals must be done in the Alpacon console (web), not the CLI. " +
 	"The CLI is an execution and request surface only; approval and rejection happen out of band. " +
 	"Use 'alpacon approval ls' to track a request's status."
@@ -27,8 +24,7 @@ the CLI credential channel. Use 'alpacon approval ls' to track status.`,
 	Example: `  # Approve in the Alpacon console (web), then track status here:
   alpacon approval ls --status approved`,
 	Run: func(cmd *cobra.Command, args []string) {
-		// Exit non-zero so a script that expected the approval to happen does not
-		// mistake this for success—the CLI must never pretend to approve.
+		// Non-zero exit: a script that expected the approval must not read this as success.
 		utils.CliErrorWithExit("%s", approveRejectExcludedMessage)
 	},
 }

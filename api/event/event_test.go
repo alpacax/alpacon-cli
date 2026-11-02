@@ -215,9 +215,8 @@ func TestPollCommandExecution(t *testing.T) {
 	}
 }
 
-// runCommandBodyCapture holds the captured POST body fields for the
-// /api/events/commands/ request. Access is guarded by mu because the
-// test server handler runs on a separate goroutine from the test body.
+// runCommandBodyCapture holds the captured POST body fields; mu guards them because
+// the test server handler runs on another goroutine.
 type runCommandBodyCapture struct {
 	mu                sync.Mutex
 	hadWorkSessionKey bool
@@ -242,9 +241,8 @@ func (c *runCommandBodyCapture) snapshot() (hadKey bool, ws string, seen bool) {
 	return c.hadWorkSessionKey, c.workSession, c.postSeen
 }
 
-// newRunCommandBodyCaptureServer returns a test server that responds to
-// GET /api/servers/servers/?name=... with a 1-item server list and captures the
-// POST body for /api/events/commands/, returning a minimal CommandResponse list.
+// newRunCommandBodyCaptureServer answers the server-name lookup with one server and
+// captures the POST body for /api/events/commands/.
 func newRunCommandBodyCaptureServer(t *testing.T, capture *runCommandBodyCapture) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -386,6 +384,62 @@ func TestErrorFromDetails_RejectedReturnsCommandRejectedError(t *testing.T) {
 	assert.Contains(t, err.Error(), "rejected by a reviewer")
 }
 
+// TestErrorFromDetails_UseFileExecutionCarriesCause pins the gate's refusal of
+// a script body on the command line: the cause reaches the error, its text
+// names the code, and ErrorCode hands the code to the --output json envelope.
+func TestErrorFromDetails_UseFileExecutionCarriesCause(t *testing.T) {
+	t.Parallel()
+	var d EventDetails
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"id": "cmd-9",
+		"status": "rejected",
+		"verification_status": "rejected",
+		"rejection_cause": "use_file_execution",
+		"rejection_gate": "approval",
+		"result": "Save the script to a file and run it as a verified file.",
+		"server": {"id": "srv-1", "name": "prod"}
+	}`), &d))
+
+	err := errorFromDetails(d)
+	var rejected *CommandRejectedError
+	require.ErrorAs(t, err, &rejected)
+	assert.Equal(t, RejectionCauseUseFileExecution, rejected.Cause)
+	assert.Equal(t, "command cmd-9 was refused because its command line carries a script body (use_file_execution)", err.Error())
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, RejectionCauseUseFileExecution, code)
+}
+
+func TestCommandRejectedError_CauseMapping(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		cause string
+		want  string
+	}{
+		{cause: RejectionCauseApprovalExpired, want: "was not approved before the approval request expired"},
+		{cause: RejectionCauseApprovalRejected, want: "was rejected by a reviewer"},
+		{cause: "command_acl_denied", want: "was refused (command_acl_denied)"},
+		{cause: "command_acl_unavailable", want: "was refused (command_acl_unavailable)"},
+		{cause: "risk_denied", want: "was refused (risk_denied)"},
+		{cause: "risk_unavailable", want: "was refused (risk_unavailable)"},
+		{cause: "approval_policy_denied", want: "was refused (approval_policy_denied)"},
+		{cause: "approval_cancelled", want: "was refused (approval_cancelled)"},
+		{cause: "work_session_terminated", want: "was refused (work_session_terminated)"},
+		{cause: "account_bound_to_other_person", want: "was refused (account_bound_to_other_person)"},
+		{cause: "unsigned_file", want: "was refused (unsigned_file)"},
+		{cause: "signature_invalid", want: "was refused (signature_invalid)"},
+		{cause: "future_cause", want: "was refused (future_cause)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.cause, func(t *testing.T) {
+			t.Parallel()
+			err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "rejected", RejectionCause: tc.cause})
+			code, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, tc.cause, code)
+			assert.Equal(t, "command cmd-9 "+tc.want, err.Error())
+		})
+	}
+}
+
 func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
 	t.Parallel()
 	// awaiting_approval, then the transient "error" the server emits in the
@@ -402,8 +456,9 @@ func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
 	}))
 	defer ts.Close()
 
+	seams, _ := fakePollClock()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Second, 5*time.Millisecond, true, pollSeams{})
+	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Second, 5*time.Millisecond, true, seams)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 }
@@ -531,7 +586,6 @@ func fakePollClock() (pollSeams, func() []time.Duration) {
 	return seams, func() []time.Duration { return delays }
 }
 
-// A throttled poll must space its requests out instead of spending one per tick.
 func TestPollCommandExecution_ThrottleBacksOff(t *testing.T) {
 	t.Parallel()
 	tick := 10 * time.Millisecond
@@ -759,19 +813,17 @@ func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
 	assert.Equal(t, "completed", resp.Status)
 }
 
-// A cancelled poll is the stream's only way to stop one it no longer reads. The
-// check at the top of the loop is what a caller that cancels before the first
-// wait relies on: the command may already be over, and a request for it is one
-// the throttle budget pays for and nobody reads.
+// A cancelled poll is the stream's only way to stop one it no longer reads. A cancel
+// before the first wait must send no request: the command may be over, and the request
+// would spend throttle budget nobody reads.
 func TestPollCommandExecution_CancelledBeforeTheFirstWaitNeverRequests(t *testing.T) {
 	t.Parallel()
 	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		// Terminal, so a poll that ignores the cancel ends on the response instead
-		// of running out the package timeout: a running status refreshes the
-		// deadline on every answer and no wall clock ever stops it.
+		// Terminal, so a poll that ignores the cancel still ends here: a running status
+		// refreshes the deadline on every answer and would run out the package timeout.
 		_, _ = w.Write([]byte(`{"id":"cmd-1","status":"completed"}`))
 	}))
 	defer ts.Close()
@@ -797,9 +849,8 @@ func TestPollCommandExecution_CancelEndsAWaitAlreadyRunning(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		// Terminal, so a poll that ignores the cancel ends on the response instead
-		// of running out the package timeout: a running status refreshes the
-		// deadline on every answer and no wall clock ever stops it.
+		// Terminal, so a poll that ignores the cancel still ends here: a running status
+		// refreshes the deadline on every answer and would run out the package timeout.
 		_, _ = w.Write([]byte(`{"id":"cmd-1","status":"completed"}`))
 	}))
 	defer ts.Close()
@@ -811,10 +862,9 @@ func TestPollCommandExecution_CancelEndsAWaitAlreadyRunning(t *testing.T) {
 		cancel: cancel,
 		after: func(time.Duration) <-chan time.Time {
 			once.Do(func() { close(cancel) })
-			// Cancel is closed before this timer is handed back, so the wait can
-			// only end on cancel. The two seconds are the far side of that race:
-			// long enough that no scheduling delay reaches them, short enough that
-			// a poll ignoring the cancel fails here rather than hanging.
+			// Cancel is closed before this timer is returned, so the wait can only end on cancel.
+			// Two seconds is beyond any scheduling delay yet short enough that a poll ignoring
+			// the cancel fails here rather than hanging.
 			return time.After(2 * time.Second)
 		},
 	}
@@ -954,7 +1004,7 @@ func startStream(t *testing.T, ac *client.AlpaconClient, cmdID, serverID string,
 	listener.Start()
 	require.True(t, listener.WaitConnected(commandOutputConnectTimeout), "listener should connect")
 
-	delays := defaultStreamDelays
+	delays := defaultStreamDelays()
 	delays.pollTick = tick
 	pathID := testPathID(t, cmdID)
 	done := make(chan error, 1)
@@ -994,8 +1044,8 @@ func TestStreamSubscribed_FinEndsRunWithoutThePoll(t *testing.T) {
 			defer mu.Unlock()
 			subscriptions = append(subscriptions, [2]string{eventType, targetID})
 		},
-		// A command that prints nothing—the case that started #309—so the run can
-		// only end on a terminal signal, never on output.
+		// A command that prints nothing, so the run can only end on a terminal signal,
+		// never on output.
 		terminal: EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
 	})
 
@@ -1156,7 +1206,7 @@ func TestStreamSubscribed_WaitTimeoutCarriesTheFileSuggestion(t *testing.T) {
 	listener.Start()
 	require.True(t, listener.WaitConnected(commandOutputConnectTimeout), "listener should connect")
 
-	delays := defaultStreamDelays
+	delays := defaultStreamDelays()
 	delays.pollTick = 10 * time.Millisecond
 	pathID := testPathID(t, "cmd-uuid")
 	done := make(chan error, 1)
@@ -1193,12 +1243,9 @@ func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
 	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
 
-// TestRunCommandStreaming_WarmFireGapDoesNotSkipLaterChunk guards against
-// advancing lastSeq past a gap during the warm-fire drain. If the persisted
-// chunks contain a hole (seq 0,1,3 with 2 missing), lastSeq must stop at the
-// last contiguous seq (1) so a later seq 2 arriving over the WS is still
-// written rather than skipped as a duplicate. seq 3 is then filled by the
-// terminal drain in order.
+// Persisted seqs 0, 1 and 3: warm-fire must stop lastSeq at 1, so seq 2 arriving over
+// the WS is still written rather than skipped as a duplicate; seq 3 then comes from the
+// terminal drain.
 func TestRunCommandStreaming_WarmFireGapDoesNotSkipLaterChunk(t *testing.T) {
 	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
@@ -1248,8 +1295,6 @@ func TestRunCommandStreaming_DuplicateSeqIgnored(t *testing.T) {
 	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
 
-// TestRunCommandStreaming_FailedStatusPropagatesExitCode guards that terminal
-// status "failed" yields a *RemoteCommandError carrying the exit code.
 func TestRunCommandStreaming_FailedStatusPropagatesExitCode(t *testing.T) {
 	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
@@ -1269,9 +1314,6 @@ func TestRunCommandStreaming_FailedStatusPropagatesExitCode(t *testing.T) {
 	assert.Equal(t, "before-exit\n", stdoutBuf.String())
 }
 
-// TestRunCommandStreaming_GapFillRaceDoesNotDropChunk guards that when a gap-fill
-// fetch returns a hole (seq 1,3; 2 not yet persisted), applyChunk stops at the
-// hole so the later WS seq 2 isn't dropped as a duplicate.
 func TestRunCommandStreaming_GapFillRaceDoesNotDropChunk(t *testing.T) {
 	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
@@ -1310,7 +1352,7 @@ func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.
 	serverID := "srv-uuid"
 
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-	// WS server just upgrades and waits; subscribe will fail so chunks shouldn't matter
+	// Subscribe fails below, so this WS server only upgrades and waits.
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -1343,7 +1385,7 @@ func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.
 			mu.Unlock()
 			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
 		case "/api/events/subscriptions/":
-			// Force subscribe failure -> fallback path with existing cmdID
+			// force the fallback with the existing cmdID
 			w.WriteHeader(http.StatusInternalServerError)
 		case "/api/events/commands/" + cmdID + "/chunks/":
 			// No chunks persisted: fallback must use the buffered Result.
@@ -1372,15 +1414,11 @@ func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.
 	require.NoError(t, err)
 	assert.Equal(t, "reused-output\n", stdoutBuf.String())
 
-	// Key assertion: SubmitCommand was called exactly once
 	mu.Lock()
 	defer mu.Unlock()
 	assert.Equal(t, 1, submitCount, "fallback must not re-submit the command")
 }
 
-// TestRunCommandStreaming_FallbackDrainsChunks guards that the polling fallback
-// reconstructs output from chunks when the server leaves Result empty (the
-// chunk-streaming contract), instead of silently dropping it.
 func TestRunCommandStreaming_FallbackDrainsChunks(t *testing.T) {
 	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
@@ -1395,7 +1433,7 @@ func TestRunCommandStreaming_FallbackDrainsChunks(t *testing.T) {
 		case "/api/servers/servers/":
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
 		case "/api/events/sessions/":
-			w.WriteHeader(http.StatusInternalServerError) // force fallback
+			w.WriteHeader(http.StatusInternalServerError) // Force the fallback.
 		case "/api/events/commands/":
 			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
 		case "/api/events/commands/" + cmdID + "/chunks/":
@@ -1439,8 +1477,7 @@ func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
 		case "/api/servers/servers/":
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
 		case "/api/events/sessions/":
-			// Force fallback
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError) // Force the fallback.
 		case "/api/events/commands/":
 			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
 		case "/api/events/commands/" + cmdID + "/chunks/":
@@ -1471,8 +1508,6 @@ func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
 	assert.Equal(t, "fallback-output\n", stdoutBuf.String())
 }
 
-// TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable: when the chunks
-// endpoint errors, the polling fallback emits the buffered Result, not an error.
 func TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable(t *testing.T) {
 	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
@@ -1487,7 +1522,7 @@ func TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable(t *testing.T) {
 		case "/api/servers/servers/":
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
 		case "/api/events/sessions/":
-			w.WriteHeader(http.StatusInternalServerError) // force fallback
+			w.WriteHeader(http.StatusInternalServerError) // Force the fallback.
 		case "/api/events/commands/":
 			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
 		case "/api/events/commands/" + cmdID + "/chunks/":
@@ -1535,7 +1570,6 @@ var testFallbackDelays = streamDelays{
 	fallbackPollTick:   10 * time.Millisecond,
 }
 
-// streamingServerConfig configures the fake event servers for streaming tests.
 type streamingServerConfig struct {
 	cmdID       string
 	serverID    string
@@ -1727,10 +1761,8 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 	return &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 }
 
-// TestRunCommandStreaming_NoDuplicateOutputOnFailure guards the duplicate-output
-// fix: a failed command's buffered Result must not be re-written to stdout after
-// the chunks were already streamed. The Result is still carried on the error so
-// cmd/exec can inspect it (e.g. for the sudo-denial hint) without reprinting.
+// A failed command's buffered Result must not be written again after its chunks
+// streamed; it stays on the error for inspection, such as the sudo-denial hint.
 func TestRunCommandStreaming_NoDuplicateOutputOnFailure(t *testing.T) {
 	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
@@ -1744,16 +1776,12 @@ func TestRunCommandStreaming_NoDuplicateOutputOnFailure(t *testing.T) {
 
 	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 
-	// Streamed once: the buffered Result is not appended to the writer.
 	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
-	// Retained on the error for inspection (cmd/exec must not reprint it).
 	var remoteErr *RemoteCommandError
 	require.ErrorAs(t, err, &remoteErr)
 	assert.Equal(t, "hello\nworld\n", remoteErr.Output)
 }
 
-// TestRunCommandStreaming_TerminalStatusErrors covers errorFromDetails' non-nil
-// branches reached through the streaming select loop.
 func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -1833,8 +1861,6 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 	}
 }
 
-// TestRunCommandStreaming_DrainsTrailingChunksOnTerminal covers the drain path:
-// trailing chunks never seen over the WS are recovered by the final REST drain.
 func TestRunCommandStreaming_DrainsTrailingChunksOnTerminal(t *testing.T) {
 	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
@@ -1858,9 +1884,6 @@ func TestRunCommandStreaming_DrainsTrailingChunksOnTerminal(t *testing.T) {
 	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
 
-// TestRunCommandStreaming_FallbackToResultWhenNothingStreamed covers the
-// last-resort path: when no chunks arrive over the WS and none are persisted,
-// the buffered Result must still be written so output is never silently dropped.
 func TestRunCommandStreaming_FallbackToResultWhenNothingStreamed(t *testing.T) {
 	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
@@ -1876,7 +1899,6 @@ func TestRunCommandStreaming_FallbackToResultWhenNothingStreamed(t *testing.T) {
 	assert.Equal(t, "buffered-only\n", stdoutBuf.String())
 }
 
-// captureStderr returns everything fn writes to stderr.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	_, stderr := testutil.CaptureOutput(t, fn)
@@ -1885,7 +1907,7 @@ func captureStderr(t *testing.T, fn func()) string {
 
 // parseSeqLte reads the optional seq__lte upper bound. An absent value means
 // "no upper bound". An unparseable value is ignored here too, unlike the real
-// server, whose strict integer filter rejects it — the CLI never sends one.
+// server, whose strict integer filter rejects it—the CLI never sends one.
 func parseSeqLte(r *http.Request) (to int, hasLte bool) {
 	if lte := r.URL.Query().Get("seq__lte"); lte != "" {
 		if v, err := strconv.Atoi(lte); err == nil {
@@ -1895,9 +1917,9 @@ func parseSeqLte(r *http.Request) (to int, hasLte bool) {
 	return 0, false
 }
 
-// holeServer serves /chunks/?seq__gte=N[&seq__lte=M] returning every seq in the
-// window except those in `hole`. fetches counts the chunk requests. Used to
-// simulate a seq that is never persisted server-side.
+// holeServer serves the chunks endpoint with every seq up to maxSeq in the requested
+// window except those in hole, simulating seqs never persisted. fetches counts the
+// chunk requests.
 func holeServer(t *testing.T, maxSeq int, hole map[int]bool, fetches *atomic.Int32) *client.AlpaconClient {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1963,8 +1985,6 @@ func swapGapFillVars(initial time.Duration, factor int, max time.Duration, maxNo
 	}
 }
 
-// While lastSeq is stuck, gapped chunks arriving within the backoff window must
-// not each trigger a REST fetch.
 func TestApplyChunk_ThrottlesRefetchWithinBackoffWindow(t *testing.T) {
 	var fetches atomic.Int32
 	ac := holeServer(t, 20, map[int]bool{1: true}, &fetches)
@@ -1985,9 +2005,6 @@ func TestApplyChunk_ThrottlesRefetchWithinBackoffWindow(t *testing.T) {
 	assert.Equal(t, 0, lastSeq, "lastSeq stays behind the permanent hole")
 }
 
-// After gapFillMaxNoProgress no-progress attempts, the missing seq is skipped:
-// present chunks are printed, the hole is recorded in skipped, and lastSeq
-// advances so live streaming resumes.
 func TestApplyChunk_GivesUpAndSkipsPermanentGap(t *testing.T) {
 	var fetches atomic.Int32
 	ac := holeServer(t, 20, map[int]bool{1: true}, &fetches)
@@ -2010,8 +2027,6 @@ func TestApplyChunk_GivesUpAndSkipsPermanentGap(t *testing.T) {
 	assert.Equal(t, "c2\nc3\nc4\nc5\nc6\n", out.String(), "c1 lost, everything else printed in order")
 }
 
-// A gap that heals before the give-up limit resets the backoff and prints
-// everything, with no seq recorded as skipped.
 func TestApplyChunk_ResetsBackoffWhenGapHeals(t *testing.T) {
 	var fetches atomic.Int32
 	// No hole: the gap-fill fetch immediately returns the missing seq.
@@ -2031,9 +2046,9 @@ func TestApplyChunk_ResetsBackoffWhenGapHeals(t *testing.T) {
 	assert.Equal(t, "c1\nc2\nc3\n", out.String())
 }
 
-// A persistently failing gap-fill fetch must back off but never give up: the
-// hole is only skipped once a successful fetch confirms it's absent, so a
-// transient error can't drop output or warn "not arrived" for seqs that exist.
+// A failing gap-fill fetch must back off but never give up: only a successful fetch
+// confirming the hole may skip it, so a transient error can't drop output or warn
+// "not arrived" for seqs that exist.
 func TestApplyChunk_FetchErrorBacksOffButNeverGivesUp(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
@@ -2132,8 +2147,6 @@ func TestGiveUpGap_BoundsHugeServerSeq(t *testing.T) {
 	assert.Contains(t, stderr, "gap too large to recover")
 }
 
-// Many gaps each under maxGapWidth must not let g.skipped grow without bound
-// across a long stream: cumulative recorded skips stay capped at maxGapWidth.
 func TestGiveUpGap_BoundsCumulativeSkipped(t *testing.T) {
 	defer swapMaxGapWidth(4)()
 
@@ -2179,8 +2192,6 @@ func TestDrainRemainingChunks_BoundsCumulativeMissing(t *testing.T) {
 	assert.Equal(t, "c3\nc6\nc9\nc12\n", out.String(), "all delivered chunks still printed")
 }
 
-// The terminal drain must likewise bound a server-supplied huge seq instead of
-// enumerating every missing seq into the warning slice.
 func TestDrainRemainingChunks_BoundsHugeServerSeq(t *testing.T) {
 	huge := 1 << 30 // far above maxGapWidth; fits 32-bit int so 386 builds compile
 	ac := chunkServer(t, []Chunk{{Seq: huge, Content: "x\n"}})
@@ -2241,8 +2252,6 @@ func lteCapturingServer(t *testing.T, results []Chunk) (ac *client.AlpaconClient
 	return ac, func() (string, string) { return gte, lte }
 }
 
-// TestApplyChunk_SendsSeqLteBound verifies the gap-fill re-fetch is bounded by
-// the live chunk that exposed the hole (seq__gte == lastSeq+1, seq__lte == chunk.Seq-1).
 func TestApplyChunk_SendsSeqLteBound(t *testing.T) {
 	t.Parallel()
 	// Return the whole gap so applyChunk can advance contiguously.
@@ -2258,8 +2267,6 @@ func TestApplyChunk_SendsSeqLteBound(t *testing.T) {
 	assert.Equal(t, "2", lte)
 }
 
-// TestRecoverSkippedChunks_SendsSeqLteBound verifies the final recovery fetch is
-// bounded by the first and last skipped seq (g.skipped is ascending).
 func TestRecoverSkippedChunks_SendsSeqLteBound(t *testing.T) {
 	ac, bounds := lteCapturingServer(t, nil)
 
@@ -2274,9 +2281,6 @@ func TestRecoverSkippedChunks_SendsSeqLteBound(t *testing.T) {
 	assert.Equal(t, "4", lte)
 }
 
-// TestApplyChunk_OldServerIgnoringSeqLte_OutputIdentical verifies that when a
-// server ignores seq__lte and returns the full tail, applyChunk's contiguous
-// consumption still stops at the live chunk (client-side upper-bound filter).
 func TestApplyChunk_OldServerIgnoringSeqLte_OutputIdentical(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2301,9 +2305,6 @@ func TestApplyChunk_OldServerIgnoringSeqLte_OutputIdentical(t *testing.T) {
 	assert.Equal(t, "c1\nc2\nc3\n", out.String(), "extra tail beyond the bound is not emitted")
 }
 
-// TestRecoverSkippedChunks_OldServerIgnoringSeqLte_OutputIdentical verifies that
-// when a server ignores seq__lte and returns extra chunks, recoverSkipped emits
-// only the skipped seqs it looks up via the bySeq map, never the extra tail.
 func TestRecoverSkippedChunks_OldServerIgnoringSeqLte_OutputIdentical(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Old server: ignores seq__lte, returns everything from seq__gte on.
@@ -2482,8 +2483,6 @@ func TestCommandStream_RefusedSubmissionsShareOneSession(t *testing.T) {
 	assert.Equal(t, int32(1), sessions.Load(), "one event session for the attempt and all its retries")
 }
 
-// A listener that could not connect is not dialed again for the next
-// submission: the stream goes straight to polling.
 func TestCommandStream_DoesNotRedialAListenerThatFailed(t *testing.T) {
 	t.Parallel()
 	var sessions, submits atomic.Int32
@@ -2528,20 +2527,26 @@ func TestPollCommandExecution_SurfacesMFARefusalOnlyWhenAsked(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			var requests atomic.Int32
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte(`{"code": "auth_mfa_required", "detail": "MFA required"}`))
 			}))
 			defer ts.Close()
 
+			seams, _ := fakePollClock()
+			seams.surfaceMFA = tc.surfaceMFA
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 10*time.Millisecond, false, pollSeams{surfaceMFA: tc.surfaceMFA})
+			_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 10*time.Millisecond, false, seams)
 			require.Error(t, err)
 			if tc.wantCode {
 				assert.Equal(t, utils.AuthMFARequired, utils.StructuredErrorCode(err))
+				assert.Equal(t, int32(1), requests.Load())
 				return
 			}
+			assert.Greater(t, requests.Load(), int32(1))
 			var clientTimeout *ClientTimeoutError
 			require.ErrorAs(t, err, &clientTimeout)
 		})

@@ -19,7 +19,6 @@ const (
 	usernameURL   = "/api/iam/username/"
 	inviteUserURL = "/api/workspaces/users/invite/"
 
-	// Username error codes the server sends
 	codeUsernameInvalid    = "user_username_invalid"
 	codeUsernameDisallowed = "user_username_disallowed"
 	codeUsernameInUse      = "user_username_in_use"
@@ -34,7 +33,8 @@ const UsernameSetSuccessFmt = "Username set to %q"
 // 200 with the flag unchanged, never an error, so the CLI has to catch the edit itself.
 var privilegeFlagFields = []string{"is_staff", "is_superuser"}
 
-// usernameErrors maps each server username error code to its user-facing message and whether re-entering a different name can resolve it.
+// usernameErrors maps each server username error code to its message and whether another name
+// can resolve it.
 var usernameErrors = map[string]struct {
 	message   string
 	retryable bool
@@ -264,7 +264,8 @@ func userPathIDByName(ac *client.AlpaconClient, userName string) (api.PathID, er
 	return api.RequireResponseID(result.ID, "user")
 }
 
-// A role binding embeds a display name, not the username other commands accept.
+// GetUsernamesByID maps each user's id to the username other commands accept; a role binding
+// embeds only a display name.
 func GetUsernamesByID(ac *client.AlpaconClient) (map[string]string, error) {
 	users, err := api.FetchAllPages[UserResponse](ac, userURL, nil)
 	if err != nil {
@@ -382,8 +383,8 @@ func PatchUser(ac *client.AlpaconClient, userID string, changes map[string]any) 
 	return ac.SendPatchRequest(api.IDURL(userURL, pathID, "", nil), changes)
 }
 
-// A key the operator deleted counts as untouched—a PATCH names what to change, and
-// nothing spells "unset" that the server would honour.
+// diffEditedUser counts a key the operator deleted as untouched—a PATCH names what to change, and
+// nothing spells "unset" that the server would honor.
 func diffEditedUser(original []byte, edited any) (*UserEdit, error) {
 	var before map[string]any
 	if err := json.Unmarshal(original, &before); err != nil {
@@ -474,21 +475,40 @@ func HandleUsernameRequired() (*SetUsernameResponse, error) {
 			return response, nil
 		}
 
-		code, _ := utils.ParseErrorResponse(err)
-		msg, known := UsernameErrorMessage(code)
-		if known {
-			if isRetryableUsernameError(code) {
-				utils.CliWarning("%s", msg)
-				continue
-			}
-			if code == codeUsernameAlreadySet {
-				// Username was set concurrently (e.g. another session); treat as success so the original command proceeds.
-				utils.CliInfo("Username is already set; continuing.")
-				return nil, nil
-			}
-			return nil, errors.New(msg)
+		warning, alreadySet, stopErr := usernameFailure(err)
+		switch {
+		case warning != "":
+			utils.CliWarning("%s", warning)
+			continue
+		case alreadySet:
+			// Set concurrently, e.g. by another session; treat as success so the command proceeds.
+			utils.CliInfo("Username is already set; continuing.")
+			return nil, nil
+		default:
+			return nil, stopErr
 		}
-		return nil, fmt.Errorf("failed to set username: %v", err)
+	}
+}
+
+// usernameFailure decides what the username prompt does with a failed
+// SetUsername: ask again after a warning, carry on because the username is
+// already set, or stop with an error. A refusal carrying the server's hint
+// stops with that refusal kept in the chain, so the hint prints under it in
+// place of the local message.
+func usernameFailure(err error) (warning string, alreadySet bool, stop error) {
+	code, _ := utils.ParseErrorResponse(err)
+	msg, known := UsernameErrorMessage(code)
+	switch {
+	case !known:
+		return "", false, fmt.Errorf("failed to set username: %w", err)
+	case isRetryableUsernameError(code):
+		return msg, false, nil
+	case code == codeUsernameAlreadySet:
+		return "", true, nil
+	case utils.RefusalHint(err) != "":
+		return "", false, fmt.Errorf("failed to set username: %w", err)
+	default:
+		return "", false, errors.New(msg)
 	}
 }
 
@@ -516,13 +536,13 @@ func SetUsername(username string) (*SetUsernameResponse, error) {
 	return &response, nil
 }
 
-// UsernameErrorMessage maps a server username error code to a human-readable message; ok is false for unrecognized codes.
+// UsernameErrorMessage maps a server username error code to a human-readable message, reporting
+// false for an unrecognized code.
 func UsernameErrorMessage(code string) (string, bool) {
 	info, ok := usernameErrors[code]
 	return info.message, ok
 }
 
-// isRetryableUsernameError reports whether re-entering a different username can resolve the error.
 func isRetryableUsernameError(code string) bool {
 	return usernameErrors[code].retryable
 }

@@ -51,7 +51,6 @@ func TestConcurrentProcessesKeepEachOthersConfigChanges(t *testing.T) {
 		os.Exit(0)
 	}
 
-	// Given a config and two alpacon processes that each change their own fields
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "", "", "token-start", "refresh", "alpacon.io", 3600, false))
 	children := make([]*exec.Cmd, 0, 2)
@@ -61,7 +60,6 @@ func TestConcurrentProcessesKeepEachOthersConfigChanges(t *testing.T) {
 		children = append(children, child)
 	}
 
-	// When both run at once
 	outputs := make([][]byte, len(children))
 	errs := make([]error, len(children))
 	done := make(chan int, len(children))
@@ -75,7 +73,6 @@ func TestConcurrentProcessesKeepEachOthersConfigChanges(t *testing.T) {
 		<-done
 	}
 
-	// Then every change either of them made is still in the file
 	for i := range children {
 		require.NoError(t, errs[i], "writer output: %s", outputs[i])
 	}
@@ -190,6 +187,10 @@ func TestEveryWriterWaitsForTheLockAndLeavesTheFileAlone(t *testing.T) {
 		{name: "while logged in", write: func(started Config) error {
 			return WhileLoggedIn(started, func() error { return nil })
 		}},
+		{name: "signer token", write: func(started Config) error {
+			return SaveSignerToken(started, SignerTarget{URL: "https://alpacon.ai", Audience: "https://alpacon.ai/"}, "signer-2", 3600)
+		}},
+		{name: "signer token clear", write: func(started Config) error { return ClearSignerToken(started.Signer.AccessToken) }},
 		{name: "work session", write: func(Config) error { return SetActiveWorkSession("uuid-2") }},
 		{name: "work session for a workspace", write: func(Config) error { return SetActiveWorkSessionFor("ws1", "uuid-2") }},
 		{name: "work session clear", write: func(Config) error {
@@ -202,6 +203,7 @@ func TestEveryWriterWaitsForTheLockAndLeavesTheFileAlone(t *testing.T) {
 			setupTestConfig(t)
 			require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "", "", "access-1", "refresh-1", "alpacon.io", 3600, false))
 			require.NoError(t, SetActiveWorkSession("uuid-1"))
+			require.NoError(t, SaveSignerToken(loadedConfig(t), SignerTarget{URL: "https://alpacon.ai", Audience: "https://alpacon.ai/"}, "signer-1", 3600))
 			started := loadedConfig(t)
 			configFile := filepath.Join(os.Getenv("HOME"), ConfigFileDir, ConfigFileName)
 			before, err := os.ReadFile(configFile)

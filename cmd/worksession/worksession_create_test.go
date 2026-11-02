@@ -106,9 +106,8 @@ func TestPollForApproval_APIFailureIsNotTerminal(t *testing.T) {
 	assert.NotErrorAs(t, err, &terminal)
 }
 
-// The session is created and pending when the polls run out, so giving up must
-// exit on the pending contract like the timeout does: exit 1 reads as retryable
-// and an agent answers it with a second session and a second approval request.
+// Giving up on failed polls leaves the session pending, so it exits on the pending contract:
+// exit 1 reads as retryable and gets answered with a second session.
 func TestPollForApproval_GivingUpIsPending(t *testing.T) {
 	requests := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -222,31 +221,29 @@ func TestPollForApproval_TimeoutIsNotTerminal(t *testing.T) {
 	assert.ErrorAs(t, err, &pending)
 }
 
-// A 429 must not starve the wait: the session may still be pending, only the
-// status GET refused. Without the deadline extension, the third 429 (arriving
-// right at the original deadline) would end the wait with "timed out" before
-// the fourth request—the one that finally reports "approved"—ever fires.
+// Without the deadline extension, the third 429, at the original deadline, would end the wait
+// before the fourth poll reports "approved".
 func TestPollForApproval_ThrottleExtendsTheDeadline(t *testing.T) {
 	const timeout = 30 * time.Millisecond
 	const interval = 10 * time.Millisecond
 
 	requests := 0
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
 		requests++
 		if requests < 4 {
-			w.WriteHeader(http.StatusTooManyRequests)
-			return
+			return http.StatusTooManyRequests, ""
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"approved"}`))
-	}))
-	defer ts.Close()
+		return http.StatusOK, `{"id":"ws-uuid","status":"approved"}`
+	})}
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
-	start := time.Now()
-	session, err := WaitForApproval(ac, "ws-uuid", false, interval, timeout)
-	elapsed := time.Since(start)
+	var session *wsapi.WorkSession
+	var err error
+	var elapsed time.Duration
+	synctest.Test(t, func(*testing.T) {
+		start := time.Now()
+		session, err = WaitForApproval(ac, "ws-uuid", false, interval, timeout)
+		elapsed = time.Since(start)
+	})
 
 	require.NoError(t, err)
 	require.NotNil(t, session)
@@ -255,9 +252,8 @@ func TestPollForApproval_ThrottleExtendsTheDeadline(t *testing.T) {
 	assert.GreaterOrEqual(t, elapsed, timeout, "the throttle extension must carry the wait past the original deadline")
 }
 
-// A run of 429s must not end the wait through the failed-poll cap. That cap is
-// for a server the CLI cannot reach; a 429 is the server answering, and the
-// throttle budget plus the deadline are what bound it.
+// The failed-poll cap is for a server the CLI cannot reach; a 429 is the server answering, bounded
+// by the throttle budget and the deadline instead.
 func TestPollForApproval_SustainedThrottleDoesNotTripTheFailureCap(t *testing.T) {
 	const timeout = 150 * time.Millisecond
 	const interval = 2 * time.Millisecond
@@ -345,10 +341,8 @@ func TestPollForApproval_ThrottleWarnsOnce(t *testing.T) {
 	assert.NotContains(t, stderr, "Poll failed")
 }
 
-// The progress line reports how long the caller has been waiting, so a 429 that
-// pushes the deadline out must not make it shrink. Deriving it from what is left
-// before a moving deadline did exactly that: six throttled polls buy ~1.26s of
-// extension, and the wait then reported 0s elapsed after 1.26s of waiting.
+// The progress line's elapsed time must not shrink when a 429 pushes the deadline out, as it did
+// when derived from the time left before a moving deadline.
 func TestPollForApproval_ElapsedTracksWallClockAcrossAThrottleExtension(t *testing.T) {
 	const timeout = 2 * time.Second
 	const interval = 20 * time.Millisecond
@@ -776,10 +770,9 @@ func TestWorkSessionCreateWaitRejectedJSONCarriesTheSessionID(t *testing.T) {
 	}`, stderr)
 }
 
-// The refusal's follow-ups are read by an agent that runs them, so every one of
-// them has to be a command the session can still take. RunUseSession is the seam
-// that decides: it refuses anything but an active session, and none of the five
-// statuses behind a terminalWaitError can become active again.
+// An agent runs the refusal's follow-ups, so each must be a command the session can still take.
+// RunUseSession refuses anything but an active session, which no terminalWaitError status can
+// reach.
 func TestRunUseSessionRefusesASettledSession(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -827,4 +820,42 @@ func TestPollForApproval_EveryEndedStatusHasACase(t *testing.T) {
 			assert.ErrorAs(t, err, &terminal, "no case for ended status %q in the create --wait switch", status)
 		})
 	}
+}
+
+func TestPollForApproval_TimeoutOnARefusalKeepsTheHint(t *testing.T) {
+	t.Parallel()
+	const hint = "Too many requests were made in a short time; wait, then retry."
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"code": "api_rate_limited", "gate": "rate", "hint": "` + hint + `"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, 30*time.Millisecond)
+
+	require.Error(t, err)
+	var pending *pendingWaitError
+	require.ErrorAs(t, err, &pending)
+	assert.Contains(t, err.Error(), "timed out waiting for approval")
+	assert.Equal(t, []utils.NextAction{{Description: hint}}, utils.RefusalNextActions(err))
+	// Only the hint goes with the timeout, never the refusal's code or status.
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Empty(t, code)
+	assert.Zero(t, utils.HTTPStatusCode(err))
+}
+
+func TestPollForApproval_PlainTimeoutCarriesNoHint(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"pending"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, 30*time.Millisecond)
+	require.Error(t, err)
+	assert.Empty(t, utils.RefusalNextActions(err))
 }

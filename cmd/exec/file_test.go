@@ -305,8 +305,8 @@ func TestParseRemoteExecArgs_FileErrors(t *testing.T) {
 	}
 }
 
-// TestParseRemoteExecArgs_GenericLaneHasNoFile pins that the generic lane is
-// untouched by the new field: File stays nil and Command is still joined.
+// TestParseRemoteExecArgs_GenericLaneHasNoFile pins that the generic lane leaves File nil and
+// still joins Command.
 func TestParseRemoteExecArgs_GenericLaneHasNoFile(t *testing.T) {
 	t.Parallel()
 	result := ParseRemoteExecArgs([]string{"prod-web", "--", "bash", "/opt/deploy.sh"})

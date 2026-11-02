@@ -9,8 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// buildRecordingIndex
-
 func TestBuildRecordingIndex_GroupsBySessionID(t *testing.T) {
 	t.Parallel()
 	items := []wsapi.TimelineItem{
@@ -46,8 +44,6 @@ func TestBuildRecordingIndex_Empty(t *testing.T) {
 	assert.Empty(t, flat)
 }
 
-// recordingBadge
-
 func TestRecordingBadge_Single(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "• 1 recording", recordingBadge(1))
@@ -57,8 +53,6 @@ func TestRecordingBadge_Multiple(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "• 3 recordings", recordingBadge(3))
 }
-
-// recordingPreview
 
 func TestRecordingPreview_StripsANSI(t *testing.T) {
 	t.Parallel()
@@ -108,8 +102,6 @@ func TestRecordingPreview_StripsFormatCharBuriedInSequence(t *testing.T) {
 	assert.Equal(t, "ls", recordingPreview("\x1b[2\u200dKls"))
 }
 
-// printRecordingHeader
-
 func TestPrintRecordingHeader_SanitizesTimestamp(t *testing.T) {
 	t.Parallel()
 	// formatTimestamp returns the server's string as-is when it does not parse, so
@@ -119,8 +111,6 @@ func TestPrintRecordingHeader_SanitizesTimestamp(t *testing.T) {
 	printRecordingHeader(&buf, &wsapi.TimelineItem{Timestamp: &ts}, 1, 1)
 	assert.Equal(t, "Terminal 1/1 — SPOOFED\n\n", buf.String())
 }
-
-// printRecordingContent
 
 func TestPrintRecordingContent_StripsFormatChars(t *testing.T) {
 	t.Parallel()
@@ -171,8 +161,6 @@ func TestPrintRecordingContent_StripsUnmatchedEscapeIntroducers(t *testing.T) {
 
 func TestPrintRecordingContent_KeepsControlBytes(t *testing.T) {
 	t.Parallel()
-	// The C0 pass is deliberately absent here: a recording shown as it was keeps
-	// \r and its line endings.
 	var buf bytes.Buffer
 	printRecordingContent(&buf, "a\rb")
 	assert.Equal(t, "a\rb\n", buf.String())

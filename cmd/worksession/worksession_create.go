@@ -58,6 +58,9 @@ var workSessionCreateCmd = &cobra.Command{
 	Short: "Create a new work session",
 	Long: `Create a new work session.
 
+The session purpose is what the assessor judges each command against. An agent
+should pass --purpose with each command, which skips the purpose demand entirely.
+
 Set the session lifetime with --expires-in (relative, e.g. 2h) or --expires-at
 (absolute RFC3339); one is required in non-interactive mode.
 
@@ -178,8 +181,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 		}
 		shouldWait := waitTimeout > 0
 
-		// Pre-validate --use to avoid creating an orphan server-side session that we
-		// can't attach to the workspace.
+		// Check --use before the create, so it never leaves a session it cannot attach.
 		if useAfterCreate {
 			if sessionRequesterType == "agent" {
 				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use cannot be combined with an agent session (agent sessions are not workspace-attachable; pass the session ID to each command with --work-session).%s", detectedAgentSuffix(detected))
@@ -196,12 +198,8 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 				scopeList = append(scopeList, s)
 			}
 		}
-		// Build session-authorized sudo policies from --sudo. Each --sudo value is a
-		// comma-separated list of command patterns forming one policy; the
-		// policies are session-authorized (the only way a non-interactive caller
-		// running 'exec' can sudo). The server binds each policy to
-		// the session assignee automatically, so they never apply to other
-		// users. The 'sudo' scope is required server-side, so add it implicitly.
+		// --sudo policies are session-authorized, the only way a non-interactive 'exec' can sudo.
+		// The server requires the 'sudo' scope for them, so add it.
 		sudoPolicies := buildSudoPolicies(createSudo, createSudoReason)
 		if len(sudoPolicies) > 0 && !slices.Contains(scopeList, "sudo") {
 			scopeList = append(scopeList, "sudo")
@@ -281,8 +279,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 			utils.CliSuccess("%s", createSuccessMessage(session))
 		}
 
-		// Phase 1: post-create decision. Cases without an explicit return delegate to
-		// the --wait branch below (or exit immediately when --wait is not set).
+		// Cases that do not return fall through to the --wait handling below.
 		switch decideUseAction(session.Status, useAfterCreate) {
 		case useDecisionUseNow:
 			// Re-fetch so the serialized JSON matches the --wait --use path.
@@ -318,12 +315,9 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 		}
 
 		if !shouldWait {
-			// A session that lands pending needs a human to approve it out of
-			// band. Emit the structured pending-approval signal and exit with
-			// ExitCodePendingApproval so a machine consumer (AI agent, CI) can branch
-			// on "wait or check later" instead of treating the pending create as a
-			// success. Other statuses (e.g. auto-approved) keep the existing success
-			// output and exit 0.
+			// A pending session needs a human to approve it out of band, so exit with
+			// ExitCodePendingApproval and let a machine consumer branch on it instead of reading
+			// success.
 			if session.Status == wsapi.StatusPending {
 				utils.PrintPendingApproval(
 					fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID),
@@ -359,7 +353,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 			return
 		}
 
-		// Phase 3: --wait --use. WaitForApproval(untilActive=true) guarantees status reached active.
+		// WaitForApproval with untilActive has already seen the session active.
 		desc, err := RunUse(ac, session.ID)
 		if err != nil {
 			// Partial success (approved, use failed)—nil omits the server error_code.
@@ -394,10 +388,12 @@ func ExitOnWaitError(operation string, session *wsapi.WorkSession, next utils.Ne
 	}
 	var pending *pendingWaitError
 	if errors.As(err, &pending) {
+		// The refusal a timed-out wait ended on, if any, adds its hint.
 		utils.PrintPendingApproval(
 			fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err),
 			session.ApprovalRequestID,
 			next,
+			utils.RefusalNextActions(err)...,
 		)
 		os.Exit(utils.ExitCodePendingApproval)
 	}
@@ -426,29 +422,27 @@ func (e *terminalWaitError) Error() string {
 	return fmt.Sprintf("%s (work session %s)", e.message, e.sessionID)
 }
 
-// pendingWaitError marks a wait that ended with the outcome still open—the window
-// elapsed, or the CLI could not reach the server for a bounded run of polls. Either
-// way the session exists and a human has not decided yet, so it carries the same exit
-// code a create without --wait does, rather than the general-error code that reads as
-// retryable and gets answered with a second session.
+// pendingWaitError marks a wait that ended with the outcome still open: the window elapsed, or a
+// bounded run of polls failed. It exits with the same code as a create without --wait, since the
+// general-error code reads as retryable and gets answered with a second session.
 type pendingWaitError struct {
 	message string
+	// hint is the server's hint of the refusal the last poll got when the wait
+	// ended on it, so it still prints. Only the hint is kept: the refusal's code
+	// must not reclassify a wait that is still pending.
+	hint string
 }
 
-func (e *pendingWaitError) Error() string { return e.message }
+func (e *pendingWaitError) Error() string     { return e.message }
+func (e *pendingWaitError) ErrorHint() string { return e.hint }
 
-// terminalWaitErrorCtx is the JSON error envelope context for a wait that
-// settled without a grant. WorkSessionID is a structured field here—not only
-// folded into the message text—so a machine consumer can act on it without
-// parsing prose.
+// terminalWaitErrorCtx is the JSON error context for a wait that settled without a grant;
+// WorkSessionID is a field so a machine consumer need not parse the message.
 type terminalWaitErrorCtx struct {
 	Operation     string `json:"operation"`
 	WorkSessionID string `json:"work_session_id,omitempty"`
 }
 
-// printTerminalWaitErrorJSON writes the settled-without-a-grant refusal as a
-// structured envelope, with the follow-ups as NextActions rather than folded
-// into the message text.
 func printTerminalWaitErrorJSON(operation string, terminal *terminalWaitError, err error) {
 	utils.PrintJSONError(os.Stderr, utils.JSONErrorEnvelope[terminalWaitErrorCtx]{
 		OK:          false,
@@ -471,11 +465,8 @@ func terminalWaitNextActions(sessionID string) []utils.NextAction {
 	}
 }
 
-// printTerminalWaitError writes the refusal and its follow-ups to stderr in the
-// shape every other next-action surface uses. Assembled and written once rather
-// than through CliError, which appends the report-a-bug pointer: a reviewer
-// saying no is the feature working, so the gate refusal (exit 3) leaves that
-// pointer off too.
+// printTerminalWaitError writes the refusal and its follow-ups to stderr itself rather than through
+// CliError, which appends the report-a-bug pointer: a reviewer saying no is not a bug.
 func printTerminalWaitError(terminal *terminalWaitError, err error) {
 	var sb strings.Builder
 	// The message carries a server-issued session id, so it takes the sanitizer
@@ -527,9 +518,8 @@ func resolveWaitTimeout(waitFlag bool, waitApprovalRaw string, waitApprovalSet b
 	return utils.ParsePositiveDuration("--wait-approval", waitApprovalRaw)
 }
 
-// validateScopeEnum rejects scopes not in validScopePresets and lists the
-// allowed values in the error message. The caller is expected to prefix the
-// error with the relevant flag name (e.g. "Invalid --scope: ...").
+// validateScopeEnum rejects scopes not in validScopePresets, listing the allowed values; the error
+// names no flag, so the caller adds it.
 func validateScopeEnum(scopes []string) error {
 	allowed := make(map[string]struct{}, len(validScopePresets))
 	for _, s := range validScopePresets {
@@ -666,34 +656,38 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 	return policies
 }
 
-// WaitForApproval polls at interval until the session reaches a terminal state or
-// timeout elapses. untilActive=false returns on approved or active; untilActive=true
-// returns only on active (continues polling on approved until the server
-// auto-activates). Deadline-based rather than attempt-count-based so a timeout
-// under one interval (e.g. --wait-approval 15s) still waits the full duration.
-// A failed poll does not end the wait—one 429 would otherwise discard a
-// half-hour wait. A fatal 4xx ends it at once and a run of other transient
-// failures ends it at MaxConsecutivePollFailures, but a run of 429s does not:
-// the throttle budget and the deadline bound that instead. A wait that ends
-// without the status it wants is an error ExitOnWaitError knows how to report.
+// WaitForApproval polls until the session reaches a terminal state or timeout elapses. It returns
+// on approved or active, or only on active when untilActive is set. It is deadline-based, so a
+// timeout under one interval still waits the full duration. A fatal 4xx ends the wait at once and
+// other transient failures end it at MaxConsecutivePollFailures; 429s are bounded by the throttle
+// budget and the deadline instead.
 func WaitForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration) (*wsapi.WorkSession, error) {
 	start := time.Now()
 	deadline := start.Add(timeout)
-	timedOut := &pendingWaitError{message: fmt.Sprintf("timed out waiting for approval after %s", timeout)}
+	// lastRefusal is the refusal (a 429 in practice) the latest poll got, if it
+	// got one: a wait that times out on it keeps it behind the timeout, so its
+	// hint still reaches the output.
+	var lastRefusal error
+	timedOut := func() error {
+		return &pendingWaitError{message: fmt.Sprintf("timed out waiting for approval after %s", timeout), hint: utils.RefusalHint(lastRefusal)}
+	}
 	failures := 0
 	throttles := 0
 	budget := utils.NewThrottleBudget(timeout)
 	lastStatus := ""
 	for {
 		s, err := wsapi.GetWorkSession(ac, id)
+		lastRefusal = nil
+		if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
+			lastRefusal = err
+		}
 		if err != nil {
 			if !utils.IsTransientRequestError(err) {
 				return nil, fmt.Errorf("polling failed: %w", err)
 			}
-			// A 429 says the server is answering, so it is not counted toward the
-			// cap below—the throttle budget and the deadline bound it instead, and
-			// counting it would end the wait before the budget it just spent could
-			// carry it anywhere. Uncapped, it also warns once rather than per poll.
+			// A 429 means the server is answering, so it does not count toward the cap below; the
+			// throttle budget and the deadline bound it instead, and it warns once rather than per
+			// poll.
 			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
 				delay := utils.NextPollBackoff(interval, throttles, utils.RetryAfter(err))
 				throttles++
@@ -702,7 +696,7 @@ func WaitForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 					deadline = newDeadline
 				}
 				if !pollSleep(deadline, delay) {
-					return nil, timedOut
+					return nil, timedOut()
 				}
 				continue
 			}
@@ -710,19 +704,17 @@ func WaitForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 			// The deadline outranks the cap: once the window is over, "timed out"
 			// is the honest answer even when this poll also filled the cap.
 			if !time.Now().Before(deadline) {
-				return nil, timedOut
+				return nil, timedOut()
 			}
 			if failures >= utils.MaxConsecutivePollFailures {
-				// The session is created and pending, so this exits on the pending
-				// contract like the timeout does. Exit 1 reads as retryable, and an
-				// agent answers it by re-running create and filing a second session
-				// and a second approval request.
+				// The session exists and is still pending, so exit on the pending contract like the
+				// timeout: exit 1 reads as retryable, and an agent would file a second session.
 				utils.CliWarning("Approval wait gave up after %d failed polls (%s); the work session is still pending.", failures, err)
 				return nil, &pendingWaitError{message: fmt.Sprintf("gave up after %d failed polls", failures)}
 			}
 			utils.CliWarning("Poll failed (%s); still waiting.", err)
 			if !pollSleep(deadline, utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err))) {
-				return nil, timedOut
+				return nil, timedOut()
 			}
 			continue
 		}
@@ -760,24 +752,19 @@ func WaitForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 		if s.Status == wsapi.StatusApproved {
 			waitMsg = waitMsgActivation
 		}
-		// Measured from the start rather than from what is left before the
-		// deadline, which a 429's extension moves: subtracting a moving deadline
-		// would make the reported elapsed time shrink as the wait grew. The window
-		// it is reported against moves with the deadline for the same reason—held
-		// at the flag's timeout, an extended wait would read as one that outran it.
+		// Elapsed is measured from the start, since a 429's extension moves the deadline; the
+		// window moves with it, or an extended wait would read as one that outran it.
 		elapsed := time.Since(start)
 		window := elapsed + time.Until(deadline)
 		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, elapsed.Round(time.Second), window.Round(time.Second))
 		if !pollSleep(deadline, utils.NextPollTick(interval, elapsed)) {
-			return nil, timedOut
+			return nil, timedOut()
 		}
 	}
 }
 
-// pollSleep waits want, capped at the time left before deadline, and reports
-// whether the wait may go on; false means the window closed. The deadline test
-// lives here so the wait states it once rather than at every sleep. A
-// non-positive want falls back to the whole remainder rather than spinning.
+// pollSleep waits want, capped at the time left before deadline, and reports whether the wait may
+// go on; false means the window closed. A non-positive want sleeps the whole remainder.
 func pollSleep(deadline time.Time, want time.Duration) bool {
 	remaining := time.Until(deadline)
 	if remaining <= 0 {

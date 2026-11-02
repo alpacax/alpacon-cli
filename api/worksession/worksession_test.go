@@ -216,10 +216,6 @@ func TestExtendWorkSession(t *testing.T) {
 	assert.Nil(t, session.PendingExtensionRequest)
 }
 
-// TestExtendWorkSession_ReasonSent covers the wire shape the extend action
-// expects: reason is required on every request, auto-approved or queued
-// alike, and the CLI sends --reason as 'reason' on the same request body, not
-// a separate call.
 func TestExtendWorkSession_ReasonSent(t *testing.T) {
 	t.Parallel()
 	newExpiry := time.Now().UTC().Add(4 * time.Hour).Format(time.RFC3339)
@@ -236,10 +232,6 @@ func TestExtendWorkSession_ReasonSent(t *testing.T) {
 	assert.Equal(t, "customer escalation", gotBody.Reason)
 }
 
-// TestExtendWorkSession_PendingApproval covers the 202 shape: same WorkSession
-// body, with PendingExtensionRequest populated instead of ExpiresAt already
-// advanced, and the 202 status returned alongside it—the caller distinguishes
-// 200 from 202 by the status, so it is asserted explicitly here too.
 func TestExtendWorkSession_PendingApproval(t *testing.T) {
 	t.Parallel()
 	addedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
@@ -277,7 +269,6 @@ func TestExtendWorkSession_PendingApproval(t *testing.T) {
 	assert.True(t, requestDeadline.Equal(session.PendingExtensionRequest.ExpiresAt))
 	assert.Equal(t, "customer escalation", session.PendingExtensionRequest.Reason)
 	assert.True(t, addedAt.Equal(session.PendingExtensionRequest.AddedAt))
-	// The session's own expiry is unchanged—the extension has not applied yet.
 	assert.True(t, currentExpiry.Equal(session.ExpiresAt))
 }
 
@@ -552,8 +543,6 @@ func TestUpdateWorkSession(t *testing.T) {
 	session, err := UpdateWorkSession(newTestClient(ts), "ses-abc", req)
 	require.NoError(t, err)
 	assert.Equal(t, "ses-abc", session.ID)
-	// Full desired set is sent: existing policy echoed back with its ID
-	// plus the new addition without one.
 	assert.Len(t, gotBody.SudoPolicies, 2)
 	assert.Equal(t, "pol-1", gotBody.SudoPolicies[0].ID)
 	assert.Empty(t, gotBody.SudoPolicies[1].ID)

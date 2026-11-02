@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mustDeviceIDPath returns the device identifier file path or fails the test.
 func mustDeviceIDPath(t *testing.T) string {
 	t.Helper()
 	path, err := deviceIDPath()
@@ -21,7 +20,6 @@ func mustDeviceIDPath(t *testing.T) string {
 	return path
 }
 
-// readDeviceIDFile returns the raw contents of the device identifier file.
 func readDeviceIDFile(t *testing.T) string {
 	t.Helper()
 	data, err := os.ReadFile(mustDeviceIDPath(t))
@@ -121,11 +119,8 @@ func TestGetOrCreateDeviceID_LivesBesideConfigNotInIt(t *testing.T) {
 	assert.NotContains(t, string(configData), "device_id")
 }
 
-// TestGetOrCreateDeviceID_SurvivesLogout is the property the separate file
-// exists to buy. DeleteConfig removes config.json; if it took the identifier
-// with it, the next login would mint a new one and orphan every presence proof
-// bound to the old one, re-challenging the user on their first privileged
-// action. The machine did not change, so the identifier must not either.
+// TestGetOrCreateDeviceID_SurvivesLogout: DeleteConfig removes config.json, and taking the
+// identifier with it would orphan every presence proof bound to it.
 func TestGetOrCreateDeviceID_SurvivesLogout(t *testing.T) {
 	setupTestConfig(t)
 
@@ -291,13 +286,11 @@ func TestCreateDeviceIDFileWithoutLink_ReportsErrExistWhenPathIsTaken(t *testing
 	assert.Equal(t, winner+"\n", string(data), "the loser must not have touched the published value")
 }
 
-// TestCreateDeviceIDFile_NeverPublishesAnEmptyFile is the property #361 was
-// about and the one the test above cannot reach: O_EXCL plus a write on the next
-// line passes that one too, while the path exists holding nothing. The catch is
-// probabilistic—the window is one write wide—but one-sided: a publication step
-// with no window cannot fail it, so a failure here is real.
-// Serial: the reader below spins without sleeping, and the window it watches is
-// one write wide. Sharing a core with parallel neighbours only narrows it.
+// TestCreateDeviceIDFile_NeverPublishesAnEmptyFile: O_EXCL plus a write would pass the test
+// above while the path exists holding nothing. The catch is probabilistic but one-sided: a
+// publication step with no window cannot fail it.
+// Serial: the reader spins without sleeping on a window one write wide, which parallel
+// neighbours would only narrow.
 func TestCreateDeviceIDFile_NeverPublishesAnEmptyFile(t *testing.T) {
 	const rounds = 200
 	const deviceID = "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b"
@@ -339,12 +332,8 @@ func TestCreateDeviceIDFile_NeverPublishesAnEmptyFile(t *testing.T) {
 	}
 }
 
-// TestGetOrCreateDeviceID_ConcurrentCreation is the property exclusive creation
-// buys. Two `alpacon` invocations can start at once—backgrounding a few shell
-// commands does it—and read-then-write lets both generate and both store,
-// leaving the loser on an identifier its installation never sends again. Every
-// caller must come away with the value the file ends up holding, and exclusivity
-// on the name alone does not get there—see createDeviceIDFile.
+// TestGetOrCreateDeviceID_ConcurrentCreation: two alpacon invocations can start at once, and
+// every caller must come away with the value the file ends up holding.
 func TestGetOrCreateDeviceID_ConcurrentCreation(t *testing.T) {
 	setupTestConfig(t)
 
@@ -377,17 +366,9 @@ func TestGetOrCreateDeviceID_ConcurrentCreation(t *testing.T) {
 	assertNoLeftoverTempFiles(t)
 }
 
-// TestGetOrCreateDeviceID_ConcurrentReplacementOfMalformedValue covers the same
-// race one step later: the file exists but holds a value the Auth0 action would
-// reject, so every caller has to replace it.
-//
-// This asserts less than the creation case above, and deliberately. Replacing a
-// path cannot be made exclusive without a lock, so concurrent replacers can
-// overwrite one another and a caller can return an identifier a later replacer
-// has already superseded. What must hold is that nobody is handed something
-// unusable and that the file is left in a state the next run can read: every
-// caller gets a value the Auth0 action accepts, and the value left on disk is
-// one of the values that were handed out rather than a torn or empty file.
+// TestGetOrCreateDeviceID_ConcurrentReplacementOfMalformedValue covers the same race when the
+// file holds a malformed value. Replacement is not exclusive, so this asserts less: every caller
+// gets a valid identifier, and the file ends holding one of them rather than a torn or empty value.
 func TestGetOrCreateDeviceID_ConcurrentReplacementOfMalformedValue(t *testing.T) {
 	setupTestConfig(t)
 	writeDeviceIDFile(t, "not_a_valid_id\n")
@@ -425,15 +406,8 @@ func TestGetOrCreateDeviceID_ConcurrentReplacementOfMalformedValue(t *testing.T)
 	assertNoLeftoverTempFiles(t)
 }
 
-// TestGetOrCreateDeviceID_TightensAnExistingPermissiveFile pins that the mode is
-// what this package claims it is. os.WriteFile leaves the mode of an existing
-// file alone, so an identifier file created world-readable by some other path
-// used to keep that mode for the life of the installation.
-//
-// The bound asserted is 0600, the one the package documents, rather than the
-// group and other bits alone: an owner execute bit says this file is a program
-// to run, which it is not, and a mask that spared it would leave the documented
-// mode and the enforced one disagreeing.
+// TestGetOrCreateDeviceID_TightensAnExistingPermissiveFile: os.WriteFile leaves an existing
+// file's mode alone. The bound is the documented 0600, owner execute bit included.
 func TestGetOrCreateDeviceID_TightensAnExistingPermissiveFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix file mode bits are not meaningful on Windows")
@@ -489,11 +463,8 @@ func TestGetOrCreateDeviceID_KeepsAStricterMode(t *testing.T) {
 	assert.Equal(t, os.FileMode(0400), fileInfo.Mode().Perm())
 }
 
-// TestGetOrCreateDeviceID_KeepsAStricterModeWhenReplacing carries the property
-// above onto the path that rewrites the file. Replacing publishes a fresh
-// temporary file, which arrives with the mode os.CreateTemp chose rather than
-// the one the file it replaces had, so a read-only identifier file used to come
-// back writable—the package widening a mode it promises only ever to narrow.
+// TestGetOrCreateDeviceID_KeepsAStricterModeWhenReplacing carries the property above onto the
+// replace path, whose temporary file arrives with the mode os.CreateTemp chose.
 func TestGetOrCreateDeviceID_KeepsAStricterModeWhenReplacing(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix file mode bits are not meaningful on Windows")
@@ -537,11 +508,9 @@ func TestGetOrCreateDeviceID_UnreadableFile(t *testing.T) {
 	assert.Empty(t, deviceID)
 }
 
-// TestGetOrCreateDeviceID_NamesTheScratchFileInItsError keeps two failures
-// apart. One temporary file serves both the path that creates the identifier
-// file and the path that rewrites it, so a scratch file that could not be
-// opened used to be reported as the identifier file itself—telling a user whose
-// device_id is sitting right there that it could not be created.
+// TestGetOrCreateDeviceID_NamesTheScratchFileInItsError: one temporary file serves both creating
+// and rewriting the identifier, and a scratch file that could not be opened must not be reported
+// as the identifier file itself.
 func TestGetOrCreateDeviceID_NamesTheScratchFileInItsError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix file mode bits are not meaningful on Windows")

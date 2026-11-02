@@ -11,7 +11,8 @@ import (
 	"strings"
 )
 
-var maxReleaseFileSize int64 = 512 << 20 // Nothing in a release comes near it—it stops a malformed or endless stream, not anything real.
+// maxReleaseFileSize stops a malformed or endless stream; no real release file comes near it.
+var maxReleaseFileSize int64 = 512 << 20
 
 // maxArchiveStreamSize bounds what gzip inflates while the scan looks for its
 // entry. maxReleaseFileSize bounds only the entry written and the archive

@@ -47,8 +47,8 @@ var webshWatchCmd = &cobra.Command{
 	},
 }
 
-// This header is the only sign of whose session is on screen, and the names in
-// it are set by whoever registered the server or the account.
+// printWatchHeader sanitizes every name: the header is the only sign of whose session is on
+// screen, and the names in it are set by whoever registered the server or the account.
 func printWatchHeader(w io.Writer, detail websh.SessionDetailResponse) {
 	fmt.Fprintf(w, "\nSession:  %s\n", utils.SanitizeTerminalText(detail.ID))
 	fmt.Fprintf(w, "Server:   %s\n", utils.SanitizeTerminalText(detail.Server.Name))

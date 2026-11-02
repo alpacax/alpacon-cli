@@ -18,14 +18,19 @@ type AlpaconClient struct {
 	// verification, so a credential written for another client (a kubeconfig)
 	// can say the same instead of failing where this client succeeds.
 	Insecure bool
+	// noRenewal skips the refresh-token renewal on a 401: it mints a workspace-
+	// audience token, which a client for another audience (the signer) cannot use.
+	noRenewal bool
+	// dropsRefusalNext clears a refusal's "next": it names a path on this host,
+	// and the `alpacon api` action that renders it reads the workspace instead.
+	dropsRefusalNext bool
 
 	// tokenMu guards accessToken, which sendRequest renews mid-flight. Unexporting
 	// the field keeps other packages out, token_boundary_test.go keeps this one out.
 	tokenMu sync.Mutex
-	// refreshMu serializes the refresh-token grant so one expiry costs one round
-	// trip. The grant is unbounded network I/O, so it runs under this lock and
-	// never under tokenMu—otherwise a slow Auth0 would stall every other request
-	// the client has in flight.
+	// refreshMu serializes the refresh-token grant so one expiry costs one round trip. The grant
+	// has no timeout (no HTTP client on that path sets one), so it never runs under tokenMu,
+	// which every request takes.
 	refreshMu sync.Mutex
 	loadOnce  sync.Once
 	loadErr   error

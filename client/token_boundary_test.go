@@ -15,9 +15,9 @@ import (
 
 const accessTokenField = "accessToken"
 
-// Only these two take tokenMu, so the rule rejects every other reference rather
-// than try to prove from the AST that a lock is held (issue #397). The receiver
-// match keeps a plain function of the same name from inheriting the pass.
+// Only these two take tokenMu, so the rule rejects every other reference rather than try to prove
+// from the AST that a lock is held. The receiver match keeps a plain function of the same name
+// from inheriting the pass.
 var accessTokenAccessors = map[string]bool{"AccessToken": true, "SetAccessToken": true}
 
 // Unexporting stops other packages; setHTTPHeader and the package's own tests

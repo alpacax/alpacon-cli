@@ -323,7 +323,7 @@ func executeTestCommand(t *testing.T, args []string) (string, string, string, []
 	username := parsed.Username
 	serverName := parsed.ServerName
 
-	// Parse SSH-like syntax for user@host (same logic as in the main command)
+	// Same user@host parsing as Run.
 	if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
 		sshTarget := utils.ParseSSHTarget(serverName)
 		if username == "" && sshTarget.User != "" {
@@ -382,7 +382,6 @@ func TestSanitizeRecord(t *testing.T) {
 	in := "\x1b[31mdocker\x1b[0m ps\n  -a\tfoo"
 	assert.Equal(t, "docker ps -a foo", sanitizeRecord(in, 100))
 
-	// Truncation applies after cleaning.
 	assert.Equal(t, "docke...", sanitizeRecord("docker ps", 5))
 
 	// OSC window-title sequences are stripped, not leaked into output.
@@ -423,10 +422,8 @@ func TestPrintWatchHeader_StripsControlSequences(t *testing.T) {
 	assert.Contains(t, got, "Username: alice\n")
 }
 
-// TestBuildRemoteExecArgsPinsWebshInvocation pins InvokedAs to WebshInvocation:
-// the one line that makes a refusal hint render websh syntax instead of exec's.
-// Without it every field still flows and the whole suite stays green, so this
-// is the only guard against a refactor dropping the field.
+// TestBuildRemoteExecArgsPinsWebshInvocation is the only guard on InvokedAs: without it a refusal
+// hint renders exec syntax while every other field still flows and the suite stays green.
 func TestBuildRemoteExecArgsPinsWebshInvocation(t *testing.T) {
 	parsed := WebshArgs{
 		Groupname:     "devs",
@@ -511,5 +508,24 @@ func TestSetupSudoListener_WarningReturnsTheCursor(t *testing.T) {
 	for line := range strings.SplitSeq(strings.TrimSuffix(stderr, "\n"), "\n") {
 		assert.True(t, strings.HasSuffix(line, "\r"),
 			"websh may already hold the terminal in raw mode, where a bare newline leaves the cursor mid-line: %q", line)
+	}
+}
+
+// A refused event session carries the server's hint under the warning, on a
+// line that still returns the cursor in raw mode.
+func TestSetupSudoListener_WarningCarriesTheServerHint(t *testing.T) {
+	const hint = "This credential cannot stand for a person at the keyboard; sign in to the CLI instead."
+	ts := newSudoListenerTestServer(t, http.StatusForbidden, `{"code": "auth_interactive_channel_requires_presence", "hint": "`+hint+`"}`)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		_ = setupSudoListener(ac, "my-server", "session-1")
+	})
+
+	assert.Contains(t, stderr, "Sudo MFA listener unavailable")
+	assert.Equal(t, 1, strings.Count(stderr, hint), "stderr: %q", stderr)
+	assert.Contains(t, stderr, hint+"\r\n")
+	for line := range strings.SplitSeq(strings.TrimSuffix(stderr, "\n"), "\n") {
+		assert.True(t, strings.HasSuffix(line, "\r"), "line: %q", line)
 	}
 }

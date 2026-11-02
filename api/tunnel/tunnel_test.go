@@ -19,9 +19,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// createTunnelBodyCapture holds the captured POST body fields for the
-// /api/websh/tunnels/ request. Access is guarded by mu because the
-// test server handler runs on a separate goroutine from the test body.
+// createTunnelBodyCapture holds the POST body fields of /api/websh/tunnels/; mu
+// guards them against the handler goroutine.
 type createTunnelBodyCapture struct {
 	mu                sync.Mutex
 	hadWorkSessionKey bool
@@ -46,10 +45,8 @@ func (c *createTunnelBodyCapture) snapshot() (hadKey bool, ws string, seen bool)
 	return c.hadWorkSessionKey, c.workSession, c.postSeen
 }
 
-// newCreateTunnelBodyCaptureServer returns a test server that:
-//   - responds to GET /api/servers/servers/ (lookup by name) with a 1-item list
-//   - captures the POST body for /api/websh/tunnels/ and returns a minimal
-//     TunnelSessionResponse so CreateTunnelSession returns nil error.
+// newCreateTunnelBodyCaptureServer answers the server lookup by name with one
+// server and captures the tunnel create body.
 func newCreateTunnelBodyCaptureServer(t *testing.T, capture *createTunnelBodyCapture) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

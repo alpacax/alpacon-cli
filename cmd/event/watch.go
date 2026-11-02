@@ -90,7 +90,7 @@ func runWatch(cmd *cobra.Command, _ []string) {
 		case <-watcher.Reconnected():
 			utils.CliWarning("Reconnected to the event channel. Events published while disconnected were not delivered.")
 		case failErr := <-watcher.ReconnectFailed():
-			utils.CliWarning("Lost the event channel and still reconnecting: %s. No events are being delivered until it recovers.", strip(failErr.Error()))
+			utils.CliWarning("Lost the event channel and still reconnecting: %s. No events are being delivered until it recovers.", utils.Reword(failErr, strip(failErr.Error())))
 		case frame := <-watcher.Frames():
 			if err := renderEvent(os.Stdout, frame, utils.OutputFormat, target, time.Now()); err != nil {
 				utils.CliWarning("%s.", err)

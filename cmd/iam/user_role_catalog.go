@@ -55,7 +55,6 @@ the flag and read the whole catalog.`,
 }
 
 func init() {
-	// The flag keeps its name for the scripts that already pass it, although what it hides
-	// is the server's answer now rather than a spelling.
+	// The name predates hiding by the server's auto_assigned answer; scripts already pass it.
 	userRoleCatalogCmd.Flags().Bool("hide-object-roles", false, "Hide the roles the server counts as assigned on its own, such as group:member or user:owner")
 }

@@ -21,11 +21,8 @@ const (
 	codeInvalidInput         = "invalid_input"
 	codeWorkspaceSuspended   = "workspace_suspended"
 
-	// codeRolePermissionRequired and codeRoleObjectPermissionRequired are the role
-	// gate's refusals—missing the permission outright, or missing it on the specific
-	// object named. Both route through the same per-gate guidance a code-less 403
-	// from the role gate always got: the refusal reason has not changed, only
-	// whether the server states a code for it.
+	// The role gate's refusals: the permission missing outright, or missing on the object named.
+	// They get the same per-gate guidance as the gate's code-less 403.
 	codeRolePermissionRequired       = "rbac_permission_required"
 	codeRoleObjectPermissionRequired = "rbac_object_permission_required"
 )
@@ -71,6 +68,11 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 	if err == nil {
 		return nil
 	}
+	// The server's hint is the guidance for this refusal, and the error output
+	// prints it; a sentence from here would say it a second time.
+	if utils.RefusalHint(err) != "" {
+		return err
+	}
 
 	code, _ := utils.ParseErrorResponse(err)
 	switch code {
@@ -97,9 +99,6 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 		return rewrite(err, "this token cannot be used for this command; use a login session or a token with an explicit scope")
 	}
 
-	// codeRolePermissionRequired and codeRoleObjectPermissionRequired are the coded
-	// shape of the same role-gate refusal the code-less 403 below has always meant—
-	// widen the guard rather than duplicate the five gate-specific messages.
 	if utils.HTTPStatusCode(err) == http.StatusForbidden && isRoleGateCode(code) {
 		switch {
 		case gate == gateUserRead:
@@ -125,11 +124,8 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 	return err
 }
 
-// isRoleGateCode reports whether code is compatible with the per-gate 403 guidance
-// above: either no code at all (the legacy bare {"detail": ...} refusal every
-// call site here predates) or one of the role gate's two coded refusals, whose
-// payload states no human detail and means exactly what the code-less 403
-// always meant.
+// isRoleGateCode reports whether code takes the per-gate 403 guidance: no code at all (the legacy
+// bare {"detail": ...} refusal) or one of the role gate's two coded refusals, which mean the same.
 func isRoleGateCode(code string) bool {
 	switch code {
 	case "", codeRolePermissionRequired, codeRoleObjectPermissionRequired:
@@ -139,11 +135,8 @@ func isRoleGateCode(code string) bool {
 	}
 }
 
-// permissionDeniedMessage renders codePermissionDenied, the troubleshoot read's
-// refusal. Every other call site of that code is a read (a permission list or
-// a permission check), where "that is not an account you may read" holds—but
-// describeRBACError is reachable from the role-write gate too, and that wording
-// would misdescribe a write refusal as a visibility problem.
+// permissionDeniedMessage renders codePermissionDenied. The read wording, "that is not an account
+// you may read", would misdescribe a refusal from the role-write gate as a visibility problem.
 func permissionDeniedMessage(gate rbacGate) string {
 	if gate == gateRoleWrite {
 		return "you do not have permission to make that change"
@@ -151,10 +144,8 @@ func permissionDeniedMessage(gate rbacGate) string {
 	return "that is not an account you may read; your own is always readable"
 }
 
-// tokenScopeMissingMessage names the scope(s) the token lacks, read off the
-// payload's "missing" field (a single scope string or a list of them). The
-// server sends no detail on this code, so without this the operator would see
-// only the generic client-side fallback and not which scope to add.
+// tokenScopeMissingMessage names the scopes the token lacks, read off "missing"; the server sends
+// no detail on this code.
 func tokenScopeMissingMessage(err error) string {
 	_, missing := utils.ParseErrorGateAndMissing(err)
 	if len(missing) == 0 {

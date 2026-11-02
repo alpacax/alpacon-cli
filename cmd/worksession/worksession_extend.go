@@ -62,12 +62,8 @@ reason once the request settles.`,
 			utils.CliErrorEnvelopeWithExit(opExtend, err, "%s", extendErrorMessage(id, err))
 		}
 
-		// The status code is what tells 200 from 202 apart, not
-		// PendingExtensionRequest on its own: a 200 body can still carry a
-		// stale one (the workspace's approval policy changed to auto-approve
-		// after the request was filed, or a lapsed request the periodic
-		// sweep has not reached yet), and treating that as still-pending
-		// would report an already-applied extension as unresolved.
+		// Branch on the status, not PendingExtensionRequest: a 200 body can still carry a stale
+		// request.
 		if status == http.StatusAccepted {
 			printExtendPending(id, session.PendingExtensionRequest)
 			os.Exit(utils.ExitCodePendingApproval)
@@ -77,8 +73,6 @@ reason once the request settles.`,
 	},
 }
 
-// printExtendSuccess writes the extended-session result: the mutation JSON
-// envelope under --output json, a plain success line otherwise.
 func printExtendSuccess(id, expiresAt string) {
 	output := newWorkSessionExtendOutput(id, expiresAt)
 	if utils.OutputFormat == utils.OutputFormatJSON {
@@ -88,11 +82,9 @@ func printExtendSuccess(id, expiresAt string) {
 	utils.CliSuccess("%s", output.Message)
 }
 
-// printExtendPending reports a 202: the extension was queued instead of
-// applied. req is normally non-nil (the 202 contract always carries it), but
-// this stays defensive rather than panic on a body that omits it. Next steps
-// point at 'describe' to check status and a plain retry with a new reason—
-// not 'work-session complete', which is unrelated to an extension decision.
+// printExtendPending reports a 202, which queued the extension instead of applying it; req may be
+// nil on a body that omits it. The next steps point at 'describe' and a retry with a new reason,
+// not at 'work-session complete', which has nothing to do with an extension.
 func printExtendPending(id string, req *wsapi.PendingExtensionRequest) {
 	message, requestID, requestedExpiresAt, deadline := extendPendingMessage(id, req)
 	describeCmd := fmt.Sprintf("alpacon work-session describe %s", id)
@@ -127,11 +119,8 @@ func printExtendPending(id string, req *wsapi.PendingExtensionRequest) {
 	}
 }
 
-// extendPendingJSON is the JSON envelope for extend's 202: the same
-// {"status":"pending_approval", ...} shape utils.PrintPendingApproval uses
-// elsewhere, but with a Context typed for this surface—requested_expires_at
-// and the request's own deadline belong in machine-readable context, not only
-// folded into the message text.
+// extendPendingJSON is the pending_approval envelope utils.PrintPendingApproval writes, with a
+// context that carries the requested expiry and the request's own deadline as fields.
 type extendPendingJSON struct {
 	OK          bool               `json:"ok"`
 	Status      string             `json:"status"`

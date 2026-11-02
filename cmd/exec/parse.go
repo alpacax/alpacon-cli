@@ -17,21 +17,16 @@ import (
 // costs a parked command its one demand.
 const PurposeMaxLength = 2000
 
-// checkPurpose validates a stated purpose against the server's rules, returning
-// the value to send and an empty string when it passes. subject names the thing
-// being validated—the flag for `exec --purpose`, the argument for
-// `exec purpose`—so one ceiling and one wording serve both.
+// checkPurpose validates a stated purpose, returning the value to send and an empty message when it
+// passes. subject names the flag or argument in the message, so `exec --purpose` and
+// `exec purpose` share one ceiling and one wording.
 //
-// Surrounding whitespace is trimmed, and the ceiling is counted on what is
-// actually sent, so the length checked is the length that travels. Trimming is
-// not sanitizing: stripping control characters out of a purpose would falsify a
-// statement the assessor and the audit record attribute to the requester, so
-// the text itself reaches the server as typed.
+// Surrounding whitespace is trimmed before the ceiling is counted, so the length checked is the
+// length sent. Nothing else is stripped: removing control characters would falsify a statement the
+// assessor and the audit record attribute to the requester.
 //
-// The ceiling is counted in runes, not bytes. The server limits purpose to
-// 2000 characters, counted in characters not bytes, so len() would refuse a
-// Korean purpose at roughly 666 of them—while telling the caller the server
-// would refuse it, which at that length is untrue.
+// The ceiling is counted in runes because the server counts characters; len() would refuse a Korean
+// purpose at roughly 666 of them.
 func checkPurpose(subject, purpose string) (string, string) {
 	trimmed := strings.TrimSpace(purpose)
 	if trimmed == "" {
@@ -76,29 +71,26 @@ type RemoteExecArgs struct {
 	Wait         bool
 	ShowHelp     bool
 	Err          string
-	// File is set by --file and selects the verified file lane, in which case
-	// Command is empty and the words after -- are the script's arguments. Nil
-	// on the generic lane, so every existing caller reads as before.
+	// File is set by --file and selects the verified file lane, in which case Command is empty and
+	// the words after -- are the script's arguments. Nil on the generic lane.
 	File *FileExecArgs
 }
 
-// ParseRemoteExecArgs parses raw CLI arguments with manual flag handling.
-// It recognizes -u/--username, -g/--groupname, and -h/--help flags before
-// the server name.
+// ParseRemoteExecArgs parses raw CLI arguments with manual flag handling. Flags are recognized
+// only before the server name.
 //
 // The -- separator has two roles depending on position:
-//   - After the server name: acts as a command separator. Everything after
-//     it is the remote command, with no further flag parsing.
-//   - Before the server name (e.g., after flags): acts as an end-of-flags
-//     marker. The first arg after -- becomes the server, the rest is the command.
+//   - After the server name: everything after it is the remote command, with no further flag
+//     parsing.
+//   - Before the server name: it ends the flags; the first arg after it is the server, the rest
+//     is the command.
 //
 // Without --, everything after the server name is the remote command.
 //
 // Layout: [flags] [USER@]SERVER [--] COMMAND...
 //
-// With --file the words after the server are the script's arguments and must
-// follow --: a command line and a verified file cannot be combined, and a word
-// list with no separator is how one would be mistaken for the other.
+// With --file the words after the server are the script's arguments and must follow --, so a
+// command line is never mistaken for a verified file's arguments.
 func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	var (
 		username, groupname, workSessionID, outputFormat, server string
@@ -117,12 +109,11 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 
-		// -- separator: everything remaining is the remote command
 		if arg == "--" {
 			separated = true
 			if server == "" {
-				// Nothing before -- that looked like a server name.
-				// Treat remaining args normally: first is server, rest is command.
+				// No server before --: the first arg after it is the server, the rest is the
+				// command.
 				remaining := args[i+1:]
 				if len(remaining) > 0 {
 					server = remaining[0]
@@ -134,13 +125,11 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			break
 		}
 
-		// Already found server: remaining args are the command
 		if server != "" {
 			commandParts = args[i:]
 			break
 		}
 
-		// Flag parsing (only before server is identified)
 		switch {
 		case arg == "-h" || arg == "--help":
 			return RemoteExecArgs{ShowHelp: true}
@@ -327,7 +316,6 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		}
 	}
 
-	// Parse SSH-like user@host syntax
 	if server != "" && strings.Contains(server, "@") && !strings.Contains(server, ":") {
 		sshTarget := utils.ParseSSHTarget(server)
 		if username == "" && sshTarget.User != "" {
@@ -450,7 +438,6 @@ func matchShortOrLongFlag(arg, short, long string) bool {
 	if len(arg) > len(short) && strings.HasPrefix(arg, short) && arg[len(short)] != '-' {
 		return true
 	}
-	// Long flag: exact (--username) or with = (--username=val)
 	return arg == long || strings.HasPrefix(arg, long+"=")
 }
 
@@ -462,16 +449,13 @@ func matchShortOrLongFlag(arg, short, long string) bool {
 // Returns the value, updated index, and an error message if no value was found.
 func extractFlagValue(args []string, i int, short string) (string, int, string) {
 	arg := args[i]
-	// --flag=value
 	if strings.Contains(arg, "=") {
 		parts := strings.SplitN(arg, "=", 2)
 		return parts[1], i, ""
 	}
-	// -uroot (short flag with attached value, no space)
 	if strings.HasPrefix(arg, short) && len(arg) > len(short) {
 		return arg[len(short):], i, ""
 	}
-	// -u root (next arg is the value)
 	if i+1 < len(args) {
 		return args[i+1], i + 1, ""
 	}

@@ -11,12 +11,22 @@ import (
 // tell it apart from an ordinary not-found with errors.Is instead of matching message text.
 var ErrBlankName = errors.New("blank name")
 
+// ErrNotFound marks a resolver's miss: the lookup answered and no resource has that name.
+// A request that failed never carries it.
+var ErrNotFound = errors.New("not found")
+
+type notFoundError struct{ msg string }
+
+func (e *notFoundError) Error() string        { return e.msg }
+func (e *notFoundError) Is(target error) bool { return target == ErrNotFound }
+
 // blankNameError carries a caller-chosen message while still satisfying errors.Is(err,
 // ErrBlankName), so each resolver keeps its own wording without losing the shared sentinel.
 type blankNameError struct{ msg string }
 
-// ResolveByNameOptions names ResolveByName's parameters so a call site cannot swap two
-// same-typed fields (e.g. blankMsg/notFoundMsg) without the compiler seeing a field name change.
+// ResolveByNameOptions names ResolveByName's parameters so a call site spells out each
+// same-typed field, such as BlankMsg and NotFoundMsg, instead of passing them by position, where
+// a swap would compile silently.
 type ResolveByNameOptions struct {
 	Endpoint    string
 	FilterKey   string
@@ -51,7 +61,7 @@ func ResolveByName[T any](ac *client.AlpaconClient, opts ResolveByNameOptions) (
 		return nil, err
 	}
 	if len(results) == 0 {
-		return nil, errors.New(opts.NotFoundMsg)
+		return nil, &notFoundError{msg: opts.NotFoundMsg}
 	}
 
 	return &results[0], nil

@@ -19,8 +19,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// errHelpRequested signals that -h/--help was encountered during parsing.
-// Callers should print help text and exit cleanly.
+// errHelpRequested signals that -h/--help was seen during parsing.
 var errHelpRequested = errors.New("help requested")
 
 type WebshArgs struct {
@@ -35,11 +34,8 @@ type WebshArgs struct {
 	Env           map[string]string
 }
 
-// ParseWebshArgs parses raw CLI args for `alpacon websh` (DisableFlagParsing mode).
-// Returns errHelpRequested when -h/--help is seen.
-//
-// NOTE: --read-only must be checked before generic -r prefixes, and
-// --work-session before the default fallthrough.
+// ParseWebshArgs parses raw CLI args for `alpacon websh` (DisableFlagParsing mode), returning
+// errHelpRequested when -h/--help is seen.
 func ParseWebshArgs(args []string) (WebshArgs, error) {
 	res := WebshArgs{Env: map[string]string{}}
 	for i := 0; i < len(args); i++ {
@@ -69,8 +65,7 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 					return res, fmt.Errorf("the --read-only value must be either 'true' or 'false'")
 				}
 			} else {
-				// Boolean form: --read-only without =.
-				// Peek ahead only for explicit "true"/"false"; otherwise treat as true.
+				// Without "=", take the next word only if it is "true" or "false"; otherwise true.
 				if i+1 < len(args) {
 					next := strings.TrimSpace(strings.ToLower(args[i+1]))
 					if next == "true" || next == "false" {
@@ -155,6 +150,12 @@ line carries a credential—a -p/--password flag, a KEY=VALUE secret such as
 PGPASSWORD=..., or a user:pass@host connection string—with exit code 1. Pass
 the secret with --env="KEY" instead; --output json emits an error envelope on
 stderr with error_code command_inline_credential.
+A command whose line carries a script body—a heredoc, a multi-line -c or -e
+body, or a decoded payload piped into a shell—can be refused when the
+workspace approval policy blocks script bodies, with exit code 6 and the code
+use_file_execution. Save the script to a file and run it with
+'alpacon exec --file', as the printed commands show; --output json carries them
+in next_actions.
 Requires an active WorkSession when using Browser login (Auth0). Token auth (API
 token or Service token) bypasses this requirement for 'websh SERVER COMMAND',
 but cannot open an interactive terminal or watch, join, or invite to a session—those
@@ -213,10 +214,8 @@ Flags:
 
 Note: All flags must be placed before the server name.
       Everything after the server name is treated as the remote command.`,
-	// DisableFlagParsing is required because positional args after the server name
-	// (e.g., "ls -la") would otherwise be consumed by Cobra's flag parser.
-	// As a trade-off, we parse all flags manually in the Run function.
-	// Flags after the server name are intentionally treated as remote command args.
+	// Positional args after the server name (e.g. "ls -la") must reach the remote command, so flags
+	// are parsed by hand in Run.
 	DisableFlagParsing: true,
 	Run: func(cmd *cobra.Command, args []string) {
 		parsed, err := ParseWebshArgs(args)
@@ -244,7 +243,6 @@ Note: All flags must be placed before the server name.
 			utils.CliErrorWithExit("The --share flag cannot be used with remote commands. Use --share for interactive sessions only.")
 		}
 
-		// Parse SSH-like syntax for user@host
 		if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
 			sshTarget := utils.ParseSSHTarget(serverName)
 			if username == "" && sshTarget.User != "" {
@@ -274,14 +272,14 @@ Note: All flags must be placed before the server name.
 			utils.OutputFormat = parsed.OutputFormat
 		}
 
-		workSessionID := worksession.ResolveOrExit(parsed.WorkSessionID)
-
 		authMethod := config.ResolveAuthMethod()
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
+
+		workSessionID := worksession.ResolveOrExit(alpaconClient, parsed.WorkSessionID)
 
 		session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
 
@@ -296,9 +294,8 @@ Note: All flags must be placed before the server name.
 				utils.CliErrorWithExit("Failed to create websh session for '%s' server: %s.", serverName, utils.InteractiveOnly(err, "open an interactive Websh terminal"))
 			}
 		}
-		// Set up sudo MFA listener in background so it doesn't delay
-		// terminal open. If the user types sudo before the listener is
-		// ready, the approval request will expire and they can retry.
+		// Start the sudo MFA listener in the background so it does not delay the terminal; a sudo
+		// typed before it is ready lets the approval request expire, and the user can retry.
 		listenerDone := make(chan *event.SudoListener, 1)
 		go func() {
 			listenerDone <- setupSudoListener(alpaconClient, serverName, session.ID)
@@ -364,7 +361,7 @@ func setupSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *
 			// Not utils.CliWarning: this runs in a goroutine racing
 			// OpenNewTerminal, so the terminal may already be in raw mode,
 			// where a bare newline leaves the cursor where it stood.
-			_, _ = fmt.Fprintf(os.Stderr, "\r\n%s: %s\r\n", utils.Yellow("Warning"), warning)
+			_, _ = fmt.Fprintf(os.Stderr, "\r\n%s: %s\r\n%s", utils.Yellow("Warning"), warning, utils.RawTerminalHintLines(listener.Err()))
 		}
 		return nil
 	}

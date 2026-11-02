@@ -19,8 +19,7 @@ func TestWorkspaceErrorCallbacks_WiresEveryField(t *testing.T) {
 	cb := WorkspaceErrorCallbacks(ac, func() error { retried = true; return nil })
 
 	assert.NotNil(t, cb.OnMFARequired)
-	// The one field left nil on purpose—a workspace-level change takes no username,
-	// unlike ErrorCallbacks.
+	// Left nil on purpose: a workspace-level change takes no username.
 	assert.Nil(t, cb.OnUsernameRequired)
 
 	require.NotNil(t, cb.RetryOperation)

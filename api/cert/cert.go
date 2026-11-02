@@ -45,11 +45,11 @@ func CreateSignRequest(ac *client.AlpaconClient, signRequest SignRequest) (SignR
 	return response, nil
 }
 
-func SubmitCSR(ac *client.AlpaconClient, csr []byte, submitURL string) error {
+func SubmitCSR(ac *client.AlpaconClient, csr []byte, signRequest SignRequestResponse) error {
 	var request CSRSubmit
 	request.CsrText = string(csr)
 
-	_, err := ac.SendPatchRequest(submitURL, request)
+	_, err := ac.SendPatchRequest(signRequest.SubmitURL, request)
 	if err != nil {
 		return err
 	}
@@ -125,9 +125,8 @@ func GetAuthorityList(ac *client.AlpaconClient) ([]AuthorityAttributes, error) {
 	return authorityList, nil
 }
 
-// GetAuthorityIDByName resolves an authority name to its ID by fetching all
-// authorities and matching by name. If name is already a UUID, it is returned
-// as-is without making any API call, so callers may pass either a name or an ID.
+// GetAuthorityIDByName resolves an authority name to its ID. A UUID is returned
+// as-is without an API call.
 func GetAuthorityIDByName(ac *client.AlpaconClient, name string) (string, error) {
 	if uuidRegex.MatchString(name) {
 		return name, nil

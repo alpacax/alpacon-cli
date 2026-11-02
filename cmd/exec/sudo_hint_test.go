@@ -54,10 +54,9 @@ func TestSudoDenialHint(t *testing.T) {
 			wantContains: []string{"MFA", "work-session update", "may require approval"},
 		},
 		{
-			// The AI judges the command against both the session title and its
-			// description (WorkSessionRiskContext), but only a title edit applies at
-			// once: a description edit on an approved/active session is queued for an
-			// approval of its own, which is the wait this path exists to skip.
+			// The command is judged against both the session title and its description, but only a
+			// title edit applies at once: a description edit on an approved or active session
+			// queues for an approval of its own, which is the wait this path exists to skip.
 			name: "intent-deviation offers only the edit that skips the wait",
 			code: "SUDO_INTENT_DEVIATION",
 			wantContains: []string{
@@ -439,7 +438,6 @@ func TestIsApprovalDenial(t *testing.T) {
 	}
 }
 
-// The --file lane's re-run hint cases (TestReRunHint_File) live in file_test.go.
 func TestReRunHint(t *testing.T) {
 	t.Parallel()
 	t.Run("minimal: server and command only", func(t *testing.T) {
@@ -471,4 +469,152 @@ func TestReRunHint(t *testing.T) {
 		// Caveat rides in Description so a machine consumer replaying Command isn't misled.
 		assert.Contains(t, got.Description, "re-read from your shell")
 	})
+}
+
+// TestSudoDenialHintDefersToTheServerHint pins the fallback: a server that sends
+// a hint has the sudo plugin print it on the line under the denial line, so the
+// local sentence would say the same thing twice; a server that sends none still
+// gets the local sentence.
+func TestSudoDenialHintDefersToTheServerHint(t *testing.T) {
+	t.Parallel()
+	const serverHint = "No sudo policy covers this command. Run it in a work session whose sudo patterns match it; adding a pattern to a session may need an approval.\n"
+	tests := []struct {
+		name      string
+		output    string
+		wantLocal bool
+	}{
+		{
+			name:   "a table code with the server's hint under it",
+			output: denialLine("SUDO_NO_WORKSESSION_POLICY") + serverHint,
+		},
+		{
+			name:      "a table code without a hint",
+			output:    denialLine("SUDO_NO_WORKSESSION_POLICY"),
+			wantLocal: true,
+		},
+		{
+			name:   "a code the table does not carry, with the server's hint",
+			output: denialLine("SUDO_BRAND_NEW_CODE") + serverHint,
+		},
+		{
+			name:      "a code the table does not carry, without a hint",
+			output:    denialLine("SUDO_BRAND_NEW_CODE"),
+			wantLocal: true,
+		},
+		{
+			name:   "the codeless denial with the server's hint",
+			output: "Alpacon denied this sudo command.\n" + serverHint,
+		},
+		{
+			name:   "a terminal that ends lines with CRLF",
+			output: "Alpacon denied this sudo command (SUDO_NO_WORKSESSION_POLICY).\r\n" + strings.TrimSuffix(serverHint, "\n") + "\r\n",
+		},
+		{
+			name:   "a hint that is the last line, with no newline after it",
+			output: denialLine("SUDO_NO_WORKSESSION_POLICY") + strings.TrimSuffix(serverHint, "\n"),
+		},
+		{
+			// The PAM-only path prints the denial line before sudo's own error.
+			name:      "sudo's own error under the denial line is not a hint",
+			output:    denialLine("SUDO_NO_WORKSESSION_POLICY") + "sudo: a password is required\n",
+			wantLocal: true,
+		},
+		{
+			name:      "sudo-rs's own error under the denial line is not a hint",
+			output:    denialLine("SUDO_NO_WORKSESSION_POLICY") + "sudo-rs: Authentication failed, try again.\n",
+			wantLocal: true,
+		},
+		{
+			// One command line can run several sudo calls, each with its own line.
+			name:      "another denial line is not a hint",
+			output:    denialLine("SUDO_RISK_DENIED") + denialLine("SUDO_NO_WORKSESSION_POLICY"),
+			wantLocal: true,
+		},
+		{
+			name:      "the codeless line under a coded one is not a hint",
+			output:    denialLine("SUDO_RISK_DENIED") + "Alpacon denied this sudo command.\n",
+			wantLocal: true,
+		},
+		{
+			name:      "an empty line is not a hint",
+			output:    denialLine("SUDO_NO_WORKSESSION_POLICY") + "\nNo sudo policy covers this command.\n",
+			wantLocal: true,
+		},
+		{
+			// The plugin cuts a hint at 256 bytes, so a longer line came from elsewhere.
+			name:      "a line longer than the hint cap is not a hint",
+			output:    denialLine("SUDO_NO_WORKSESSION_POLICY") + strings.Repeat("x", 257) + ".\n",
+			wantLocal: true,
+		},
+		{
+			// The plugin strips control characters from the hint before printing it.
+			name:      "a line carrying an escape is not a hint",
+			output:    denialLine("SUDO_NO_WORKSESSION_POLICY") + "\x1b[31mNo policy covers this command.\n",
+			wantLocal: true,
+		},
+		{
+			// The detector cannot tell this from a hint. Accepted: from a server
+			// that sends none, only the local sentence is lost.
+			name:   "command output right under the denial line passes for a hint",
+			output: denialLine("SUDO_NO_WORKSESSION_POLICY") + "build finished\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			hint := sudoDenialHint(tt.output)
+			if tt.wantLocal {
+				assert.Contains(t, hint, "Hint:", "output: %q", tt.output)
+				return
+			}
+			assert.Empty(t, hint, "output: %q", tt.output)
+		})
+	}
+}
+
+// The pending classification decides the wait, so a server hint withholds only
+// the self-service sentence, never the pending signal.
+func TestPendingSudoDenialDefersToTheServerHint(t *testing.T) {
+	t.Parallel()
+	const serverHint = "This command does not match its work session's declared purpose, so it waits on an approval request whose state can be read on it.\n"
+
+	hint, pending := pendingSudoDenial(denialLine("SUDO_INTENT_DEVIATION") + serverHint)
+	assert.True(t, pending)
+	assert.Empty(t, hint)
+
+	hint, pending = pendingSudoDenial(denialLine("SUDO_INTENT_DEVIATION"))
+	assert.True(t, pending)
+	assert.Contains(t, hint, "--title")
+}
+
+// TestRemoteFailureReportDefersToTheServerHint drives what HandleCommandResult
+// prints for a failed command. The server's hint carries no punctuation rule,
+// so one ending in "!" or in nothing at all still stands in for the local
+// sentence, over a terminal's CRLF line endings as well.
+func TestRemoteFailureReportDefersToTheServerHint(t *testing.T) {
+	t.Parallel()
+	const crlfDenial = "Alpacon denied this sudo command (SUDO_NO_WORKSESSION_POLICY).\r\n"
+	tests := []struct {
+		name      string
+		output    string
+		wantLocal bool
+	}{
+		{name: "a hint ending in an exclamation mark", output: crlfDenial + "Sign in again!\r\n"},
+		{name: "a hint with no final punctuation", output: crlfDenial + "Run it in a work session whose sudo patterns match it\r\n"},
+		{name: "no hint", output: crlfDenial, wantLocal: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			report, exitCode := remoteFailureReport(&event.RemoteCommandError{ExitCode: 1, Output: tt.output})
+
+			assert.Equal(t, 1, exitCode)
+			if tt.wantLocal {
+				assert.Contains(t, report, "work-session update [SESSION_ID] --sudo")
+				return
+			}
+			assert.NotContains(t, report, "Hint:")
+			assert.NotContains(t, report, "work-session update")
+		})
+	}
 }

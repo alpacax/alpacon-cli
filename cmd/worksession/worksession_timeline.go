@@ -137,7 +137,6 @@ func recordingPreview(raw string) string {
 		// Not SanitizeTerminalText: its control pass would take \r before the
 		// overwrite handling below gets to use it.
 		line := utils.StripFormatAndANSI(scanner.Text())
-		// Strip trailing CR from CRLF line endings before overwrite handling.
 		line = strings.TrimRight(line, "\r")
 		// \r moves cursor to line start; take only the last overwritten segment
 		if idx := strings.LastIndex(line, "\r"); idx != -1 {
@@ -302,9 +301,7 @@ func formatDetails(item *wsapi.TimelineItem) string {
 		return detail
 
 	case "websh_record":
-		// Sanitize before truncating, as every case above does: otherwise the 60-char
-		// budget goes on escape bytes and the cell shows less of the command than the
-		// rows beside it.
+		// Sanitize before truncating, or escape bytes spend the 60-char budget.
 		return utils.TruncateString(utils.SanitizeTerminalText(item.MaskedRecord), 60)
 
 	default:

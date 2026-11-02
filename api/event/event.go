@@ -19,12 +19,13 @@ import (
 const (
 	getEventURL = "/api/events/commands/"
 
-	// Base gap the pacing above multiplies, for the poll running behind a live
-	// stream.
+	// Base tick utils.NextPollTick widens, for the poll running behind a live stream.
 	streamPollTick = time.Second
-	// The poll that stands in for a stream that never connected.
-	fallbackPollTick = time.Second
 )
+
+// CommandPollTick paces a command poll with no stream behind it. A var so a test's
+// helper process, which no in-process seam reaches, can shorten it.
+var CommandPollTick = time.Second
 
 // streamDelays sit on the stream, not in package variables, so a test can shorten
 // them and stay parallel; synctest cannot, since the stream holds a real socket.
@@ -35,11 +36,13 @@ type streamDelays struct {
 	fallbackPollTick   time.Duration
 }
 
-var defaultStreamDelays = streamDelays{
-	connectTimeout:     commandOutputConnectTimeout,
-	reconnectBaseDelay: wsReconnectBaseDelay,
-	pollTick:           streamPollTick,
-	fallbackPollTick:   fallbackPollTick,
+func defaultStreamDelays() streamDelays {
+	return streamDelays{
+		connectTimeout:     commandOutputConnectTimeout,
+		reconnectBaseDelay: wsReconnectBaseDelay,
+		pollTick:           streamPollTick,
+		fallbackPollTick:   CommandPollTick,
+	}
 }
 
 // maxGapWidth caps enumerated missing seqs (per gap and cumulatively) so a buggy or
@@ -277,14 +280,12 @@ func newCommandRequest(serverID, username, groupname, workSessionID, purpose str
 		RunAfter:    []string{},
 		WorkSession: workSessionID,
 		Purpose:     purpose,
-		// Declared on every submission, including --detach: the demand is
-		// reported to the caller the moment it is seen rather than waited out,
-		// so nothing here can be left stalling for an answer it cannot give.
+		// Declared on every submission, --detach included: a demand is reported to the caller
+		// as soon as it is seen, never waited out.
 		PurposeDemandSupported: true,
 	}
 }
 
-// postCommand sends one submission and decodes the command it created.
 func postCommand(ac *client.AlpaconClient, commandRequest *CommandRequest) (CommandResponse, error) {
 	respBody, err := ac.SendPostRequest(getEventURL, commandRequest)
 	if err != nil {
@@ -308,14 +309,13 @@ func postCommand(ac *client.AlpaconClient, commandRequest *CommandRequest) (Comm
 }
 
 // AnswerPurposeDemand states what a parked command is for and sends it back
-// through verification. The server re-judges it once with the purpose
-// in hand; whatever that second verdict is—run, hold for a human, or deny—is
-// reached by exactly the path an un-parked command takes.
+// through verification. The server re-judges it once with the purpose in hand,
+// and whatever that verdict is—run, hold for a human, or deny—follows the path an
+// un-parked command takes.
 //
-// The server refuses a command that is not parked, and refuses an answer from
-// anyone but the requester, with the same error either way: whether a given
-// command is parked is not something a bystander needs to learn. So a failure
-// here cannot be read as "the deadline passed" specifically.
+// The server answers a command that is not parked and an answer from anyone but
+// the requester with the same error, so a failure here cannot be read as "the
+// deadline passed" specifically.
 func AnswerPurposeDemand(ac *client.AlpaconClient, cmdID, purpose string) error {
 	pathID, err := api.RequireID(cmdID, "command")
 	if err != nil {
@@ -345,12 +345,12 @@ func getCommandByPathID(ac *client.AlpaconClient, pathID api.PathID) (EventDetai
 	return response, nil
 }
 
-// PollCommandExecution polls with default timeout/tick; tests use pollCommandExecution directly.
-// An MFA refusal (auth_mfa_required) of the poll is returned at once as the
-// typed error, so the caller can wait for MFA and poll again; the poll only
-// reads, so polling again is safe. Any other GET error is retried with backoff.
+// PollCommandExecution polls with the default timeout and tick. An MFA refusal
+// (auth_mfa_required) is returned at once as the typed error, so the caller can wait
+// for MFA and poll again; the poll only reads, so that is safe. Any other GET error
+// is retried with backoff.
 func PollCommandExecution(ac *client.AlpaconClient, cmdID api.PathID) (EventDetails, error) {
-	return pollCommandExecution(ac, cmdID, execTimeout(), 1*time.Second, false, pollSeams{surfaceMFA: true})
+	return pollCommandExecution(ac, cmdID, execTimeout(), CommandPollTick, false, pollSeams{surfaceMFA: true})
 }
 
 func execTimeout() time.Duration {
@@ -371,11 +371,11 @@ func isPollWaitStatus(status string, waitApproval bool) bool {
 		(waitApproval && (IsAwaitingApprovalStatus(status) || status == "error"))
 }
 
-// waitApproval polls through the awaiting_approval hold—bounded by timeout, which
-// the hold never resets and throttled waits extend by at most one timeout or
-// utils.PollMaxThrottleExtensions grants, whichever binds first, plus one backoff
-// wait—so an approved job resumes streaming. Without it the hold is terminal
-// (PendingApprovalError). A closed seams.cancel ends the poll with errPollCancelled.
+// pollCommandExecution polls until the command leaves the running state. With waitApproval
+// it also polls through the awaiting_approval hold—bounded by timeout, which the hold never
+// resets and throttled waits extend by at most one timeout or utils.PollMaxThrottleExtensions
+// grants, plus one backoff wait—so an approved job resumes streaming. A closed seams.cancel
+// ends the poll with errPollCancelled.
 func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, tick time.Duration, waitApproval bool, seams pollSeams) (EventDetails, error) {
 	var response EventDetails
 
@@ -384,6 +384,7 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 	delay := tick
 	failures := 0
 	budget := utils.NewThrottleBudget(timeout)
+	lastRefusalHint := ""
 
 	for {
 		select {
@@ -402,10 +403,14 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 			}
 		}
 		if !seams.Now().Before(deadline) {
-			return response, &ClientTimeoutError{}
+			return response, &ClientTimeoutError{hint: lastRefusalHint}
 		}
 
 		responseBody, err := ac.SendGetRequest(api.IDURL(getEventURL, pathID, "", nil))
+		lastRefusalHint = ""
+		if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
+			lastRefusalHint = utils.RefusalHint(err)
+		}
 		if err != nil {
 			if seams.surfaceMFA && utils.StructuredErrorCode(err) == utils.AuthMFARequired {
 				return response, err
@@ -452,7 +457,7 @@ func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username
 }
 
 func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
-	return runCommandStreamingWithDelays(ac, defaultStreamDelays, serverName, command, username, groupname, env, workSessionID, purpose, out)
+	return runCommandStreamingWithDelays(ac, defaultStreamDelays(), serverName, command, username, groupname, env, workSessionID, purpose, out)
 }
 
 func runCommandStreamingWithDelays(ac *client.AlpaconClient, delays streamDelays, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
@@ -486,7 +491,7 @@ type CommandStream struct {
 
 // NewCommandStream returns a CommandStream that connects on its first submission.
 func NewCommandStream(ac *client.AlpaconClient) *CommandStream {
-	return &CommandStream{ac: ac, delays: defaultStreamDelays}
+	return &CommandStream{ac: ac, delays: defaultStreamDelays()}
 }
 
 // RunCommand is RunCommandStreaming over this stream's listener.
@@ -546,11 +551,10 @@ func (s *CommandStream) run(submit commandSubmitter, out io.Writer) error {
 
 // StreamApprovedCommand resubscribes to an already-submitted command and streams
 // its output, waiting through the awaiting_approval hold (bounded by timeout)
-// until a reviewer approves it out of band and it runs. Used by --wait after a
-// PendingApprovalError; the parked job produced no output yet, so resubscribing
-// loses nothing.
+// until a reviewer approves it and it runs. A parked job has produced no output
+// yet, so resubscribing loses nothing.
 func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer, timeout time.Duration) error {
-	return streamApprovedCommandWithDelays(ac, defaultStreamDelays, cmdID, out, timeout)
+	return streamApprovedCommandWithDelays(ac, defaultStreamDelays(), cmdID, out, timeout)
 }
 
 func streamApprovedCommandWithDelays(ac *client.AlpaconClient, delays streamDelays, cmdID string, out io.Writer, timeout time.Duration) error {
@@ -585,8 +589,7 @@ func listenerFailure(listener *CommandOutputListener) error {
 
 // streamSubscribed subscribes to cmdID's output channel and to serverID's fin
 // channel, warm-fires persisted chunks, then writes live chunks to out until the
-// fin event or the poll reports a terminal state. Shared by the fresh-submit and
-// approval-resume paths.
+// fin event or the poll reports a terminal state.
 func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener, cmdID api.PathID, serverID string, out io.Writer, timeout time.Duration, delays streamDelays, waitApproval bool) error {
 	commandID := cmdID.String()
 	if err := listener.subscribeTo(commandID, serverID); err != nil {
@@ -594,11 +597,9 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 		return runCommandFallbackFromID(ac, cmdID, out, delays.fallbackPollTick, waitApproval, err)
 	}
 
-	// Warm-fire: drain any chunks already persisted. Advance lastSeq only over
-	// contiguous seqs and stop at the first gap, so a later chunk filling that
-	// gap (e.g. arriving over the WS) is still written instead of being skipped
-	// as a duplicate. Chunks past the gap are picked up by applyChunk or the
-	// terminal drain once the gap is filled.
+	// Warm-fire: write chunks already persisted, advancing lastSeq only over contiguous
+	// seqs so a later chunk filling a gap is still written rather than skipped as a
+	// duplicate.
 	lastSeq := -1
 	if existing, err := getCommandChunks(ac, cmdID, 0, noSeqBound); err == nil {
 		for _, c := range existing {
@@ -643,15 +644,14 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 		lastSeq = drainRemainingChunks(ac, cmdID, lastSeq, out)
 		gap.recoverSkipped(ac, cmdID, out)
 		listener.Stop()
-		// If nothing was ever streamed (no WS chunks, none persisted), fall back
-		// to the buffered Result so output is never silently dropped. On a normal
-		// streamed run lastSeq has advanced and this is skipped.
+		// Nothing was streamed: fall back to the buffered Result so output is never
+		// silently dropped.
 		if lastSeq < 0 && details.Result != "" {
 			_, _ = fmt.Fprint(out, details.Result)
 		}
 		printStandingGrant(details)
-		// Output is already streamed; errorFromDetails keeps it on the error
-		// for inspection (e.g. sudo-denial hint) but cmd/exec never reprints it.
+		// Output is already streamed; errorFromDetails keeps it on the error for
+		// inspection, such as the sudo-denial hint, not for reprinting.
 		return errorFromDetails(details)
 	}
 
@@ -697,7 +697,6 @@ func applyChunk(ac *client.AlpaconClient, cmdID api.PathID, lastSeq int, chunk C
 		return lastSeq
 	}
 	if chunk.Seq > lastSeq+1 {
-		// Throttle: while lastSeq is stuck, re-fetch only after the backoff window.
 		if g.noProgress > 0 && gapFillNow().Sub(g.lastAttempt) < gapFillInterval(g.noProgress) {
 			return lastSeq
 		}
@@ -705,19 +704,15 @@ func applyChunk(ac *client.AlpaconClient, cmdID api.PathID, lastSeq int, chunk C
 		missing, err := getCommandChunks(ac, cmdID, lastSeq+1, chunk.Seq-1)
 		g.lastAttempt = gapFillNow()
 		if err != nil {
-			// Fetch failed: back off (noProgress++ keeps the throttle window
-			// growing) but don't give up. Skipping requires a successful fetch
-			// confirming the seq is absent, else a transient error would drop
-			// output and warn "not arrived" for seqs that may exist.
+			// Back off but don't give up: skipping needs a successful fetch confirming the
+			// seq is absent, or a transient error would drop output that may exist.
 			g.noProgress++
 			utils.CliWarning("failed to fetch missing chunks (seq %d..%d): %v; output may be incomplete",
 				lastSeq+1, chunk.Seq-1, err)
 		} else {
-			// Advance only over contiguous seqs, stopping at the first hole, so a
-			// gap-fill racing ahead of persistence can't skip a not-yet-stored seq.
-			// The c.Seq > chunk.Seq clip caps consumption at the live chunk's seq
-			// (one past the requested seq__lte), so an old server that ignores
-			// seq__lte and returns the whole tail can't overrun the live chunk.
+			// Advance only over contiguous seqs, so a gap-fill racing ahead of persistence
+			// can't skip a not-yet-stored seq. The c.Seq > chunk.Seq clip keeps an old server
+			// that ignores seq__lte from overrunning the live chunk.
 			for _, c := range missing {
 				if c.Seq != lastSeq+1 || c.Seq > chunk.Seq {
 					break
@@ -772,10 +767,9 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID api.PathID, lastSeq in
 		if c.Seq <= lastSeq {
 			continue
 		}
-		// Report the hole before this chunk, but bound the total enumerated so a
-		// hostile server can't grow missing without limit; excess is summarized.
-		// Budget is compared by subtraction (len(missing) <= maxGapWidth, so no
-		// overflow) rather than adding to a server-controlled gap.
+		// Bound the total enumerated so a hostile server can't grow missing without
+		// limit; excess is summarized. Compare by subtraction, which cannot overflow,
+		// rather than adding to a server-controlled gap.
 		if gap := c.Seq - lastSeq - 1; gap > 0 {
 			if gap > maxGapWidth-len(missing) {
 				truncated = true
@@ -812,7 +806,7 @@ func errorFromDetails(d EventDetails) error {
 		return &PendingApprovalError{CommandID: d.ID, FileSuggestion: d.FileExecutionSuggestion}
 	}
 	if IsRejectedStatus(d.Status) {
-		return &CommandRejectedError{CommandID: d.ID}
+		return &CommandRejectedError{CommandID: d.ID, Cause: d.RejectionCause}
 	}
 	if IsStatusOnlyFailure(d.Status) {
 		phase := ""
@@ -847,11 +841,11 @@ func errorFromDetails(d EventDetails) error {
 	}
 }
 
-// runCommandFallback warns the user and delegates to the existing polling flow.
+// runCommandFallback submits the command and polls it in place of the stream.
 func runCommandFallback(ac *client.AlpaconClient, submit commandSubmitter, out io.Writer, tick time.Duration, cause error) error {
 	cmdResp, err := submit()
 	if err != nil {
-		// Surface MFA/auth errors so RunCommandWithRetry's callbacks can handle them.
+		// Unwrapped: the MFA retry reads the utils.MarkSubmission tag off it as returned.
 		return err
 	}
 	// The command exists now; a failed poll or output read is returned untagged,
@@ -859,10 +853,9 @@ func runCommandFallback(ac *client.AlpaconClient, submit commandSubmitter, out i
 	return runCommandFallbackFromID(ac, cmdResp.pathID, out, tick, false, cause)
 }
 
-// runCommandFallbackFromID polls an already-submitted command by ID (instead of
-// re-submitting) and writes its output to out. Used when streaming setup fails
-// after SubmitCommand has created the command. waitApproval keeps the poll
-// blocking through an awaiting_approval hold so --wait is honored on this path.
+// runCommandFallbackFromID polls an already-submitted command by ID instead of
+// resubmitting it, and writes its output to out. waitApproval keeps the poll
+// blocking through an awaiting_approval hold.
 func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID api.PathID, out io.Writer, tick time.Duration, waitApproval bool, cause error) error {
 	utils.CliWarning("real-time output unavailable (%v); falling back to polling", cause)
 	details, err := pollCommandExecution(ac, cmdID, execTimeout(), tick, waitApproval, pollSeams{})

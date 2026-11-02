@@ -39,6 +39,31 @@ func TestGetWorkspaceID(t *testing.T) {
 	assert.Equal(t, "uuid-2", id.String())
 }
 
+func TestGetWorkspaceID_FollowsNextPage(t *testing.T) {
+	t.Parallel()
+	var pages []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/workspaces/workspaces/", r.URL.Path)
+		page := r.URL.Query().Get("page")
+		pages = append(pages, page)
+
+		w.Header().Set("Content-Type", "application/json")
+		if page == "1" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"next": 2, "results": []map[string]any{{"id": "uuid-1", "schema_name": "ws-alpha"}}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"next": nil, "results": []map[string]any{{"id": "uuid-2", "schema_name": "ws-beta"}}})
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	id, err := GetWorkspaceID(ac, ts.URL, "ws-beta")
+
+	require.NoError(t, err)
+	assert.Equal(t, "uuid-2", id.String())
+	assert.Equal(t, []string{"1", "2"}, pages)
+}
+
 func TestGetWorkspaceID_NotFound(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

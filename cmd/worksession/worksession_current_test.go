@@ -1,4 +1,4 @@
-package worksession_test
+package worksession
 
 import (
 	"encoding/json"
@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,7 +23,7 @@ func TestRunCurrent_NoActive_ReturnsEmpty(t *testing.T) {
 	defer ts.Close()
 	ac := newTestClient(ts)
 
-	uuid, ws, err := worksession.RunCurrent(ac)
+	uuid, ws, err := RunCurrent(ac)
 	require.NoError(t, err)
 	assert.Empty(t, uuid)
 	assert.Nil(t, ws)
@@ -44,7 +44,7 @@ func TestRunCurrent_ActiveResolves(t *testing.T) {
 	defer ts.Close()
 	ac := newTestClient(ts)
 
-	uuid, ws, err := worksession.RunCurrent(ac)
+	uuid, ws, err := RunCurrent(ac)
 	require.NoError(t, err)
 	assert.Equal(t, "ses-abc", uuid)
 	require.NotNil(t, ws)
@@ -61,7 +61,7 @@ func TestRunCurrent_StaleUUID_ServerNotFound(t *testing.T) {
 	defer ts.Close()
 	ac := newTestClient(ts)
 
-	uuid, ws, err := worksession.RunCurrent(ac)
+	uuid, ws, err := RunCurrent(ac)
 	require.Error(t, err)
 	assert.Equal(t, "ses-stale", uuid)
 	assert.Nil(t, ws)
@@ -87,7 +87,7 @@ func TestWriteCurrentTable_MarksARunningSessionQuietly(t *testing.T) {
 
 	var err error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		err = worksession.WriteCurrentTable(ac, "ses-abc")
+		err = WriteCurrentTable(ac, "ses-abc")
 	})
 
 	require.NoError(t, err)
@@ -100,7 +100,7 @@ func TestWriteCurrentTable_WarnsAndLeavesAnEndedSessionUnmarked(t *testing.T) {
 
 	var err error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		err = worksession.WriteCurrentTable(ac, "ses-abc")
+		err = WriteCurrentTable(ac, "ses-abc")
 	})
 
 	require.NoError(t, err)
@@ -114,10 +114,73 @@ func TestWriteCurrentRaw_WarnsOnAnEndedSessionAndKeepsTheBody(t *testing.T) {
 
 	var err error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		err = worksession.WriteCurrentRaw(ac, "ses-abc")
+		err = WriteCurrentRaw(ac, "ses-abc")
 	})
 
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"id":"ses-abc","status":"completed"}`, stdout)
 	assert.Contains(t, stderr, "Active work-session ses-abc has ended (completed).")
+}
+
+func TestRunCurrent_UsesClientWorkspaceWhenConfigSwitchedAfterClientBuilt(t *testing.T) {
+	setupTmpConfig(t)
+	require.NoError(t, config.SetActiveWorkSession("ses-a"))
+	var requested string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "ses-a", "status": "active"})
+	}))
+	defer ts.Close()
+	ac := newTestClient(ts)
+	switchConfigToWorkspace(t, "other", "ses-other")
+
+	uuid, _, err := RunCurrent(ac)
+
+	require.NoError(t, err)
+	assert.Equal(t, "ses-a", uuid)
+	assert.Equal(t, "/api/work-sessions/sessions/ses-a/", requested)
+}
+
+func TestPrintCurrent_UsesClientWorkspaceWhenConfigSwitchedAfterClientBuilt(t *testing.T) {
+	setupTmpConfig(t)
+	require.NoError(t, config.SetActiveWorkSession("ses-a"))
+	var requested string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ses-a","status":"active"}`))
+	}))
+	defer ts.Close()
+	ac := newTestClient(ts)
+	switchConfigToWorkspace(t, "other", "ses-other")
+	saved := utils.OutputFormat
+	t.Cleanup(func() { utils.OutputFormat = saved })
+	utils.OutputFormat = utils.OutputFormatJSON
+
+	var err error
+	stdout, _ := testutil.CaptureOutput(t, func() {
+		err = printCurrent(ac)
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "/api/work-sessions/sessions/ses-a/", requested)
+	assert.JSONEq(t, `{"id":"ses-a","status":"active"}`, stdout)
+}
+
+func TestPrintCurrent_PrintsNullWhenTheClientsWorkspaceHasNoSession(t *testing.T) {
+	setupTmpConfig(t)
+	ac := &client.AlpaconClient{WorkspaceName: "ws"}
+	switchConfigToWorkspace(t, "other", "ses-other")
+	saved := utils.OutputFormat
+	t.Cleanup(func() { utils.OutputFormat = saved })
+	utils.OutputFormat = utils.OutputFormatJSON
+
+	var err error
+	stdout, _ := testutil.CaptureOutput(t, func() {
+		err = printCurrent(ac)
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "null\n", stdout)
 }

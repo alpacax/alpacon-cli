@@ -39,8 +39,8 @@ func EditAuthentication(ac *client.AlpaconClient) (any, error) {
 	return data, nil
 }
 
-// PatchAuthentication sends the edited authentication settings to the server.
-// Returns the raw error from SendPatchRequest to preserve error structure for ParseErrorResponse.
+// PatchAuthentication sends the edited authentication settings to the server. The error is only
+// tagged with utils.MarkSubmission, so ParseErrorResponse still reads its structure.
 func PatchAuthentication(ac *client.AlpaconClient, data any) ([]byte, error) {
 	body, err := ac.SendPatchRequest(authenticationURL, data)
 	return body, utils.MarkSubmission(err)

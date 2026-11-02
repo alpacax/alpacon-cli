@@ -24,9 +24,8 @@ import (
 const (
 	currentUserURL = "/api/iam/users/-/"
 
-	// bearerPrefix is the scheme setHTTPHeader signs an access token with. The
-	// stale-token retry reads it back off the request to learn which token the
-	// server rejected.
+	// bearerPrefix is the scheme setHTTPHeader signs an access token with; the stale-token retry
+	// reads it back to learn which token the server rejected.
 	bearerPrefix = "Bearer "
 
 	// ClientCapabilitiesHeader carries the optional behaviors a WebSocket
@@ -38,11 +37,11 @@ const (
 	// for a transient reason does not take the session with it.
 	CapabilityWebsocketReconnect = "websocket-reconnect"
 
-	// serverGateTokenScope is the "gate" value the server sends on a
-	// token-scope refusal (api_token_scope_missing, api_token_scope_action_unresolved).
-	// It is the only gate whose "missing" is a scope string; every other gate's
-	// "missing" names a permission or role, so authStatusMessage's fallback
-	// message only uses "scope" wording when the gate is this one.
+	// CapabilityIdleWarning says the client handles idle warnings without printing raw frames.
+	CapabilityIdleWarning = "idle-warning"
+
+	// serverGateTokenScope is the "gate" of a token-scope refusal, the only gate whose "missing" is
+	// a scope string rather than a permission or role.
 	serverGateTokenScope = "token_scope"
 
 	// reauthenticateMessage covers a detail-less 401 that is uncoded or coded
@@ -53,13 +52,8 @@ const (
 	// the token's MFA state, so only a new login, which runs MFA, can lift it.
 	signInMFAMessage = "multi-factor authentication required at sign-in: please run 'alpacon login' again"
 
-	// gatePlan is the "gate" value the server sends on every 402 plan
-	// refusal, limit or feature lock alike.
-	gatePlan = "plan"
-
-	// axisServer is the one axis whose remedy carries an extra hint: a host that
-	// hit the server cap may be a re-registration of one deleted-but-not-freed
-	// entry rather than a genuinely new one.
+	// axisServer is the one axis with an extra remedy: a host that hit the server cap may be a
+	// re-registration of a deleted entry not yet freed.
 	axisServer = "server"
 
 	talkToUsURL             = "https://www.alpacax.com/alpacon/pricing"
@@ -71,11 +65,9 @@ const (
 	featureLockSentence      = "This action needs a higher plan."
 )
 
-// legacyPlanLimitAxis maps a 402's "code" to its axis for a server that
-// predates the "gate"/"axis" envelope. Deliberately excludes
-// workspace_free_limit_exceeded: that gate-less 402 can also be a
-// Free-workspace refusal, which this mapping must not repaint as a plan
-// limit.
+// legacyPlanLimitAxis maps a 402's "code" to its axis for a server that predates the "gate"/"axis"
+// envelope. It omits workspace_free_limit_exceeded: that gate-less 402 can also be a
+// Free-workspace refusal, not a plan limit.
 var legacyPlanLimitAxis = map[string]string{
 	"server_limit_exceeded":      "server",
 	"user_limit_exceeded":        "user",
@@ -85,7 +77,6 @@ var legacyPlanLimitAxis = map[string]string{
 	"websh_share_limit_exceeded": "websh-share",
 }
 
-// axisDisplayNames renders an axis for a human reader.
 var axisDisplayNames = map[string]string{
 	"server":      "servers",
 	"user":        "users (pending invitations count)",
@@ -104,33 +95,27 @@ type apiError struct {
 	message string
 	code    string
 	source  string
-	// gate and missing carry the optional "gate"/"missing" fields a coded
-	// 402/403/405/429 may send beside "code": the server states which gate
-	// refused the request and what it was missing, but sends no human "detail"
-	// on these routes, so a caller such as cmd/iam's RBAC guidance table reads
-	// these instead of trying to parse one out of nothing. missing is normalized
-	// to a slice regardless of whether the server sent one scope string or a list.
+	// gate and missing are the optional fields a coded 402/403/405/429 sends beside "code": which
+	// gate refused and what it was missing, since these refusals carry no "detail". missing is a
+	// slice whether the server sent one scope string or a list.
 	gate    string
 	missing []string
-	// axis and next carry the optional 402 plan-limit fields: axis names which
-	// limit refused the request, and next is a self-relative entitlements-read
-	// path a member-scoped caller can read for the numbers the 402 body never
-	// carries. planLimitMessage reads axis to build the user-facing text; next
-	// is carried for a future programmatic reader, not this CLI's plain-text
-	// rendering.
+	// axis is the 402 plan-limit field; next is the path a refusal says its state
+	// can be read at.
 	axis string
 	next string
-	// retryAfter is the Retry-After header's parsed delay, set by
-	// withRetryAfter alongside the *retryAfterError wrapper it returns, so
-	// planLimitMessage can build "resets in N days" without re-parsing the
-	// header itself.
+	// nextUnderAPIToken records that the refused request carried an API token.
+	nextUnderAPIToken bool
+	// hint is the server's sanitized next-step sentence a coded 402/403/405/429 may carry; when it
+	// is set, the message only identifies the refusal.
+	hint string
+	// retryAfter is the parsed Retry-After delay, stored by withRetryAfter so planLimitMessage can
+	// say "resets in N days" without re-parsing the header.
 	retryAfter time.Duration
 	statusCode int
-	// apiPayload records that the body was a JSON object—the shape every
-	// server error response has. It is a filter, not a provenance flag:
-	// only the negative holds, since anything standing in front of the server
-	// can emit a JSON object too. The stale-token retry reads it to drop
-	// gateway refusals, and nothing may read it as proof of who wrote the body.
+	// apiPayload records that the body was a JSON object, as every server error is. Only the
+	// negative holds—anything in front of the server can emit JSON too—so the stale-token retry
+	// uses it to drop gateway refusals, and nothing may read it as proof of who wrote the body.
 	apiPayload bool
 	body       []byte
 }
@@ -213,22 +198,23 @@ func getUserPrivileges(isStaff, isSuperuser bool) string {
 	return "general"
 }
 
-// checkAuthStatus prefers the server-provided reason and only suggests
-// re-login for a bare authentication failure—never for a coded condition such
-// as MFA-required or a policy denial, which re-login does not resolve. The
-// error code is always preserved on the returned error so downstream handlers
-// (MFA flow, WorkSession gate) can still route on it.
+// checkAuthStatus turns a 401/403 into an error, preferring the server-provided reason; see
+// authStatusMessage for when it suggests re-login. The error code is always kept on the returned
+// error so the MFA flow and the WorkSession gate can route on it.
 func checkAuthStatus(statusCode int, body []byte) error {
 	if statusCode != http.StatusUnauthorized && statusCode != http.StatusForbidden {
 		return nil
 	}
 	detail, code, source, gate, missing, hasDetail := parseAuthStatusErrorPayload(body, statusCode)
+	hint := utils.ParseRefusalHint(body, statusCode)
 	return &apiError{
-		message:    authStatusMessage(statusCode, code, detail, hasDetail, gate, missing),
+		message:    authStatusMessage(statusCode, code, detail, hasDetail, gate, missing, hint != ""),
 		code:       code,
 		source:     source,
 		gate:       gate,
 		missing:    missing,
+		next:       utils.ParseRefusalNext(body, statusCode),
+		hint:       hint,
 		apiPayload: isJSONObject(body),
 		body:       body,
 	}
@@ -249,7 +235,11 @@ func isJSONObject(body []byte) bool {
 // auth_token_missing/auth_authentication_failed/auth_token_mfa_missing—a user
 // who merely needs step-up MFA, or who hit a policy denial, must not be told
 // to log in again.
-func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate string, missing []string) string {
+//
+// serverHint says the response carried the server's own guidance, which the
+// error output prints under this message: the per-code sentence would say the
+// same thing a second time, so the message then only identifies the refusal.
+func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate string, missing []string, serverHint bool) string {
 	if hasDetail {
 		if statusCode == http.StatusUnauthorized {
 			switch code {
@@ -261,35 +251,60 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate
 		}
 		return detail
 	}
-	if msg, ok := authStatusCodeMessage(statusCode, code); ok {
-		return msg
+	if !serverHint {
+		if msg, ok := authStatusCodeMessage(statusCode, code); ok {
+			return msg
+		}
 	}
 	if statusCode == http.StatusUnauthorized {
 		if code == "" {
 			return reauthenticateMessage
 		}
-		// A coded 401 is a deliberate server decision, not a stale token; do not
-		// mislabel it as an authentication failure or suggest re-login.
-		// Deliberately information-light: do not interpolate the raw code into the
-		// message—callers read it via ErrorCode(), and embedding it would break the
-		// no-raw-code contract that TestSendRequest_403CodeWithoutDetailKeepsCodeSource guards.
+		// A coded 401 is a deliberate server decision, not a stale token, so no re-login hint. The
+		// raw code stays out of the message (callers read it via ErrorCode()), as
+		// TestSendRequest_403CodeWithoutDetailKeepsCodeSource pins.
 		return "request denied by server"
 	}
-	// A coded 403 with no detail but a stated "missing": name it rather than fall
-	// back to the generic line. A caller with more specific guidance for its own
-	// code (cmd/iam's RBAC gates) overrides this; this is the floor for every
-	// other caller that just surfaces the error as-is. "missing" is not always a
-	// scope—the role gate's "missing" names a permission/role, not a
-	// "scope:..." string—so only the token-scope gate gets scope wording; every
-	// other gate (including an absent one, from a server this CLI does not yet
-	// know) gets gate-neutral wording instead.
+	// A coded 403 with no detail: the token-scope gate names its missing scopes,
+	// any other named gate gets refusalMessage's line, a gateless "missing" is named as is.
+	if gate == serverGateTokenScope && len(missing) > 0 {
+		return fmt.Sprintf("permission denied: missing scope %s", strings.Join(missing, ", "))
+	}
+	if gate != "" {
+		return refusalMessage(statusCode, code, gate, missing)
+	}
 	if len(missing) > 0 {
-		if gate == serverGateTokenScope {
-			return fmt.Sprintf("permission denied: missing scope %s", strings.Join(missing, ", "))
-		}
 		return fmt.Sprintf("permission denied: missing %s", strings.Join(missing, ", "))
 	}
+	if serverHint {
+		return refusalMessage(statusCode, code, "", nil)
+	}
 	return "permission denied: you do not have the required privileges for this action"
+}
+
+// refusalMessage is the one line for a refusal the CLI has no sentence for:
+// status, code, gate and missing, never a bare code or a field dump.
+func refusalMessage(statusCode int, code, gate string, missing []string) string {
+	label := "request refused"
+	if statusCode == http.StatusForbidden {
+		label = "permission denied"
+	}
+	if gate != "" {
+		label += " by the " + utils.SanitizeTerminalText(gate) + " gate"
+	}
+	status := fmt.Sprintf("HTTP %d", statusCode)
+	if code != "" {
+		status += ", code: " + utils.SanitizeTerminalText(code)
+	}
+	label += " (" + status + ")"
+	if len(missing) == 0 {
+		return label
+	}
+	cleaned := make([]string, len(missing))
+	for i, m := range missing {
+		cleaned[i] = utils.SanitizeTerminalText(m)
+	}
+	return label + ": missing " + strings.Join(cleaned, ", ")
 }
 
 // authStatusCodeMessage maps structured server codes that arrive on a 401/403
@@ -340,11 +355,8 @@ func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 // regardless so the WorkSession gate can route to exit 3 and a coded refusal
 // without either still carries what it can.
 func parseAuthStatusErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, missing []string, ok bool) {
-	// axis/next ride only on the 402 plan-limit envelope (client.go's
-	// planLimitMessage), never on a 401/403; this path ignores them, and
-	// isEnvelopeOnly's own statusCode gate keeps a same-named validation field
-	// from being swallowed regardless.
-	message, code, source, gate, _, _, missing, ok = parseAPIErrorPayload(body, statusCode)
+	// axis is a 402 field and never rides on a 401/403, so it is ignored here.
+	message, code, source, gate, _, missing, ok = parseAPIErrorPayload(body, statusCode)
 	if !ok || message == "" {
 		return "", code, source, gate, missing, false
 	}
@@ -361,11 +373,9 @@ func parseAuthStatusErrorPayload(body []byte, statusCode int) (message string, c
 	return "", code, source, gate, missing, false
 }
 
-// SetWebsocketHeader builds the header for a WebSocket dial. gorilla sends no
-// User-Agent of its own, so a client assembled without one—every client outside
-// NewAlpaconAPIClient—would dial anonymously; fall back to the same string the
-// HTTP requests carry. The handshake declares a detected AI agent the same way
-// every HTTP request does.
+// SetWebsocketHeader builds the header for a WebSocket dial, declaring a detected AI agent as every
+// HTTP request does. gorilla sends no User-Agent of its own, so a client whose UserAgent is empty
+// falls back to the HTTP requests' string.
 func (ac *AlpaconClient) SetWebsocketHeader() http.Header {
 	userAgent := ac.UserAgent
 	if userAgent == "" {
@@ -428,7 +438,7 @@ func (ac *AlpaconClient) createRequest(method, url string, body io.Reader) (*htt
 func readJSONResponse(resp *http.Response) ([]byte, error) {
 	body, readErr := io.ReadAll(resp.Body)
 	if err := checkAuthStatus(resp.StatusCode, body); err != nil {
-		return nil, withStatus(err, resp.StatusCode)
+		return nil, withRetryAfter(withStatus(err, resp.StatusCode), resp.Header)
 	}
 	if readErr != nil {
 		// The headers already carried a status; dropping it here would leave a
@@ -475,7 +485,7 @@ func (ac *AlpaconClient) sendRequestWithStatus(req *http.Request) ([]byte, int, 
 // renewedRequest reports whether err is a renewable stale-token rejection and,
 // if the renewal succeeds, returns the request to replay.
 func (ac *AlpaconClient) renewedRequest(req *http.Request, err error) (*http.Request, bool) {
-	if !isStaleCredential(err) {
+	if ac.noRenewal || !isStaleCredential(err) {
 		return nil, false
 	}
 	sent, ok := strings.CutPrefix(req.Header.Get("Authorization"), bearerPrefix)
@@ -494,8 +504,8 @@ func (ac *AlpaconClient) renewedRequest(req *http.Request, err error) (*http.Req
 	return ac.setHTTPHeader(retry), true
 }
 
-// renewAccessTokenWithin is renewAccessToken bounded by ctx: once ctx ends it reports false, and the
-// renewal finishes in the background, where its token lands and a save warning may print after the return.
+// renewAccessTokenWithin is renewAccessToken bounded by ctx: once ctx ends it reports false, and
+// the renewal finishes in the background, where its token lands and a save warning may print later.
 func (ac *AlpaconClient) renewAccessTokenWithin(ctx context.Context, sent string) bool {
 	if ctx.Done() == nil {
 		return ac.renewAccessToken(sent)
@@ -510,15 +520,12 @@ func (ac *AlpaconClient) renewAccessTokenWithin(ctx context.Context, sent string
 	}
 }
 
-// renewAccessToken installs a fresh access token, reporting whether one is now
-// in hand. sent is the token the rejected request carried: a different one means
-// another request in flight already renewed it, and retrying with that one beats
-// spending a second refresh-token grant on the same expiry. A failed grant
-// leaves the token as it was, so the sent check collapses nothing—every other
-// in-flight request that took the same 401 runs its own grant. The in-flight
-// count bounds that and each request still retries at most once; a caller that
-// ever fans requests out widely enough for the bound to hurt should remember
-// the failure for the life of the client instead.
+// renewAccessToken installs a fresh access token, reporting whether one is now in hand. sent is the
+// token the rejected request carried: a different current token means another request already
+// renewed it, so this reuses it rather than spend a second grant. A failed grant leaves the token
+// unchanged, so each in-flight request that took the same 401 runs its own grant; each request
+// still retries at most once. A caller that fans requests out widely enough for that to hurt
+// should remember the failure for the life of the client instead.
 func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 	ac.refreshMu.Lock()
 	defer ac.refreshMu.Unlock()
@@ -526,34 +533,26 @@ func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 		return true
 	}
 	if err := refreshAccessToken(ac); err != nil {
-		// The caller goes on to surface the server's own 401, which says to log
-		// in again but not why the renewal behind it failed. Without this line
-		// a long wait that dies on a rejected refresh token leaves no trace of
-		// the rejection.
+		// The caller surfaces the server's 401, which never says why the renewal failed; without
+		// this line a long wait that dies on a rejected refresh token leaves no trace of it.
 		utils.CliDebug("access token renewal failed: %v", utils.RedactURLError(err))
 		return false
 	}
 	return true
 }
 
-// isStaleCredential reports whether err is a 401 a fresh access token could
-// plausibly move. A code-less 401, or one coded auth_token_missing, may be a
-// stale access token. Other Auth0 bearer rejections—a workspace mismatch, MFA,
-// an uninvited user—also land there and cost one renewal and one replay before
-// surfacing the same error. So that 401 is not proof of expiry—it is the only
-// one worth spending one retry on, because a coded refusal (MFA required, IP
-// not allowed, token ACL, auth_authentication_failed, auth_token_mfa_missing)
-// names what it wants and a new token is not it.
+// isStaleCredential reports whether err is a 401 a fresh access token could plausibly move: a
+// code-less one, or one coded auth_token_missing. Other bearer rejections (a workspace mismatch,
+// MFA, an uninvited user) also land there and cost one renewal and one replay; a coded refusal
+// names what it wants, and a new token is not it.
 func isStaleCredential(err error) bool {
 	if utils.HTTPStatusCode(err) != http.StatusUnauthorized {
 		return false
 	}
 	var ae *apiError
 	if !errors.As(err, &ae) || !ae.apiPayload {
-		// A 401 the server did not write: a gateway refused the request before
-		// it arrived. No token this process can obtain changes that answer, so
-		// renewing would spend an Auth0 round trip and a config rewrite to be
-		// rejected the same way.
+		// Not a JSON object, so possibly a gateway's refusal, which no token this process can
+		// obtain changes; renewal is spent only on a body the server could have written.
 		return false
 	}
 	code, _ := utils.ParseErrorResponse(err)
@@ -584,12 +583,9 @@ func (ac *AlpaconClient) roundTrip(req *http.Request) ([]byte, error) {
 	return body, err
 }
 
-// roundTripWithStatus is roundTrip plus the response's HTTP status code on
-// success, for the rare endpoint whose body shape is the same on two
-// different success codes and a caller must tell them apart (e.g.
-// work-session extend's 200-vs-202 contract). On failure the status is also
-// returned for convenience, though it is already recoverable from err via
-// utils.HTTPStatusCode.
+// roundTripWithStatus is roundTrip plus the response's HTTP status code, for an endpoint whose
+// success codes share one body shape (e.g. work-session extend's 200 vs 202). The status is also
+// returned on failure.
 func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, error) {
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
@@ -599,7 +595,7 @@ func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, er
 
 	respBody, err := readJSONResponse(resp)
 	if err != nil {
-		return nil, resp.StatusCode, err
+		return nil, resp.StatusCode, ac.withRefusalNextFor(err)
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -607,10 +603,24 @@ func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, er
 		if resp.StatusCode == http.StatusPaymentRequired {
 			apiErr = ac.rewritePlanLimitMessage(apiErr)
 		}
-		return nil, resp.StatusCode, apiErr
+		return nil, resp.StatusCode, ac.withRefusalNextFor(apiErr)
 	}
 
 	return respBody, resp.StatusCode, nil
+}
+
+// withRefusalNextFor fits err's "next" to this client: dropped on a host `alpacon api`
+// does not reach, marked text only when the request carried an API token.
+func (ac *AlpaconClient) withRefusalNextFor(err error) error {
+	var ae *apiError
+	if !errors.As(err, &ae) {
+		return err
+	}
+	if ac.dropsRefusalNext {
+		ae.next = ""
+	}
+	ae.nextUnderAPIToken = ac.AccessToken() == "" && ac.Token != ""
+	return err
 }
 
 // rewritePlanLimitMessage replaces err's message with planLimitMessage's
@@ -622,7 +632,7 @@ func (ac *AlpaconClient) rewritePlanLimitMessage(err error) error {
 	if !errors.As(err, &ae) {
 		return err
 	}
-	if message, ok := planLimitMessage(ae.axis, ae.code, ae.gate, ae.retryAfter, ac.BaseURL); ok {
+	if message, ok := planLimitMessage(ae.axis, ae.code, ae.gate, ae.retryAfter, ac.BaseURL, ae.hint != ""); ok {
 		ae.message = message
 	}
 	return err
@@ -638,9 +648,14 @@ func (ac *AlpaconClient) rewritePlanLimitMessage(err error) error {
 //  3. gate=="plan" with no axis: a feature lock, not a limit.
 //  4. Anything else: not a plan-limit response at all; ok is false and the
 //     caller leaves today's message alone.
-func planLimitMessage(axis, code, gate string, retryAfter time.Duration, workspaceURL string) (string, bool) {
+//
+// With serverHint the server's hint, printed under this message, is the
+// guidance, so the remedy sentences and the feature-lock sentence are left
+// out. What the hint cannot carry stays: the limit reached, the reset day and
+// where to upgrade.
+func planLimitMessage(axis, code, gate string, retryAfter time.Duration, workspaceURL string, serverHint bool) (string, bool) {
 	switch {
-	case gate == gatePlan && axis != "":
+	case gate == utils.GatePlan && axis != "":
 		// rule 1: axis already carried by the modern envelope.
 	case gate == "":
 		mapped, known := legacyPlanLimitAxis[code]
@@ -648,15 +663,29 @@ func planLimitMessage(axis, code, gate string, retryAfter time.Duration, workspa
 			return "", false // rule 4
 		}
 		axis = mapped // rule 2
-	case gate == gatePlan:
+	case gate == utils.GatePlan:
 		// rule 3: a feature lock—no axis to name a limit on.
-		return fmt.Sprintf("%s Upgrade: %s. Talk to us: %s", featureLockSentence, billingLocation(workspaceURL), talkToUsURL), true
+		lock := featureLockSentence
+		if serverHint {
+			lock = refusalMessage(http.StatusPaymentRequired, code, "", nil) + "."
+		}
+		return fmt.Sprintf("%s Upgrade: %s. Talk to us: %s", lock, billingLocation(workspaceURL), talkToUsURL), true
 	default:
 		return "", false // rule 4: some other gate, e.g. role or token_scope
 	}
 
-	message := fmt.Sprintf("plan limit reached: %s. %s Upgrade: %s. Talk to us: %s",
-		axisDisplayName(axis), planLimitRemedy(axis, retryAfter), billingLocation(workspaceURL), talkToUsURL)
+	remedy := planLimitRemedy(axis, retryAfter)
+	if serverHint {
+		remedy = ""
+		if retryAfter > 0 {
+			remedy = monthlyRemedy(retryAfter)
+		}
+	}
+	if remedy != "" {
+		remedy += " "
+	}
+	message := fmt.Sprintf("plan limit reached: %s. %sUpgrade: %s. Talk to us: %s",
+		axisDisplayName(axis), remedy, billingLocation(workspaceURL), talkToUsURL)
 	return message, true
 }
 
@@ -669,11 +698,9 @@ func axisDisplayName(axis string) string {
 	return axis
 }
 
-// planLimitRemedy picks the count-cap or monthly-reset remedy sentence:
-// retryAfter is only ever set on a monthly axis (websh, webftp, websh-share)
-// and only when the limit is above zero, so its presence alone decides
-// which sentence applies. axisServer gets an extra hint no other axis needs:
-// a host cap is the one limit a stale, undeleted entry can trip by accident.
+// planLimitRemedy picks the count-cap or monthly-reset remedy sentence: Retry-After is only sent
+// on a monthly axis with a limit above zero, so its presence alone decides. axisServer also gets
+// the re-registration hint.
 func planLimitRemedy(axis string, retryAfter time.Duration) string {
 	remedy := countCapRemedy
 	if retryAfter > 0 {
@@ -704,14 +731,10 @@ func billingLocation(workspaceURL string) string {
 	return fmt.Sprintf(consoleBillingURLFormat, label)
 }
 
-// consoleLabel extracts the workspace label from a canonical Alpacon Cloud
-// host. It mirrors cmd/login.go's isCloudWorkspaceURL—the CLI's other
-// definition of "this is Alpacon Cloud"—rather than sharing it: client cannot
-// import cmd. The URL must round-trip, case-insensitively, to exactly
-// https://<label>.<region>.alpacon.io; a different scheme, a port, a path, or
-// a non-4-label host all fail this, so a self-hosted endpoint whose hostname
-// merely resembles the pattern (or a cloud host spelled in another case)
-// never gets an unverified—or missing—cloud billing link.
+// consoleLabel extracts the workspace label from a canonical Alpacon Cloud host. It mirrors
+// cmd/login.go's isCloudWorkspaceURL, since client cannot import cmd: the URL must round-trip,
+// case-insensitively, to exactly https://<label>.<region>.alpacon.io, so a self-hosted host that
+// merely resembles the pattern never gets a cloud billing link.
 func consoleLabel(workspaceURL string) (string, bool) {
 	raw := strings.TrimSpace(workspaceURL)
 	if !strings.Contains(raw, "://") {
@@ -791,7 +814,6 @@ func (ac *AlpaconClient) sendRawRequest(req *http.Request, header http.Header) (
 	return ac.rawRoundTrip(retry)
 }
 
-// hasHeader reports whether header carries name, case-insensitively.
 func hasHeader(header http.Header, name string) bool {
 	for candidate := range header {
 		if strings.EqualFold(candidate, name) {
@@ -801,7 +823,6 @@ func hasHeader(header http.Header, name string) bool {
 	return false
 }
 
-// setHeaderValues replaces name's values in h with values.
 func setHeaderValues(h http.Header, name string, values []string) {
 	h.Del(name)
 	for _, value := range values {
@@ -868,7 +889,7 @@ func (ac *AlpaconClient) rawRoundTrip(req *http.Request) (*RawResponse, error) {
 	return &RawResponse{Status: resp.Status, StatusCode: resp.StatusCode, Proto: resp.Proto, Header: resp.Header.Clone(), Body: respBody}, nil
 }
 
-// Get Request to Alpacon Server
+// SendGetRequest sends a GET request to the workspace.
 func (ac *AlpaconClient) SendGetRequest(url string) ([]byte, error) {
 	return ac.SendGetRequestWithContext(context.Background(), url)
 }
@@ -883,7 +904,7 @@ func (ac *AlpaconClient) SendGetRequestWithContext(ctx context.Context, url stri
 	return ac.sendRequest(req.WithContext(ctx))
 }
 
-// POST Request to Alpacon Server
+// SendPostRequest sends body as JSON in a POST request to the workspace.
 func (ac *AlpaconClient) SendPostRequest(url string, body any) ([]byte, error) {
 	jsonValue, err := json.Marshal(body)
 	if err != nil {
@@ -897,11 +918,10 @@ func (ac *AlpaconClient) SendPostRequest(url string, body any) ([]byte, error) {
 	return ac.sendRequest(req)
 }
 
-// SendPostRequestWithStatus is SendPostRequest plus the response's HTTP status
-// code on success. Use it only where the status code itself carries meaning
-// the body cannot be trusted to (e.g. work-session extend's 200-vs-202
-// contract, where the body may still carry a field from before the status
-// existed to disambiguate it)—every other caller wants SendPostRequest.
+// SendPostRequestWithStatus is SendPostRequest plus the response's HTTP status code. Use it only
+// where the status carries meaning the body cannot be trusted to (e.g. work-session extend's 200 vs
+// 202, whose body may carry a field from before the status existed); every other caller wants
+// SendPostRequest.
 func (ac *AlpaconClient) SendPostRequestWithStatus(url string, body any) ([]byte, int, error) {
 	jsonValue, err := json.Marshal(body)
 	if err != nil {
@@ -1013,8 +1033,9 @@ func (ac *AlpaconClient) SendGetRequestForDownload(url string) (*http.Response, 
 	return ac.downloadRoundTrip(retry)
 }
 
-// downloadRoundTrip surfaces a 401/403 as an error and leaves the body open on
-// every other status for the caller to stream. The status is tagged onto the
+// downloadRoundTrip surfaces a 401/403 and a coded 402/405/429 as an error, a plan
+// limit worded as the other requests word it, and leaves the body open on every
+// other status for the caller to stream. The status is tagged onto the
 // error so the stale-token retry—and utils.HTTPStatusCode—can read it.
 func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := ac.HTTPClient.Do(req)
@@ -1026,7 +1047,18 @@ func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, e
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, withStatus(checkAuthStatus(resp.StatusCode, body), resp.StatusCode)
+		return nil, ac.withRefusalNextFor(withRetryAfter(withStatus(checkAuthStatus(resp.StatusCode, body), resp.StatusCode), resp.Header))
+	}
+	// A 402, 405 or 429 is a coded refusal too: the shared parser keeps its
+	// code and hint, where the caller would only have the raw body to print.
+	if utils.IsRefusalStatus(resp.StatusCode) {
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		refusal := withRetryAfter(withStatus(parseAPIError(body, resp.StatusCode), resp.StatusCode), resp.Header)
+		if resp.StatusCode == http.StatusPaymentRequired {
+			refusal = ac.rewritePlanLimitMessage(refusal)
+		}
+		return nil, ac.withRefusalNextFor(refusal)
 	}
 
 	return resp, nil
@@ -1133,12 +1165,28 @@ func (e *apiError) ErrorMissing() []string {
 	return e.missing
 }
 
+func (e *apiError) ErrorHint() string {
+	return e.hint
+}
+
+func (e *apiError) ErrorNext() string {
+	return e.next
+}
+
+func (e *apiError) ErrorNextUnderAPIToken() bool {
+	return e.nextUnderAPIToken
+}
+
 func (e *apiError) ErrorFields() map[string]any {
 	return errorExtraFields(e.body)
 }
 
 func (e *apiError) HTTPStatusCode() int {
 	return e.statusCode
+}
+
+func newAPIError(message, code, source, gate, axis, next string, missing []string) *apiError {
+	return &apiError{message: message, code: code, source: source, gate: gate, axis: axis, next: next, missing: missing}
 }
 
 func redirectRefusedStatus(resp *http.Response) int {
@@ -1162,13 +1210,9 @@ func withStatus(err error, statusCode int) error {
 	return utils.WithHTTPStatus(err, statusCode)
 }
 
-// withRetryAfter tags err with the Retry-After delay. Only delta-seconds is parsed—
-// that is what a throttled response sends, and misreading an HTTP-date would
-// stall a poll.
-// When err is (or wraps) an *apiError, the delay is also stored there directly so
-// planLimitMessage can read it without re-parsing the header or unwrapping the
-// *retryAfterError this still returns for every other caller (the exec/websh poll
-// loops read RetryAfter() off that wrapper).
+// withRetryAfter tags err with the Retry-After delay, delta-seconds only: that is what a throttled
+// response sends, and misreading an HTTP-date would stall a poll. An *apiError in err also stores
+// the delay for planLimitMessage; other callers read it off the returned *retryAfterError.
 func withRetryAfter(err error, header http.Header) error {
 	if err == nil {
 		return nil
@@ -1187,11 +1231,22 @@ func withRetryAfter(err error, header http.Header) error {
 // parseAPIError extracts a human-readable error message from a JSON API error response.
 // Handles common formats: {"detail": "..."}, {"field": ["error", ...]}, {"non_field_errors": ["..."]},
 // {"field_errors": {"path": [{"code", "message"}, ...]}}
-// statusCode gates whether "axis"/"next" are read as the 402 plan-limit
-// envelope (isEnvelopeOnly) rather than as ordinary validation fields.
+// statusCode gates whether "axis" (402) and "next" (any refusal status) are
+// read as the envelope (isEnvelopeOnly) rather than as ordinary validation fields.
 func parseAPIError(body []byte, statusCode int) error {
-	message, code, source, gate, axis, next, missing, _ := parseAPIErrorPayload(body, statusCode)
-	return &apiError{message: message, code: code, source: source, gate: gate, axis: axis, next: next, missing: missing, body: body}
+	message, code, source, gate, axis, missing, _ := parseAPIErrorPayload(body, statusCode)
+	err := newAPIError(message, code, source, gate, axis, utils.ParseRefusalNext(body, statusCode), missing)
+	err.hint = utils.ParseRefusalHint(body, statusCode)
+	err.body = body
+	// codeOnlyMessage's sentence gives way to the server's hint, and its bare
+	// default to a refusal that names its gate or what it was missing.
+	if code != "" && utils.IsRefusalStatus(statusCode) && message == codeOnlyMessage(code) {
+		_, known := codeSentence(code)
+		if err.hint != "" || (!known && (gate != "" || len(missing) > 0)) {
+			err.message = refusalMessage(statusCode, code, gate, missing)
+		}
+	}
+	return err
 }
 
 func errorExtraFields(body []byte) map[string]any {
@@ -1210,49 +1265,51 @@ func errorExtraFields(body []byte) map[string]any {
 	return parsed
 }
 
-func parseAPIErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, axis string, next string, missing []string, ok bool) {
+func parseAPIErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, axis string, missing []string, ok bool) {
 	raw := string(body)
 
 	if strings.TrimSpace(raw) == "" {
-		return "server returned an empty error response", "", "", "", "", "", nil, false
+		return "server returned an empty error response", "", "", "", "", nil, false
 	}
 
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		// Not valid JSON (e.g., HTML error page) — return truncated
-		return truncateBody(raw), "", "", "", "", "", nil, false
+		return truncateBody(raw), "", "", "", "", nil, false
 	}
 
 	code = stringField(parsed, "code")
 	source = stringField(parsed, "source")
 	gate, missing = parseGateAndMissing(parsed)
 	axis = stringField(parsed, "axis")
-	next = stringField(parsed, "next")
 
-	// Case 1: {"detail": "..."}
 	if detail := strings.TrimSpace(stringField(parsed, "detail")); detail != "" {
-		return detail, code, source, gate, axis, next, missing, true
+		return detail, code, source, gate, axis, missing, true
 	}
 
 	// A refusal envelope carries no field errors; gate/axis/next/missing are not validation messages.
 	if code != "" && isEnvelopeOnly(parsed, statusCode) {
-		return codeOnlyMessage(code), code, source, gate, axis, next, missing, true
+		return codeOnlyMessage(code), code, source, gate, axis, missing, true
 	}
 
 	if messages := fieldErrorMessages(parsed["field_errors"]); len(messages) > 0 {
-		return strings.Join(messages, "; "), code, source, gate, axis, next, missing, true
+		return strings.Join(messages, "; "), code, source, gate, axis, missing, true
 	}
 
-	// Case 2: field validation errors {"field": ["msg1", ...]}. A "code" whose
-	// value is the envelope's string code stays out; a list "code" field is a
-	// real request field and is rendered like any other. Keys are sorted
-	// for deterministic output.
+	// Field validation errors {"field": ["msg", ...]}. A string "code" is the envelope's and stays
+	// out; a list "code" is a real request field and renders like any other.
 	fields := make([]string, 0, len(parsed))
 	for field := range parsed {
 		if field == "field_errors" {
 			continue
 		}
 		if field == "code" {
+			if _, isString := parsed[field].(string); isString {
+				continue
+			}
+		}
+		// A refusal's string "hint" reaches the output sanitized through ErrorHint; rendering it
+		// here would print it a second time, raw.
+		if field == "hint" && utils.IsRefusalStatus(statusCode) {
 			if _, isString := parsed[field].(string); isString {
 				continue
 			}
@@ -1280,24 +1337,18 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 	}
 
 	if len(messages) > 0 {
-		return strings.Join(messages, "; "), code, source, gate, axis, next, missing, true
+		return strings.Join(messages, "; "), code, source, gate, axis, missing, true
 	}
 
 	if code != "" {
-		return codeOnlyMessage(code), code, source, gate, axis, next, missing, true
+		return codeOnlyMessage(code), code, source, gate, axis, missing, true
 	}
 
-	// Fallback: return truncated raw body
-	return truncateBody(raw), code, source, gate, axis, next, missing, true
+	return truncateBody(raw), code, source, gate, axis, missing, true
 }
 
-// isEnvelopeOnly reports whether parsed holds only envelope-shaped values: a
-// string for "code"/"source"/"gate"/"detail", "axis"/"next" the same but only
-// on a 402 (the plan-limit fields—on any other status they are not part of
-// the envelope, so a validation response that happens to have a field named
-// "axis" or "next" still renders as a field error rather than being swallowed
-// into a code-only message), and for
-// "missing" either a single scope string or a list of them.
+// isEnvelopeOnly reports whether parsed holds only refusal-envelope values. "axis" and "next"
+// count only on the statuses that send them; elsewhere a field of that name is a request field.
 func isEnvelopeOnly(parsed map[string]any, statusCode int) bool {
 	for key, value := range parsed {
 		switch key {
@@ -1305,8 +1356,22 @@ func isEnvelopeOnly(parsed map[string]any, statusCode int) bool {
 			if _, ok := value.(string); !ok {
 				return false
 			}
-		case "axis", "next":
+		case "hint":
+			if !utils.IsRefusalStatus(statusCode) {
+				return false
+			}
+			if _, ok := value.(string); !ok {
+				return false
+			}
+		case "axis":
 			if statusCode != http.StatusPaymentRequired {
+				return false
+			}
+			if _, ok := value.(string); !ok {
+				return false
+			}
+		case "next":
+			if !utils.IsRefusalStatus(statusCode) {
 				return false
 			}
 			if _, ok := value.(string); !ok {
@@ -1381,53 +1446,57 @@ func fieldErrorMessages(raw any) []string {
 	return messages
 }
 
-// codeOnlyMessage renders a code sent with no detail or field errors; a case
-// here names the remedy where the bare code would not.
+// codeOnlyMessage renders a code sent with no detail or field errors.
 func codeOnlyMessage(code string) string {
-	switch code {
-	case utils.APINotFound:
-		return "the requested resource was not found"
-	case utils.APIRateLimited:
-		return "too many requests—please try again later"
-	case utils.APINotAcceptable:
-		return "the server cannot produce a response in the format requested"
-	case utils.APIUnsupportedMediaType:
-		return "the server does not support the request's content type"
-	case utils.AuthVerificationUnavailable:
-		return "the server could not verify your credential right now—it was not rejected, so try again in a moment"
-	case utils.APICursorExpired:
-		return "the search snapshot this page was read from expired—read the listing again from the start"
-	case utils.APIInvalidCursor:
-		return "the server would not take this page's cursor—read the listing again from the start"
-	case utils.APISearchUnavailable:
-		return "the search backend would not start this read right now—try again in a moment"
-	case utils.ServerPAMInstallUnsupported:
-		return "alpamon-pam cannot be installed on this server—its operating system or package manager has no alpamon-pam package"
-	case utils.ServerPAMInstallRequiresSudoWithMFA:
-		return "alpamon-pam needs sudo with MFA—turn on \"Use sudo with MFA\" in the workspace security settings and try again; a deployment that cannot complete the MFA step-up cannot install it from Alpacon"
-	case utils.ServerPAMInstallInProgress:
-		return "an alpamon-pam install is already pending on this server—wait for it to finish"
-	case utils.WorkSessionTargetAccountAbsent:
-		return "the account does not exist on at least one target server and will not be created there—drop that server or name a different account with --account"
-	case utils.WorkSessionTargetAccountNotReachable:
-		return "your roles cannot open that account on at least one target server—ask for a group role on that server, or name an account you can open with --account"
-	case utils.TargetAccountOtherPerson:
-		return "that account belongs to another person on at least one target server, and no session may run as it—name your own account or a shared one with --account"
-	case utils.WorkSessionAgentSessionRequired:
-		return "this CLI runs under an AI agent, and the work session is a user session—create an agent session with 'alpacon work-session create' and pass its ID with --work-session"
-	case utils.CommandACLMoved:
-		return "command ACLs are now managed on the command pre-approval ledger, which this CLI cannot change yet—a Command ACL admin issues or revokes the entry under Pre-approved commands on the service token's page in the web console; a personal API token has no command list on the ledger"
-	default:
-		return fmt.Sprintf("request failed (code: %s)", code)
+	if sentence, known := codeSentence(code); known {
+		return sentence
 	}
+	return fmt.Sprintf("request failed (code: %s)", code)
 }
 
-// parseGateAndMissing extracts the optional "gate" and "missing" fields a coded
-// 402/403/405/429 response may carry beside "code": the server states which
-// gate refused the request and what it was missing, but sends no human "detail"
-// on these routes, so a caller such as cmd/iam's RBAC guidance table reads these
-// instead. "missing" is accepted as either one scope string or a list of them—
-// either way it comes back as a slice, trimmed and with empty entries dropped.
+// codeSentence is the CLI's own sentence for code, naming the remedy where the
+// bare code would not; known is false for a code it has none for.
+func codeSentence(code string) (sentence string, known bool) {
+	switch code {
+	case utils.APINotFound:
+		return "the requested resource was not found", true
+	case utils.APIRateLimited:
+		return "too many requests—please try again later", true
+	case utils.APINotAcceptable:
+		return "the server cannot produce a response in the format requested", true
+	case utils.APIUnsupportedMediaType:
+		return "the server does not support the request's content type", true
+	case utils.AuthVerificationUnavailable:
+		return "the server could not verify your credential right now—it was not rejected, so try again in a moment", true
+	case utils.APICursorExpired:
+		return "the search snapshot this page was read from expired—read the listing again from the start", true
+	case utils.APIInvalidCursor:
+		return "the server would not take this page's cursor—read the listing again from the start", true
+	case utils.APISearchUnavailable:
+		return "the search backend would not start this read right now—try again in a moment", true
+	case utils.ServerPAMInstallUnsupported:
+		return "alpamon-pam cannot be installed on this server—its operating system or package manager has no alpamon-pam package", true
+	case utils.ServerPAMInstallRequiresSudoWithMFA:
+		return "alpamon-pam needs sudo with MFA—turn on \"Use sudo with MFA\" in the workspace security settings and try again; a deployment that cannot complete the MFA step-up cannot install it from Alpacon", true
+	case utils.ServerPAMInstallInProgress:
+		return "an alpamon-pam install is already pending on this server—wait for it to finish", true
+	case utils.WorkSessionTargetAccountAbsent:
+		return "the account does not exist on at least one target server and will not be created there—drop that server or name a different account with --account", true
+	case utils.WorkSessionTargetAccountNotReachable:
+		return "your roles cannot open that account on at least one target server—ask for a group role on that server, or name an account you can open with --account", true
+	case utils.TargetAccountOtherPerson:
+		return "that account belongs to another person on at least one target server, and no session may run as it—name your own account or a shared one with --account", true
+	case utils.WorkSessionAgentSessionRequired:
+		return "this CLI runs under an AI agent, and the work session is a user session—create an agent session with 'alpacon work-session create' and pass its ID with --work-session", true
+	case utils.CommandACLMoved:
+		return "command ACLs are now managed on the command pre-approval ledger, which this CLI cannot change yet—a Command ACL admin issues or revokes the entry under Pre-approved commands on the service token's page in the web console; a personal API token has no command list on the ledger", true
+	}
+	return "", false
+}
+
+// parseGateAndMissing reads the optional "gate" and "missing" a coded refusal carries beside
+// "code"; cmd/iam's RBAC guidance reads them. "missing" may be one scope string or a list; either
+// way it comes back as a slice, trimmed, with empty entries dropped.
 func parseGateAndMissing(parsed map[string]any) (gate string, missing []string) {
 	gate = stringField(parsed, "gate")
 	switch v := parsed["missing"].(type) {

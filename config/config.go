@@ -22,10 +22,9 @@ const (
 	// 'alpacon kube login' opened; logout removes it with the config.
 	KubeSessionDir = "kube"
 
-	// ServiceTokenPrefix is the default service-token key prefix, hard-coded here.
-	// It matches the server's default SERVICE_TOKEN_PREFIX; if a self-hosted server
-	// overrides that setting, its service tokens will not match this prefix and are
-	// treated as generic tokens. Personal API tokens use "alpat-".
+	// ServiceTokenPrefix is the server's default service-token key prefix. A self-hosted server
+	// configured with another prefix issues tokens this treats as generic. Personal API tokens
+	// use "alpat-".
 	ServiceTokenPrefix = "alpst-"
 )
 
@@ -99,12 +98,9 @@ func saveConfig(config *Config) error {
 
 	warnUnrestricted("config directory", restrictConfigDirectoryMode(dir))
 
-	// The rename below replaces whatever the last path component names, so a
-	// config.json kept as a link into a dotfiles tree would be swapped for a
-	// regular file on the first access-token refresh and the tree left stale.
-	// Resolving first is what makes that setup survive a write, and the temp
-	// file is created beside the target so the rename stays inside one
-	// filesystem even when the tree is on another mount.
+	// The rename replaces the last path component, so a config.json linked into a dotfiles tree
+	// must be resolved first or the link is swapped for a regular file. The temp file sits beside
+	// the target so the rename stays on one filesystem.
 	configFile, err := resolveConfigWritePath(filepath.Join(dir, ConfigFileName))
 	if err != nil {
 		return err
@@ -317,18 +313,14 @@ func LoadConfig() (Config, error) {
 	return config, nil
 }
 
-// openCheckedConfigFile hands back a handle nothing else may stand in for. The
-// handle the narrowing already opened is the one that is read: closing it and
-// resolving the path again leaves a window for the file to be replaced between
-// the checks and the decode, and costs a second open on each of the two to five
-// times a command loads the config.
+// openCheckedConfigFile hands back a handle nothing else may stand in for. It reads the handle
+// the narrowing already opened, since resolving the path again would let the file be replaced
+// between the checks and the decode.
 //
-// A refusal is fatal where a failed narrowing is not. A mode this process could
-// not change still leaves a file it wrote itself—a read-only mount is the usual
-// reason—so that warns and the read goes on through the path. But a file
-// another account owns is one another account can rewrite, and this one names
-// the host the CLI talks to and decides whether its certificate is checked, so
-// reading it would hand the next login's token to whoever chose those values.
+// A refusal is fatal where a failed narrowing is not: a mode this process could not change (a
+// read-only mount, usually) only warns, but a file another account owns names the host the CLI
+// talks to and whether its certificate is checked, so reading it would hand over the next
+// login's token.
 func openCheckedConfigFile(configFile string) (*os.File, error) {
 	file, narrowErr := openNarrowedConfigFile(configFile)
 	if narrowErr == nil {
@@ -351,12 +343,9 @@ func openCheckedConfigFile(configFile string) (*os.File, error) {
 		warnUnrestricted("config file", narrowErr)
 	}
 
-	// Reached for a symbolic link above all, which is refused a chmod but not a
-	// read—keeping one config.json in a dotfiles tree is a supported setup. So
-	// this is the first look at what the path resolves to, and it gets the same
-	// refusal the narrowed handle got: a pipe there would park the decode
-	// forever, and a link is the one way a file another account owns can reach
-	// this far.
+	// Reached mainly for a symbolic link, which is refused a chmod but not a read. This is the
+	// first look at the target, so it gets the same refusal the narrowed handle got: a pipe would
+	// park the decode forever, and a link is how a file another account owns can reach this far.
 	file, err := openConfigForRead(configFile)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -373,11 +362,9 @@ func openCheckedConfigFile(configFile string) (*os.File, error) {
 		_ = file.Close()
 		return nil, err
 	}
-	// The target's mode is known now, so the warning can be true. A dotfiles
-	// config.json kept at 0600 exposes nothing, and saying otherwise on every
-	// command is how a user learns to read past the warning that matters. The
-	// handle already open is what answers it: resolving the path again would
-	// cost an open and read a file this one no longer has to be.
+	// The target's mode is known now, so warn only when it grants another account access: a
+	// dotfiles config.json at 0600 exposes nothing, and a warning on every command teaches users to
+	// ignore it.
 	if symlinked && grantsOtherAccounts(info.Mode().Perm()) {
 		warnUnrestricted("config file", narrowErr)
 	}
@@ -465,20 +452,29 @@ func SetActiveWorkSessionFor(workspaceName, uuid string) error {
 	})
 }
 
-// GetActiveWorkSession returns the active work-session UUID for the current workspace.
-// Returns "" (no error) when no session is set, the config is missing the map, or no config file exists.
+// GetActiveWorkSession returns the active work-session UUID for the current workspace, or "" when none is set or no config file exists.
+// A caller holding a client uses GetActiveWorkSessionFor with the client's workspace instead.
 func GetActiveWorkSession() (string, error) {
+	return readActiveWorkSession(func(cfg Config) string { return cfg.WorkspaceIdentity() })
+}
+
+// GetActiveWorkSessionFor is GetActiveWorkSession for workspaceName, a parameter rather than a fresh
+// read so another shell's 'alpacon ws use' cannot swap in a foreign session.
+func GetActiveWorkSessionFor(workspaceName string) (string, error) {
+	return readActiveWorkSession(func(Config) string { return workspaceName })
+}
+
+func readActiveWorkSession(workspace func(Config) string) (string, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
-		// errors.Is and not os.IsNotExist: LoadConfig wraps the missing-file
-		// error with %w, and os.IsNotExist unwraps only the error types the os
-		// package defines—so this used to report an absent config as a failure.
+		// errors.Is, not os.IsNotExist: LoadConfig wraps the missing-file error with %w, which
+		// os.IsNotExist does not unwrap.
 		if errors.Is(err, fs.ErrNotExist) {
 			return "", nil
 		}
 		return "", err
 	}
-	return activeWorkSessionOn(cfg, cfg.WorkspaceIdentity()), nil
+	return activeWorkSessionOn(cfg, workspace(cfg)), nil
 }
 
 // ClearActiveWorkSessionFor clears workspaceName's active work-session only while it is still uuid,
@@ -562,7 +558,7 @@ func setActiveWorkSessionOn(cfg *Config, workspaceName, uuid string) (bool, erro
 		return false, errors.New("no active workspace; run 'alpacon login' first")
 	}
 	// A session saved before schema_name was recorded sits under the host label,
-	// where GetActiveWorkSession still falls back to it. Every write for the
+	// where a read for the current workspace still falls back to it. Every write for the
 	// current workspace drops it, or an unset would revive that older session.
 	legacyKey := ""
 	if workspaceName == cfg.WorkspaceIdentity() && cfg.WorkspaceName != workspaceName {

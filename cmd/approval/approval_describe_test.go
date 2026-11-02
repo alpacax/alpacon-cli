@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Shape of the command_exec detail payload for a file execution request.
 const fileExecutionFixture = `{
   "id": "apr-1",
   "request_type": "command_exec",

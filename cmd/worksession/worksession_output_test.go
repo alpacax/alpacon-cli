@@ -337,7 +337,6 @@ func TestActiveWorkSessionSetMessage_StripsControlSequences(t *testing.T) {
 
 func TestActiveWorkSessionSetMessage_DropsDescriptionLeftEmpty(t *testing.T) {
 	t.Parallel()
-	// Stripping can empty the description; the parentheses go with it.
 	assert.Equal(t, "Active work-session set to ses-abc.",
 		activeWorkSessionSetMessage("", "ses-abc", "\x1b[2K\r"))
 }

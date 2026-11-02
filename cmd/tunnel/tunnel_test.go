@@ -96,7 +96,7 @@ func TestExecuteTunnelCommandRunModeReturnsErrorForInvalidRemotePort(t *testing.
 	tunnelFlags.remotePort = "invalid"
 
 	cmd, args := parseTunnelCommandArgs(t, []string{"prod-db", "--", "psql"})
-	exitCode, err := executeTunnelCommand(cmd, args, nil)
+	exitCode, err := executeTunnelCommand(&client.AlpaconClient{}, cmd, args, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -144,7 +144,7 @@ func TestHandleTunnelStartError_TokenRefusalAsksForInteractiveLogin(t *testing.T
 			t.Parallel()
 			err := tunnelCreateError(t, tt.code)
 
-			got := handleTunnelStartError(err, "my-server", nil)
+			got := handleTunnelStartError(&client.AlpaconClient{}, err, "my-server", nil)
 
 			assert.EqualError(t, got, "a token cannot open a tunnel; run 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device) and try again")
 		})
@@ -155,7 +155,16 @@ func TestHandleTunnelStartError_OtherRefusalPassesThrough(t *testing.T) {
 	t.Parallel()
 	err := tunnelCreateError(t, utils.WorkSessionRequired)
 
-	got := handleTunnelStartError(err, "my-server", nil)
+	got := handleTunnelStartError(&client.AlpaconClient{}, err, "my-server", nil)
 
 	assert.Equal(t, err, got)
+}
+
+func TestToStartOptionsCarriesTheCallersClient(t *testing.T) {
+	t.Parallel()
+	ac := &client.AlpaconClient{WorkspaceName: "ws-a"}
+
+	opts := tunnelFlagValues{remotePort: "5432"}.toStartOptions(ac, "my-db")
+
+	assert.Same(t, ac, opts.Client)
 }

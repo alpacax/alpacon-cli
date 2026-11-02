@@ -6,11 +6,15 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// extendErrorMessage maps a server refusal from the extend action to actionable
-// text. The three coded refusals below carry no human detail of their own (see
-// utils.ParseErrorResponse), so without this the operator would see only the
-// generic "request failed (code: ...)" fallback and not what to do about it.
+// extendErrorMessage maps a server refusal from the extend action to actionable text. The coded
+// refusals below carry no human detail, so the operator would otherwise see only the generic
+// "request failed (code: ...)" fallback.
 func extendErrorMessage(id string, err error) string {
+	// The server's hint is the guidance when the refusal carries one; the
+	// error output prints it under this line.
+	if utils.RefusalHint(err) != "" {
+		return fmt.Sprintf("Failed to extend work session: %s.", err)
+	}
 	code, _ := utils.ParseErrorResponse(err)
 	switch code {
 	case utils.WorkSessionExtensionReasonRequired:

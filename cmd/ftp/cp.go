@@ -63,7 +63,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 		allowOverwrite := !noOverwrite
 
 		if len(args) < 2 {
-			utils.CliErrorWithExit("You must specify at least two arguments.\n\n" +
+			utils.CliUsageErrorWithExit("You must specify at least two arguments.\n\n" +
 				"Usage examples:\n" +
 				"  • Upload file to server:\n" +
 				"    alpacon cp /local/file.txt server:/remote/path/\n" +
@@ -77,22 +77,17 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
 		username, err := normalizeArgs(args, username)
 		if err != nil {
-			utils.CliErrorWithExit("%v", err)
+			utils.CliUsageErrorWithExit("%v", err)
 			return
 		}
 
 		sources := args[:len(args)-1]
 		dest := args[len(args)-1]
 
-		// Validate source and destination paths
 		if err := validatePaths(sources, dest); err != nil {
-			utils.CliErrorWithExit("%s", err.Error())
+			utils.CliUsageErrorWithExit("%s", err.Error())
 			return
 		}
-
-		// Resolve after argument/path validation so resolution errors don't
-		// mask early usage errors.
-		workSessionID := worksession.ResolveOrExit(flagWorkSession)
 
 		authMethod := config.ResolveAuthMethod()
 
@@ -105,6 +100,8 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 				"  • Verify the API endpoint is accessible", err)
 			return
 		}
+
+		workSessionID := worksession.ResolveOrExit(alpaconClient, flagWorkSession)
 
 		if isLocalPaths(sources) && isRemotePath(dest) {
 			serverName, err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
@@ -140,7 +137,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
 			utils.CliSuccess("Downloaded %s to %s", wrappedSrc, dest)
 		} else {
-			utils.CliErrorWithExit("Invalid combination of source and destination paths.\n\n" +
+			utils.CliUsageErrorWithExit("Invalid combination of source and destination paths.\n\n" +
 				"Valid operations:\n" +
 				"  • Upload (local → remote): alpacon cp /local/file server:/remote/path/\n" +
 				"  • Download (remote → local): alpacon cp server:/remote/file /local/path/\n\n" +
@@ -159,12 +156,10 @@ func init() {
 	CpCmd.Flags().String("work-session", "", "Attach this transfer to a work-session (overrides 'work-session use')")
 }
 
-// isRemotePath determines if the given path is a remote server path.
 func isRemotePath(path string) bool {
 	return utils.IsRemoteTarget(path)
 }
 
-// isLocalPath determines if the given path is a local file system path.
 func isLocalPath(path string) bool {
 	return utils.IsLocalTarget(path)
 }
@@ -210,7 +205,6 @@ func stripUserPrefix(arg string) (rewritten, user string) {
 }
 
 func validatePaths(sources []string, dest string) error {
-	// Check for mixed local and remote sources (not allowed)
 	hasLocal := false
 	hasRemote := false
 
@@ -230,7 +224,6 @@ func validatePaths(sources []string, dest string) error {
 			"  • Cannot mix: alpacon cp file1.txt server:/file2.txt /dest/  ❌")
 	}
 
-	// Check for invalid remote path format
 	allPaths := make([]string, 0, len(sources)+1)
 	allPaths = append(allPaths, sources...)
 	allPaths = append(allPaths, dest)
@@ -265,7 +258,6 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 		err = ftp.UploadFile(client, src, dest, username, groupname, allowOverwrite, workSessionID)
 	}
 	if err != nil {
-		// Parse error and provide specific guidance
 		errStr := err.Error()
 		if strings.Contains(errStr, "no such file or directory") {
 			utils.CliErrorWithExit("Source file(s) not found: %s\n\n"+
@@ -274,7 +266,7 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 				"  • You have read permissions for the source files\n"+
 				"  • For folders, use -r flag: alpacon cp -r /local/folder %s",
 				strings.Join(src, ", "), dest)
-		} else if strings.Contains(errStr, "permission denied") || strings.Contains(errStr, "access denied") {
+		} else if wantsPermissionAdvice(err) {
 			utils.CliErrorWithExit("Permission denied uploading to '%s' on server '%s'.\n\n"+
 				"Try these solutions:\n"+
 				"  • Upload as root: alpacon cp -u root %s %s\n"+
@@ -305,7 +297,6 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 
 	err = ftp.DownloadFile(client, sources, dest, username, groupname, recursive, workSessionID)
 	if err != nil {
-		// Parse error and provide specific guidance
 		errStr := err.Error()
 		if strings.Contains(errStr, "no such file or directory") || strings.Contains(errStr, "file not found") {
 			utils.CliErrorWithExit("Source file not found: '%s' on server '%s'.\n\n"+
@@ -315,7 +306,7 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 				"  • You have read permissions for the file\n"+
 				"  • For folders, use -r flag: alpacon cp -r %s %s",
 				remotePath, serverName, remotePath, serverName, filepath.Dir(remotePath), srcDisplay, dest)
-		} else if strings.Contains(errStr, "permission denied") || strings.Contains(errStr, "access denied") {
+		} else if wantsPermissionAdvice(err) {
 			utils.CliErrorWithExit("Permission denied downloading '%s' from server '%s'.\n\n"+
 				"Try these solutions:\n"+
 				"  • Download as root: alpacon cp -u root %s %s\n"+
@@ -328,7 +319,7 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 				"  • Server name is spelled correctly\n"+
 				"  • Server is registered: alpacon server ls\n"+
 				"  • You have access to this server", serverName)
-		} else if strings.Contains(errStr, "download failed") {
+		} else if strings.Contains(errStr, "download failed") && utils.RefusalHint(err) == "" {
 			utils.CliErrorWithExit("Download failed from server '%s': %s\n\n"+
 				"This might be due to:\n"+
 				"  • Network connectivity issues\n"+
@@ -340,4 +331,15 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 		return serverName, err
 	}
 	return serverName, nil
+}
+
+// wantsPermissionAdvice reports whether err is a permission error the run-as-root advice fits:
+// a file permission on the server, or a refusal with no server hint. A hinted refusal, such as a
+// token's file access rules, gets the hint instead.
+func wantsPermissionAdvice(err error) bool {
+	if utils.RefusalHint(err) != "" {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "permission denied") || strings.Contains(errStr, "access denied")
 }

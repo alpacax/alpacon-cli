@@ -21,17 +21,31 @@ type WebsocketClient struct {
 	// reconnect carries a dropped session to a new connection. nil on a client
 	// that ends the session on the first drop, which is every non-interactive one.
 	reconnect *reconnector
+	// The reader owns replay state until its pumps stop before the next dial.
+	replay replayState
+	// The reader keeps warning deadlines across connections, like replay state.
+	idleWarnings map[time.Time]struct{}
+}
+
+type replayState struct {
+	epoch         string
+	offset        uint64
+	outputWritten bool
 }
 
 // connection is one WebSocket connection of a session. A session outlives its
 // connections—a dropped link is re-dialed onto a new user channel—so each one
 // records its own ending and the session decides what that ending means.
 type connection struct {
-	ws      *websocket.Conn
-	ended   chan struct{} // closed once the first ending is recorded
-	err     error
-	endOnce sync.Once
-	pumps   sync.WaitGroup
+	ws           *websocket.Conn
+	ended        chan struct{} // closed once the first ending is recorded
+	err          error
+	endOnce      sync.Once
+	pumps        sync.WaitGroup
+	replay       *replayState
+	reconnected  bool
+	notice       io.Writer
+	idleWarnings map[time.Time]struct{}
 }
 
 // reconnector is what an interactive session needs to survive a dropped

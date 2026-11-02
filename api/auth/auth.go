@@ -81,17 +81,7 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 		return err
 	}
 
-	// Log in to Alpacon server
-	httpReq, err := http.NewRequest(http.MethodPost, utils.BuildURL(workspaceURL, loginURL, nil), bytes.NewBuffer(reqBody))
-	if err != nil {
-		return err
-	}
-
-	httpReq.Header.Add("Content-Type", "application/json")
-	httpReq.Header.Set("User-Agent", utils.GetUserAgent())
-	aiagent.FromEnvironment().SetHeaders(httpReq.Header)
-
-	resp, err := httpClient.Do(httpReq)
+	resp, err := postLogin(httpClient, workspaceURL, reqBody)
 	if err != nil {
 		return utils.WithRedirectStatus(err, resp)
 	}
@@ -118,6 +108,19 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 	}
 
 	return nil
+}
+
+func postLogin(httpClient *http.Client, workspaceURL string, reqBody []byte) (*http.Response, error) {
+	httpReq, err := http.NewRequest(http.MethodPost, utils.BuildURL(workspaceURL, loginURL, nil), bytes.NewBuffer(reqBody))
+	if err != nil {
+		return nil, err
+	}
+
+	httpReq.Header.Add("Content-Type", "application/json")
+	httpReq.Header.Set("User-Agent", utils.GetUserAgent())
+	aiagent.FromEnvironment().SetHeaders(httpReq.Header)
+
+	return httpClient.Do(httpReq)
 }
 
 // loginStatusError keeps the status and the server's error code of a refused
@@ -283,7 +286,7 @@ func GetTokenScopes(ac *client.AlpaconClient) ([]TokenScopeAttributes, error) {
 func Logout(ac *client.AlpaconClient, validConfig config.Config) error {
 	_, err := ac.SendPostRequest(logoutURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed to send post request: %v", err)
+		return fmt.Errorf("failed to send post request: %w", err)
 	}
 
 	err = config.DeleteConfig(validConfig)

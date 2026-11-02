@@ -326,6 +326,95 @@ func TestCliErrorHelpersExitInSubprocess(t *testing.T) {
 			},
 		},
 		{
+			name: "error helper with a usage error argument exits 2 in table", mode: "exit-usage-arg", format: OutputFormatTable, wantExit: ExitCodeUsageError,
+			check: func(t *testing.T, stderr string) {
+				t.Helper()
+				assert.Contains(t, stderr, "Error: Failed: invalid note ID: invalid id.")
+				assert.NotContains(t, stderr, "For issues")
+			},
+		},
+		{
+			name: "error helper with a usage error argument exits 2 in json", mode: "exit-usage-arg", format: OutputFormatJSON, wantExit: ExitCodeUsageError,
+			check: func(t *testing.T, stderr string) {
+				t.Helper()
+				env := decodeSingleLineEnvelope(t, stderr)
+				assert.Equal(t, ErrorCodeUsage, env.ErrorCode)
+				assert.Equal(t, ExitCodeUsageError, env.ExitCode)
+			},
+		},
+		{
+			name: "coded error helper with a usage error argument exits 2", mode: "with-code-usage-arg", format: OutputFormatTable, wantExit: ExitCodeUsageError,
+			check: func(t *testing.T, stderr string) {
+				t.Helper()
+				assert.Contains(t, stderr, "Error: Failed: invalid note ID: invalid id.")
+			},
+		},
+		{
+			name: "coded error helper with a usage error argument exits 2 in json", mode: "with-code-usage-arg", format: OutputFormatJSON, wantExit: ExitCodeUsageError,
+			check: func(t *testing.T, stderr string) {
+				t.Helper()
+				env := decodeSingleLineEnvelope(t, stderr)
+				assert.Equal(t, ErrorCodeUsage, env.ErrorCode)
+				assert.Equal(t, ExitCodeUsageError, env.ExitCode)
+			},
+		},
+		{
+			name: "exit code 1 with a usage error argument exits 2", mode: "exit-code-1-usage-arg", format: OutputFormatJSON, wantExit: ExitCodeUsageError,
+			check: func(t *testing.T, stderr string) {
+				t.Helper()
+				assert.Equal(t, ExitCodeUsageError, decodeSingleLineEnvelope(t, stderr).ExitCode)
+			},
+		},
+		{
+			name: "envelope helper at exit code 1 with a usage error exits 2", mode: "envelope-code-1-usage", format: OutputFormatJSON, wantExit: ExitCodeUsageError,
+			check: func(t *testing.T, stderr string) {
+				t.Helper()
+				assert.Equal(t, ErrorCodeUsage, decodeSingleLineEnvelope(t, stderr).ErrorCode)
+			},
+		},
+		{
+			name: "envelope helper keeps a chosen exit code other than 1", mode: "envelope-code-6-usage", format: OutputFormatTable, wantExit: ExitCodeNotApproved,
+			check: func(t *testing.T, stderr string) {
+				t.Helper()
+				assert.Contains(t, stderr, "Error: Failed: invalid note ID: invalid id.")
+			},
+		},
+		{
+			name: "a server answer coded usage_error stays exit 1 with its status", mode: "exit-server-usage-code", format: OutputFormatJSON, wantExit: ExitCodeGeneralError,
+			check: func(t *testing.T, stderr string) {
+				t.Helper()
+				env := decodeSingleLineEnvelope(t, stderr)
+				assert.Equal(t, ExitCodeGeneralError, env.ExitCode)
+				assert.Equal(t, ErrorCodeUsage, env.ErrorCode)
+				assert.Equal(t, 400, env.HTTPStatus)
+			},
+		},
+		{
+			name: "a server answer coded usage_error stays exit 1 in table", mode: "exit-server-usage-code", format: OutputFormatTable, wantExit: ExitCodeGeneralError,
+			check: func(t *testing.T, stderr string) {
+				t.Helper()
+				assert.Contains(t, stderr, "For issues")
+			},
+		},
+		{
+			name: "table usage helper exits 2 without the report footer", mode: "usage-no-operation", format: OutputFormatTable, wantExit: ExitCodeUsageError,
+			check: func(t *testing.T, stderr string) {
+				t.Helper()
+				assert.Contains(t, stderr, "bad flag --x")
+				assert.NotContains(t, stderr, "report")
+			},
+		},
+		{
+			name: "json usage helper carries usage_error", mode: "usage-no-operation", format: OutputFormatJSON, wantExit: ExitCodeUsageError,
+			check: func(t *testing.T, stderr string) {
+				t.Helper()
+				env := decodeSingleLineEnvelope(t, stderr)
+				assert.Equal(t, ErrorCodeUsage, env.ErrorCode)
+				assert.Equal(t, ExitCodeUsageError, env.ExitCode)
+				assert.Equal(t, "bad flag --x", env.Message)
+			},
+		},
+		{
 			name: "usage helper", mode: "usage", format: OutputFormatJSON, wantExit: ExitCodeUsageError,
 			check: func(t *testing.T, stderr string) {
 				t.Helper()
@@ -378,6 +467,7 @@ func TestCliErrorHelpersHelperProcess(t *testing.T) {
 	OutputFormat = format
 	CommandName = "greet world"
 	apiErr := &fakeAPIError{code: "rbac_permission_required", status: 403, fields: map[string]any{"gate": "role"}}
+	usageArg := MarkUsageError(fmt.Errorf("invalid note ID: %w", ErrInvalidID))
 	switch mode {
 	case "exit":
 		CliErrorWithExit("Failed: %s.", "boom")
@@ -397,6 +487,20 @@ func TestCliErrorHelpersHelperProcess(t *testing.T) {
 		CliErrorEnvelopeWithExitCode(6, "", apiErr, "Failed: %s.", apiErr)
 	case "usage":
 		CliUsageErrorEnvelopeWithExit("", "bad flag")
+	case "exit-usage-arg":
+		CliErrorWithExit("Failed: %s.", usageArg)
+	case "with-code-usage-arg":
+		CliErrorWithCode(ExitCodeGeneralError, "", "Failed: %s.", usageArg)
+	case "exit-code-1-usage-arg":
+		CliErrorWithExitCode(ExitCodeGeneralError, "Failed: %s.", usageArg)
+	case "envelope-code-1-usage":
+		CliErrorEnvelopeWithExitCode(ExitCodeGeneralError, "", usageArg, "Failed: %s.", usageArg)
+	case "envelope-code-6-usage":
+		CliErrorEnvelopeWithExitCode(ExitCodeNotApproved, "", usageArg, "Failed: %s.", usageArg)
+	case "exit-server-usage-code":
+		CliErrorWithExit("Failed: %s.", &fakeAPIError{code: ErrorCodeUsage, status: 400})
+	case "usage-no-operation":
+		CliUsageErrorWithExit("bad flag --%s", "x")
 	case "prompt-eof":
 		PromptForInput("Username: ")
 	case "failure":
@@ -422,4 +526,43 @@ func decodeSingleLineEnvelope(t *testing.T, stderr string) JSONErrorEnvelope[cli
 	var env JSONErrorEnvelope[cliErrorCtx]
 	require.NoError(t, json.Unmarshal([]byte(trimmed), &env), "stderr: %s", stderr)
 	return env
+}
+
+// A partial success keeps the attach refusal out of error_code but still shows its hint.
+func TestCliErrorEnvelopeWithExit_NilErrorStillShowsTheHint(t *testing.T) {
+	for _, format := range []string{OutputFormatJSON, OutputFormatTable} {
+		t.Run(format, func(t *testing.T) {
+			help := exec.Command(os.Args[0], "-test.run=^TestCliErrorEnvelopeWithExitNilErrorHelperProcess$")
+			help.Env = append(os.Environ(), "GO_WANT_NIL_ERROR_ENVELOPE_HELPER="+format)
+			var stderr bytes.Buffer
+			help.Stderr = &stderr
+
+			err := help.Run()
+
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, 1, exitErr.ExitCode())
+			const message = "Work session created (ws-1) but failed to set as active: permission denied. Run 'alpacon work-session use ws-1' to retry."
+			if format == OutputFormatTable {
+				assert.Contains(t, stderr.String(), message+"\nHint: "+sampleHint+"\n")
+				return
+			}
+			var envelope JSONErrorEnvelope[cliErrorCtx]
+			require.NoError(t, json.Unmarshal(stderr.Bytes(), &envelope), "stderr: %s", stderr.String())
+			assert.Equal(t, ErrorCodeCLI, envelope.ErrorCode)
+			assert.Equal(t, message, envelope.Message)
+			assert.Equal(t, []NextAction{{Description: sampleHint}}, envelope.NextActions)
+		})
+	}
+}
+
+func TestCliErrorEnvelopeWithExitNilErrorHelperProcess(t *testing.T) {
+	format := os.Getenv("GO_WANT_NIL_ERROR_ENVELOPE_HELPER")
+	if format == "" {
+		return
+	}
+	OutputFormat = format
+	colorEnabled = false
+	useErr := &hintedError{code: "permission_denied", hint: sampleHint}
+	CliErrorEnvelopeWithExit("create", nil, "Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", "ws-1", useErr, "ws-1")
 }

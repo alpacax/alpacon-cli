@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -14,10 +15,8 @@ import (
 
 const purposeTestCommandID = "a1b2c3d4-5678-abcd-ef01-234567890abc"
 
-// purposeRequiredSignal mirrors every field of the published envelope, not just
-// the ones a caller happens to branch on. An earlier version omitted `message`
-// and `context`, which meant deleting them from the envelope kept the suite
-// green while breaking a contract README documents.
+// purposeRequiredSignal mirrors every field of the published envelope, not just the ones a caller
+// branches on, so dropping a field README documents fails the suite.
 type purposeRequiredSignal struct {
 	OK                    bool   `json:"ok"`
 	Status                string `json:"status"`
@@ -34,7 +33,6 @@ type purposeRequiredSignal struct {
 	NextActions []NextAction `json:"next_actions"`
 }
 
-// purposeAnswerSignal is the envelope `exec purpose` prints.
 type purposeAnswerSignal struct {
 	OK          bool         `json:"ok"`
 	Status      string       `json:"status"`
@@ -81,7 +79,7 @@ func TestPrintPurposeDemand_EnvelopeCarriesTheWholeContract(t *testing.T) {
 	assert.False(t, got.OK)
 	assert.Equal(t, PurposeRequiredStatus, got.Status)
 	assert.Equal(t, ExitCodePurposeRequired, got.ExitCode)
-	assert.Equal(t, PurposeDemandLead, got.Message)
+	assert.Contains(t, got.Message, PurposeDemandLead)
 	assert.Equal(t, purposeTestCommandID, got.CommandID)
 	assert.Equal(t, purposeTestCommandID, got.Context.CommandID)
 
@@ -103,9 +101,6 @@ func TestPrintPurposeDemand_EnvelopeCarriesTheWholeContract(t *testing.T) {
 }
 
 func TestPrintPurposeDemand_DeadlineMeasuresAgainstTheServersExpiry(t *testing.T) {
-	// The server derives the expiry because the window's length is a setting no
-	// endpoint publishes—so this client has no length to assume and cannot be
-	// wrong about one.
 	got := capturePurposeJSONIn(t, 30*time.Second)
 
 	require.NotNil(t, got.Context.DeadlineSeconds)
@@ -122,15 +117,14 @@ func TestPrintPurposeDemand_AnExpiredWindowReportsZeroNotNegative(t *testing.T) 
 }
 
 func TestPrintPurposeDemand_NoExpiryReportsNoDeadline(t *testing.T) {
-	// An older server sends no expiry. Inventing one would publish a deadline
-	// that does not exist on a workspace which raised COMMAND_PURPOSE_DEADLINE.
+	// An older server sends no expiry, and inventing one could publish a deadline that does not
+	// exist: the server's deployment can change the window's length.
 	got := capturePurposeJSON(t, nil)
 
 	assert.Nil(t, got.Context.DeadlineSeconds)
 }
 
 func TestPrintPurposeDemand_TableModeIsActionableOnStderr(t *testing.T) {
-	// The default path—no --output json—had no coverage at all.
 	expires := time.Now().Add(45 * time.Second)
 	var stdout, stderr string
 	withFormat(OutputFormatTable, func() {
@@ -141,15 +135,14 @@ func TestPrintPurposeDemand_TableModeIsActionableOnStderr(t *testing.T) {
 
 	assert.Empty(t, stdout, "stdout stays clean for the command's own output")
 	assert.Contains(t, stderr, "Purpose required")
-	assert.Contains(t, stderr, "left to answer")
+	assert.Contains(t, stderr, "the command is judged again without one")
 	assert.Contains(t, stderr, "local to this host")
 	assert.Contains(t, stderr, "alpacon exec purpose "+purposeTestCommandID)
 	assert.Contains(t, stderr, "alpacon exec logs "+purposeTestCommandID)
 }
 
 func TestPrintPurposeDemand_SanitizesTheServerSuppliedID(t *testing.T) {
-	// The id is server-supplied and every line interpolates it into text
-	// written straight to the terminal (#364).
+	// The id is server-supplied and every line writes it straight to the terminal.
 	var stderr string
 	withFormat(OutputFormatTable, func() {
 		_, stderr = testutil.CaptureOutput(t, func() {
@@ -214,12 +207,100 @@ func TestPrintPurposeAnswer_TableModeKeepsStdoutClean(t *testing.T) {
 	assert.Contains(t, stderr, "Purpose recorded")
 }
 
-func TestPurposeDemandLead_SaysWhatSilenceCosts(t *testing.T) {
-	t.Parallel()
-	// Both surfaces read the expiry behaviour off this one string, so they
-	// cannot describe it differently. A caller who arrives through `exec logs`
-	// found the demand late by definition, and needs to know the command is not
-	// blocked by the window closing.
-	assert.Contains(t, PurposeDemandLead, "not blocked")
-	assert.Contains(t, PurposeDemandLead, "ordinary path")
+func TestPrintPurposeDemand_StatesLocalDeadlineAndLapseOutcome(t *testing.T) {
+	for _, format := range []string{OutputFormatTable, OutputFormatJSON} {
+		for _, window := range []time.Duration{time.Minute, -time.Minute} {
+			t.Run(format+" "+window.String(), func(t *testing.T) {
+				var stdout, stderr, want string
+				withFormat(format, func() {
+					stdout, stderr = testutil.CaptureOutput(t, func() {
+						synctest.Test(t, func(*testing.T) {
+							expires := time.Now().Add(window).In(time.FixedZone("server", 9*60*60))
+							left := "60"
+							if window < 0 {
+								left = "0"
+							}
+							want = "If no purpose arrives by " + expires.Local().Format("15:04:05") + " (about " + left + " s), the command is judged again without one: it runs, waits for a human approver (who is notified then), or is refused. Read the result with `alpacon exec logs " + purposeTestCommandID + "`; do not resubmit."
+							PrintPurposeDemand(PurposeDemandLead, purposeTestCommandID, &expires)
+						})
+					})
+				})
+				if format == OutputFormatJSON {
+					var got purposeRequiredSignal
+					require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+					assert.Contains(t, got.Message, want)
+				} else {
+					assert.Empty(t, stdout)
+					assert.Contains(t, stderr, want)
+				}
+				assert.NotContains(t, stdout+stderr, "ordinary path")
+			})
+		}
+	}
+}
+
+// A refused answer whose refusal carries the server's hint leads with the
+// hint in place of the local guess at why; without a hint the guess stays.
+func TestPrintPurposeRefused_ServerHintReplacesTheGuess(t *testing.T) {
+	const hint = "Your account may not act on this command, which it did not request."
+	refusal := &hintedError{code: "event_command_not_requester", hint: hint}
+
+	var out string
+	withFormat(OutputFormatJSON, func() {
+		out = testutil.CaptureStdout(t, func() { PrintPurposeRefused(purposeTestCommandID, refusal) })
+	})
+	var got purposeAnswerSignal
+	require.NoError(t, json.Unmarshal([]byte(out), &got), "stdout: %s", out)
+	assert.Equal(t, "failed to state the purpose for "+purposeTestCommandID+": permission denied.", got.Message)
+	require.Len(t, got.NextActions, 2)
+	assert.Equal(t, NextAction{Description: hint}, got.NextActions[0])
+	assert.Contains(t, got.NextActions[1].Command, "alpacon exec logs")
+
+	var stderr string
+	withFormat(OutputFormatTable, func() {
+		_, stderr = testutil.CaptureOutput(t, func() { PrintPurposeRefused(purposeTestCommandID, refusal) })
+	})
+	assert.Equal(t, 1, strings.Count(stderr, hint), "stderr: %q", stderr)
+	assert.NotContains(t, stderr, "may have expired")
+
+	withFormat(OutputFormatTable, func() {
+		_, stderr = testutil.CaptureOutput(t, func() {
+			PrintPurposeRefused(purposeTestCommandID, &hintedError{code: "event_command_not_requester"})
+		})
+	})
+	assert.Contains(t, stderr, "may have expired")
+}
+
+func TestPrintPurposeRefused_NextOrRetryWithoutHintKeepsTheGuess(t *testing.T) {
+	tests := []struct {
+		name      string
+		refusal   *refusedError
+		wantFirst NextAction
+	}{
+		{
+			name:      "next only",
+			refusal:   &refusedError{next: "/api/events/commands/c1/", gate: "approval"},
+			wantFirst: NextAction{Command: "alpacon api /api/events/commands/c1/", Description: "Where the server says to check on this refusal"},
+		},
+		{
+			name:      "retry after only",
+			refusal:   &refusedError{gate: "rate", retryAfter: 30 * time.Second},
+			wantFirst: NextAction{Description: "Retry after 30s"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out string
+			withFormat(OutputFormatJSON, func() {
+				out = testutil.CaptureStdout(t, func() { PrintPurposeRefused(purposeTestCommandID, tt.refusal) })
+			})
+
+			var got purposeAnswerSignal
+			require.NoError(t, json.Unmarshal([]byte(out), &got), "stdout: %s", out)
+			assert.Contains(t, got.Message, "may have expired")
+			require.Len(t, got.NextActions, 2)
+			assert.Equal(t, tt.wantFirst, got.NextActions[0])
+			assert.Contains(t, got.NextActions[1].Command, "alpacon exec logs")
+		})
+	}
 }

@@ -25,7 +25,9 @@ func (f Failure) envelope() JSONErrorEnvelope[cliErrorCtx] {
 	env := newFailureEnvelope(f.ExitCode, f.ErrorCode, f.Operation, f.Err, f.Message)
 	env.RemoteExitCode = f.RemoteExitCode
 	env.Partial = f.Partial
-	env.NextActions = f.NextActions
+	if f.NextActions != nil {
+		env.NextActions = f.NextActions
+	}
 	if f.HTTPStatus != 0 {
 		env.HTTPStatus = f.HTTPStatus
 	}

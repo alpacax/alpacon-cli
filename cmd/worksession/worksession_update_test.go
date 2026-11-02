@@ -10,6 +10,7 @@ import (
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -39,7 +40,6 @@ func TestValidateSessionForSudoUpdate(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "ses-no-sudo")
 		assert.Contains(t, err.Error(), "'sudo' scope")
-		// Guidance must point at the create flag, not at a separate scope flag.
 		assert.Contains(t, err.Error(), "--sudo",
 			"guidance should reference --sudo so the user creates the right session next time")
 	})
@@ -351,4 +351,36 @@ func TestParseRFC3339Flag(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--starts-at")
 	assert.Contains(t, err.Error(), "RFC3339")
+}
+
+func TestUpdateTargetSession_PicksTheArgumentOrTheClientWorkspaceSession(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		active   string
+		switchTo string
+		expected string
+	}{
+		{name: "no argument and no active session", expected: ""},
+		{name: "argument wins over the active session", args: []string{"ses-arg"}, active: "ses-a", expected: "ses-arg"},
+		{name: "active session of the client workspace after a switch", active: "ses-a", switchTo: "other", expected: "ses-a"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupTmpConfig(t)
+			t.Setenv(WorkSessionEnvVar, "")
+			if tt.active != "" {
+				require.NoError(t, config.SetActiveWorkSession(tt.active))
+			}
+			ac := &client.AlpaconClient{WorkspaceName: "ws"}
+			if tt.switchTo != "" {
+				switchConfigToWorkspace(t, tt.switchTo, "ses-other")
+			}
+
+			got := updateTargetSession(ac, tt.args)
+
+			assert.Equal(t, tt.expected, got)
+		})
+	}
 }

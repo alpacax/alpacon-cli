@@ -1,8 +1,16 @@
 package ftp
 
 import (
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"testing/synctest"
 
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -205,7 +213,6 @@ func TestValidatePaths(t *testing.T) {
 	}
 }
 
-// Test the SSH parsing logic used in the cp command
 func TestCpCommandSSHParsing(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -287,7 +294,6 @@ func TestCpCommandSSHParsing(t *testing.T) {
 	}
 }
 
-// Test scenarios covering the required patterns from the issue
 func TestRequiredCpPatterns(t *testing.T) {
 	t.Parallel()
 	patterns := []struct {
@@ -333,7 +339,6 @@ func TestRequiredCpPatterns(t *testing.T) {
 				sources := pattern.args[:len(pattern.args)-1]
 				dest := pattern.args[len(pattern.args)-1]
 
-				// Test the logic that determines upload vs download
 				isUpload := isLocalPaths(sources) && isRemotePath(dest)
 				isDownload := isRemotePath(sources[0]) && isLocalPath(dest)
 
@@ -428,6 +433,123 @@ func TestNormalizeArgsUsername(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantUser, user)
 			assert.Equal(t, tt.wantArgs, tt.args)
+		})
+	}
+}
+
+// fileRefusal returns the error the client makes of a 403 answered with body.
+func fileRefusal(t *testing.T, body string) error {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(ts.Close)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, Token: "test-token"}
+	_, err := ac.SendGetRequest("/api/webftp/uploads/")
+	require.Error(t, err)
+	return err
+}
+
+// The run-as-root advice fits a permission on the server's files; a refusal carrying the
+// server's hint, such as a token's file access rules, gets the hint instead.
+func TestWantsPermissionAdvice(t *testing.T) {
+	t.Parallel()
+	const hint = "This token's file access rules do not allow this transfer for this path, account and direction."
+	fileACL := `{"code": "api_token_acl_not_allowed", "gate": "file_acl", "missing": "file_preapproval"`
+
+	hinted := fileRefusal(t, fileACL+`, "hint": "`+hint+`"}`)
+	require.Contains(t, hinted.Error(), "permission denied")
+	assert.False(t, wantsPermissionAdvice(hinted))
+	assert.Equal(t, hint, utils.RefusalHint(hinted))
+	// A bulk upload joins its files' failures; a refusal among them still
+	// reads through.
+	assert.False(t, wantsPermissionAdvice(errors.Join(errors.New("a.txt: disk full"), fmt.Errorf("b.txt: %w", hinted))))
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "a file permission on the server", err: errors.New("open /etc/shadow: permission denied"), want: true},
+		{name: "an access denied from the agent", err: errors.New("access denied"), want: true},
+		{name: "a refusal from a server that sends no hint", err: fileRefusal(t, `{"code": "user_no_permission"}`), want: true},
+		{name: "an unrelated failure", err: errors.New("connection reset by peer")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, wantsPermissionAdvice(tt.err), "err: %v", tt.err)
+		})
+	}
+}
+
+// refusedDownloadClient serves a download whose final fetch is answered with
+// status and body.
+func refusedDownloadClient(status int, body string) *client.AlpaconClient {
+	return &client.AlpaconClient{
+		BaseURL:       testutil.StubBaseURL,
+		WorkspaceName: "my-workspace",
+		HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
+			switch {
+			case r.URL.Path == "/api/servers/servers/":
+				return http.StatusOK, `{"count": 1, "results": [{"id": "srv-id", "name": "my-server"}]}`
+			case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/downloads/":
+				return http.StatusCreated, `{"id": "t-1", "command": "cmd-1", "download_url": "http://stub.invalid/blob"}`
+			case r.URL.Path == "/api/events/commands/cmd-1/":
+				return http.StatusOK, `{"id": "cmd-1", "status": "completed", "success": true}`
+			case r.URL.Path == "/api/webftp/downloads/t-1/status/":
+				return http.StatusOK, `{"success": true, "message": "done"}`
+			case r.URL.Path == "/blob":
+				return status, body
+			default:
+				return http.StatusOK, `{}`
+			}
+		}),
+	}
+}
+
+// A download fetch refused with the server's hint reaches cp's caller with the hint on the error,
+// and cp's own failed-download checklist, which exits on the spot, stays out. A 429 that outlasts
+// the retries counts the same.
+func TestDownloadObject_FetchRefusalWithAHintSkipsTheChecklist(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		hint   string
+	}{
+		{
+			name:   "a file access refusal",
+			status: http.StatusForbidden,
+			body:   `{"code": "api_token_acl_not_allowed", "gate": "file_acl", "hint": "This token's file access rules do not allow this transfer for this path, account and direction."}`,
+			hint:   "This token's file access rules do not allow this transfer for this path, account and direction.",
+		},
+		{
+			name:   "a throttle that outlasts the retries",
+			status: http.StatusTooManyRequests,
+			body:   `{"code": "api_rate_limited", "gate": "rate", "hint": "Too many requests were made in a short time; wait, then retry."}`,
+			hint:   "Too many requests were made in a short time; wait, then retry.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ac := refusedDownloadClient(tt.status, tt.body)
+			dest := t.TempDir()
+
+			var serverName string
+			var err error
+			// The fake clock spends the retry backoff at once.
+			synctest.Test(t, func(t *testing.T) {
+				serverName, err = downloadObject(ac, []string{"my-server:/home/alice/a.txt"}, dest, "", "", false, "")
+			})
+			require.Error(t, err)
+			assert.Equal(t, "my-server", serverName)
+			assert.Contains(t, err.Error(), "download failed")
+			assert.Equal(t, tt.hint, utils.RefusalHint(err))
 		})
 	}
 }

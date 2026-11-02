@@ -9,10 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestRenderUsageEstimate_NullLimitRendersFairUseNoCap covers the D0 change: an
-// Essentials fair-use axis (websh, webftp, websh-share) answers the estimate
-// with a null limit, and a raw JSON `null` there reads as a bug in the
-// terminal rather than as the fair-use answer it is.
+// An Essentials fair-use axis (websh, webftp, websh-share) answers the estimate
+// with a null limit, which must not print as a raw JSON null.
 func TestRenderUsageEstimate_NullLimitRendersFairUseNoCap(t *testing.T) {
 	t.Parallel()
 

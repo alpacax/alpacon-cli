@@ -47,8 +47,7 @@ func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType, assigne
 	return result, nil
 }
 
-// ProjectAttributes converts a full WorkSession into the WorkSessionAttributes
-// shape used by table outputs (ls, current). Single source of truth for column projection.
+// ProjectAttributes converts a WorkSession into its table row.
 func ProjectAttributes(ws *WorkSession) WorkSessionAttributes {
 	return WorkSessionAttributes{
 		ID:          ws.ID,
@@ -164,10 +163,8 @@ func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (
 	return &session, nil
 }
 
-// UpdateWorkSession PATCHes a work session. Used to attach sudo policies to an
-// existing session (e.g. after an 'exec' sudo was denied). The server
-// may queue the change for approval, in which case it takes effect only once
-// approved.
+// UpdateWorkSession PATCHes a work session. The server may queue the change for approval, in
+// which case it takes effect only once approved.
 func UpdateWorkSession(ac *client.AlpaconClient, id string, req WorkSessionUpdateRequest) (*WorkSession, error) {
 	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
@@ -218,16 +215,10 @@ func CompleteWorkSession(ac *client.AlpaconClient, id string) error {
 	return err
 }
 
-// ExtendWorkSession requests a new expires_at for a running session. The
-// server answers 200 with the session already extended, or—when the
-// workspace's approval policy holds this request for a decision instead of
-// auto-approving it—202 with the session's PendingExtensionRequest populated
-// instead. The returned status is what tells the two apart, not
-// PendingExtensionRequest on its own: a 200 body can still carry a stale one
-// (the workspace's approval policy changed to auto-approve after the request
-// was filed, or a lapsed request the periodic sweep has not reached yet), so
-// a caller that branched on the field alone would report an already-applied
-// extension as still pending.
+// ExtendWorkSession requests a new expires_at for a running session and returns the HTTP status:
+// 200 when the session is already extended, 202 when the workspace's approval policy holds the
+// request and PendingExtensionRequest is populated. Branch on the status, not the field: a 200
+// body can still carry a stale request, such as a lapsed one the server has not yet cleared.
 func ExtendWorkSession(ac *client.AlpaconClient, id string, req WorkSessionExtendRequest) (*WorkSession, int, error) {
 	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
@@ -253,7 +244,8 @@ func RevokeWorkSession(ac *client.AlpaconClient, id string) error {
 	return err
 }
 
-// CancelWorkSession withdraws the requester's own pending session; the server restricts it to the creator/superuser and rejects non-pending sessions (unlike superuser-only RevokeWorkSession).
+// CancelWorkSession withdraws a pending session. Unlike the superuser-only RevokeWorkSession, the
+// server restricts it to the creator or a superuser, and it rejects a session no longer pending.
 func CancelWorkSession(ac *client.AlpaconClient, id string) error {
 	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
@@ -289,10 +281,8 @@ func GetWorkSessionTimeline(ac *client.AlpaconClient, id string, includeRecords 
 	return api.FetchAllCursorPages[TimelineItem](ac, endpoint, params)
 }
 
-// getWholeWorkSessionTimeline takes the unpaginated shape in one request. It
-// names no `cursor`, which is what holds the server to that shape, so nothing
-// here may add one; `page_size` stays off too, since a whole list has no page
-// to size.
+// getWholeWorkSessionTimeline reads the unpaginated shape in one request. Naming no `cursor` is
+// what holds the server to that shape, so neither `cursor` nor `page_size` may be added here.
 func getWholeWorkSessionTimeline(ac *client.AlpaconClient, endpoint string, params map[string]string) ([]TimelineItem, error) {
 	body, err := ac.SendGetRequest(utils.BuildURL(endpoint, "", params))
 	if err != nil {
@@ -312,10 +302,9 @@ func getWholeWorkSessionTimeline(ac *client.AlpaconClient, endpoint string, para
 	return response.Results, nil
 }
 
-// ListTerminalSessionIDs returns the ids of a work session's Websh terminals in
-// timeline order. Tunnels are Websh sessions the server lists under their own
-// type and have no recording, so they are not terminals. It reads the paginated
-// timeline, which carries no recordings.
+// ListTerminalSessionIDs returns the ids of a work session's Websh terminals in timeline order.
+// Tunnels are Websh sessions the server lists under their own type and have no recording, so they
+// are not terminals.
 func ListTerminalSessionIDs(ac *client.AlpaconClient, id string) ([]string, error) {
 	items, err := GetWorkSessionTimeline(ac, id, false /* includeRecords */)
 	if err != nil {
@@ -330,10 +319,9 @@ func ListTerminalSessionIDs(ac *client.AlpaconClient, id string) ([]string, erro
 	return ids, nil
 }
 
-// GetTerminalRecording reads one Websh session's recording through the work
-// session's records route, concatenating the chunks in order. The walk ends on a
-// null `next` or an empty page; a short page is not the last one. addedAt is the
-// first chunk's added_at, and found is false when the session has no recording.
+// GetTerminalRecording reads one Websh session's recording through the work session's records
+// route, joining the chunks in order. addedAt is the first chunk's added_at, and found is false
+// when the session has no recording.
 func GetTerminalRecording(ac *client.AlpaconClient, id, webshSessionID string) (record, addedAt string, found bool, err error) {
 	pathID, err := api.RequireID(id, "work session")
 	if err != nil {

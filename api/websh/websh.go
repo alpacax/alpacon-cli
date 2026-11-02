@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -29,17 +30,10 @@ const (
 	ctrlC              = 0x03
 	writeFlushInterval = 5 * time.Millisecond
 
-	// sessionEndCloseCode is how the proxy closes a user channel at the end of a
-	// session; alpamon sends the same 4000 for the same meaning. A websh session
-	// never ends with 1000, so without this every normal end would be reported
-	// as a failure.
+	// sessionEndCloseCode treats 4000 as normal; the server never ends sessions with 1000.
 	sessionEndCloseCode = 4000
 
-	// A close that does not mean the session ended is a dropped link—a restarted
-	// service, a network interruption—and the session it was carrying is still
-	// running on the server, so the client dials a new channel onto it instead of
-	// ending the shell. The budget bounds a server that keeps accepting a channel
-	// and dropping it: roughly 30s of waiting before the session is given up.
+	// 1012 and 1006 leave the session running, so re-dial; cap repeated drops.
 	maxReconnectAttempts   = 5
 	reconnectBaseDelay     = 1 * time.Second
 	reconnectMaxDelay      = 15 * time.Second
@@ -62,12 +56,13 @@ var (
 	// closed while the connection was down, so retrying only asks again.
 	ErrSessionGone = errors.New("the session is no longer open")
 
-	// closeReasonMessages maps the proxy's session-end reason tokens; an empty message stays
+	// closeReasonMessages maps the proxy's close reason tokens; an empty message stays
 	// silent, since shell_exited means the user ended the shell and closed says nothing.
 	closeReasonMessages = map[string]string{
 		"user_request":           "the session was closed",
 		"force_close":            "closed by an administrator",
-		"idle_timeout":           "the session reached its time limit",
+		"idle_timeout":           "after inactivity",
+		"idle_detached":          "after inactivity; the shell keeps running on the server until the work session ends",
 		"agent_disconnected":     "Alpamon on the server disconnected",
 		"server_shutdown":        "the service restarted",
 		"work_session_expired":   "the work session expired",
@@ -246,8 +241,7 @@ func JoinWebshSession(ac *client.AlpaconClient, sharedURL, password string) (Ses
 	return response, nil
 }
 
-// BuildSessionRequest assembles the JSON body for a websh session create call.
-// Empty workSessionID is omitted from the wire request via omitempty on the field.
+// BuildSessionRequest assembles the JSON body for a Websh session create call.
 func BuildSessionRequest(serverID, username, groupname string, rows, cols int, workSessionID string) *SessionRequest {
 	return &SessionRequest{
 		Server:      serverID,
@@ -259,7 +253,8 @@ func BuildSessionRequest(serverID, username, groupname string, rows, cols int, w
 	}
 }
 
-// Create new websh session
+// CreateWebshSession creates a Websh session on the server and, with share, asks
+// for its share link.
 func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupname string, share, readOnly bool, workSessionID string) (SessionResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
@@ -317,23 +312,42 @@ func shareCreatedSession(ac *client.AlpaconClient, responseBody []byte, share, r
 
 func newWebsocketClient(header http.Header) *WebsocketClient {
 	return &WebsocketClient{
-		header: header,
-		done:   make(chan struct{}),
+		header:       header,
+		done:         make(chan struct{}),
+		idleWarnings: make(map[time.Time]struct{}),
 	}
 }
 
 func (wsClient *WebsocketClient) dial(websocketURL string) error {
-	conn, resp, err := websocket.DefaultDialer.Dial(websocketURL, wsClient.header)
+	reconnected := wsClient.conn != nil
+	dialURL := websocketURL
+	if wsClient.reconnect != nil {
+		query := map[string]string{"replay_epoch": wsClient.replay.epoch}
+		if wsClient.replay.epoch != "" || !wsClient.replay.outputWritten {
+			query["replay"] = "1"
+		}
+		if reconnected && wsClient.replay.epoch != "" {
+			query["replay_from"] = strconv.FormatUint(wsClient.replay.offset, 10)
+		}
+		dialURL = utils.SetQuery(websocketURL, query, "replay", "replay_from")
+	}
+	conn, resp, err := websocket.DefaultDialer.Dial(dialURL, wsClient.header)
 	if err != nil {
 		return utils.WebsocketDialError("websocket connection failed", err, resp)
 	}
 	wsClient.conn = newConnection(conn)
+	wsClient.conn.replay = &wsClient.replay
+	wsClient.conn.idleWarnings = wsClient.idleWarnings
+	if wsClient.reconnect != nil {
+		wsClient.conn.reconnected = reconnected
+		wsClient.conn.notice = wsClient.reconnect.notice
+	}
 
 	return nil
 }
 
 func newConnection(ws *websocket.Conn) *connection {
-	return &connection{ws: ws, ended: make(chan struct{})}
+	return &connection{ws: ws, ended: make(chan struct{}), replay: &replayState{}}
 }
 
 // finish keeps the first ending. err is written before ended closes, so anyone
@@ -352,7 +366,6 @@ func (c *connection) close() {
 	c.pumps.Wait()
 }
 
-// startReader reads server output for as long as the connection lasts.
 func (c *connection) startReader() {
 	c.pumps.Go(func() {
 		c.readFromServer()
@@ -368,7 +381,6 @@ func (c *connection) startWriter(inputChan <-chan string) {
 	})
 }
 
-// closeConn releases the current connection, if the session ever had one.
 func (wsClient *WebsocketClient) closeConn() {
 	if wsClient.conn != nil {
 		wsClient.conn.close()
@@ -405,15 +417,18 @@ func printCloseReason(err error) {
 		if message == "" {
 			return
 		}
-		_, _ = fmt.Fprintf(os.Stderr, "\r\nsession closed: %s\r\n", message)
+		prefix := "session closed: "
+		switch reason {
+		case "idle_timeout":
+			prefix = "session closed "
+		case "idle_detached":
+			prefix = "session disconnected "
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "\r\n%s%s\r\n", prefix, message)
 	}
 }
 
-// endsSession reports whether a connection error means the session itself ended:
-// the proxy's session-end code, or one of the two normal WebSocket closes. Every
-// other ending—1012 on a restarted service, 1006 on a link that went away, a
-// transport error with no close frame at all—leaves the session running on the
-// server, so it is a connection to re-dial rather than a shell to close.
+// endsSession treats 4000 as final without reconnecting, even when idle detach leaves the shell running.
 func endsSession(err error) bool {
 	if err == nil {
 		return true
@@ -438,7 +453,7 @@ func reconnectDelay(failures int, base time.Duration) time.Duration {
 // Input is not forwarded to the server. Terminal echo is suppressed via raw mode.
 // Ends cleanly on the remote close, on Ctrl+C, or on a signal.
 func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
-	wsClient := newWebsocketClient(ac.SetWebsocketHeader())
+	wsClient := newWebsocketClient(ac.SetWebsocketHeaderWithCapabilities(client.CapabilityIdleWarning))
 	if err := wsClient.dial(sessionResponse.WebsocketURL); err != nil {
 		return err
 	}
@@ -477,7 +492,7 @@ func (wsClient *WebsocketClient) watchInterrupt(sigChan <-chan os.Signal) {
 	}
 }
 
-// readCtrlC ends the session on Ctrl+C — raw mode suppresses SIGINT, so it only
+// readCtrlC ends the session on Ctrl+C—raw mode suppresses SIGINT, so it only
 // ever arrives as a byte. Once anything else has ended the session it stops
 // consuming stdin, though not before the read it is already parked in returns.
 func (wsClient *WebsocketClient) readCtrlC() {
@@ -515,9 +530,9 @@ func OpenSharedTerminal(ac *client.AlpaconClient, sessionResponse SessionRespons
 func openInteractiveTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse, reconnect *reconnector) error {
 	var header http.Header
 	if reconnect != nil {
-		header = ac.SetWebsocketHeaderWithCapabilities(client.CapabilityWebsocketReconnect)
+		header = ac.SetWebsocketHeaderWithCapabilities(client.CapabilityWebsocketReconnect, client.CapabilityIdleWarning)
 	} else {
-		header = ac.SetWebsocketHeader()
+		header = ac.SetWebsocketHeaderWithCapabilities(client.CapabilityIdleWarning)
 	}
 
 	wsClient := newWebsocketClient(header)
@@ -633,10 +648,8 @@ func (wsClient *WebsocketClient) redial() bool {
 		if err := wsClient.dial(websocketURL); err != nil {
 			continue
 		}
-		// Before the pumps, so the redraw the resize provokes lands on a socket
-		// that is already being read. A size the server would not take is not
-		// worth ending a working session over—the shell is usable, if possibly
-		// drawn at the width it had before.
+		// Before the pumps, so the redraw the resize provokes lands on a socket already
+		// being read. A refused size is not worth ending a working session over.
 		if r.resendSize != nil {
 			_ = r.resendSize()
 		}
@@ -685,24 +698,82 @@ func enterRawMode() (func(), error) {
 }
 
 func (c *connection) readFromServer() {
+	originSeen, legacy, warned := false, false, false
 	for {
-		_, message, err := c.ws.ReadMessage()
+		kind, message, err := c.ws.ReadMessage()
 		if err != nil {
 			c.finish(err)
 			return
 		}
-		_, _ = os.Stdout.Write(message)
+		switch kind {
+		case websocket.TextMessage:
+			var origin struct {
+				Type      string          `json:"type"`
+				Epoch     string          `json:"epoch"`
+				Offset    uint64          `json:"offset"`
+				Truncated bool            `json:"truncated"`
+				ClosesAt  json.RawMessage `json:"closes_at"`
+			}
+			if json.Unmarshal(message, &origin) != nil {
+				continue
+			}
+			if origin.Type == "idle_warning" {
+				var closesAt time.Time
+				now := time.Now()
+				if err := json.Unmarshal(origin.ClosesAt, &closesAt); err != nil || !closesAt.After(now) {
+					continue
+				}
+				for deadline := range c.idleWarnings {
+					if !deadline.After(now) {
+						delete(c.idleWarnings, deadline)
+					}
+				}
+				closesAt = closesAt.UTC()
+				if _, seen := c.idleWarnings[closesAt]; seen {
+					continue
+				}
+				if c.idleWarnings == nil {
+					c.idleWarnings = make(map[time.Time]struct{})
+				}
+				c.idleWarnings[closesAt] = struct{}{}
+				notice := c.notice
+				if notice == nil {
+					notice = os.Stderr
+				}
+				_, _ = fmt.Fprintf(notice, "[Idle: this session disconnects at %s without input.]\r\n", closesAt.Local().Format("15:04:05"))
+				continue
+			}
+			if legacy || origin.Type != "replay_origin" || origin.Epoch == "" {
+				continue
+			}
+			originSeen = true
+			c.replay.epoch = origin.Epoch
+			c.replay.offset = origin.Offset
+			if origin.Truncated && c.reconnected && !warned {
+				_, _ = fmt.Fprint(c.notice, "[Some output from the disconnect was not kept; showing what remains.]\r\n")
+				warned = true
+			}
+		case websocket.BinaryMessage:
+			if originSeen {
+				c.replay.offset += uint64(len(message))
+			} else {
+				// A proxy without origins cannot accept an offset from a prior connection.
+				legacy = true
+				c.replay.epoch = ""
+				c.replay.offset = 0
+			}
+			n, _ := os.Stdout.Write(message)
+			c.replay.outputWritten = c.replay.outputWritten || n > 0
+		}
 	}
 }
 
 // readUserInput cannot be released mid-read: a goroutine parked in ReadRune stays
-// there until the next keystroke, and only closing stdin would change that. That
-// is why one reader serves the whole session rather than one per connection—a
-// reader left over from a dropped connection would race the next one for the
-// user's keystrokes.
+// there until the next keystroke. So one reader serves the whole session; one left
+// from a dropped connection would race the next for the user's keystrokes.
 //
-// Between connections nothing is draining inputChan, so this parks on the send
-// until the session either reconnects or ends. Nothing is buffered on its behalf.
+// Between connections nothing drains inputChan, so this parks on the send until
+// the session reconnects or ends. Nothing is buffered on its behalf.
 func (wsClient *WebsocketClient) readUserInput(inputChan chan<- string) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
@@ -733,9 +804,8 @@ func (c *connection) writeToServer(inputChan <-chan string) {
 	for {
 		select {
 		case <-c.ended:
-			// Whatever is still buffered goes with the connection: nothing here
-			// re-sends it, so input typed as the link dropped is lost. Replaying it
-			// would submit lines to a shell the user could no longer see.
+			// Buffered input goes with the connection: replaying it would submit lines to a
+			// shell the user could no longer see.
 			return
 		case input := <-inputChan:
 			inputBuffer = append(inputBuffer, []rune(input)...)
@@ -753,7 +823,6 @@ func (c *connection) writeToServer(inputChan <-chan string) {
 }
 
 func sharingInfo(response ShareResponse) {
-	// Sanitize credentials display based on environment
 	displayPassword := response.Password
 	hideCredentials := os.Getenv("ALPACON_HIDE_CREDENTIALS") == "true"
 	if hideCredentials {

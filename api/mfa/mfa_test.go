@@ -10,6 +10,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -95,7 +96,7 @@ func TestGetMFALink_ReturnsTheURLAndScopesItToTheServer(t *testing.T) {
 	assert.Equal(t, "my-workspace", query.Get("workspace"))
 }
 
-// It used to yield ("", nil), so callers opened a browser on a blank link.
+// A malformed body must not yield ("", nil): callers would open a browser on a blank link.
 func TestGetMFALink_MalformedBodyIsAnError(t *testing.T) {
 	t.Parallel()
 	ac, _ := mfaLinkServer(t, `not json`)
@@ -185,8 +186,7 @@ func TestGetMFALink_EmptyWorkspaceIsAnErrorBeforeAnyRequest(t *testing.T) {
 }
 
 func TestGetMFALinkByServerName_NamesTheWorkspaceTheClientIsPinnedTo(t *testing.T) {
-	// A regression guard, not a claim about today's code: an empty HOME leaves
-	// no config, so a second read finding its way back in fails here.
+	// Regression guard: an empty HOME leaves no config, so a second config read fails here.
 	t.Setenv("HOME", t.TempDir())
 
 	var query url.Values
@@ -251,7 +251,6 @@ func TestStepUpForSudo_PollsAtAFixedInterval(t *testing.T) {
 				polls.Record()
 				return http.StatusOK, `{"completed": false}`
 			default:
-				// The server-name lookup GetMFALinkByServerName runs before the MFA link fetch.
 				return http.StatusOK, `{"count": 1, "results": [{"id": "server-id"}]}`
 			}
 		}),
@@ -269,11 +268,9 @@ func TestStepUpForSudo_PollsAtAFixedInterval(t *testing.T) {
 		"no poll may sit out longer than the base tick")
 }
 
-// Completion has to end the wait on the poll that sees it, and the token refresh
-// that follows is what makes the step-up visible to the retry. HOME points at an
-// empty dir so the refresh has no stored token to spend—which is exactly the
-// failure whose wording a user reads when a step-up completes but the session
-// cannot be renewed.
+// Completion ends the wait on the poll that sees it, and the token refresh after it
+// is what the retry sees. HOME is an empty dir so the refresh has no stored token:
+// the failure a user reads when a step-up completes but the session cannot renew.
 func TestStepUpForSudo_CompletionEndsTheWaitAndRefreshesTheToken(t *testing.T) {
 	const tick = 10 * time.Millisecond
 	const waitFor = 125*tick + tick/2
@@ -292,7 +289,6 @@ func TestStepUpForSudo_CompletionEndsTheWaitAndRefreshesTheToken(t *testing.T) {
 				polls.Record()
 				return http.StatusOK, `{"completed": true}`
 			default:
-				// The server-name lookup GetMFALinkByServerName runs before the MFA link fetch.
 				return http.StatusOK, `{"count": 1, "results": [{"id": "server-id"}]}`
 			}
 		}),
@@ -308,4 +304,38 @@ func TestStepUpForSudo_CompletionEndsTheWaitAndRefreshesTheToken(t *testing.T) {
 	assert.NotContains(t, err.Error(), "timed out", "completion must end the wait, not run it to the deadline")
 	assert.Equal(t, time.Duration(0), polls.WidestGap(),
 		"the first completed read must end the wait rather than schedule another poll")
+}
+
+// A step-up whose completion checks are refused times out with the last
+// refusal behind it, so its hint still prints; the timeout message is unchanged.
+func TestStepUpForSudo_TimeoutOnARefusalKeepsTheHint(t *testing.T) {
+	const tick = 10 * time.Millisecond
+	const hint = "This credential cannot prove an MFA check; verify the sudo request from a console or CLI sign-in instead."
+	ac := &client.AlpaconClient{
+		BaseURL:       testutil.StubBaseURL,
+		WorkspaceName: "pinned-ws",
+		HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
+			switch r.URL.Path {
+			case mfaURL + "/":
+				return http.StatusOK, `{"mfa_url": "https://example.com/mfa"}`
+			case mfaCompletionURL:
+				return http.StatusForbidden, `{"code": "sudo_verify_credential_cannot_prove_mfa", "hint": "` + hint + `"}`
+			default:
+				return http.StatusOK, `{"count": 1, "results": [{"id": "server-id"}]}`
+			}
+		}),
+	}
+
+	var err error
+	synctest.Test(t, func(*testing.T) {
+		err = stepUpForSudo(ac, "my-server", tick, 10*tick+tick/2)
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, "MFA step-up timed out after 105ms", err.Error())
+	assert.Equal(t, hint, utils.RefusalHint(err))
+	// Only the hint goes with the timeout: the refusal's code would read as that
+	// refusal to an MFA retry.
+	assert.Empty(t, utils.StructuredErrorCode(err))
+	assert.Zero(t, utils.HTTPStatusCode(err))
 }

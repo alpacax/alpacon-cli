@@ -166,8 +166,8 @@ func TestSudoListener_VerifySudoGrant_Success(t *testing.T) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Contains(t, r.URL.Path, "/api/sudo/grants/grant-123/verify/")
 
-		// Verify carries no payload — the server resolves MFA from the
-		// MFACompletion record, so the body must stay empty.
+		// Verify carries no payload: the server resolves MFA on its own side, so the body
+		// must stay empty.
 		body, err := io.ReadAll(r.Body)
 		assert.NoError(t, err)
 		assert.JSONEq(t, "{}", string(body))
@@ -379,8 +379,12 @@ func TestSudoListener_AnnouncesOutageOncePerOutage(t *testing.T) {
 	_, stderr := testutil.CaptureOutput(t, func() {
 		sl := NewSudoListener(ac, "my-server", "session-1")
 		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
 		sl.Start()
-		defer sl.Stop()
+		defer func() {
+			sl.Stop()
+			<-sl.stopped
+		}()
 
 		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before an outage counts")
 
@@ -405,8 +409,12 @@ func TestSudoListener_StaysQuietBeforeFirstSubscribe(t *testing.T) {
 	_, stderr := testutil.CaptureOutput(t, func() {
 		sl := NewSudoListener(ac, "my-server", "session-1")
 		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
 		sl.Start()
-		defer sl.Stop()
+		defer func() {
+			sl.Stop()
+			<-sl.stopped
+		}()
 
 		assert.False(t, sl.WaitConnected(300*time.Millisecond), "a listener that never upgrades must not report a connection")
 	})
@@ -433,8 +441,12 @@ func TestSudoListener_AnnouncesOutageWhenSessionCreateFails(t *testing.T) {
 	_, stderr := testutil.CaptureOutput(t, func() {
 		sl := NewSudoListener(ac, "my-server", "session-1")
 		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
 		sl.Start()
-		defer sl.Stop()
+		defer func() {
+			sl.Stop()
+			<-sl.stopped
+		}()
 
 		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before an outage counts")
 
@@ -465,8 +477,12 @@ func TestSudoListener_AnnouncesOutageWhenResubscribeFails(t *testing.T) {
 	_, stderr := testutil.CaptureOutput(t, func() {
 		sl := NewSudoListener(ac, "my-server", "session-1")
 		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
 		sl.Start()
-		defer sl.Stop()
+		defer func() {
+			sl.Stop()
+			<-sl.stopped
+		}()
 
 		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before an outage counts")
 
@@ -492,8 +508,12 @@ func TestSudoListener_AnnouncesTheNextOutageAfterRecovering(t *testing.T) {
 	_, stderr := testutil.CaptureOutput(t, func() {
 		sl := NewSudoListener(ac, "my-server", "session-1")
 		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
 		sl.Start()
-		defer sl.Stop()
+		defer func() {
+			sl.Stop()
+			<-sl.stopped
+		}()
 
 		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must connect and subscribe")
 
@@ -560,8 +580,12 @@ func TestSudoListener_RetriesAnUnauthorizedSessionAfterTheFirstSubscribe(t *test
 	_, stderr := testutil.CaptureOutput(t, func() {
 		sl := NewSudoListener(ac, "my-server", "session-1")
 		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
 		sl.Start()
-		defer sl.Stop()
+		defer func() {
+			sl.Stop()
+			<-sl.stopped
+		}()
 
 		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before a 401 counts as post-subscribe")
 		require.Eventually(t, func() bool { return sessions.Load() >= 3 }, 3*time.Second, 10*time.Millisecond)
@@ -595,7 +619,7 @@ func TestSudoListener_SurfacesANonFatalCauseAfterTheWaitEnds(t *testing.T) {
 	t.Parallel()
 	alwaysServerError := func(int32) int { return http.StatusInternalServerError }
 
-	ts, _, _ := newWatcherTestServer(t, alwaysServerError, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
+	ts, sessions, _ := newWatcherTestServer(t, alwaysServerError, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	sl := NewSudoListener(ac, "my-server", "session-1")
@@ -603,8 +627,10 @@ func TestSudoListener_SurfacesANonFatalCauseAfterTheWaitEnds(t *testing.T) {
 	sl.Start()
 	defer sl.Stop()
 
+	// A second attempt means the first 500 was already recorded and retried.
+	require.Eventually(t, func() bool { return sessions.Load() >= 2 }, 5*time.Second, time.Millisecond)
 	// A 500 is retried, so the wait runs out; websh still has to name the reason.
-	assert.False(t, sl.WaitConnected(500*time.Millisecond), "a listener that never creates a session must not report connected")
+	assert.False(t, sl.WaitConnected(10*time.Millisecond), "a listener that never creates a session must not report connected")
 
 	err := sl.Err()
 	require.Error(t, err)
@@ -640,6 +666,58 @@ func TestSudoListener_HandleSudoMFA_CredentialCannotProveMFAPointsToLogin(t *tes
 	assert.NotContains(t, stderr, "Opening browser")
 	assert.Equal(t, int32(1), verifies.Load(), "the refusal must not start a retry loop")
 	assert.Zero(t, others.Load(), "no MFA link lookup or poll after the refusal")
+}
+
+// The MFA link is a REST request: its refusal's hint prints under the failure,
+// each line ending in \r\n for a terminal in raw mode.
+func TestSudoListener_HandleSudoMFA_LinkRefusalCarriesTheHint(t *testing.T) {
+	// No t.Parallel: HOME is redirected so the token refresh finds no stored config.
+	t.Setenv("HOME", t.TempDir())
+	const hint = "This action needs a recent MFA check; complete MFA, then retry."
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/api/sudo/grants/grant-1/verify/"):
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code": "auth_mfa_required"}`))
+		case r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count": 1, "results": [{"id": "srv-id", "name": "my-server"}]}`))
+		default:
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code": "permission_\u001b[2Jdenied", "hint": "` + hint + `"}`))
+		}
+	}))
+	defer ts.Close()
+
+	sl := NewSudoListener(&client.AlpaconClient{
+		HTTPClient:    ts.Client(),
+		BaseURL:       ts.URL,
+		WorkspaceName: "my-workspace",
+	}, "my-server", "session-1")
+	var event sudoMFAEvent
+	event.Payload.SudoGrantID = "grant-1"
+
+	_, stderr := testutil.CaptureOutput(t, func() { sl.handleSudoMFA(event) })
+
+	assert.Contains(t, stderr, "Failed to get MFA link")
+	assert.Contains(t, stderr, "code: permission_denied")
+	assert.NotContains(t, stderr, "\x1b[2J")
+	assert.Equal(t, 1, strings.Count(stderr, hint), "stderr: %q", stderr)
+	assert.Contains(t, stderr, hint+"\r\n")
+	assert.NotContains(t, stderr, "Opening browser")
+}
+
+func TestCredentialCannotProveMFAText(t *testing.T) {
+	t.Parallel()
+	const hint = "This credential cannot prove an MFA check; verify the sudo request from a console or CLI sign-in instead."
+
+	hinted := credentialCannotProveMFAText(hint)
+	assert.Equal(t, 1, strings.Count(hinted, hint))
+	assert.NotContains(t, hinted, "sign in with `alpacon login`")
+	assert.True(t, strings.HasSuffix(hinted, "\r\n"), "raw-mode output must end in CRLF: %q", hinted)
+
+	assert.Contains(t, credentialCannotProveMFAText(""), "sign in with `alpacon login` to complete sudo MFA")
 }
 
 // A verification the server never acted on (a 503 here) does not end the wait,

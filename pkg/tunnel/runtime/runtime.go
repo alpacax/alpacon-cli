@@ -35,7 +35,8 @@ type StartOptions struct {
 	Username      string
 	Groupname     string
 	Verbose       bool
-	WorkSessionID string // Optional work-session UUID to attach to the tunnel.
+	WorkSessionID string                // Optional work-session UUID to attach to the tunnel.
+	Client        *client.AlpaconClient // Required; WorkSessionID must come from this client's workspace.
 }
 
 type streamSession interface {
@@ -61,23 +62,39 @@ type Runtime struct {
 	cause   error
 }
 
+// ValidatePorts checks the remote and local ports Start would use; an empty local port means auto-assign.
+func ValidatePorts(remotePort, localPort string) error {
+	_, _, err := parsePorts(remotePort, localPort)
+	return err
+}
+
+func parsePorts(remotePort, localPort string) (target int, bind string, err error) {
+	target, err = parsePort(remotePort, false)
+	if err != nil {
+		return 0, "", fmt.Errorf("invalid remote port: %w", err)
+	}
+	bind = localPort
+	if bind == "" {
+		bind = "0"
+	}
+	if _, err := parsePort(bind, true); err != nil {
+		return 0, "", fmt.Errorf("invalid local port: %w", err)
+	}
+	return target, bind, nil
+}
+
 // Start initializes a TCP tunnel runtime and starts accepting local TCP connections.
 func Start(opts StartOptions) (*Runtime, error) {
 	if opts.ServerName == "" {
 		return nil, errors.New("server name is required")
 	}
+	if opts.Client == nil {
+		return nil, errors.New("client is required")
+	}
 
-	targetPort, err := parsePort(opts.RemotePort, false)
+	targetPort, bindPort, err := parsePorts(opts.RemotePort, opts.LocalPort)
 	if err != nil {
-		return nil, fmt.Errorf("invalid remote port: %w", err)
-	}
-
-	bindPort := opts.LocalPort
-	if bindPort == "" {
-		bindPort = "0"
-	}
-	if _, err := parsePort(bindPort, true); err != nil {
-		return nil, fmt.Errorf("invalid local port: %w", err)
+		return nil, err
 	}
 
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%s", bindPort))
@@ -90,13 +107,7 @@ func Start(opts StartOptions) (*Runtime, error) {
 		return nil, fmt.Errorf("failed to resolve local port: %w", err)
 	}
 
-	alpaconClient, err := client.NewAlpaconAPIClient()
-	if err != nil {
-		_ = listener.Close()
-		return nil, fmt.Errorf("connection to Alpacon API failed: %w", err)
-	}
-
-	tunnelSession, err := tunnelapi.CreateTunnelSession(alpaconClient, opts.ServerName, opts.Username, opts.Groupname, targetPort, opts.WorkSessionID)
+	tunnelSession, err := tunnelapi.CreateTunnelSession(opts.Client, opts.ServerName, opts.Username, opts.Groupname, targetPort, opts.WorkSessionID)
 	if err != nil {
 		_ = listener.Close()
 		return nil, utils.MarkSubmission(fmt.Errorf("failed to create tunnel session: %w", err))
@@ -105,7 +116,7 @@ func Start(opts StartOptions) (*Runtime, error) {
 	// The tunnel session exists from here on; what fails after it is returned
 	// untagged, so a refused dial never reads as a refused create.
 	smuxConfig := config.GetSmuxConfig()
-	wsConn, err := dialTunnel(alpaconClient, tunnelSession, opts.ServerName, smuxConfig.MaxFrameSize, openStatusTimeout)
+	wsConn, err := dialTunnel(opts.Client, tunnelSession, opts.ServerName, smuxConfig.MaxFrameSize, openStatusTimeout)
 	if err != nil {
 		_ = listener.Close()
 		return nil, err

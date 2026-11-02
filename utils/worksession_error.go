@@ -40,6 +40,12 @@ func AgentSessionScope(operation string) string {
 
 type workSessionErrorJSON = JSONErrorEnvelope[workSessionErrorCtx]
 
+// accountSessionCreateDescription is the account-not-approved refusal's
+// pointer to a new session; the server's hint for that refusal already says
+// to request a work session for the account, so workSessionGuidance drops it
+// when a hint is there.
+const accountSessionCreateDescription = "or create a session for this account"
+
 type workSessionErrorCtx struct {
 	AuthMethod         string   `json:"auth_method"`
 	RequiredScope      string   `json:"required_scope"`
@@ -78,15 +84,16 @@ func HandleWorkSessionError(err error, operation, target, authMethod, activeWS s
 	if !isWorkSessionCode(code) {
 		return
 	}
+	hint := RefusalHint(err)
 	if OutputFormat == OutputFormatJSON {
-		PrintJSONError(os.Stderr, buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS))
+		PrintJSONError(os.Stderr, buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS, hint))
 	} else {
-		fmt.Fprintln(os.Stderr, buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS))
+		fmt.Fprintln(os.Stderr, buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS, hint))
 	}
 	os.Exit(ExitCodeWorkSessionDenied)
 }
 
-func buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS string) string {
+func buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS, hint string) string {
 	reason := workSessionReasonMap[code]
 	authDisplay := authMethod
 	if authMethod == "Browser login" {
@@ -110,7 +117,7 @@ func buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS st
 	}
 	fmt.Fprintln(&sb)
 	fmt.Fprintln(&sb, "Next:")
-	for _, action := range workSessionNextActions(code, operation, target, activeWS) {
+	for _, action := range workSessionGuidance(code, operation, target, activeWS, hint) {
 		fmt.Fprintf(&sb, "  %s\n", action.PlainText())
 	}
 	fmt.Fprintln(&sb)
@@ -147,7 +154,7 @@ func workSessionTokenNote(operation string) string {
 	return "Note: Tokens issued by Alpacon (service or personal API token) bypass this check."
 }
 
-func buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS string) workSessionErrorJSON {
+func buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS, hint string) workSessionErrorJSON {
 	var ws *string
 	if activeWS != "" {
 		ws = &activeWS
@@ -166,8 +173,25 @@ func buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS
 			CurrentWorksession: ws,
 			TargetClusters:     targetClusterList(operation, target),
 		},
-		NextActions: workSessionNextActions(code, operation, target, activeWS),
+		NextActions: workSessionGuidance(code, operation, target, activeWS, hint),
 	}
+}
+
+// workSessionGuidance is the Next list for a WorkSession refusal: the server's
+// hint first, when the refusal carried one, then the actions built from the
+// code. A code-built description that says what the hint says is dropped, and
+// its command stays.
+func workSessionGuidance(code, operation, target, activeWS, hint string) []NextAction {
+	actions := workSessionNextActions(code, operation, target, activeWS)
+	if hint == "" {
+		return actions
+	}
+	for i := range actions {
+		if actions[i].Description == accountSessionCreateDescription {
+			actions[i].Description = ""
+		}
+	}
+	return append([]NextAction{{Description: hint}}, actions...)
 }
 
 func targetServerList(operation, target string) []string {
@@ -203,9 +227,7 @@ func workSessionNextActions(code, operation, target, activeWS string) []NextActi
 		`alpacon work-session create --scope %s --server %s --expires-in 1h --purpose "<intent>" --requester-type agent`,
 		agentScope, serverArg,
 	)
-	// How an agent runs the work once it has a session: the gated command takes
-	// --work-session <ID>. An agent session cannot hold websh, so that work goes
-	// through exec instead.
+	// An agent runs gated work with --work-session <ID>, and websh work through exec instead.
 	agentReuse := "prefixing the gated command with --work-session <ID>"
 	agentNext := "prefix the gated command with --work-session <ID>"
 	agentCreate := NextAction{Command: agentCreateCmd}
@@ -214,8 +236,8 @@ func workSessionNextActions(code, operation, target, activeWS string) []NextActi
 		agentNext = fmt.Sprintf("run the work with 'alpacon exec --work-session <ID>'; an agent session cannot hold %s", operation)
 		agentCreate.Description = "AI agent: " + agentNext
 	}
-	// Reuse an active session first (ls), then create as the fallback. Humans attach via `use`;
-	// agents can't `use` (it rejects agent sessions) and instead pass --work-session <ID> downstream.
+	// Reuse an active session first, then create one. Humans attach with `use`; agents cannot, so
+	// they pass --work-session <ID> to the gated command.
 	createOrReuse := []NextAction{
 		{Command: "alpacon work-session ls --status active", Description: "find an existing active session; AI agent: reuse it by " + agentReuse},
 		{Command: "alpacon work-session use <ID>", Description: "human: attach an existing session (rejects agent sessions)"},
@@ -230,7 +252,7 @@ func workSessionNextActions(code, operation, target, activeWS string) []NextActi
 		}
 		return []NextAction{
 			{Command: "alpacon exec" + workSessionFlag(activeWS) + " -u <approved account> " + serverArg + " -- <command>", Description: "pass -u with the session's account (shown by 'alpacon work-session current')"},
-			{Command: accountCreate, Description: "or create a session for this account"},
+			{Command: accountCreate, Description: accountSessionCreateDescription},
 		}
 	case WorkSessionAgentSessionRequired:
 		// The selected session is a person's; only an agent session serves an agent.
@@ -248,8 +270,8 @@ func workSessionNextActions(code, operation, target, activeWS string) []NextActi
 	case WorkSessionExpired:
 		return []NextAction{{Command: workSessionExtendCommand(activeWS)}, {Command: createCmd}, agentCreate}
 	case WorkSessionAssigneeMismatch:
-		// Session belongs to another principal; reuse/create one owned by this caller.
-		// Agents can't `use`, so route through the agent-aware reuse+create path.
+		// The session belongs to another principal; agents cannot `use`, so take the agent-aware
+		// path.
 		return createOrReuse
 	case WorkSessionNotUsable:
 		return createOrReuse

@@ -41,9 +41,11 @@ attempt to argue the verdict down is reported in its own right and denied.
 Prefer stating it up front with 'alpacon exec --purpose': the assessor then
 judges on the first pass and no demand is issued at all.
 
-Exit code 1 covers every refusal. A settled command and an answer from the wrong
-principal share one server error, so this cannot report which happened; read the
-command's state with 'alpacon exec logs JOB_ID' rather than re-submitting it.`,
+Exit code 2 means the JOB_ID is not a UUID or the PURPOSE is blank or too long.
+Exit code 1 covers every refusal from the server. A settled command and an answer
+from the wrong principal share one server error, so this cannot report which
+happened; read the command's state with 'alpacon exec logs JOB_ID' rather than
+re-submitting it.`,
 	Example: `  # Answer a demand reported by 'alpacon exec' (exit code 7)
   alpacon exec purpose a1b2c3d4-5678-abcd-ef01-234567890abc \
     'The host clock is 40s ahead, so the renewed cert reads as not-yet-valid.'
@@ -55,18 +57,14 @@ command's state with 'alpacon exec logs JOB_ID' rather than re-submitting it.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		jobID, purpose := args[0], args[1]
 
-		// Exit 1, not ExitCodeUsageError: 2 is reserved for work-session, event
-		// wait/watch, and utils.RequirePositiveInt (README "Exit codes"). Every
-		// other command exits 1 on its own argument validation, `exec logs`
-		// included, and a script must not read 2 here as a usage-only surface.
 		if !utils.IsUUID(jobID) {
-			utils.CliErrorWithExit("invalid JOB_ID %q: must be a UUID (e.g. a1b2c3d4-5678-abcd-ef01-234567890abc)", jobID)
+			utils.CliUsageErrorWithExit("invalid JOB_ID %q: must be a UUID (e.g. a1b2c3d4-5678-abcd-ef01-234567890abc)", jobID)
 			return
 		}
 		// Same ceiling and wording as --purpose, counted the same way.
 		purpose, msg := checkPurpose("PURPOSE", purpose)
 		if msg != "" {
-			utils.CliErrorWithExit("%s", msg)
+			utils.CliUsageErrorWithExit("%s", msg)
 			return
 		}
 

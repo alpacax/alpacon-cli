@@ -50,16 +50,10 @@ func newWorkSessionExtendOutput(id, expiresAt string) workSessionMutationOutput 
 	}
 }
 
-// extendPendingMessage describes an extension request the server queued for
-// review instead of applying immediately (202), and returns the
-// pieces a machine-readable envelope wants split out (request id, the
-// requested expiry, and the request's own deadline) alongside the human
-// message. req is normally non-nil for a 202, but this degrades to a generic
-// message rather than panic when a response omits it.
-//
-// req.ExpiresAt is the request's own deadline, not the session's—the
-// session's current expiry is unchanged until the request is decided, so the
-// message says so rather than implying the session already moved.
+// extendPendingMessage describes an extension request the server queued (202) and returns the
+// human message with the request id, the requested expiry, and the request's own deadline split
+// out. A nil req gets a generic message. req.ExpiresAt is the request's deadline, not the
+// session's, so the message says the session's current expiry is unchanged.
 func extendPendingMessage(id string, req *wsapi.PendingExtensionRequest) (message, requestID, requestedExpiresAt, deadline string) {
 	if req == nil {
 		return fmt.Sprintf("Work session %s: the extension is pending approval.", id), "", "", ""
@@ -121,7 +115,7 @@ func activeWorkSessionSetMessage(successPrefix, id, desc string) string {
 
 func printWorkSessionMutationJSON(output workSessionMutationOutput) {
 	if err := utils.PrintJSONValue(os.Stdout, output); err != nil {
-		// Keeps stderr structured; PrintJSONError falls back to minimal JSON if marshalling fails again.
+		// Keeps stderr structured even though marshalling failed.
 		utils.CliErrorEnvelopeWithExit(output.Operation, err, "Failed to marshal work-session result: %s", err)
 	}
 }
@@ -161,9 +155,8 @@ func formatRecommendations(recs []wsapi.Recommendation) string {
 	return strings.Join(lines, "\n")
 }
 
-// PrintSessionAdvisories shows what the approver changed or recommended, such
-// as a scope dropped from the request. Text mode only—JSON callers return
-// before reaching this.
+// PrintSessionAdvisories shows what the approver changed or recommended, such as a scope dropped from
+// the request. Text mode only—JSON callers return before reaching this.
 func PrintSessionAdvisories(session *wsapi.WorkSession) {
 	if block := formatAdjustments(session.Adjustments); block != "" {
 		utils.CliWarning("Approver adjusted your request:\n%s", block)

@@ -5,37 +5,27 @@ import (
 	"time"
 )
 
-// mfaWaitMessage labels the wait between showing the MFA link and the retried
-// operation going through.
 const mfaWaitMessage = "Waiting for MFA authentication..."
 
 var maxRetryDuration = 3 * time.Minute
 
 var retryInterval = 1 * time.Second
 
-// ErrorHandlerCallbacks defines callback functions for handling different error types
+// ErrorHandlerCallbacks defines callback functions for handling different error types.
 type ErrorHandlerCallbacks struct {
-	// OnMFARequired is called when MFA authentication is required
-	// serverName: the name of the server requiring MFA
 	OnMFARequired func(serverName string) error
 
-	// OnUsernameRequired is called when username is required
 	OnUsernameRequired func() error
 
-	// RetryOperation re-runs the operation that failed. After an MFA prompt it is
-	// called repeatedly until it stops failing with auth_mfa_required, so the
-	// server's refusal is what tells the wait that MFA has not completed yet.
-	// Should return nil on success, error on failure.
+	// RetryOperation re-runs the failed operation. After an MFA prompt it runs until it stops
+	// failing with auth_mfa_required, so its refusal is what tells the wait MFA is not done yet.
 	RetryOperation func() error
 }
 
-// HandleCommonErrors handles common errors (MFA, UsernameRequired) with retry logic
-// Returns nil if error was handled successfully, otherwise returns the original or new error
-//
-// Only the tagged error of the operation's side-effecting request (MarkSubmission)
-// is handled; any other error is returned as is, because it came after the
-// operation took effect on the server and nothing here may run it again. The
-// error it returns carries no tag.
+// HandleCommonErrors handles an MFA or username-required refusal through callbacks and retries the
+// operation, returning nil once it succeeds. Only the tagged error of the operation's
+// side-effecting request (MarkSubmission) is handled; any other error came after the operation
+// took effect and is returned as is. The error it returns carries no tag.
 func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCallbacks) error {
 	if !IsSubmissionError(err) {
 		return err
@@ -52,7 +42,6 @@ func handleSubmissionError(err error, serverName string, callbacks ErrorHandlerC
 			return err
 		}
 
-		// Handle MFA error
 		if err := callbacks.OnMFARequired(serverName); err != nil {
 			CliErrorWithExit("MFA authentication failed: %s", err)
 		}
@@ -67,40 +56,30 @@ func handleSubmissionError(err error, serverName string, callbacks ErrorHandlerC
 			return err
 		}
 
-		// Handle username required error
 		if err := callbacks.OnUsernameRequired(); err != nil {
 			return err
 		}
 
-		// Retry the operation if callback is provided
 		if callbacks.RetryOperation != nil {
 			return callbacks.RetryOperation()
 		}
 		return nil
 
 	default:
-		// Unknown error code, return original error
 		return err
 	}
 }
 
-// retryUntilMFAAccepted re-runs retry once per retryInterval until the server
-// stops refusing it for MFA. The step-up link the user opened names this
-// client, so completing MFA in the browser credits the client the request
-// already comes from: the next attempt passes with the same access token, and
-// no separate completion probe or token refresh is needed to notice.
+// retryUntilMFAAccepted re-runs retry once per retryInterval until the server stops refusing it for
+// MFA. The step-up link names this client, so the next attempt passes with the same access token
+// once MFA completes; no completion probe or token refresh is needed.
 //
-// Only a typed auth_mfa_required keeps the wait going, never one read out of
-// message text, and so does an attempt the server never acted on
-// (IsUnprocessedRequestError), up to MaxConsecutivePollFailures in a row, so a
-// brief outage while the user is still in the browser does not end it. A
-// Retry-After on that answer sets the next gap, capped like any poll backoff;
-// a gap that would carry the next attempt past the deadline ends the wait. Only
-// the retried request's own tagged error (MarkSubmission) can keep it going; an
-// untagged one came after the operation took effect and ends the wait whatever
-// it carries. Any other answer, success or failure, is the operation's own
-// result and ends the wait.
-// The deadline bounds the attempts to about maxRetryDuration / retryInterval.
+// Only the retried request's own tagged error (MarkSubmission) can keep the wait going: a typed
+// auth_mfa_required, or an unprocessed attempt (IsUnprocessedRequestError) up to
+// MaxConsecutivePollFailures in a row, its Retry-After setting the next gap within the poll backoff
+// cap; unprocessed attempts are ridden through so a brief outage while the user is in the browser
+// does not end the wait. Any other answer ends the wait, as does a gap that would pass the
+// deadline.
 func retryUntilMFAAccepted(retry func() error) error {
 	spinner := NewSpinner(mfaWaitMessage)
 	spinner.Start()
@@ -118,10 +97,8 @@ func retryUntilMFAAccepted(retry func() error) error {
 
 		time.Sleep(delay)
 
-		// Any attempt may be the one that goes through and streams the
-		// command's output to stdout, and a frame drawn over that output is
-		// erased with it when the spinner clears its line. So the spinner is
-		// off for every attempt and comes back only after a refusal.
+		// Any attempt may stream the command's output to stdout, which clearing the spinner's line
+		// would erase, so the spinner is off during attempts and returns only after a refusal.
 		spinner.Stop()
 		err := retry()
 		if err == nil {

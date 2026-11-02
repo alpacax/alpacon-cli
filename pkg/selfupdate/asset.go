@@ -10,7 +10,8 @@ func ArchiveName(version, goos, goarch string) string { // Mirrors the archives 
 	return fmt.Sprintf("alpacon-%s-%s-%s.%s", version, goos, goarch, extension)
 }
 
-func BinaryName(goos string) string { // Fixed by the build, so a binary renamed on disk—go install names it after the module, alpacon-cli—still finds its own file inside.
+// BinaryName returns the name inside the archive, whatever the running binary is called on disk.
+func BinaryName(goos string) string {
 	if goos == "windows" {
 		return "alpacon.exe"
 	}

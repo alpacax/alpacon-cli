@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/alpacax/alpacon-cli/cmd/acl"
 	"github.com/alpacax/alpacon-cli/cmd/agent"
 	apicmd "github.com/alpacax/alpacon-cli/cmd/api"
 	"github.com/alpacax/alpacon-cli/cmd/approval"
@@ -103,120 +104,89 @@ func kubernetesSurfaceEnabled() bool {
 }
 
 func init() {
-	// Global output format flag
 	RootCmd.PersistentFlags().StringVar(
 		&utils.OutputFormat, "output", utils.OutputFormatTable,
 		"Output format: table or json",
 	)
 
-	// version
 	RootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, versionCmd.Short)
 	RootCmd.AddCommand(versionCmd)
 
-	// update
 	RootCmd.AddCommand(updateCmd)
 
-	// login
 	RootCmd.AddCommand(loginCmd)
 
-	// logout
 	RootCmd.AddCommand(logoutCmd)
 
-	// iam
 	RootCmd.AddCommand(iam.UserCmd)
 	RootCmd.AddCommand(iam.GroupCmd)
 
-	// server
 	RootCmd.AddCommand(server.ServerCmd)
 
-	// agent
 	RootCmd.AddCommand(agent.AgentCmd)
 
-	// api
 	RootCmd.AddCommand(apicmd.ApiCmd)
 
-	// websh
 	RootCmd.AddCommand(websh.WebshCmd)
 
-	// exec
 	RootCmd.AddCommand(exec.ExecCmd)
 
-	// ftp
 	RootCmd.AddCommand(ftp.CpCmd)
 
-	// edit
 	RootCmd.AddCommand(edit.EditCmd)
 
-	// packages
 	RootCmd.AddCommand(packages.PackagesCmd)
 
-	// log
 	RootCmd.AddCommand(log.LogCmd)
 
-	// event
 	RootCmd.AddCommand(event.EventCmd)
 
-	// note
 	RootCmd.AddCommand(note.NoteCmd)
 
-	// authority
 	RootCmd.AddCommand(authority.AuthorityCmd)
 
-	// csr
 	RootCmd.AddCommand(csr.CsrCmd)
 
-	// certificate
 	RootCmd.AddCommand(cert.CertCmd)
 
-	// token
 	RootCmd.AddCommand(token.TokenCmd)
 
-	// tunnel
 	RootCmd.AddCommand(tunnel.TunnelCmd)
 
-	// username
 	RootCmd.AddCommand(username.UsernameCmd)
 
-	// workspace
 	RootCmd.AddCommand(workspace.WorkspaceCmd)
 
-	// revoke
 	RootCmd.AddCommand(revoke.RevokeCmd)
 
-	// audit
 	RootCmd.AddCommand(audit.AuditCmd)
 
-	// webhook
 	RootCmd.AddCommand(webhook.WebhookCmd)
 
-	// webftp
 	RootCmd.AddCommand(webftp.WebFTPCmd)
 
-	// work-session
 	RootCmd.AddCommand(worksession.WorkSessionCmd)
 
-	// approval
 	RootCmd.AddCommand(approval.ApprovalCmd)
 
-	// kube
 	RootCmd.AddCommand(kube.KubeCmd)
 
-	// whoami
+	RootCmd.AddCommand(acl.AclCmd)
+
 	RootCmd.AddCommand(whoamiCmd)
 }
 
-// buildWelcomeLines composes the right-side text lines rendered next to the
-// Pacabot art when `alpacon` is invoked with no subcommand. Three lines:
-// version, workspace URL (or login prompt / config error), help hint.
+// buildWelcomeLines composes the lines shown beside the Pacabot art when alpacon
+// runs with no subcommand: version, workspace URL (or login prompt or config
+// error), and a help hint.
 func buildWelcomeLines() []string {
 	header := fmt.Sprintf("alpacon %s", utils.GetCLIVersion())
 	helpHint := "'alpacon --help' for commands"
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		// Missing config file → expected case, treat as not logged in.
-		// Other errors (permissions, malformed JSON) surface so the user
-		// can act on them instead of seeing a misleading login prompt.
+		// A missing config means not logged in; any other error surfaces so the user can
+		// act on it rather than see a misleading login prompt.
 		if errors.Is(err, os.ErrNotExist) {
 			return []string{header, "Not logged in — run 'alpacon login'", helpHint}
 		}

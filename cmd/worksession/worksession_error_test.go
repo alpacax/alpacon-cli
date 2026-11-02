@@ -79,8 +79,6 @@ func TestExtendJSONErrorEnvelope_UsageError(t *testing.T) {
 
 func TestExtendTableUsageError_ExitsTwo(t *testing.T) {
 	t.Parallel()
-	// Table is the default output mode, so this is the branch of
-	// CliUsageErrorEnvelopeWithExit most callers reach.
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, "http://127.0.0.1:1",
 		"extend", "ses-1")
 
