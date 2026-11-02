@@ -44,6 +44,14 @@ type RawResponse struct {
 	Body       []byte
 }
 
+// Err is the error the client returns for this response through its other send paths, nil for a 2xx.
+func (r *RawResponse) Err() error {
+	if r.StatusCode >= http.StatusOK && r.StatusCode < http.StatusMultipleChoices {
+		return nil
+	}
+	return withRetryAfter(withStatus(parseAPIError(r.Body, r.StatusCode), r.StatusCode), r.Header)
+}
+
 type CurrentUserResponse struct {
 	Username    string `json:"username"`
 	IsStaff     bool   `json:"is_staff"`

@@ -45,6 +45,7 @@ type options struct {
 type httpStatusError struct {
 	status   int
 	location string
+	cause    error // the response read as the client reads any refusal: code, fields, Retry-After
 }
 
 type mfaRequiredError struct{}
@@ -73,6 +74,14 @@ type preparedRequest struct {
 
 func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.status) }
 
+func (e *httpStatusError) failure() utils.Failure {
+	message := e.Error()
+	if e.location != "" {
+		message += "; redirect to " + e.location + " not followed"
+	}
+	return utils.Failure{ExitCode: utils.ExitCodeGeneralError, Err: e.cause, Message: message}
+}
+
 func (e unprocessedResponseError) Error() string       { return fmt.Sprintf("HTTP %d", e.status) }
 func (e unprocessedResponseError) HTTPStatusCode() int { return e.status }
 
@@ -97,7 +106,7 @@ func newCommand() *cobra.Command {
 		Short: "Send a request to the Alpacon API",
 		Long: "Send a request to the Alpacon API. ENDPOINT is a path on the current workspace—an absolute URL is refused.\n" +
 			"Fields (-f/-F) go to the query string for GET, and to a JSON body otherwise. A non-2xx response's body is still printed\n" +
-			"to stdout, while `HTTP <code>` goes to stderr and the command exits 1. An MFA-required response opens the workspace\n" +
+			"to stdout, while `HTTP <code>` goes to stderr (under --output json, the error envelope) and the command exits 1. An MFA-required response opens the workspace\n" +
 			"MFA link and retries once MFA completes, like other commands—unless the request carries its own -H Authorization header.",
 		Example: "  alpacon api /api/iam/users/\n  alpacon api -X POST -F name=my-server /api/servers/servers/\n  alpacon api -i /api/iam/users/-/",
 		Run: func(cmd *cobra.Command, args []string) {
@@ -117,6 +126,7 @@ func newCommand() *cobra.Command {
 			code, err = runAPI(ac, opts, request, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if err != nil {
 				if statusErr, ok := err.(*httpStatusError); ok {
+					utils.ExitWithFailureJSON(statusErr.failure())
 					if _, writeErr := fmt.Fprintf(cmd.ErrOrStderr(), "HTTP %d\n", statusErr.status); writeErr != nil {
 						utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "%s", writeErr)
 					}
@@ -290,7 +300,7 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 		return utils.ExitCodeGeneralError, err
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		statusErr := &httpStatusError{status: response.StatusCode}
+		statusErr := &httpStatusError{status: response.StatusCode, cause: response.Err()}
 		if response.StatusCode >= http.StatusMultipleChoices && response.StatusCode < http.StatusBadRequest {
 			statusErr.location = response.Header.Get("Location")
 		}
