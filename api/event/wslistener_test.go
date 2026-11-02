@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -103,35 +104,38 @@ func TestWSListener_NextReconnectDelay(t *testing.T) {
 
 func TestWSListener_ConnectAndListen_ResetsOnlyAfterStableLifetime(t *testing.T) {
 	t.Parallel()
+	const hold = 3 * wsReconnectBaseDelay // outlives the base delay
 	tests := []struct {
 		name           string
 		stableLifetime time.Duration
 		want           bool
 	}{
-		{"connection outliving the base delay but not the stable lifetime keeps the backoff", time.Second, false},
-		{"connection outliving the stable lifetime resets the backoff", time.Millisecond, true},
+		{"connection shorter than the stable lifetime keeps the backoff", wsStableConnectionLifetime, false},
+		{"connection lasting exactly the stable lifetime keeps the backoff", hold, false},
+		{"connection outliving the stable lifetime resets the backoff", hold - time.Nanosecond, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			upgrader := websocket.Upgrader{}
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				conn, err := upgrader.Upgrade(w, r, nil)
-				if err != nil {
-					return
-				}
-				time.Sleep(3 * testReconnectBaseDelay)
-				_ = conn.Close()
-			}))
-			defer ts.Close()
+			synctest.Test(t, func(t *testing.T) {
+				upgrader := websocket.Upgrader{}
+				ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					conn, err := upgrader.Upgrade(w, r, nil)
+					if err != nil {
+						return
+					}
+					time.Sleep(hold)
+					_ = conn.Close()
+				}))
 
-			w := newProvisionedWSListener(nil, provisionURL("ws"+strings.TrimPrefix(ts.URL, "http")), time.Second)
-			w.handleFrame = func([]byte) {}
-			w.reconnectBaseDelay = testReconnectBaseDelay
-			w.stableLifetime = tt.stableLifetime
+				w := newProvisionedWSListener(nil, provisionURL(ts.WebsocketURL("/")), time.Second)
+				w.netDial = ts.DialContext
+				w.handleFrame = func([]byte) {}
+				w.stableLifetime = tt.stableLifetime
 
-			assert.Equal(t, tt.want, w.connectAndListen())
+				assert.Equal(t, tt.want, w.connectAndListen())
+			})
 		})
 	}
 }
@@ -146,55 +150,62 @@ func TestWSListener_ListenLoop_KeepsBackoffAcrossShortConnections(t *testing.T) 
 		hold           time.Duration
 	}{
 		{"instant drops", 0, 0},
-		{"slow provision then instant drops", 3 * testReconnectBaseDelay, 0},
-		{"drops after outliving the base delay", 0, 3 * testReconnectBaseDelay},
+		{"slow provision then instant drops", 3 * wsReconnectBaseDelay, 0},
+		{"drops after outliving the base delay", 0, 3 * wsReconnectBaseDelay},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			upgrader := websocket.Upgrader{}
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				conn, err := upgrader.Upgrade(w, r, nil)
-				if err != nil {
-					return
-				}
-				time.Sleep(tt.hold)
-				_ = conn.Close()
-			}))
-			defer ts.Close()
+			synctest.Test(t, func(t *testing.T) {
+				over := make(chan struct{}) // frees a handler still holding when the test ends
+				defer close(over)
+				upgrader := websocket.Upgrader{}
+				ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					conn, err := upgrader.Upgrade(w, r, nil)
+					if err != nil {
+						return
+					}
+					defer func() { _ = conn.Close() }()
+					select {
+					case <-time.After(tt.hold):
+					case <-over:
+					}
+				}))
 
-			started := make(chan time.Time, attempts)
-			wsURL := "ws" + strings.TrimPrefix(ts.URL, "http")
-			w := newProvisionedWSListener(nil, func() (*EventSessionResponse, error) {
-				select {
-				case started <- time.Now():
-				default:
-				}
-				time.Sleep(tt.provisionDelay)
-				return &EventSessionResponse{ID: "session", WebsocketURL: wsURL}, nil
-			}, time.Second)
-			w.handleFrame = func([]byte) {}
-			w.reconnectBaseDelay = testReconnectBaseDelay
-			w.stableLifetime = time.Second
-			w.Start()
-			defer w.Stop()
+				started := make(chan time.Time, attempts)
+				w := newProvisionedWSListener(nil, func() (*EventSessionResponse, error) {
+					select {
+					case started <- time.Now():
+					default:
+					}
+					time.Sleep(tt.provisionDelay)
+					return &EventSessionResponse{ID: "session", WebsocketURL: ts.WebsocketURL("/")}, nil
+				}, time.Second)
+				w.netDial = ts.DialContext
+				w.handleFrame = func([]byte) {}
+				w.Start()
+				defer func() { // a provision sleeping past the last attempt must end inside the bubble
+					w.Stop()
+					<-w.stopped
+				}()
 
-			times := make([]time.Time, 0, attempts)
-			for len(times) < attempts {
-				select {
-				case at := <-started:
-					times = append(times, at)
-				case <-time.After(5 * time.Second):
-					t.Fatalf("expected %d dial attempts, got %d", attempts, len(times))
+				times := make([]time.Time, 0, attempts)
+				for len(times) < attempts {
+					select {
+					case at := <-started:
+						times = append(times, at)
+					case <-time.After(time.Minute):
+						t.Fatalf("expected %d dial attempts, got %d", attempts, len(times))
+					}
 				}
-			}
 
-			// A reset after every drop would hold each wait at one base delay.
-			delay := testReconnectBaseDelay
-			for i := 1; i < attempts; i++ {
-				assert.GreaterOrEqual(t, times[i].Sub(times[i-1]), tt.provisionDelay+tt.hold+delay, "gap before attempt %d", i+1)
-				delay *= 2
-			}
+				// A reset after every drop would hold each wait at one base delay.
+				delay := wsReconnectBaseDelay
+				for i := 1; i < attempts; i++ {
+					assert.Equal(t, tt.provisionDelay+tt.hold+delay, times[i].Sub(times[i-1]), "gap before attempt %d", i+1)
+					delay *= 2
+				}
+			})
 		})
 	}
 }
@@ -203,47 +214,53 @@ func TestWSListener_ListenLoop_ResetsBackoffAfterStableConnections(t *testing.T)
 	t.Parallel()
 	const (
 		attempts = 6
-		hold     = 3 * testReconnectBaseDelay
+		hold     = 3 * wsReconnectBaseDelay
 	)
-	upgrader := websocket.Upgrader{}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		time.Sleep(hold)
-		_ = conn.Close()
-	}))
-	defer ts.Close()
+	synctest.Test(t, func(t *testing.T) {
+		over := make(chan struct{}) // frees a handler still holding when the test ends
+		defer close(over)
+		upgrader := websocket.Upgrader{}
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer func() { _ = conn.Close() }()
+			select {
+			case <-time.After(hold):
+			case <-over:
+			}
+		}))
 
-	started := make(chan time.Time, attempts)
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http")
-	w := newProvisionedWSListener(nil, func() (*EventSessionResponse, error) {
-		select {
-		case started <- time.Now():
-		default:
-		}
-		return &EventSessionResponse{ID: "session", WebsocketURL: wsURL}, nil
-	}, time.Second)
-	w.handleFrame = func([]byte) {}
-	w.reconnectBaseDelay = testReconnectBaseDelay
-	w.stableLifetime = time.Millisecond
-	w.Start()
-	defer w.Stop()
+		started := make(chan time.Time, attempts)
+		w := newProvisionedWSListener(nil, func() (*EventSessionResponse, error) {
+			select {
+			case started <- time.Now():
+			default:
+			}
+			return &EventSessionResponse{ID: "session", WebsocketURL: ts.WebsocketURL("/")}, nil
+		}, time.Second)
+		w.netDial = ts.DialContext
+		w.handleFrame = func([]byte) {}
+		w.stableLifetime = time.Millisecond
+		w.Start()
+		defer w.Stop()
 
-	times := make([]time.Time, 0, attempts)
-	for len(times) < attempts {
-		select {
-		case at := <-started:
-			times = append(times, at)
-		case <-time.After(5 * time.Second):
-			t.Fatalf("expected %d dial attempts, got %d", attempts, len(times))
+		times := make([]time.Time, 0, attempts)
+		for len(times) < attempts {
+			select {
+			case at := <-started:
+				times = append(times, at)
+			case <-time.After(time.Minute):
+				t.Fatalf("expected %d dial attempts, got %d", attempts, len(times))
+			}
 		}
-	}
 
-	// Without the reset the last wait alone would be 16 base delays; with it, one.
-	last := times[attempts-1].Sub(times[attempts-2])
-	assert.Less(t, last, hold+8*testReconnectBaseDelay)
+		// Without the reset each wait would double: 1s, 2s, 4s and on.
+		for i := 1; i < attempts; i++ {
+			assert.Equal(t, hold+wsReconnectBaseDelay, times[i].Sub(times[i-1]), "gap before attempt %d", i+1)
+		}
+	})
 }
 
 func TestWSListener_ConnectAndListen_ReturnsFalseOnFailedHandshake(t *testing.T) {
@@ -276,31 +293,31 @@ func TestWSListener_ConnectAndListen_ReportsTheHandshakeStatus(t *testing.T) {
 
 func TestWSListener_ListenLoop_DoesNotDialWhenAlreadyStopped(t *testing.T) {
 	t.Parallel()
-	var dialed atomic.Int32
+	synctest.Test(t, func(t *testing.T) {
+		var dialed atomic.Int32
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			dialed.Add(1)
+		}))
 
-	// Counted at handler entry so the increment happens-before Dial returns.
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		dialed.Add(1)
-	}))
-	defer server.Close()
+		w := newProvisionedWSListener(nil, provisionURL(ts.WebsocketURL("/")), time.Second)
+		w.netDial = ts.DialContext
+		w.handleFrame = func([]byte) {}
+		w.Stop()
 
-	w := newProvisionedWSListener(nil, provisionURL("ws"+strings.TrimPrefix(server.URL, "http")), time.Second)
-	w.handleFrame = func([]byte) {}
-	w.Stop()
+		returned := make(chan struct{})
+		go func() {
+			defer close(returned)
+			w.listenLoop()
+		}()
 
-	returned := make(chan struct{})
-	go func() {
-		defer close(returned)
-		w.listenLoop()
-	}()
+		select {
+		case <-returned:
+		case <-time.After(2 * time.Second):
+			t.Fatal("listenLoop should return immediately when done is already closed")
+		}
 
-	select {
-	case <-returned:
-	case <-time.After(2 * time.Second):
-		t.Fatal("listenLoop should return immediately when done is already closed")
-	}
-
-	assert.Zero(t, dialed.Load(), "listenLoop should not dial after Stop")
+		assert.Zero(t, dialed.Load(), "listenLoop should not dial after Stop")
+	})
 }
 
 func TestWSListener_WaitConnected_Shutdown(t *testing.T) {
@@ -324,51 +341,43 @@ func TestWSListener_WaitConnected_Shutdown(t *testing.T) {
 
 func TestWSListener_ProvisionCalledPerDialAttempt(t *testing.T) {
 	t.Parallel()
-	upgrader := websocket.Upgrader{}
-	var conns atomic.Int32
+	synctest.Test(t, func(t *testing.T) {
+		upgrader := websocket.Upgrader{}
+		var conns atomic.Int32
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		if conns.Add(1) == 1 {
-			// Drop the first connection so the listener has to dial again.
-			_ = conn.Close()
-			return
-		}
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
 				return
 			}
-		}
-	}))
-	defer ts.Close()
+			defer func() { _ = conn.Close() }()
+			if conns.Add(1) == 1 {
+				return // drop the first connection so the listener has to dial again
+			}
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					return
+				}
+			}
+		}))
 
-	var provisions atomic.Int32
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http")
+		var provisions atomic.Int32
+		w := newProvisionedWSListener(nil, func() (*EventSessionResponse, error) {
+			provisions.Add(1)
+			return &EventSessionResponse{ID: "session", WebsocketURL: ts.WebsocketURL("/")}, nil
+		}, time.Second)
+		w.netDial = ts.DialContext
+		w.handleFrame = func([]byte) {}
+		w.Start()
+		defer w.Stop()
 
-	w := newProvisionedWSListener(nil, func() (*EventSessionResponse, error) {
-		provisions.Add(1)
-		return &EventSessionResponse{ID: "session", WebsocketURL: wsURL}, nil
-	}, time.Second)
-	w.handleFrame = func([]byte) {}
-	w.reconnectBaseDelay = testReconnectBaseDelay
-	w.Start()
-	defer w.Stop()
+		require.True(t, w.WaitConnected(2*time.Second))
+		time.Sleep(wsReconnectBaseDelay)
+		synctest.Wait()
 
-	require.True(t, w.WaitConnected(2*time.Second))
-
-	deadline := time.After(5 * time.Second)
-	for conns.Load() < 2 {
-		select {
-		case <-deadline:
-			t.Fatalf("expected a reconnect, conns=%d provisions=%d", conns.Load(), provisions.Load())
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-
-	assert.GreaterOrEqual(t, provisions.Load(), int32(2), "provision must run once per dial attempt")
+		assert.Equal(t, int32(2), conns.Load())
+		assert.Equal(t, int32(2), provisions.Load(), "provision must run once per dial attempt")
+	})
 }
 
 func TestWSListener_ProvisionErrorIsAFailedAttempt(t *testing.T) {
@@ -388,37 +397,39 @@ func TestWSListener_ProvisionErrorIsAFailedAttempt(t *testing.T) {
 
 func TestWSListener_OnConnectedRunsBeforeConnectedCloses(t *testing.T) {
 	t.Parallel()
-	upgrader := websocket.Upgrader{}
-
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
+	synctest.Test(t, func(t *testing.T) {
+		upgrader := websocket.Upgrader{}
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
 				return
 			}
+			defer func() { _ = conn.Close() }()
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					return
+				}
+			}
+		}))
+
+		// Atomics because the hook runs on the listener goroutine.
+		var hookRan, openDuringHook atomic.Bool
+
+		w := newProvisionedWSListener(nil, provisionURL(ts.WebsocketURL("/")), time.Second)
+		w.netDial = ts.DialContext
+		w.handleFrame = func([]byte) {}
+		w.onConnected = func() error {
+			hookRan.Store(true)
+			openDuringHook.Store(!w.WaitConnected(0))
+			return nil
 		}
-	}))
-	defer ts.Close()
+		w.Start()
+		defer w.Stop()
 
-	// Atomics because the hook runs on the listener goroutine.
-	var hookRan, openDuringHook atomic.Bool
-
-	w := newProvisionedWSListener(nil, provisionURL("ws"+strings.TrimPrefix(ts.URL, "http")), time.Second)
-	w.handleFrame = func([]byte) {}
-	w.onConnected = func() error {
-		hookRan.Store(true)
-		openDuringHook.Store(!w.WaitConnected(0))
-		return nil
-	}
-	w.Start()
-	defer w.Stop()
-
-	require.True(t, w.WaitConnected(2*time.Second))
-	assert.True(t, hookRan.Load(), "onConnected must run on a successful dial")
-	assert.True(t, openDuringHook.Load(), "connected must not close before onConnected returns")
+		require.True(t, w.WaitConnected(2*time.Second))
+		assert.True(t, hookRan.Load(), "onConnected must run on a successful dial")
+		assert.True(t, openDuringHook.Load(), "connected must not close before onConnected returns")
+	})
 }
 
 func TestWSListener_OnConnectedErrorIsAFailedAttempt(t *testing.T) {
@@ -556,66 +567,69 @@ func TestWSListener_ClosesNothingForASessionWithoutAnID(t *testing.T) {
 
 func TestWSListener_SendsTheCloseToTheServerWhenTheDialFails(t *testing.T) {
 	t.Parallel()
-	deleted := make(chan string, 1)
-	mux := http.NewServeMux()
-	mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {}) // a 200, so the handshake fails
-	mux.HandleFunc("DELETE "+eventSessionsURL+"{id}/", func(w http.ResponseWriter, r *http.Request) {
-		deleted <- r.PathValue("id")
-		w.WriteHeader(http.StatusNoContent)
+	synctest.Test(t, func(t *testing.T) {
+		deleted := make(chan string, 1)
+		mux := http.NewServeMux()
+		mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {}) // a 200, so the handshake fails
+		mux.HandleFunc("DELETE "+eventSessionsURL+"{id}/", func(w http.ResponseWriter, r *http.Request) {
+			deleted <- r.PathValue("id")
+			w.WriteHeader(http.StatusNoContent)
+		})
+		ts := testutil.NewPipeServer(t, mux)
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		w := newProvisionedWSListener(ac, func() (*EventSessionResponse, error) {
+			return &EventSessionResponse{ID: "session-1", WebsocketURL: ts.WebsocketURL("/ws/")}, nil
+		}, time.Second)
+		w.handleFrame = func([]byte) {}
+
+		w.connectAndListen()
+
+		select {
+		case id := <-deleted:
+			assert.Equal(t, "session-1", id)
+		case <-time.After(2 * time.Second):
+			t.Fatal("the failed dial's session was never closed")
+		}
 	})
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	w := newProvisionedWSListener(ac, func() (*EventSessionResponse, error) {
-		return &EventSessionResponse{ID: "session-1", WebsocketURL: "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/"}, nil
-	}, time.Second)
-	w.handleFrame = func([]byte) {}
-
-	w.connectAndListen()
-
-	select {
-	case id := <-deleted:
-		assert.Equal(t, "session-1", id)
-	case <-time.After(2 * time.Second):
-		t.Fatal("the failed dial's session was never closed")
-	}
 }
 
 // Ctrl+C during an outage must not wait on a close the server is not answering.
 func TestWSListener_StopDoesNotWaitForAPendingClose(t *testing.T) {
 	t.Parallel()
-	arrived := make(chan struct{}, 1)
-	release := make(chan struct{})
-	mux := http.NewServeMux()
-	mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {}) // a 200, so the handshake fails
-	mux.HandleFunc("DELETE "+eventSessionsURL+"{id}/", func(w http.ResponseWriter, r *http.Request) {
+	synctest.Test(t, func(t *testing.T) {
+		arrived := make(chan struct{}, 1)
+		release := make(chan struct{})
+		mux := http.NewServeMux()
+		mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {}) // a 200, so the handshake fails
+		mux.HandleFunc("DELETE "+eventSessionsURL+"{id}/", func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case arrived <- struct{}{}:
+			default:
+			}
+			<-release
+		})
+		ts := testutil.NewPipeServer(t, mux)
+		defer close(release) // runs before the server's cleanup, which waits on the handler
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		w := newProvisionedWSListener(ac, provisionURL(ts.WebsocketURL("/ws/")), time.Second)
+		w.handleFrame = func([]byte) {}
+		w.Start()
 		select {
-		case arrived <- struct{}{}:
-		default:
+		case <-arrived:
+		case <-time.After(2 * time.Second):
+			t.Fatal("the failed dial's session was never closed")
 		}
-		<-release
+
+		start := time.Now()
+		w.Stop()
+
+		select {
+		case <-w.stopped:
+		case <-time.After(time.Second):
+			t.Fatal("Stop waited on a close the server never answered")
+		}
+		assert.Zero(t, time.Since(start), "the listener must stop without waiting")
 	})
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
-	defer close(release) // runs before ts.Close, which waits on the handler
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	w := newProvisionedWSListener(ac, provisionURL("ws"+strings.TrimPrefix(ts.URL, "http")+"/ws/"), time.Second)
-	w.handleFrame = func([]byte) {}
-	w.reconnectBaseDelay = testReconnectBaseDelay
-	w.Start()
-	select {
-	case <-arrived:
-	case <-time.After(2 * time.Second):
-		t.Fatal("the failed dial's session was never closed")
-	}
-
-	w.Stop()
-
-	select {
-	case <-w.stopped:
-	case <-time.After(time.Second):
-		t.Fatal("Stop waited on a close the server never answered")
-	}
 }
 
 // Comparing function pointers, since ProxyFromEnvironment reads the environment
