@@ -16,7 +16,11 @@ func (platformNotifier) Notify(ctx context.Context, title, body, consoleURL stri
 	if err != nil {
 		return err
 	}
-	return exec.CommandContext(ctx, tool, "--app-name=Alpacon", "-u", "normal", "--", escapeMarkup(clean(title)), escapeMarkup(clean(body))).Run()
+	return linuxNotificationCommand(ctx, tool, title, body).Run()
+}
+
+func linuxNotificationCommand(ctx context.Context, tool, title, body string) *exec.Cmd {
+	return exec.CommandContext(ctx, tool, "--app-name=Alpacon", "-u", "normal", "--", escapeMarkup(clean(title)), escapeMarkup(clean(body)))
 }
 
 func escapeMarkup(s string) string {

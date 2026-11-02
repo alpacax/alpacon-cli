@@ -15,6 +15,9 @@ import (
 // The MCP client mirrors this command-denial gate allowlist.
 const commandDenialGates = "server_reach,command_preapproval,command_acl,file_acl,risk,approval,sudo,work_session,block"
 
+// The command layer supplies config access without making utils import config.
+var LocalSignalConsoleOrigin = func() (workspaceURL, baseDomain string) { return "", "" }
+
 var deliverLocalSignal = func(kind localsignal.Kind, fields localsignal.Fields) {
 	red := func(s string) string {
 		if term.IsTerminal(int(os.Stderr.Fd())) {
@@ -23,6 +26,7 @@ var deliverLocalSignal = func(kind localsignal.Kind, fields localsignal.Fields) 
 		return s
 	}
 	emitter := localsignal.New(TrackedStderr(), red, nil)
+	emitter.WorkspaceURL, emitter.BaseDomain = LocalSignalConsoleOrigin()
 	emitter.JSON = OutputFormat == OutputFormatJSON
 	emitter.Emit(kind, fields)
 }

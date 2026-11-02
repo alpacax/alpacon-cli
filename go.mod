@@ -9,8 +9,12 @@ require (
 	github.com/stretchr/testify v1.12.1
 	github.com/xtaci/smux v1.5.58
 	go.yaml.in/yaml/v3 v3.0.5
+	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0
 )
 
-require github.com/inconshreveable/mousetrap v1.1.0 // indirect
+require (
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
+)

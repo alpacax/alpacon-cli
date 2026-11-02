@@ -37,7 +37,7 @@ func windowsNotificationCommand(ctx context.Context, title, body, consoleURL str
 	for i, value := range []string{clean(title), clean(body)} {
 		fmt.Fprintf(&script, `$xml.GetElementsByTagName('text').Item(%d).InnerText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s')); `, i, encode(value))
 	}
-	if consoleURL = consoleLink(consoleURL); consoleURL != "" {
+	if consoleURL != "" {
 		fmt.Fprintf(&script, `$xml.DocumentElement.SetAttribute('launch', [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'))); $xml.DocumentElement.SetAttribute('activationType', 'protocol'); `, encode(clean(consoleURL)))
 	}
 	fmt.Fprint(&script, `[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($xml))`)

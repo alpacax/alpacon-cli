@@ -31,7 +31,8 @@ func TestWindowsToastCommand(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			cmd := windowsNotificationCommand(context.Background(), "title", "body", tc.link)
+			link := consoleLink(tc.link, "https://console.example", "")
+			cmd := windowsNotificationCommand(context.Background(), "title", "body", link)
 			require.Len(t, cmd.Args, 5)
 			assert.Equal(t, []string{"powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand"}, cmd.Args[:4])
 			data, err := base64.StdEncoding.DecodeString(cmd.Args[4])
@@ -50,4 +51,17 @@ func TestWindowsToastCommand(t *testing.T) {
 			}
 		})
 	}
+}
+
+func platformNotificationArguments(ctx context.Context, title, body, link string) []string {
+	cmd := windowsNotificationCommand(ctx, title, body, link)
+	data, err := base64.StdEncoding.DecodeString(cmd.Args[4])
+	if err != nil {
+		panic(err)
+	}
+	units := make([]uint16, len(data)/2)
+	for i := range units {
+		units[i] = binary.LittleEndian.Uint16(data[2*i:])
+	}
+	return []string{string(utf16.Decode(units))}
 }

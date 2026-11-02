@@ -171,6 +171,13 @@ func kubernetesSurfaceEnabled() bool {
 }
 
 func init() {
+	utils.LocalSignalConsoleOrigin = func() (string, string) {
+		cfg, err := config.LoadConfig()
+		if err != nil {
+			return "", ""
+		}
+		return cfg.WorkspaceURL, cfg.BaseDomain
+	}
 	RootCmd.PersistentFlags().StringVar(
 		&utils.OutputFormat, "output", utils.OutputFormatTable,
 		"Output format: table or json",

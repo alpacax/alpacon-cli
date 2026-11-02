@@ -684,6 +684,9 @@ func TestRunExecWithApprovalWait_ThrottleWarnsOnce(t *testing.T) {
 func TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	origin := utils.LocalSignalConsoleOrigin
+	t.Cleanup(func() { utils.LocalSignalConsoleOrigin = origin })
+	utils.LocalSignalConsoleOrigin = func() (string, string) { return "https://console.example", "" }
 	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 		return denial

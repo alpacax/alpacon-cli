@@ -3,6 +3,7 @@ package localsignal
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -287,6 +288,7 @@ func TestBannerDestination(t *testing.T) {
 			stderr.WriteString("existing stderr\n")
 			tty := &terminalBuffer{}
 			e := New(&stderr, nil, nil)
+			e.WorkspaceURL = "https://console.example"
 			e.JSON = tc.json
 			e.statePath = func() (string, error) { return "", errors.New("no state") }
 			e.openTTY = func() (io.WriteCloser, error) {
@@ -329,39 +331,86 @@ func TestServerValuesAreCleaned(t *testing.T) {
 	assert.Equal(t, "safe", clean(dirty))
 }
 
+func consoleLinkCases() []struct {
+	name, workspace, base, link string
+	keep                        bool
+} {
+	const cloud = "https://my-workspace.ap1.alpacon.io"
+	return []struct {
+		name, workspace, base, link string
+		keep                        bool
+	}{
+		{"cloud console", cloud, "alpacon.io", "https://alpacon.io/my-workspace/commands/1", true},
+		{"same workspace", cloud, "alpacon.io", cloud + "/commands/1", true},
+		{"self hosted same origin", "http://10.0.0.5:8080", "", "http://10.0.0.5:8080/commands/1", true},
+		{"self hosted different host", "http://10.0.0.5:8080", "", "http://10.0.0.6:8080/commands/1", false},
+		{"prefix lookalike", cloud, "alpacon.io", "https://evil-alpacon.io/", false},
+		{"suffix lookalike", cloud, "alpacon.io", "https://alpacon.io.evil.com/", false},
+		{"base nondefault port", cloud, "alpacon.io", "https://alpacon.io:8443/", false},
+		{"different scheme", cloud, "alpacon.io", "http://alpacon.io/", false},
+		{"userinfo", cloud, "alpacon.io", "https://alice@alpacon.io/", false},
+		{"file", cloud, "alpacon.io", "file:///tmp/approval", false},
+		{"javascript", cloud, "alpacon.io", "javascript:alert%281%29", false},
+		{"search", cloud, "alpacon.io", "search-ms:query=approval", false},
+		{"no base domain", cloud, "", "https://alpacon.io/", false},
+		{"no derived parent", cloud, "", "https://other.ap1.alpacon.io/", false},
+		{"base subdomain", cloud, "alpacon.io", "https://console.alpacon.io/", true},
+		{"case and trailing dot", cloud, "ALPACON.IO.", "https://CONSOLE.ALPACON.IO./", true},
+		{"IDNA same host", "https://bücher.example", "", "https://xn--bcher-kva.example/", true},
+		{"IDNA base", cloud, "bücher.example", "https://console.xn--bcher-kva.example/", true},
+		{"same host default port", cloud, "", cloud + ":443/", true},
+		{"base explicit default port", cloud, "alpacon.io", "https://alpacon.io:443/", true},
+		{"http default port", "http://my-server", "", "http://my-server:80/", true},
+		{"same host wrong port", "http://10.0.0.5:8080", "", "http://10.0.0.5/", false},
+		{"IPv6 same host", "http://[::1]:8080", "", "http://[::1]:8080/", true},
+		{"control", cloud, "alpacon.io", "https://alpacon.io/\x01", false},
+		{"too long", cloud, "alpacon.io", "https://alpacon.io/" + strings.Repeat("a", 2048), false},
+		{"at length limit", cloud, "alpacon.io", "https://alpacon.io/" + strings.Repeat("a", 2048-len("https://alpacon.io/")), true},
+		{"relative", cloud, "alpacon.io", "/commands/1", false},
+		{"no host", cloud, "alpacon.io", "https:///commands/1", false},
+		{"invalid escape", cloud, "alpacon.io", "https://alpacon.io/%zz", false},
+		{"invalid port", cloud, "alpacon.io", "https://alpacon.io:65536/", false},
+		{"empty port", cloud, "alpacon.io", "https://alpacon.io:/", false},
+		{"missing workspace", "", "alpacon.io", "https://alpacon.io/", false},
+	}
+}
+
 func TestConsoleURLValidation(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct{ name, link, want string }{
-		{"https", "https://console.example/commands/1", "https://console.example/commands/1"},
-		{"file", "file:///tmp/approval", ""},
-		{"search", "search-ms:query=approval", ""},
-		{"settings", "ms-settings:privacy", ""},
-		{"http", "http://console.example/commands/1", ""},
-		{"relative", "/commands/1", ""},
-		{"javascript", "javascript:alert(1)", ""},
-		{"no host", "https:///commands/1", ""},
-		{"invalid", "https://console.example/%zz", ""},
-	} {
+	for _, tc := range consoleLinkCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			want := ""
+			if tc.keep {
+				want = tc.link
+			}
+			assert.Equal(t, want, consoleLink(tc.link, tc.workspace, tc.base))
 			var output bytes.Buffer
 			e := New(&output, nil, nil)
+			e.WorkspaceURL, e.BaseDomain = tc.workspace, tc.base
 			e.statePath = func() (string, error) { return "", errors.New("no state") }
 			e.headless = func() bool { return false }
-			e.notifier = notifyFunc(func(_ context.Context, _, body, link string) error {
-				assert.Equal(t, tc.want, link)
+			e.notifier = notifyFunc(func(ctx context.Context, title, body, link string) error {
+				assert.Equal(t, want, link)
 				_, wantBody := Format(ApprovalPending, Fields{}, 0)
-				if tc.want != "" {
-					wantBody += " " + tc.want
+				if want != "" {
+					wantBody += " " + want
 				}
 				assert.Equal(t, wantBody, body)
+				args := platformNotificationArguments(ctx, title, body, link)
+				if !tc.keep {
+					for _, arg := range args {
+						assert.NotContains(t, arg, tc.link)
+						assert.NotContains(t, arg, base64.StdEncoding.EncodeToString([]byte(tc.link)))
+					}
+				}
 				return nil
 			})
 			e.Emit(ApprovalPending, Fields{ConsoleURL: tc.link})
-			if tc.want == "" {
+			if !tc.keep {
 				assert.NotContains(t, output.String(), tc.link)
 			} else {
-				assert.Contains(t, output.String(), "\n"+tc.want+"\n")
+				assert.Contains(t, output.String(), "\n"+want+"\n")
 			}
 		})
 	}

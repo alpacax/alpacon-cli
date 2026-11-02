@@ -73,6 +73,26 @@ func TestBuildWelcomeLines(t *testing.T) {
 	})
 }
 
+func TestLocalSignalConsoleOrigin(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	workspace, base := utils.LocalSignalConsoleOrigin()
+	assert.Empty(t, workspace)
+	assert.Empty(t, base)
+
+	dir := filepath.Join(os.Getenv("HOME"), ".alpacon")
+	require.NoError(t, os.MkdirAll(dir, 0700))
+	file := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(file, []byte(`{"workspace_url":"https://my-workspace.ap1.alpacon.io","base_domain":"alpacon.io"}`), 0600))
+	workspace, base = utils.LocalSignalConsoleOrigin()
+	assert.Equal(t, "https://my-workspace.ap1.alpacon.io", workspace)
+	assert.Equal(t, "alpacon.io", base)
+
+	require.NoError(t, os.WriteFile(file, []byte(`{"workspace_url":"http://10.0.0.5:8080"}`), 0600))
+	workspace, base = utils.LocalSignalConsoleOrigin()
+	assert.Equal(t, "http://10.0.0.5:8080", workspace)
+	assert.Empty(t, base)
+}
+
 func TestHostFromURL(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

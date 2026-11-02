@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -50,15 +49,17 @@ type Notifier interface {
 type platformNotifier struct{}
 
 type Emitter struct {
-	JSON      bool
-	openTTY   func() (io.WriteCloser, error)
-	notifier  Notifier
-	writer    io.Writer
-	red       func(string) string
-	debug     func(string, ...any)
-	headless  func() bool
-	statePath func() (string, error)
-	now       func() time.Time
+	JSON         bool
+	WorkspaceURL string
+	BaseDomain   string
+	openTTY      func() (io.WriteCloser, error)
+	notifier     Notifier
+	writer       io.Writer
+	red          func(string) string
+	debug        func(string, ...any)
+	headless     func() bool
+	statePath    func() (string, error)
+	now          func() time.Time
 }
 
 func New(w io.Writer, red func(string) string, debug func(string, ...any)) *Emitter {
@@ -93,7 +94,7 @@ func (e *Emitter) Emit(kind Kind, fields Fields) {
 	if title == "" {
 		return
 	}
-	link := consoleLink(fields.ConsoleURL)
+	link := consoleLink(fields.ConsoleURL, e.WorkspaceURL, e.BaseDomain)
 	bannerBody := body
 	if link != "" {
 		bannerBody += "\n" + link
@@ -195,14 +196,6 @@ func Argv0(command string) string {
 		return ""
 	}
 	return name
-}
-
-func consoleLink(raw string) string {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "https" || !parsed.IsAbs() || parsed.Hostname() == "" {
-		return ""
-	}
-	return clean(raw)
 }
 
 func clean(s string) string {
