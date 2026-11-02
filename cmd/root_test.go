@@ -74,12 +74,13 @@ func TestBuildWelcomeLines(t *testing.T) {
 }
 
 func TestLocalSignalConsoleOrigin(t *testing.T) {
-	setTestHome(t, t.TempDir())
+	home := t.TempDir()
+	setTestHome(t, home)
 	workspace, base := utils.LocalSignalConsoleOrigin()
 	assert.Empty(t, workspace)
 	assert.Empty(t, base)
 
-	dir := filepath.Join(os.Getenv("HOME"), ".alpacon")
+	dir := filepath.Join(home, ".alpacon")
 	require.NoError(t, os.MkdirAll(dir, 0700))
 	file := filepath.Join(dir, "config.json")
 	require.NoError(t, os.WriteFile(file, []byte(`{"workspace_url":"https://my-workspace.ap1.alpacon.io","base_domain":"alpacon.io"}`), 0600))
