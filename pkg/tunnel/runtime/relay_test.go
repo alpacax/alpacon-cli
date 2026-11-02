@@ -390,6 +390,37 @@ func TestRelayStartsBoundWhenCopyEndsEvenWhileHalfCloseIsHeld(t *testing.T) {
 	})
 }
 
+func TestRelayClosesLocalClientOnCopyErrorWhileHalfCloseIsHeld(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		held := make(chan struct{})
+		release := sync.OnceFunc(func() { close(held) })
+		defer release()
+		local, cliSide := net.Pipe()
+		cliStream, remote := net.Pipe()
+		heldFIN := finConn{cliSide, func() error { <-held; return nil }}
+		run := startRelay(heldFIN, cliStream, time.Minute)
+		require.NoError(t, remote.Close())
+		synctest.Wait()
+		readDone := make(chan error, 1)
+		go func() { _, err := io.ReadAll(local); readDone <- err }()
+
+		_, err := local.Write([]byte("request")) // fails on the closed remote
+		require.NoError(t, err)
+		synctest.Wait()
+
+		select {
+		case err := <-readDone:
+			require.NoError(t, err)
+		default:
+			t.Fatal("local client stayed open behind a held FIN after the other copy failed")
+		}
+		release()
+		<-run.done
+		assert.False(t, run.cut)
+	})
+}
+
 func TestRelayCutsQuietLocalClientExactlyAtBound(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

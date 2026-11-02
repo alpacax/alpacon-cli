@@ -27,29 +27,33 @@ func relay(local, remote net.Conn, bound time.Duration) (cut bool) {
 	pipes.Go(func() { pipe(remote, local) })
 	pipes.Go(func() { pipe(local, remote) })
 
+	closeBoth := func() {
+		_ = local.Close()
+		_ = remote.Close()
+	}
 	if err := <-errChan; err == nil {
 		// A close, not a deadline: smux reads a write deadline only when the write starts.
 		timer := time.NewTimer(bound)
 		defer timer.Stop()
 		select {
-		case <-errChan:
+		case err := <-errChan:
+			if err != nil {
+				closeBoth() // before the wait, which a held FIN can stretch to smux's close timeout
+			}
 		case <-timer.C:
 			cut = true
 			if tcp, ok := local.(*net.TCPConn); ok {
 				_ = tcp.SetLinger(0) // a reset tells the local client its data was cut, not complete
 			}
-			_ = local.Close()
-			_ = remote.Close()
+			closeBoth()
 			<-errChan
 		}
 	} else {
-		_ = local.Close()
-		_ = remote.Close()
+		closeBoth()
 		<-errChan
 	}
 	pipes.Wait()
-	_ = local.Close()
-	_ = remote.Close()
+	closeBoth()
 	return cut
 }
 
