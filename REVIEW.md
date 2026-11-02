@@ -16,4 +16,4 @@ WALL-D and GitHub Copilot code review apply these rules on top of the stack's re
 
 ## Public repository
 
-- Flag a comment, fixture, or help text that names a private repository, an internal host, an `alpacax/<repo>#N` reference, or a real person's name: this public repository publishes internal or personal information to readers without private access.
+- Flag a comment, fixture, or help text that names a private repository or an issue or PR in one, an internal host, or a real person's name: this public repository publishes internal or personal information to readers without private access.
