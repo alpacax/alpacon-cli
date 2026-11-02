@@ -40,12 +40,13 @@ func (f Failure) envelope() JSONErrorEnvelope[cliErrorCtx] {
 	return env
 }
 
-// ExitWithFailureJSON writes the envelope to stderr and exits with f.ExitCode under --output
-// json; in table mode it returns so the caller's own message and exit stay as they were.
+// ExitWithFailureJSON writes the envelope to stderr as its last line and exits with f.ExitCode
+// under --output json; in table mode it returns so the caller's own message and exit stay as they were.
 func ExitWithFailureJSON(f Failure) {
 	if OutputFormat != OutputFormatJSON {
 		return
 	}
+	sealStderr()
 	PrintJSONError(os.Stderr, f.envelope())
 	os.Exit(f.ExitCode)
 }

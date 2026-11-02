@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -373,7 +372,7 @@ func setupSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *
 			// Not utils.CliWarning: this runs in a goroutine racing
 			// OpenNewTerminal, so the terminal may already be in raw mode,
 			// where a bare newline leaves the cursor where it stood.
-			_, _ = fmt.Fprintf(os.Stderr, "\r\n%s: %s\r\n%s", utils.Yellow("Warning"), warning, utils.RawTerminalHintLines(listener.Err()))
+			_, _ = fmt.Fprintf(utils.TrackedStderr(), "\r\n%s: %s\r\n%s", utils.Yellow("Warning"), warning, utils.RawTerminalHintLines(listener.Err()))
 		}
 		return nil
 	}

@@ -1,9 +1,12 @@
 package utils
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	osexec "os/exec"
 	"strings"
 	"testing"
 
@@ -76,4 +79,57 @@ func TestPrintJSONErrorStartsOnItsOwnLineAfterAChild(t *testing.T) {
 
 	assert.True(t, strings.HasPrefix(stderr, "fail\n"), "stderr: %q", stderr)
 	lastLineIsEnvelope(t, stderr)
+}
+
+// Serial: swaps os.Stderr and seals the process-wide stderr.
+func TestSealedStderrDropsLaterNotices(t *testing.T) {
+	t.Cleanup(func() {
+		stderrMu.Lock()
+		stderrSealed = false
+		stderrMu.Unlock()
+	})
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		CliWarning("before")
+		sealStderr()
+		CliWarning("after")
+	})
+
+	assert.Contains(t, stderr, "before")
+	assert.NotContains(t, stderr, "after")
+}
+
+func TestExitWithFailureJSONStaysLastWhileAGoroutinePrints(t *testing.T) {
+	t.Parallel()
+	helper := osexec.Command(os.Args[0], "-test.run=^TestExitWithFailureJSONNoisyHelperProcess$")
+	helper.Env = append(os.Environ(), "GO_WANT_NOISY_EXIT_HELPER=1")
+	var stdout, stderr bytes.Buffer
+	helper.Stdout, helper.Stderr = &stdout, &stderr
+
+	err := helper.Run()
+
+	var exitErr *osexec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, ExitCodeServerBusy, exitErr.ExitCode())
+	assert.Empty(t, stdout.String())
+	assert.Contains(t, stderr.String(), "still polling")
+	lastLineIsEnvelope(t, stderr.String())
+}
+
+// Serial: the child reaches an os.Exit.
+func TestExitWithFailureJSONNoisyHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_NOISY_EXIT_HELPER") == "" {
+		return
+	}
+	OutputFormat = OutputFormatJSON
+	printed := make(chan struct{})
+	go func() {
+		CliWarning("still polling")
+		close(printed)
+		for {
+			CliWarning("still polling")
+		}
+	}()
+	<-printed
+	ExitWithFailureJSON(Failure{ExitCode: ExitCodeServerBusy, Err: errors.New("busy"), Message: "busy"})
 }

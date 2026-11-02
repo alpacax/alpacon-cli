@@ -86,6 +86,7 @@ func HandleWorkSessionError(err error, operation, target, authMethod, activeWS s
 	}
 	hint := RefusalHint(err)
 	if OutputFormat == OutputFormatJSON {
+		sealStderr()
 		PrintJSONError(os.Stderr, buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS, hint))
 	} else {
 		fmt.Fprintln(os.Stderr, buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS, hint))

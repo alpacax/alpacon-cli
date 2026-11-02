@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -160,7 +159,7 @@ func (sl *SudoListener) fail(cause error) error {
 			// Stop cancels neither an in-flight dial nor a session create, so a
 			// failure landing after it must not claim anything is still retrying.
 		default:
-			_, _ = fmt.Fprintf(os.Stderr, "\r\n%s\r\n", utils.Yellow(sudoOutageWarning))
+			_, _ = fmt.Fprintf(utils.TrackedStderr(), "\r\n%s\r\n", utils.Yellow(sudoOutageWarning))
 		}
 	}
 
@@ -206,7 +205,7 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 
 	grantID := event.Payload.SudoGrantID
 	if grantID == "" {
-		fmt.Fprintf(os.Stderr, "\r\n\033[31mSudo MFA event is missing a grant ID; cannot verify. This likely indicates a server/CLI version mismatch.\033[0m\r\n")
+		_, _ = fmt.Fprintf(utils.TrackedStderr(), "\r\n\033[31mSudo MFA event is missing a grant ID; cannot verify. This likely indicates a server/CLI version mismatch.\033[0m\r\n")
 		return
 	}
 
@@ -228,23 +227,23 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 		if sl.reportCredentialCannotProveMFA(err) {
 			return
 		}
-		fmt.Fprintf(os.Stderr, "\r\n\033[31mFailed to get MFA link: %s\033[0m\r\n%s", err, utils.RawTerminalHintLines(err))
+		_, _ = fmt.Fprintf(utils.TrackedStderr(), "\r\n\033[31mFailed to get MFA link: %s\033[0m\r\n%s", err, utils.RawTerminalHintLines(err))
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "\r\n\033[33mSudo MFA required. Opening browser...\033[0m\r\n")
-	fmt.Fprintf(os.Stderr, "%s\r\n", mfaURL)
+	_, _ = fmt.Fprintf(utils.TrackedStderr(), "\r\n\033[33mSudo MFA required. Opening browser...\033[0m\r\n")
+	_, _ = fmt.Fprintf(utils.TrackedStderr(), "%s\r\n", mfaURL)
 	utils.OpenBrowser(mfaURL)
 
 	if err := sl.retryVerifyUntilMFA(grantID); err != nil {
 		if errors.Is(err, errMFAWaitEnded) {
-			fmt.Fprintf(os.Stderr, "\r\n\033[31mMFA verification timed out. Please re-run the sudo command.\033[0m\r\n")
+			_, _ = fmt.Fprintf(utils.TrackedStderr(), "\r\n\033[31mMFA verification timed out. Please re-run the sudo command.\033[0m\r\n")
 			return
 		}
 		if sl.reportCredentialCannotProveMFA(err) {
 			return
 		}
-		fmt.Fprintf(os.Stderr, "\r\n\033[31mSudo verification failed: %s\033[0m\r\n", err)
+		_, _ = fmt.Fprintf(utils.TrackedStderr(), "\r\n\033[31mSudo verification failed: %s\033[0m\r\n", err)
 		return
 	}
 }
@@ -257,7 +256,7 @@ func (sl *SudoListener) reportCredentialCannotProveMFA(err error) bool {
 	if code, _ := utils.ParseErrorResponse(err); code != utils.SudoVerifyCredentialCannotProveMFA {
 		return false
 	}
-	fmt.Fprint(os.Stderr, credentialCannotProveMFAText(utils.RefusalHint(err)))
+	_, _ = fmt.Fprint(utils.TrackedStderr(), credentialCannotProveMFAText(utils.RefusalHint(err)))
 	return true
 }
 
