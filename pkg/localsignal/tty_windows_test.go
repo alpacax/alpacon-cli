@@ -4,11 +4,13 @@ package localsignal
 
 import (
 	"io"
+	"os"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type blockedTTY struct{ release, closed chan struct{} }
@@ -22,7 +24,7 @@ func TestWindowsTTYWriteBound(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				tty := &blockedTTY{release: make(chan struct{}), closed: make(chan struct{})}
 				start := time.Now()
-				writeTTY(func() (io.WriteCloser, error) {
+				err := writeTTY(func() (io.WriteCloser, error) {
 					if stage == "open" {
 						<-tty.release
 					}
@@ -31,6 +33,7 @@ func TestWindowsTTYWriteBound(t *testing.T) {
 				assert.Equal(t, 200*time.Millisecond, time.Since(start))
 				close(tty.release)
 				<-tty.closed
+				require.ErrorIs(t, err, os.ErrDeadlineExceeded)
 			})
 		})
 	}

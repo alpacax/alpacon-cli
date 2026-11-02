@@ -44,7 +44,15 @@ Run the command again later to check for completion.`,
 			utils.CliErrorWithExit("failed to fetch command result: %s", err)
 			return
 		}
-		event.SignalPendingSudoApproval(alpaconClient, details)
+		switch details.Status {
+		case "completed", "success", "failed":
+			if details.SudoGrantStatus != nil && *details.SudoGrantStatus == "pending_approval" {
+				utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{
+					Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name,
+					Account: details.Username, Session: details.WorkSessionID(), ConsoleURL: details.ConsoleURL,
+				}, alpaconClient)
+			}
+		}
 		if line := event.StandingGrantLine(details); line != "" {
 			fmt.Fprintln(os.Stderr, line)
 		}

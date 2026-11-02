@@ -28,6 +28,25 @@ func (f notifyFunc) Notify(ctx context.Context, title, body, link string) error 
 	return f(ctx, title, body, link)
 }
 
+type terminalStderr struct{ bytes.Buffer }
+
+func (b *terminalStderr) Fd() uintptr { return 2 }
+
+type failedTTY struct {
+	writeErr error
+	short    bool
+	closed   bool
+}
+
+func (w *failedTTY) Write(p []byte) (int, error) {
+	if w.short {
+		return len(p) - 1, nil
+	}
+	return 0, w.writeErr
+}
+
+func (w *failedTTY) Close() error { w.closed = true; return nil }
+
 func TestFormat(t *testing.T) {
 	t.Parallel()
 	f := Fields{Argv0: "/usr/bin/sudo --password secret", Server: "my-server", Account: "alice", Gate: "risk", Session: "ses-1"}
@@ -337,6 +356,49 @@ func TestBannerDestination(t *testing.T) {
 			} else {
 				assert.Equal(t, "existing stderr\n"+banner, stderr.String())
 				assert.Empty(t, tty.String())
+			}
+		})
+	}
+}
+
+func TestBannerTTYFailureFallback(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"text", "json"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			for _, failure := range []string{"open", "background group", "write", "short write"} {
+				t.Run(failure, func(t *testing.T) {
+					t.Parallel()
+					var stderr terminalStderr
+					tty := &failedTTY{writeErr: errors.New("tty write failed"), short: failure == "short write"}
+					e := New(&stderr, nil, nil)
+					e.JSON = mode == "json"
+					e.isTerminal = func(fd int) bool { assert.Equal(t, 2, fd); return true }
+					e.statePath = func() (string, error) { return "", errors.New("no state") }
+					e.headless = func() bool { return true }
+					opened := false
+					e.openTTY = func() (io.WriteCloser, error) {
+						opened = true
+						switch failure {
+						case "open":
+							return nil, errors.New("no controlling terminal")
+						case "background group":
+							return nil, os.ErrPermission
+						default:
+							return tty, nil
+						}
+					}
+					e.Emit(ApprovalPending, Fields{Argv0: "sudo"})
+					assert.True(t, opened, "terminal output must attempt the tty opener")
+					if failure == "write" || failure == "short write" {
+						assert.True(t, tty.closed, "opened tty must close after a failed write")
+					}
+					if e.JSON {
+						assert.Empty(t, stderr.String())
+					} else {
+						assert.Equal(t, "==== ALPACON: APPROVAL PENDING ====\nsudo is waiting for approval. Open the approval or wait for an approver.\n================================\n", stderr.String())
+					}
+				})
 			}
 		})
 	}

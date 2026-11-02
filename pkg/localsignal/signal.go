@@ -61,6 +61,7 @@ type Emitter struct {
 	WorkspaceURL string
 	BaseDomain   string
 	openTTY      func() (io.WriteCloser, error)
+	isTerminal   func(int) bool
 	notifier     Notifier
 	writer       io.Writer
 	red          func(string) string
@@ -73,7 +74,7 @@ type Emitter struct {
 func New(w io.Writer, red func(string) string, debug func(string, ...any)) *Emitter {
 	return &Emitter{
 		notifier: NewNotifier(), openTTY: OpenTTY, writer: w, red: red, debug: debug,
-		headless: platformHeadless, now: time.Now,
+		headless: platformHeadless, now: time.Now, isTerminal: term.IsTerminal,
 		statePath: func() (string, error) {
 			dir, err := configdir.Dir()
 			return filepath.Join(dir, "state", "signals.json"), err
@@ -115,10 +116,12 @@ func (e *Emitter) Emit(kind Kind, fields Fields) {
 	}
 	ttyOutput := e.JSON
 	if file, ok := e.writer.(interface{ Fd() uintptr }); ok {
-		ttyOutput = ttyOutput || term.IsTerminal(int(file.Fd()))
+		ttyOutput = ttyOutput || e.isTerminal(int(file.Fd()))
 	}
 	if ttyOutput {
-		writeTTY(e.openTTY, banner)
+		if err := writeTTY(e.openTTY, banner); err != nil && !e.JSON {
+			_, _ = io.WriteString(e.writer, banner)
+		}
 	} else {
 		_, _ = io.WriteString(e.writer, banner)
 	}
@@ -324,9 +327,15 @@ func displayName(s string) string {
 	return capText(s, 64)
 }
 
-func writeTTYNow(open func() (io.WriteCloser, error), banner string) {
-	if tty, err := open(); err == nil {
-		_, _ = io.WriteString(tty, banner)
-		_ = tty.Close()
+func writeTTYNow(open func() (io.WriteCloser, error), banner string) error {
+	tty, err := open()
+	if err != nil {
+		return err
 	}
+	defer func() { _ = tty.Close() }()
+	n, err := io.WriteString(tty, banner)
+	if err == nil && n != len(banner) {
+		return io.ErrShortWrite
+	}
+	return err
 }
