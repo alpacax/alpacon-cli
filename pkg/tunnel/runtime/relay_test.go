@@ -405,7 +405,7 @@ func TestRelayClosesLocalClientOnCopyErrorWhileHalfCloseIsHeld(t *testing.T) {
 		readDone := make(chan error, 1)
 		go func() { _, err := io.ReadAll(local); readDone <- err }()
 
-		_, err := local.Write([]byte("request")) // fails on the closed remote
+		_, err := local.Write([]byte("request")) // the relay's copy to the closed remote fails
 		require.NoError(t, err)
 		synctest.Wait()
 
