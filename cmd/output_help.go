@@ -44,6 +44,8 @@ CLI error codes, used when the server sent none:
   http_<status>           an HTTP answer with no code, e.g. http_404
   not_approved            an awaited approval ended without being granted
   purpose_refused         the answer to a purpose demand was refused
+  remote_command_failed   the command ran on the server and failed there
+  child_command_failed    tunnel's local command exited non-zero
   cli_error               anything else
 
 Status objects, printed on stdout with a "status" field instead of an envelope:
