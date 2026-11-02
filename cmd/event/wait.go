@@ -159,8 +159,20 @@ func runWait(cmd *cobra.Command, _ []string) {
 	}
 
 	if outcome == eventapi.OutcomeFailed {
-		os.Exit(utils.ExitCodeNotApproved)
+		exitNotApproved(displayType)
 	}
+}
+
+// exitNotApproved exits 6 for an event in the failure set; the event is already on stdout,
+// so under --output json only the envelope marks the outcome.
+func exitNotApproved(displayType string) {
+	utils.ExitWithFailureJSON(utils.Failure{
+		ExitCode:  utils.ExitCodeNotApproved,
+		ErrorCode: utils.ErrorCodeNotApproved,
+		Operation: opWait,
+		Message:   fmt.Sprintf("A %s event in the failure set arrived.", displayType),
+	})
+	os.Exit(utils.ExitCodeNotApproved)
 }
 
 // reportOutages runs for the life of the command. Both conditions can recur: a catch-up
