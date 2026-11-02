@@ -153,14 +153,26 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	}
 
 	exitCode, err := executeTunnelCommand(ac, cmd, args, sigChan)
+	exitTunnel(exitCode, err)
+}
+
+// exitTunnel exits with the local command's code, or 1 when the tunnel itself failed;
+// under --output json either ends stderr with an envelope.
+func exitTunnel(exitCode int, err error) {
 	if err != nil {
-		utils.CliError("%s", err)
 		if exitCode == 0 {
 			exitCode = 1
 		}
+		utils.ExitWithFailureJSON(utils.Failure{ExitCode: exitCode, Err: err, Message: err.Error()})
+		utils.CliError("%s", err)
 		os.Exit(exitCode)
 	}
 	if exitCode != 0 {
+		utils.ExitWithFailureJSON(utils.Failure{
+			ExitCode:  exitCode,
+			ErrorCode: utils.ErrorCodeChildCommandFailed,
+			Message:   fmt.Sprintf("the local command exited with code %d", exitCode),
+		})
 		os.Exit(exitCode)
 	}
 }
