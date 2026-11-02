@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -17,59 +18,58 @@ import (
 func TestCommandStream_MFAWaitDoesNotResubmitAfterAnAcceptedCommand(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name   string
-		cfg    streamingServerConfig
-		delays streamDelays
+		name string
+		cfg  streamingServerConfig
 	}{
 		{
 			// The event session is refused, so the run polls the command it
 			// submitted and then reads its output from the chunk endpoint.
-			name:   "polling fallback",
-			cfg:    streamingServerConfig{sessionStatus: http.StatusForbidden},
-			delays: testFallbackDelays,
+			name: "polling fallback",
+			cfg:  streamingServerConfig{sessionStatus: http.StatusForbidden},
 		},
 		{
 			// The listener connects, but subscribing to the accepted command fails,
 			// so the run falls back to polling the command it already submitted.
-			name:   "event listener",
-			cfg:    streamingServerConfig{subscribeStatus: http.StatusServiceUnavailable},
-			delays: testStreamDelays,
+			name: "event listener",
+			cfg:  streamingServerConfig{subscribeStatus: http.StatusServiceUnavailable},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			var submits atomic.Int32
-			cfg := tc.cfg
-			cfg.cmdID = "cmd-uuid"
-			cfg.serverID = "srv-uuid"
-			cfg.submitRefusals = 1
-			cfg.submits = &submits
-			// Completed with nothing in result, so the output has to come from
-			// the chunk endpoint, which is unavailable.
-			cfg.terminal = EventDetails{Status: "completed", Success: new(true)}
-			cfg.chunkStatus = http.StatusServiceUnavailable
-			ac := newStreamingServers(t, cfg)
+			synctest.Test(t, func(t *testing.T) {
+				var submits atomic.Int32
+				cfg := tc.cfg
+				cfg.cmdID = "cmd-uuid"
+				cfg.serverID = "srv-uuid"
+				cfg.submitRefusals = 1
+				cfg.submits = &submits
+				// Completed with nothing in result, so the output has to come from
+				// the chunk endpoint, which is unavailable.
+				cfg.terminal = EventDetails{Status: "completed", Success: new(true)}
+				cfg.chunkStatus = http.StatusServiceUnavailable
+				ac := newStreamingServers(t, cfg)
 
-			stream := &CommandStream{ac: ac, delays: tc.delays}
-			defer stream.Close()
-			var out bytes.Buffer
-			run := func() error {
-				return stream.RunCommand("srv", "echo hi", "", "", nil, "", "", &out)
-			}
+				stream := NewCommandStream(ac)
+				defer stream.Close()
+				var out bytes.Buffer
+				run := func() error {
+					return stream.RunCommand("srv", "echo hi", "", "", nil, "", "", &out)
+				}
 
-			first := run()
-			code, _ := utils.ParseErrorResponse(first)
-			require.Equal(t, utils.AuthMFARequired, code, "got %v", first)
+				first := run()
+				code, _ := utils.ParseErrorResponse(first)
+				require.Equal(t, utils.AuthMFARequired, code, "got %v", first)
 
-			err := utils.HandleCommonErrors(first, "srv", utils.ErrorHandlerCallbacks{
-				OnMFARequired:  func(string) error { return nil },
-				RetryOperation: run,
+				err := utils.HandleCommonErrors(first, "srv", utils.ErrorHandlerCallbacks{
+					OnMFARequired:  func(string) error { return nil },
+					RetryOperation: run,
+				})
+
+				require.ErrorContains(t, err, "failed to read command output")
+				assert.Equal(t, int32(1), submits.Load()-int32(cfg.submitRefusals),
+					"exactly one accepted submission: the command must not run again")
 			})
-
-			require.ErrorContains(t, err, "failed to read command output")
-			assert.Equal(t, int32(1), submits.Load()-int32(cfg.submitRefusals),
-				"exactly one accepted submission: the command must not run again")
 		})
 	}
 }

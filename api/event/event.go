@@ -27,24 +27,6 @@ const (
 // helper process, which no in-process seam reaches, can shorten it.
 var CommandPollTick = time.Second
 
-// streamDelays sit on the stream, not in package variables, so a test can shorten
-// them and stay parallel; synctest cannot, since the stream holds a real socket.
-type streamDelays struct {
-	connectTimeout     time.Duration
-	reconnectBaseDelay time.Duration
-	pollTick           time.Duration
-	fallbackPollTick   time.Duration
-}
-
-func defaultStreamDelays() streamDelays {
-	return streamDelays{
-		connectTimeout:     commandOutputConnectTimeout,
-		reconnectBaseDelay: wsReconnectBaseDelay,
-		pollTick:           streamPollTick,
-		fallbackPollTick:   CommandPollTick,
-	}
-}
-
 // maxGapWidth caps enumerated missing seqs (per gap and cumulatively) so a buggy or
 // hostile server can't spin the CLI or grow the skipped/missing slices without bound.
 // var, not const, so tests can lower it.
@@ -457,11 +439,7 @@ func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username
 }
 
 func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
-	return runCommandStreamingWithDelays(ac, defaultStreamDelays(), serverName, command, username, groupname, env, workSessionID, purpose, out)
-}
-
-func runCommandStreamingWithDelays(ac *client.AlpaconClient, delays streamDelays, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
-	stream := &CommandStream{ac: ac, delays: delays}
+	stream := NewCommandStream(ac)
 	defer stream.Close()
 	return stream.RunCommand(serverName, command, username, groupname, env, workSessionID, purpose, out)
 }
@@ -483,7 +461,6 @@ func RunFileCommandStreaming(ac *client.AlpaconClient, serverName string, file F
 // a listener no submission used. A CommandStream is not safe for concurrent use.
 type CommandStream struct {
 	ac       *client.AlpaconClient
-	delays   streamDelays
 	listener *CommandOutputListener
 	// unavailable is why the listener could not connect, once that happened.
 	unavailable error
@@ -491,7 +468,7 @@ type CommandStream struct {
 
 // NewCommandStream returns a CommandStream that connects on its first submission.
 func NewCommandStream(ac *client.AlpaconClient) *CommandStream {
-	return &CommandStream{ac: ac, delays: defaultStreamDelays()}
+	return &CommandStream{ac: ac}
 }
 
 // RunCommand is RunCommandStreaming over this stream's listener.
@@ -523,16 +500,15 @@ func (s *CommandStream) Close() {
 // the warm-fire read in streamSubscribed covers any reconnect in between.
 func (s *CommandStream) run(submit commandSubmitter, out io.Writer) error {
 	if s.unavailable != nil {
-		return runCommandFallback(s.ac, submit, out, s.delays.fallbackPollTick, s.unavailable)
+		return runCommandFallback(s.ac, submit, out, CommandPollTick, s.unavailable)
 	}
 	if s.listener == nil {
-		listener := newCommandOutputListener(s.ac, s.delays.connectTimeout)
-		listener.reconnectBaseDelay = s.delays.reconnectBaseDelay
+		listener := NewCommandOutputListener(s.ac)
 		listener.Start()
-		if !listener.WaitConnected(s.delays.connectTimeout) {
+		if !listener.WaitConnected(commandOutputConnectTimeout) {
 			listener.Stop()
 			s.unavailable = listenerFailure(listener)
-			return runCommandFallback(s.ac, submit, out, s.delays.fallbackPollTick, s.unavailable)
+			return runCommandFallback(s.ac, submit, out, CommandPollTick, s.unavailable)
 		}
 		s.listener = listener
 	}
@@ -546,7 +522,7 @@ func (s *CommandStream) run(submit commandSubmitter, out io.Writer) error {
 	// is returned untagged, so it never submits the command again.
 	listener := s.listener
 	s.listener = nil
-	return streamSubscribed(s.ac, listener, cmdResp.pathID, cmdResp.Server.ID, out, execTimeout(), s.delays, false)
+	return streamSubscribed(s.ac, listener, cmdResp.pathID, cmdResp.Server.ID, out, execTimeout(), false)
 }
 
 // StreamApprovedCommand resubscribes to an already-submitted command and streams
@@ -554,20 +530,15 @@ func (s *CommandStream) run(submit commandSubmitter, out io.Writer) error {
 // until a reviewer approves it and it runs. A parked job has produced no output
 // yet, so resubscribing loses nothing.
 func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer, timeout time.Duration) error {
-	return streamApprovedCommandWithDelays(ac, defaultStreamDelays(), cmdID, out, timeout)
-}
-
-func streamApprovedCommandWithDelays(ac *client.AlpaconClient, delays streamDelays, cmdID string, out io.Writer, timeout time.Duration) error {
 	pathID, err := api.RequireID(cmdID, "command")
 	if err != nil {
 		return err
 	}
-	listener := newCommandOutputListener(ac, delays.connectTimeout)
-	listener.reconnectBaseDelay = delays.reconnectBaseDelay
+	listener := NewCommandOutputListener(ac)
 	listener.Start()
-	if !listener.WaitConnected(delays.connectTimeout) {
+	if !listener.WaitConnected(commandOutputConnectTimeout) {
 		listener.Stop()
-		return runCommandFallbackFromID(ac, pathID, out, delays.fallbackPollTick, true, listenerFailure(listener))
+		return runCommandFallbackFromID(ac, pathID, out, CommandPollTick, true, listenerFailure(listener))
 	}
 	// The fin event targets the server, which only the command itself names here.
 	// A failed read just skips the subscription; the poll still ends the run.
@@ -575,7 +546,7 @@ func streamApprovedCommandWithDelays(ac *client.AlpaconClient, delays streamDela
 	if details, err := getCommandByPathID(ac, pathID); err == nil {
 		serverID = details.Server.ID
 	}
-	return streamSubscribed(ac, listener, pathID, serverID, out, timeout, delays, true)
+	return streamSubscribed(ac, listener, pathID, serverID, out, timeout, true)
 }
 
 // listenerFailure names why the listener never connected: the last error a session
@@ -590,11 +561,11 @@ func listenerFailure(listener *CommandOutputListener) error {
 // streamSubscribed subscribes to cmdID's output channel and to serverID's fin
 // channel, warm-fires persisted chunks, then writes live chunks to out until the
 // fin event or the poll reports a terminal state.
-func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener, cmdID api.PathID, serverID string, out io.Writer, timeout time.Duration, delays streamDelays, waitApproval bool) error {
+func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener, cmdID api.PathID, serverID string, out io.Writer, timeout time.Duration, waitApproval bool) error {
 	commandID := cmdID.String()
 	if err := listener.subscribeTo(commandID, serverID); err != nil {
 		listener.Stop()
-		return runCommandFallbackFromID(ac, cmdID, out, delays.fallbackPollTick, waitApproval, err)
+		return runCommandFallbackFromID(ac, cmdID, out, CommandPollTick, waitApproval, err)
 	}
 
 	// Warm-fire: write chunks already persisted, advancing lastSeq only over contiguous
@@ -620,7 +591,7 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 	pollCancel := make(chan struct{})
 	defer close(pollCancel)
 	go func() {
-		details, err := pollCommandExecution(ac, cmdID, timeout, delays.pollTick, waitApproval, pollSeams{cancel: pollCancel})
+		details, err := pollCommandExecution(ac, cmdID, timeout, streamPollTick, waitApproval, pollSeams{cancel: pollCancel})
 		switch {
 		case errors.Is(err, errPollCancelled): // the stream is gone; nobody reads these
 		case err != nil:
