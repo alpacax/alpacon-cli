@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,6 +34,40 @@ func lastEnvelope(t *testing.T, stderr string) contractEnvelope {
 	var envelope contractEnvelope
 	require.NoError(t, json.Unmarshal([]byte(lines[len(lines)-1]), &envelope), "stderr: %s", stderr)
 	return envelope
+}
+
+// commandPaths lists every command under c, groups included: exec and websh parse their own flags
+// and have subcommands, so a walk of the leaves alone would skip them.
+func commandPaths(c *cobra.Command) []string {
+	var paths []string
+	for _, sub := range c.Commands() {
+		_, path, _ := strings.Cut(sub.CommandPath(), " ")
+		paths = append(append(paths, path), commandPaths(sub)...)
+	}
+	return paths
+}
+
+func TestEveryCommandEndsStderrWithAnEnvelopeOnAnUnknownFlagUnderJSONOutput(t *testing.T) {
+	paths := commandPaths(RootCmd)
+	require.GreaterOrEqual(t, len(paths), 100, "expected to walk the whole command tree")
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+
+			stdout, stderr, exitCode := runJSONHelper(t, append(strings.Fields(path), "--no-such-flag")...)
+
+			assert.Equal(t, utils.ExitCodeUsageError, exitCode, "stderr: %s", stderr)
+			assert.Empty(t, stdout)
+			envelope := lastEnvelope(t, stderr)
+			assert.Equal(t, contractEnvelope{
+				ExitCode: utils.ExitCodeUsageError, ErrorCode: utils.ErrorCodeUsage, Command: path,
+				Context: struct {
+					Operation string `json:"operation"`
+				}{Operation: path},
+			}, envelope)
+		})
+	}
 }
 
 func TestHelpGoesToStderrUnderJSONOutput(t *testing.T) {
