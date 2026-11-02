@@ -35,6 +35,9 @@ type wsListener struct {
 	wsHeader         http.Header
 	handshakeTimeout time.Duration
 	readLimit        int64 // 0 for gorilla's default of no limit
+	// The client's transport, whose dial and proxy the channel takes so it goes where the HTTP
+	// requests go; nil keeps the dialer's defaults.
+	transport *http.Transport
 	// The first backoff step, lowered by tests so a reconnect assertion does not have to
 	// sit through the production delay.
 	reconnectBaseDelay time.Duration
@@ -69,6 +72,9 @@ func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (*Event
 	w.closeUnopened = func(string) {}
 	if ac != nil {
 		w.closeUnopened = func(id string) { go closeSession(ac, id, eventSessionCloseTimeout) }
+		if ac.HTTPClient != nil {
+			w.transport, _ = ac.HTTPClient.Transport.(*http.Transport)
+		}
 	}
 	return w
 }
@@ -163,6 +169,9 @@ func (w *wsListener) connectAndListen() bool {
 	}
 
 	dialer := newListenerDialer(w.handshakeTimeout)
+	if t := w.transport; t != nil {
+		dialer.NetDialContext, dialer.Proxy = t.DialContext, t.Proxy
+	}
 	conn, resp, dialErr := dialer.Dial(session.WebsocketURL, w.wsHeader)
 	if dialErr != nil {
 		if w.onDialFailed != nil {
