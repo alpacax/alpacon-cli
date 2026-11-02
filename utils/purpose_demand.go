@@ -173,7 +173,7 @@ func PrintPurposeRefused(commandID string, cause error) {
 	// The server's hint, when the refusal carries one, says why in place of the
 	// local guess, and leads the follow-ups.
 	actions := RefusalNextActions(cause)
-	if len(actions) > 0 {
+	if RefusalHint(cause) != "" {
 		message = fmt.Sprintf("failed to state the purpose for %s: %s.", commandID, cause)
 	}
 	next := NextAction{

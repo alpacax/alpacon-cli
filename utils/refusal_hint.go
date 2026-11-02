@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
@@ -94,15 +95,83 @@ func refusalHints(err error) []string {
 	return hints
 }
 
-// RefusalNextActions is the server's own guidance for a refused request, as
-// the follow-ups an error output shows under the error line: one per distinct
-// hint. The hint is printed as sent, never rephrased or matched against a
-// local table, so a new refusal code needs no CLI change to be explained. Nil
-// when err carries none.
+const refusalNextDescription = "Where the server says to check on this refusal"
+
+// GatePlan is the "gate" of a plan refusal, whose own message already states
+// when its limit resets, so no Retry-After action is added for it.
+const GatePlan = "plan"
+
+// nextCarrier is implemented by an error that carries a refusal's "next" path.
+type nextCarrier interface {
+	ErrorNext() string
+}
+
+// tokenNextCarrier is implemented by an error whose request went out under an
+// API token, which the path "next" names may refuse.
+type tokenNextCarrier interface {
+	ErrorNextUnderAPIToken() bool
+}
+
+// selfRelativePath matches a path whose every segment is plain characters that
+// no shell, terminal or URL parser reads differently, with no "." or ".." segment.
+var selfRelativePath = regexp.MustCompile(`^(/[A-Za-z0-9_~-][A-Za-z0-9_.~-]*)+/?$`)
+
+// ParseRefusalNext returns the "next" string a 402/403/405/429 body carries,
+// or "" on any other status, where a field of that name is a request field.
+func ParseRefusalNext(body []byte, statusCode int) string {
+	if !IsRefusalStatus(statusCode) {
+		return ""
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return ""
+	}
+	next, _ := parsed["next"].(string)
+	return next
+}
+
+// refusalNext returns the first "next" in err's chain and whether its request
+// used an API token, or "" when there is none or it is not a path safe to hand
+// to `alpacon api` as one shell word.
+func refusalNext(err error) (next string, underAPIToken bool) {
+	for e := range errorChain(err) {
+		carrier, ok := e.(nextCarrier)
+		if !ok {
+			continue
+		}
+		next := carrier.ErrorNext()
+		if next == "" {
+			continue
+		}
+		if len(next) > MaxServerHintBytes || !selfRelativePath.MatchString(next) {
+			return "", false
+		}
+		tokenCarrier, ok := e.(tokenNextCarrier)
+		return next, ok && tokenCarrier.ErrorNextUnderAPIToken()
+	}
+	return "", false
+}
+
+// RefusalNextActions is the server's guidance for a refused request, shown
+// under the error line: each distinct hint as sent, then where to read the
+// request's state ("next"), then the Retry-After wait of a gated refusal other
+// than a plan limit. Nil when err carries none. Under an API token "next" is
+// text only, since a path the server names may refuse token authentication.
 func RefusalNextActions(err error) []NextAction {
 	var actions []NextAction
 	for _, hint := range refusalHints(err) {
 		actions = append(actions, NextAction{Description: hint})
+	}
+	switch next, underAPIToken := refusalNext(err); {
+	case next == "":
+	case underAPIToken:
+		actions = append(actions, NextAction{Description: refusalNextDescription + ", which an API token cannot read: " + next})
+	default:
+		actions = append(actions, NextAction{Command: "alpacon api " + next, Description: refusalNextDescription})
+	}
+	gate, _ := ParseErrorGateAndMissing(err)
+	if wait := RetryAfter(err); wait > 0 && gate != "" && gate != GatePlan {
+		actions = append(actions, NextAction{Description: fmt.Sprintf("Retry after %ds", retryAfterSeconds(wait))})
 	}
 	return actions
 }
@@ -124,7 +193,7 @@ func (e *rewordedError) Error() string { return e.message }
 func (e *rewordedError) Unwrap() error { return e.err }
 
 // PrintRefusalHints writes err's refusal guidance to w, one "Hint:" line per
-// distinct hint, for output written outside the Cli* helpers.
+// RefusalNextActions entry, for output written outside the Cli* helpers.
 func PrintRefusalHints(w io.Writer, err error) {
 	printRefusalNextActions(w, err)
 }
@@ -148,8 +217,7 @@ func (e *hintOnlyError) ErrorHint() string { return e.hint }
 
 // RawTerminalHintLines renders err's refusal guidance for a terminal that may
 // be in raw mode, where a bare newline leaves the cursor where it stood: one
-// "Hint:" line per distinct hint, each ending in \r\n. Empty when err carries
-// none.
+// "Hint:" line per RefusalNextActions entry, each ending in \r\n.
 func RawTerminalHintLines(err error) string {
 	var sb strings.Builder
 	for _, action := range RefusalNextActions(err) {

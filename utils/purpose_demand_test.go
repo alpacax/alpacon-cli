@@ -270,3 +270,37 @@ func TestPrintPurposeRefused_ServerHintReplacesTheGuess(t *testing.T) {
 	})
 	assert.Contains(t, stderr, "may have expired")
 }
+
+func TestPrintPurposeRefused_NextOrRetryWithoutHintKeepsTheGuess(t *testing.T) {
+	tests := []struct {
+		name      string
+		refusal   *refusedError
+		wantFirst NextAction
+	}{
+		{
+			name:      "next only",
+			refusal:   &refusedError{next: "/api/events/commands/c1/", gate: "approval"},
+			wantFirst: NextAction{Command: "alpacon api /api/events/commands/c1/", Description: "Where the server says to check on this refusal"},
+		},
+		{
+			name:      "retry after only",
+			refusal:   &refusedError{gate: "rate", retryAfter: 30 * time.Second},
+			wantFirst: NextAction{Description: "Retry after 30s"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out string
+			withFormat(OutputFormatJSON, func() {
+				out = testutil.CaptureStdout(t, func() { PrintPurposeRefused(purposeTestCommandID, tt.refusal) })
+			})
+
+			var got purposeAnswerSignal
+			require.NoError(t, json.Unmarshal([]byte(out), &got), "stdout: %s", out)
+			assert.Contains(t, got.Message, "may have expired")
+			require.Len(t, got.NextActions, 2)
+			assert.Equal(t, tt.wantFirst, got.NextActions[0])
+			assert.Contains(t, got.NextActions[1].Command, "alpacon exec logs")
+		})
+	}
+}
