@@ -21,19 +21,21 @@ func consoleLink(raw, workspaceURL, baseDomain string) string {
 		return ""
 	}
 	if host == consoleHost(workspace.Hostname()) && consolePort(link) == consolePort(workspace) {
-		return raw
+		return link.String()
 	}
 	base := consoleHost(baseDomain)
 	workspaceHost := consoleHost(workspace.Hostname())
 	workspaceIP, _ := netip.ParseAddr(workspaceHost)
 	if base == cloud.DefaultBaseDomain && !workspaceIP.IsValid() && strings.HasSuffix(workspaceHost, "."+base) && (host == base || strings.HasSuffix(host, "."+base)) && consolePort(link) == defaultConsolePort(link.Scheme) {
-		return raw
+		return link.String()
 	}
 	return ""
 }
 
 func consoleOrigin(raw string) *url.URL {
-	if len(raw) > 2048 || strings.ContainsFunc(raw, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) {
+	if len(raw) > 2048 || strings.ContainsFunc(raw, func(r rune) bool {
+		return r > unicode.MaxASCII || unicode.IsSpace(r) || unicode.IsControl(r) || r == '#'
+	}) {
 		return nil
 	}
 	u, err := url.Parse(raw)

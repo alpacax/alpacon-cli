@@ -149,7 +149,7 @@ func TestLimiterContentionPreservesFirstEvent(t *testing.T) {
 }
 
 func allowAt(statePath, session string, kind Kind, now time.Time) (int, bool, error) {
-	return allow(statePath, session, kind, func() time.Time { return now })
+	return allow(statePath, "", session, kind, func() time.Time { return now })
 }
 
 func TestLimiterFuturePruningAndKeyBound(t *testing.T) {
@@ -199,4 +199,35 @@ func TestLimiterLockTimeoutFailsOpenWithoutWrite(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "original", string(data))
+}
+
+func TestOversizedStateFailsOpen(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "signals.json")
+	now := time.Now()
+	data, err := json.Marshal(map[string]entry{"denied:ses-1": {Last: now}})
+	require.NoError(t, err)
+	data = append(data, bytes.Repeat([]byte(" "), 64*1024)...)
+	require.NoError(t, os.WriteFile(path, data, 0600))
+	_, emit, err := allowAt(path, "ses-1", Denied, now)
+	require.NoError(t, err)
+	assert.True(t, emit, "oversized state must fail open")
+}
+
+func TestLimiterWholeStepDeadline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "signals.json")
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		finished := make(chan struct{})
+		start := time.Now()
+		_, emit, err := allow(path, "", "ses-1", Denied, func() time.Time { defer close(finished); <-release; return time.Now() })
+		require.Error(t, err)
+		assert.True(t, emit, "the entire limiter must be bounded")
+		assert.Equal(t, 500*time.Millisecond, time.Since(start))
+		close(release)
+		<-finished
+		synctest.Wait()
+	})
+	_, err := os.Stat(path)
+	assert.ErrorIs(t, err, os.ErrNotExist)
 }

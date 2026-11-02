@@ -354,3 +354,16 @@ func TestSignalPinnedOriginBypassesConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestSignalBatchKeepsWorkspacesSeparate(t *testing.T) {
+	old := deliverLocalSignal
+	t.Cleanup(func() { deliverLocalSignal = old })
+	var got []string
+	deliverLocalSignal = func(_ localsignal.Kind, f localsignal.Fields) { got = append(got, f.Origin.WorkspaceURL) }
+	var failures []error
+	for _, workspace := range []string{"https://first.example", "https://first.example", "https://second.example"} {
+		failures = append(failures, WithSignalFields(&signalRefusalStub{gate: "risk"}, localsignal.Fields{}, signalOriginStub{WorkspaceURL: workspace}))
+	}
+	SignalRefusal(&BatchError{Failures: failures})
+	assert.Equal(t, []string{"https://first.example", "https://second.example"}, got)
+}

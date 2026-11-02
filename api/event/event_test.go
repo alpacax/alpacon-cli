@@ -2748,7 +2748,11 @@ func TestSuccessfulCommandWithPendingSudoApprovalSignals(t *testing.T) {
 				want += output
 			}
 			assert.Equal(t, want, out.String())
-			assert.Equal(t, 1, strings.Count(stderr, "==== ALPACON: APPROVAL PENDING ===="))
+			banners := 1
+			if lane == "polling" {
+				banners = 2
+			}
+			assert.Equal(t, banners, strings.Count(stderr, "==== ALPACON: APPROVAL PENDING ===="))
 			assert.Contains(t, stderr, "sudo on my-server as alice is waiting for approval. Session ses-1.")
 		})
 	}

@@ -1,8 +1,10 @@
 package localsignal
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -15,40 +17,80 @@ type entry struct {
 	Folded int       `json:"folded"`
 }
 
-func allow(statePath, session string, kind Kind, clock func() time.Time) (folded int, emit bool, err error) {
+func allow(statePath, workspace, session string, kind Kind, clock func() time.Time) (folded int, emit bool, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	type result struct {
+		folded int
+		emit   bool
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		folded, emit, err := allowWithin(ctx, statePath, workspace, session, kind, clock)
+		done <- result{folded, emit, err}
+	}()
+	select {
+	case r := <-done:
+		return r.folded, r.emit, r.err
+	case <-ctx.Done():
+		return 0, true, filelock.ErrLocked
+	}
+}
+
+func allowWithin(ctx context.Context, statePath, workspace, session string, kind Kind, clock func() time.Time) (int, bool, error) {
+	if err := os.MkdirAll(filepath.Dir(statePath), 0700); err != nil {
+		return 0, true, err
+	}
 	// Hold a sibling lock: renaming the state file replaces its inode.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	var lock *filelock.Lock
+	lock, err := openSignalFile(statePath+".lock", true)
+	if err != nil {
+		return 0, true, err
+	}
+	defer func() { _ = lock.Close() }()
 	for {
-		lock, err = filelock.Acquire(statePath+".lock", 0600)
+		err = lockSignalFile(lock)
 		if !errors.Is(err, filelock.ErrLocked) {
 			break
 		}
-		if !time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
 			return 0, true, filelock.ErrLocked
+		case <-time.After(5 * time.Millisecond):
 		}
-		time.Sleep(min(5*time.Millisecond, time.Until(deadline)))
 	}
 	if err != nil {
 		return 0, true, err
 	}
-	defer func() { _ = lock.Release() }()
+	defer func() { _ = unlockSignalFile(lock) }()
+	if err := ctx.Err(); err != nil {
+		return 0, true, err
+	}
 	now := clock()
 	state := map[string]entry{}
-	if data, readErr := os.ReadFile(statePath); readErr == nil {
-		if json.Unmarshal(data, &state) != nil || state == nil {
+	f, readErr := openSignalFile(statePath, false)
+	if readErr == nil {
+		data, err := io.ReadAll(io.LimitReader(f, 64*1024+1))
+		_ = f.Close()
+		if err != nil {
+			return 0, true, err
+		}
+		if len(data) > 64*1024 || json.Unmarshal(data, &state) != nil || state == nil {
 			state = map[string]entry{}
 		}
+	} else if !errors.Is(readErr, os.ErrNotExist) {
+		return 0, true, readErr
 	}
 	for key, item := range state {
 		if now.Sub(item.Last) > 24*time.Hour {
 			delete(state, key)
 		}
 	}
-	if runes := []rune(session); len(runes) > 128 {
-		session = string(runes[:128])
-	}
+	session = capText(session, 128)
 	key := string(kind)
+	if workspace != "" {
+		key = workspace + "|" + key
+	}
 	if session != "" {
 		key += ":" + session
 	}
@@ -56,14 +98,17 @@ func allow(statePath, session string, kind Kind, clock func() time.Time) (folded
 	if found && !last.Last.After(now) && now.Sub(last.Last) < 60*time.Second {
 		last.Folded++
 		state[key] = last
-		err := saveState(statePath, state)
+		err := saveState(ctx, statePath, state)
 		return 0, err != nil, err
 	}
 	state[key] = entry{Last: now}
-	return last.Folded, true, saveState(statePath, state)
+	return last.Folded, true, saveState(ctx, statePath, state)
 }
 
-func saveState(statePath string, state map[string]entry) error {
+func saveState(ctx context.Context, statePath string, state map[string]entry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f, err := os.CreateTemp(filepath.Dir(statePath), ".signals-*")
 	if err != nil {
 		return err
@@ -74,6 +119,9 @@ func saveState(statePath string, state map[string]entry) error {
 		err = closeErr
 	}
 	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	return os.Rename(f.Name(), statePath)

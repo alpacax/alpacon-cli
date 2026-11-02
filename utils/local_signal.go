@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -141,8 +142,9 @@ func SignalPaused(err error) { signalRefusal(err, false) }
 
 func signalRefusal(err error, command bool) {
 	seen := map[struct {
-		session string
-		kind    localsignal.Kind
+		workspace string
+		session   string
+		kind      localsignal.Kind
 	}]bool{}
 	signalOne := func(e error, fields localsignal.Fields) {
 		fields.Gate = ""
@@ -190,10 +192,17 @@ func signalRefusal(err error, command bool) {
 			}
 		}
 		fields = responseSignalFields(e, fields)
+		workspace := ""
+		if fields.Origin != nil {
+			if origin, err := url.Parse(fields.Origin.WorkspaceURL); err == nil {
+				workspace = strings.ToLower(origin.Host)
+			}
+		}
 		key := struct {
-			session string
-			kind    localsignal.Kind
-		}{fields.Session, kind}
+			workspace string
+			session   string
+			kind      localsignal.Kind
+		}{workspace, fields.Session, kind}
 		if seen[key] {
 			return
 		}

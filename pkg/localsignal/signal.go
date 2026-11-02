@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -29,6 +30,7 @@ var NewNotifier = func() Notifier { return platformNotifier{} }
 var OpenTTY = openTTY
 
 var executableName = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,64}$`)
+var sessionName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 var assignmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 
 type Kind string
@@ -88,15 +90,17 @@ func (e *Emitter) Emit(kind Kind, fields Fields) {
 	statePath, err := e.statePath()
 	folded, emit := 0, true
 	if err == nil {
-		folded, emit, err = allow(statePath, fields.Session, kind, e.now)
+		workspace, _ := url.Parse(e.WorkspaceURL)
+		host := ""
+		if workspace != nil {
+			host = strings.ToLower(workspace.Host)
+		}
+		folded, emit, err = allow(statePath, host, fields.Session, kind, e.now)
 	}
 	if err != nil {
 		e.log("Local signal state unavailable: %s", err)
 	}
-	if !emit {
-		return
-	}
-	title, body := Format(kind, fields, folded)
+	title, body := Format(kind, fields, 0)
 	if title == "" {
 		return
 	}
@@ -104,9 +108,8 @@ func (e *Emitter) Emit(kind Kind, fields Fields) {
 	bannerBody := body
 	if link != "" {
 		bannerBody += "\n" + link
-		body += " " + link
 	}
-	banner := fmt.Sprintf("==== %s ====\n%s\n================================\n", strings.ToUpper(title), bannerBody)
+	banner := fmt.Sprintf("==== %s ====\n%s\n================================\n", strings.ToUpper(title), capText(bannerBody, 256))
 	if e.red != nil {
 		banner = e.red(banner)
 	}
@@ -115,16 +118,18 @@ func (e *Emitter) Emit(kind Kind, fields Fields) {
 		ttyOutput = ttyOutput || term.IsTerminal(int(file.Fd()))
 	}
 	if ttyOutput {
-		if tty, err := e.openTTY(); err == nil {
-			_, _ = io.WriteString(tty, banner)
-			_ = tty.Close()
-		}
+		writeTTY(e.openTTY, banner)
 	} else {
 		_, _ = io.WriteString(e.writer, banner)
 	}
-	if e.headless() {
+	if !emit || e.headless() {
 		return
 	}
+	_, body = Format(kind, fields, folded)
+	if link != "" {
+		body += " " + link
+	}
+	body = capText(body, 256)
 	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
 	defer cancel()
 	done := make(chan error, 1)
@@ -147,13 +152,19 @@ func (e *Emitter) log(message string, args ...any) {
 
 // Argv0 discards assignments and shell syntax before accepting a plain executable name.
 func Argv0(command string) string {
-	command = strings.TrimLeftFunc(command, unicode.IsSpace)
+	if len(command) > 4096 {
+		return ""
+	}
+	command = strings.TrimLeft(command, " \t\n\r")
 	for {
 		prefix := assignmentName.FindString(command)
 		var quote rune
 		escaped := false
 		end := len(command)
 		for i, r := range command[len(prefix):] {
+			if r > unicode.MaxASCII || (unicode.IsControl(r) && !asciiSpace(r)) {
+				return ""
+			}
 			if r == '`' || strings.HasPrefix(command[len(prefix)+i:], "$(") || strings.HasPrefix(command[len(prefix)+i:], "${") {
 				return ""
 			}
@@ -178,7 +189,7 @@ func Argv0(command string) string {
 				quote = r
 				continue
 			}
-			if unicode.IsSpace(r) {
+			if asciiSpace(r) {
 				end = len(prefix) + i
 				break
 			}
@@ -192,10 +203,10 @@ func Argv0(command string) string {
 		if prefix == "" {
 			break
 		}
-		command = strings.TrimLeftFunc(command[end:], unicode.IsSpace)
+		command = strings.TrimLeft(command[end:], " \t\n\r")
 	}
 	end := strings.IndexFunc(command, func(r rune) bool {
-		return unicode.IsSpace(r) || strings.ContainsRune(";|&<>()$`'\"\\", r)
+		return asciiSpace(r) || strings.ContainsRune(";|&<>()$`'\"\\", r)
 	})
 	if end >= 0 {
 		command = command[:end]
@@ -212,7 +223,7 @@ func Argv0(command string) string {
 
 func clean(s string) string {
 	return strings.TrimSpace(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) {
 			return -1
 		}
 		return r
@@ -227,13 +238,16 @@ func Format(kind Kind, f Fields, folded int) (title, body string) {
 	if command == "" || command == "." {
 		command = "Command"
 	}
-	if server := clean(f.Server); server != "" {
+	if server := displayName(f.Server); server != "" {
 		command += " on " + server
 	}
-	if account := clean(f.Account); account != "" {
+	if account := displayName(f.Account); account != "" {
 		command += " as " + account
 	}
-	session := clean(f.Session)
+	session := f.Session
+	if !sessionName.MatchString(session) {
+		session = ""
+	}
 	switch kind {
 	case Denied:
 		title, body = "Alpacon: command denied", command+" was refused"
@@ -271,7 +285,7 @@ func Format(kind Kind, f Fields, folded int) (title, body string) {
 	if folded > 0 {
 		body += fmt.Sprintf(" +%d more.", folded)
 	}
-	return title, body
+	return title, capText(body, 256)
 }
 
 func headless(platform string, lookupEnv func(string) (string, bool), sessionZero bool) bool {
@@ -288,4 +302,31 @@ func headless(platform string, lookupEnv func(string) (string, bool), sessionZer
 		return (!display && !wayland) || !bus
 	}
 	return platform == "windows" && sessionZero
+}
+
+func asciiSpace(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '\r' }
+
+func capText(s string, limit int) string {
+	for i := range s {
+		if limit == 0 {
+			return s[:i]
+		}
+		limit--
+	}
+	return s
+}
+
+func displayName(s string) string {
+	s = clean(s)
+	if strings.Contains(s, "://") {
+		return ""
+	}
+	return capText(s, 64)
+}
+
+func writeTTYNow(open func() (io.WriteCloser, error), banner string) {
+	if tty, err := open(); err == nil {
+		_, _ = io.WriteString(tty, banner)
+		_ = tty.Close()
+	}
 }

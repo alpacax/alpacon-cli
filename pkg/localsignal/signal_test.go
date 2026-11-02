@@ -16,6 +16,7 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -144,10 +145,11 @@ func TestEmitHeadlessBannerAndSharedLimit(t *testing.T) {
 	assert.Equal(t, "==== ALPACON: COMMAND DENIED ====\nid was refused and did not run. Session ses-1.\n================================\n", output.String())
 	output.Reset()
 	emitter.Emit(Denied, f)
-	assert.Empty(t, output.String())
+	assert.Contains(t, output.String(), "COMMAND DENIED")
+	output.Reset()
 	now = now.Add(60 * time.Second)
 	emitter.Emit(Denied, f)
-	assert.Contains(t, output.String(), "Session ses-1. +1 more.")
+	assert.Contains(t, output.String(), "Session ses-1.")
 }
 
 func TestEmitNotifierFailureAndTimeout(t *testing.T) {
@@ -191,7 +193,7 @@ func TestEmitNotifierFailureAndTimeout(t *testing.T) {
 
 func TestNoOptOut(t *testing.T) {
 	t.Parallel()
-	allowed := map[string]bool{"CI": true, "SSH_CONNECTION": true, "SSH_TTY": true, "DISPLAY": true, "WAYLAND_DISPLAY": true, "DBUS_SESSION_BUS_ADDRESS": true}
+	allowed := map[string]bool{"CI": true, "SSH_CONNECTION": true, "SSH_TTY": true, "DISPLAY": true, "WAYLAND_DISPLAY": true, "DBUS_SESSION_BUS_ADDRESS": true, "SystemRoot": true}
 	// Include every direct caller and error sink, so an opt-out cannot move outside this package.
 	var files []string
 	err := filepath.WalkDir("../..", func(file string, entry os.DirEntry, err error) error {
@@ -321,7 +323,7 @@ func TestBannerDestination(t *testing.T) {
 				assert.Equal(t, "sudo was refused and did not run. https://console.example/commands/1", body)
 				return nil
 			})
-			e.Emit(Denied, Fields{Argv0: "sudo", ConsoleURL: "https://console.example/commands/1"})
+			e.Emit(Denied, Fields{Argv0: "sudo", ConsoleURL: "HTTPS://console.example/commands/1"})
 			assert.Equal(t, "https://console.example/commands/1", <-notified)
 			const banner = "==== ALPACON: COMMAND DENIED ====\nsudo was refused and did not run.\nhttps://console.example/commands/1\n================================\n"
 			if tc.json {
@@ -343,7 +345,7 @@ func TestBannerDestination(t *testing.T) {
 func TestServerValuesAreCleaned(t *testing.T) {
 	t.Parallel()
 	dirty := "safe\x00\x1b\x7f\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
-	_, body := Format(Denied, Fields{Argv0: "sudo", Server: dirty, Account: dirty, Gate: dirty, Session: dirty}, 0)
+	_, body := Format(Denied, Fields{Argv0: "sudo", Server: dirty, Account: dirty, Gate: dirty, Session: "safe"}, 0)
 	assert.Equal(t, "sudo on safe as safe was refused by the safe gate and did not run. Session safe.", body)
 	assert.Equal(t, "safe", clean(dirty))
 }
@@ -428,7 +430,7 @@ func TestConsoleURLValidation(t *testing.T) {
 				if want != "" {
 					wantBody += " " + want
 				}
-				assert.Equal(t, wantBody, body)
+				assert.Equal(t, capText(wantBody, 256), body)
 				args := platformNotificationArguments(ctx, title, body, link)
 				if !tc.keep {
 					for _, arg := range args {
@@ -442,8 +444,80 @@ func TestConsoleURLValidation(t *testing.T) {
 			if !tc.keep {
 				assert.NotContains(t, output.String(), tc.link)
 			} else {
-				assert.Contains(t, output.String(), "\n"+want+"\n")
+				_, bannerBody := Format(ApprovalPending, Fields{}, 0)
+				assert.Contains(t, output.String(), capText(bannerBody+"\n"+want, 256)+"\n")
 			}
 		})
 	}
+}
+
+func TestArgv0NonASCIIAndControls(t *testing.T) {
+	t.Parallel()
+	for _, r := range []rune{'\u00a0', '\u2003', '\u3000', '\u0085', '\x1c', '\u2028'} {
+		t.Run("U"+strconv.FormatInt(int64(r), 16), func(t *testing.T) {
+			t.Parallel()
+			assert.Empty(t, Argv0("TOKEN=abc"+string(r)+"sk_live_X"))
+			assert.Empty(t, Argv0("sudo"+string(r)+"secret"))
+		})
+	}
+}
+
+func TestArgv0InputBound(t *testing.T) {
+	command := strings.Repeat("A=abc ", 90000)[:512*1024]
+	start := time.Now()
+	assert.Empty(t, Argv0(command))
+	assert.Less(t, time.Since(start), 50*time.Millisecond)
+	assert.Empty(t, Argv0("sudo "+strings.Repeat("x", 4096)))
+	assert.Equal(t, "id", Argv0("id "+strings.Repeat("x", 4093)))
+}
+
+func TestSignalTextBounds(t *testing.T) {
+	t.Parallel()
+	for _, session := range []string{"a b", "https://example.com", strings.Repeat("a", 65), "ses-1\u200b"} {
+		_, body := Format(Paused, Fields{Session: session}, 0)
+		assert.Equal(t, "Work Session is paused after a critical denial. The owner or an approver can resume or end it.", body)
+	}
+	_, body := Format(Denied, Fields{Server: "https://example.com", Account: "http://example.com"}, 0)
+	assert.Equal(t, "Command was refused and did not run.", body)
+	_, body = Format(Denied, Fields{Server: strings.Repeat("界", 80), Account: strings.Repeat("é", 80)}, 0)
+	assert.Contains(t, body, "on "+strings.Repeat("界", 64)+" as "+strings.Repeat("é", 64))
+	_, body = Format(Denied, Fields{Server: strings.Repeat("界", 80), Account: strings.Repeat("é", 80), Gate: strings.Repeat("x", 300)}, 0)
+	assert.Equal(t, 256, utf8.RuneCountInString(body))
+}
+
+func TestCleanUnicodeCategories(t *testing.T) {
+	t.Parallel()
+	for _, r := range []rune{'\u0085', '\u061c', '\u200b', '\ufeff', '\u00ad', '\u2028', '\u2029'} {
+		t.Run("U"+strconv.FormatInt(int64(r), 16), func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, "safesafe", clean("safe"+string(r)+"safe"))
+		})
+	}
+}
+
+func TestConsoleLinkDisplayText(t *testing.T) {
+	t.Parallel()
+	for _, suffix := range []string{"/a b https://evil.example/x", "/a\u00a0b", "/a\u2028b", "/x#fragment", "/x#", "/café"} {
+		assert.Empty(t, consoleLink("https://console.example"+suffix, "https://console.example", ""))
+	}
+	assert.Equal(t, "https://console.example/a%20b", consoleLink("https://console.example/a%20b", "https://console.example", ""))
+}
+
+func TestBannerWithFreshState(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	e := New(&output, nil, nil)
+	path := filepath.Join(t.TempDir(), "signals.json")
+	e.statePath = func() (string, error) { return path, nil }
+	e.headless = func() bool { return false }
+	calls := 0
+	e.notifier = notifyFunc(func(context.Context, string, string, string) error { calls++; return nil })
+	e.Emit(Denied, Fields{})
+	output.Reset()
+	e.Emit(Denied, Fields{})
+	assert.Contains(t, output.String(), "COMMAND DENIED")
+	assert.Equal(t, 1, calls)
+	e.WorkspaceURL = "https://other.example"
+	e.Emit(Denied, Fields{})
+	assert.Equal(t, 2, calls)
 }

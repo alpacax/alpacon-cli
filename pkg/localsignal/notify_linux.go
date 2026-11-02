@@ -12,9 +12,9 @@ import (
 func platformHeadless() bool { return headless("linux", os.LookupEnv, false) }
 
 func (platformNotifier) Notify(ctx context.Context, title, body, consoleURL string) error {
-	tool, err := exec.LookPath("notify-send")
-	if err != nil {
-		return err
+	tool := linuxNotifierPath()
+	if tool == "" {
+		return nil
 	}
 	return linuxNotificationCommand(ctx, tool, title, body).Run()
 }
@@ -25,4 +25,13 @@ func linuxNotificationCommand(ctx context.Context, tool, title, body string) *ex
 
 func escapeMarkup(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
+}
+
+func linuxNotifierPath() string {
+	for _, tool := range []string{"/usr/bin/notify-send", "/bin/notify-send"} {
+		if info, err := os.Stat(tool); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0111 != 0 {
+			return tool
+		}
+	}
+	return ""
 }

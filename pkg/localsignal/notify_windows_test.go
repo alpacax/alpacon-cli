@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -34,7 +35,7 @@ func TestWindowsToastCommand(t *testing.T) {
 			link := consoleLink(tc.link, "https://console.example", "")
 			cmd := windowsNotificationCommand(context.Background(), "title", "body", link)
 			require.Len(t, cmd.Args, 5)
-			assert.Equal(t, []string{"powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand"}, cmd.Args[:4])
+			assert.Equal(t, []string{cmd.Path, "-NoProfile", "-NonInteractive", "-EncodedCommand"}, cmd.Args[:4])
 			data, err := base64.StdEncoding.DecodeString(cmd.Args[4])
 			require.NoError(t, err)
 			units := make([]uint16, len(data)/2)
@@ -64,4 +65,15 @@ func platformNotificationArguments(ctx context.Context, title, body, link string
 		units[i] = binary.LittleEndian.Uint16(data[2*i:])
 	}
 	return []string{string(utf16.Decode(units))}
+}
+
+func TestWindowsNotifierPath(t *testing.T) {
+	for _, root := range []string{"", "relative", `D:\Windows`} {
+		t.Setenv("SystemRoot", root)
+		if !filepath.IsAbs(root) {
+			root = `C:\Windows`
+		}
+		cmd := windowsNotificationCommand(context.Background(), "title", "body", "")
+		assert.Equal(t, filepath.Join(root, `System32\WindowsPowerShell\v1.0\powershell.exe`), cmd.Path)
+	}
 }
