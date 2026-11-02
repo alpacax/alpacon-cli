@@ -1,6 +1,7 @@
 package websh
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"net/http"
@@ -32,25 +33,31 @@ type WebshArgs struct {
 	WorkSessionID string
 	OutputFormat  string
 	Env           map[string]string
+	UnsetEnv      []string
 }
 
-// ParseWebshArgs parses raw CLI args for `alpacon websh` (DisableFlagParsing mode), returning
-// errHelpRequested when -h/--help is seen.
+// ParseWebshArgs parses raw CLI args for `alpacon websh` (DisableFlagParsing mode). It reads every
+// flag before returning the first error or errHelpRequested, so OutputFormat holds the last --output.
 func ParseWebshArgs(args []string) (WebshArgs, error) {
 	res := WebshArgs{Env: map[string]string{}}
+	var stop error
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "-s" || args[i] == "--share":
 			res.Share = true
 		case args[i] == "-h" || args[i] == "--help":
-			return res, errHelpRequested
+			stop = cmp.Or(stop, errHelpRequested)
 		case strings.HasPrefix(args[i], "-u") || strings.HasPrefix(args[i], "--username"):
 			res.Username, i = extractValue(args, i)
 		case strings.HasPrefix(args[i], "-g") || strings.HasPrefix(args[i], "--groupname"):
 			res.Groupname, i = extractValue(args, i)
 		case args[i] == "--env" || strings.HasPrefix(args[i], "--env="):
-			if errMsg := execCmd.ParseEnvArg(args[i], res.Env); errMsg != "" {
-				return res, errors.New(errMsg)
+			unset, errMsg := execCmd.ParseEnvArg(args[i], res.Env)
+			if errMsg != "" {
+				stop = cmp.Or(stop, errors.New(errMsg))
+			}
+			if unset != "" {
+				res.UnsetEnv = append(res.UnsetEnv, unset)
 			}
 		case strings.HasPrefix(args[i], "--read-only"):
 			if strings.Contains(args[i], "=") {
@@ -62,7 +69,7 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 				case "false":
 					res.ReadOnly = false
 				default:
-					return res, fmt.Errorf("the --read-only value must be either 'true' or 'false'")
+					stop = cmp.Or(stop, fmt.Errorf("the --read-only value must be either 'true' or 'false'"))
 				}
 			} else {
 				// Without "=", take the next word only if it is "true" or "false"; otherwise true.
@@ -81,16 +88,17 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 		case args[i] == "--work-session" || strings.HasPrefix(args[i], "--work-session="):
 			ws, newI := extractValue(args, i)
 			if ws == "" {
-				return res, fmt.Errorf("--work-session requires a value")
+				stop = cmp.Or(stop, fmt.Errorf("--work-session requires a value"))
 			}
 			res.WorkSessionID = ws
 			i = newI
 		case args[i] == "--output" || strings.HasPrefix(args[i], "--output="):
 			val, newI := extractValue(args, i)
 			if val == "" {
-				return res, fmt.Errorf("--output requires a value (table|json)")
+				stop = cmp.Or(stop, fmt.Errorf("--output requires a value (table|json)"))
+			} else {
+				res.OutputFormat = val
 			}
-			res.OutputFormat = val
 			i = newI
 		default:
 			if res.ServerName == "" {
@@ -101,7 +109,7 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 			}
 		}
 	}
-	return res, nil
+	return res, stop
 }
 
 // buildRemoteExecArgs assembles the shared-runner args for websh command mode.
@@ -219,12 +227,13 @@ Note: All flags must be placed before the server name.
 	DisableFlagParsing: true,
 	Run: func(cmd *cobra.Command, args []string) {
 		parsed, err := ParseWebshArgs(args)
+		execCmd.WarnUnsetEnv(parsed.UnsetEnv)
 		if err != nil {
 			if errors.Is(err, errHelpRequested) {
 				_ = cmd.Help()
 				return
 			}
-			utils.CliErrorWithExit("%s", err)
+			utils.CliArgumentErrorWithExit("%s", err)
 		}
 
 		username := parsed.Username
@@ -236,11 +245,11 @@ Note: All flags must be placed before the server name.
 		env := parsed.Env
 
 		if serverName == "" {
-			utils.CliErrorWithExit("Server name is required.")
+			utils.CliArgumentErrorWithExit("Server name is required.")
 		}
 
 		if share && len(commandArgs) > 0 {
-			utils.CliErrorWithExit("The --share flag cannot be used with remote commands. Use --share for interactive sessions only.")
+			utils.CliArgumentErrorWithExit("The --share flag cannot be used with remote commands. Use --share for interactive sessions only.")
 		}
 
 		if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
@@ -267,7 +276,7 @@ Note: All flags must be placed before the server name.
 
 		if parsed.OutputFormat != "" {
 			if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
-				utils.CliErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
+				utils.CliArgumentErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
 			}
 			utils.OutputFormat = parsed.OutputFormat
 		}

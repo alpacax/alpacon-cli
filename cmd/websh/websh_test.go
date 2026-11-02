@@ -358,6 +358,14 @@ func TestParseWebshArgs_EnvErrorHidesSecret(t *testing.T) {
 	assert.NotContains(t, err.Error(), "hunter2", "malformed --env error must not echo the value")
 }
 
+func TestParseWebshArgs_UnsetEnvKeyIsReportedNotSent(t *testing.T) {
+	t.Parallel()
+	got, err := ParseWebshArgs([]string{"--env=ALPACON_TEST_UNSET_KEY", "my-server", "ls"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"ALPACON_TEST_UNSET_KEY"}, got.UnsetEnv)
+	assert.NotContains(t, got.Env, "ALPACON_TEST_UNSET_KEY")
+}
+
 func TestParseWebshArgs_EnvPrefixIsExact(t *testing.T) {
 	t.Parallel()
 	// --env-file must not be swallowed by --env matching; websh has no
