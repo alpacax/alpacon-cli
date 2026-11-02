@@ -519,6 +519,39 @@ func TestSendRequest_SignerRefusalDropsNext(t *testing.T) {
 	assert.Nil(t, utils.RefusalNextActions(err))
 }
 
+func TestSendGetRequestForDownload_SignerRefusalDropsNext(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+	}{
+		{name: "forbidden", status: http.StatusForbidden},
+		{name: "too many requests", status: http.StatusTooManyRequests},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(`{"code": "future_denied", "gate": "approval", "next": "/api/approvals/7/"}`))
+			}))
+			defer ts.Close()
+			ac := newTestClient(ts.URL)
+			ac.dropsRefusalNext = true
+
+			resp, err := ac.SendGetRequestForDownload("/api/test/")
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+
+			require.Error(t, err)
+			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
+			assert.Nil(t, utils.RefusalNextActions(err))
+		})
+	}
+}
+
 func TestSendRequest_MalformedNextYieldsNoAction(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

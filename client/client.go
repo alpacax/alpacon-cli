@@ -1041,7 +1041,7 @@ func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, e
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, withRetryAfter(withStatus(checkAuthStatus(resp.StatusCode, body), resp.StatusCode), resp.Header)
+		return nil, ac.withoutForeignNext(withRetryAfter(withStatus(checkAuthStatus(resp.StatusCode, body), resp.StatusCode), resp.Header))
 	}
 	// A 402, 405 or 429 is a coded refusal too: the shared parser keeps its
 	// code and hint, where the caller would only have the raw body to print.
@@ -1052,7 +1052,7 @@ func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, e
 		if resp.StatusCode == http.StatusPaymentRequired {
 			refusal = ac.rewritePlanLimitMessage(refusal)
 		}
-		return nil, refusal
+		return nil, ac.withoutForeignNext(refusal)
 	}
 
 	return resp, nil
