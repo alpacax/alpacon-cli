@@ -89,9 +89,13 @@ func Execute() {
 	format := utils.OutputFormatIn(args)
 	kube.ApplySurfaceGate(RootCmd, kubernetesSurfaceEnabled())
 	RootCmd.InitDefaultCompletionCmd()
+	RootCmd.InitDefaultHelpCmd()
 	markHookErrors(RootCmd)
 	keepWithOwnParser(RootCmd, args)
 	utils.CommandName = commandName(RootCmd, args)
+	if format == utils.OutputFormatJSON {
+		keepHelpOffStdout(RootCmd)
+	}
 	cmd, err := RootCmd.ExecuteC()
 	switch {
 	case err == nil:
@@ -111,6 +115,26 @@ func commandName(root *cobra.Command, args []string) string {
 	cmd, _, _ := root.Find(args)
 	_, name, _ := strings.Cut(cmd.CommandPath(), " ")
 	return name
+}
+
+// keepHelpOffStdout sends help to stderr, since stdout carries only data under --output json,
+// and makes help for a topic no command answers a usage error rather than a success.
+func keepHelpOffStdout(root *cobra.Command) {
+	help := root.HelpFunc()
+	root.SetHelpFunc(func(c *cobra.Command, args []string) {
+		out := c.OutOrStdout()
+		c.SetOut(c.ErrOrStderr())
+		defer c.SetOut(out)
+		help(c, args)
+	})
+	helpCmd, _, _ := root.Find([]string{"help"})
+	run := helpCmd.Run
+	helpCmd.Run = func(c *cobra.Command, args []string) {
+		if topic, _, err := root.Find(args); topic == nil || err != nil {
+			utils.CliUsageErrorWithExit("unknown help topic %q", strings.Join(args, " "))
+		}
+		run(c, args)
+	}
 }
 
 // keepWithOwnParser detaches the subcommands of a command that parses its own flags when a flag Cobra

@@ -35,6 +35,51 @@ func lastEnvelope(t *testing.T, stderr string) contractEnvelope {
 	return envelope
 }
 
+func TestHelpGoesToStderrUnderJSONOutput(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "help flag on a group", args: []string{"workspace", "--help"}},
+		{name: "help flag on an alias", args: []string{"ws", "ls", "-h"}},
+		{name: "help command", args: []string{"help", "server"}},
+		{name: "help flag on a command with its own parser", args: []string{"exec", "--help"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			stdout, stderr, exitCode := runJSONHelper(t, tt.args...)
+
+			assert.Equal(t, 0, exitCode, "stderr: %s", stderr)
+			assert.Empty(t, stdout)
+			assert.Contains(t, stderr, "Usage:")
+		})
+	}
+}
+
+func TestHelpForAnUnknownTopicIsAUsageErrorUnderJSONOutput(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, exitCode := runJSONHelper(t, "help", "no-such-command")
+
+	assert.Equal(t, utils.ExitCodeUsageError, exitCode)
+	assert.Empty(t, stdout)
+	assert.JSONEq(t, `{"ok":false,"exit_code":2,"error_code":"usage_error","message":"unknown help topic \"no-such-command\"","command":"help","context":{"operation":"help"}}`, stderr)
+}
+
+func TestAGroupWithoutASubcommandPrintsHelpToStderrBeforeTheEnvelopeUnderJSONOutput(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, exitCode := runJSONHelper(t, "server")
+
+	assert.Equal(t, utils.ExitCodeUsageError, exitCode)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "Available Commands:")
+	assert.Equal(t, "server", lastEnvelope(t, stderr).Command)
+}
+
 func TestTheEnvelopeNamesTheDeepestCommandTheLineResolved(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
