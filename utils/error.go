@@ -153,11 +153,25 @@ const (
 	WorkSessionTargetAccountNotReachable = "work_session_target_account_not_reachable"
 	TargetAccountOtherPerson             = "target_account_other_person"
 
-	// Refusals of a kube session the server names itself. An AI agent's
-	// WorkSession cannot open one yet; the cluster's agent is not connected;
-	// the agent did not accept the session, which the server then closed; and
-	// the caller has no user name the session could act as.
-	KubeSessionAgentModeNotSupported = "kube_session_agent_mode_not_supported"
+	// WorkSessionClusterNotAllowed: the cluster a kube session names is not
+	// the one its work session targets.
+	WorkSessionClusterNotAllowed = "work_session_cluster_not_allowed"
+
+	// Refusals of a work session create's targets and lifetime. A session
+	// targets servers or exactly one cluster, never both and never neither; a
+	// cluster session holds kube and optionally kube_exec, nothing else, and
+	// names no account; and its lifetime stays within the workspace's maximum.
+	WorkSessionMixedTargets               = "work_session_mixed_targets"
+	WorkSessionNoServers                  = "work_session_no_servers"
+	WorkSessionTooManyClusters            = "work_session_too_many_clusters"
+	WorkSessionInvalidScope               = "work_session_invalid_scope"
+	ClusterNotFound                       = "cluster_not_found"
+	WorkSessionTargetAccountNotApplicable = "work_session_target_account_not_applicable"
+	WorkSessionExpiresExceedsMaxTTL       = "work_session_expires_exceeds_max_ttl"
+
+	// Refusals of a kube session the server names itself. The cluster's agent
+	// is not connected; the agent did not accept the session, which the server
+	// then closed; and the caller has no user name the session could act as.
 	ClusterNotConnected              = "cluster_not_connected"
 	KubeSessionChannelOpenFailed     = "kube_session_channel_open_failed"
 	KubeSessionPrincipalNotSupported = "kube_session_principal_not_supported"

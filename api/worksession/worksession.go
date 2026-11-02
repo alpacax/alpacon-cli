@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -48,18 +49,101 @@ func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType, assigne
 
 // ProjectAttributes converts a WorkSession into its table row.
 func ProjectAttributes(ws *WorkSession) WorkSessionAttributes {
-	serverNames := make([]string, len(ws.Servers))
-	for i, srv := range ws.Servers {
-		serverNames[i] = srv.Name
-	}
 	return WorkSessionAttributes{
 		ID:          ws.ID,
 		Description: utils.TruncateString(ws.Description, 70),
 		Status:      ws.Status,
 		Scopes:      strings.Join(ws.Scopes, ", "),
-		Servers:     strings.Join(serverNames, ", "),
-		ExpiresAt:   ws.ExpiresAt.Local().Format("2006-01-02 15:04"),
+		Servers:     strings.Join(ServerNames(ws), ", "),
+		Clusters:    strings.Join(ClusterNames(ws), ", "),
+		ExpiresAt:   FormatExpiresAt(ws.ExpiresAt),
 	}
+}
+
+// FormatExpiresAt leaves blank the expiry of a session created with a
+// duration, which has none until it activates.
+func FormatExpiresAt(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Local().Format("2006-01-02 15:04")
+}
+
+// ServerNames lists the names of the servers ws targets.
+func ServerNames(ws *WorkSession) []string {
+	names := make([]string, len(ws.Servers))
+	for i, srv := range ws.Servers {
+		names[i] = srv.Name
+	}
+	return names
+}
+
+// ClusterNames lists the names of the clusters ws targets.
+func ClusterNames(ws *WorkSession) []string {
+	names := make([]string, len(ws.Clusters))
+	for i, c := range ws.Clusters {
+		names[i] = c.Name
+	}
+	return names
+}
+
+// TargetsCluster reports whether ws names clusterID among its targets.
+func TargetsCluster(ws *WorkSession, clusterID string) bool {
+	for _, c := range ws.Clusters {
+		if strings.EqualFold(c.ID, clusterID) {
+			return true
+		}
+	}
+	return false
+}
+
+// ClusterSessionFilter narrows GetClusterWorkSessions. Empty fields are not
+// sent; Status takes several statuses separated by commas.
+type ClusterSessionFilter struct {
+	ClusterID     string
+	Status        string
+	RequesterType string
+	AssignedUser  string
+}
+
+// GetClusterWorkSessions returns, whole, the work sessions that target one
+// cluster, through the server's cluster filter.
+func GetClusterWorkSessions(ac *client.AlpaconClient, filter ClusterSessionFilter) ([]WorkSession, error) {
+	if strings.TrimSpace(filter.ClusterID) == "" {
+		return nil, errors.New("cluster ID is required")
+	}
+	params := map[string]string{"cluster": filter.ClusterID}
+	if filter.Status != "" {
+		params["status"] = filter.Status
+	}
+	if filter.RequesterType != "" {
+		params["requester_type"] = filter.RequesterType
+	}
+	if filter.AssignedUser != "" {
+		params["assigned_user"] = filter.AssignedUser
+	}
+	sessions, err := api.FetchAllPages[WorkSession](ac, workSessionURL, params)
+	if err != nil {
+		return nil, err
+	}
+	// A listed ID goes on to a read or an approval wait, so it is held to what
+	// a server-sent ID must be before any of it reaches a path.
+	for i := range sessions {
+		pathID, err := api.RequireResponseID(sessions[i].ID, "work session")
+		if err != nil {
+			return nil, err
+		}
+		sessions[i].ID = pathID.String()
+	}
+	return sessions, nil
+}
+
+// FormatDuration renders d the way the server reads a duration, HH:MM:SS
+// with the hours left unbounded, rounding up to the whole second so a
+// sub-second remainder is never dropped to zero.
+func FormatDuration(d time.Duration) string {
+	seconds := int64((d + time.Second - 1) / time.Second)
+	return fmt.Sprintf("%02d:%02d:%02d", seconds/3600, seconds/60%60, seconds%60)
 }
 
 func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (*WorkSession, error) {

@@ -155,7 +155,9 @@ func formatRecommendations(recs []wsapi.Recommendation) string {
 	return strings.Join(lines, "\n")
 }
 
-func printSessionAdvisories(session *wsapi.WorkSession) {
+// PrintSessionAdvisories shows what the approver changed or recommended, such as a scope dropped from
+// the request. Text mode only—JSON callers return before reaching this.
+func PrintSessionAdvisories(session *wsapi.WorkSession) {
 	if block := formatAdjustments(session.Adjustments); block != "" {
 		utils.CliWarning("Approver adjusted your request:\n%s", block)
 	}

@@ -24,25 +24,28 @@ const (
 var endedStatuses = []string{StatusCompleted, StatusExpired, StatusRevoked, StatusRejected, StatusCancelled}
 
 type WorkSession struct {
-	ID                string                `json:"id"`
-	Title             string                `json:"title"`
-	Description       string                `json:"description"`
-	Status            string                `json:"status"`
-	RequesterType     string                `json:"requester_type"`
-	Scopes            []string              `json:"scopes"`
-	Servers           []types.ServerSummary `json:"servers"`
-	CreatedBy         *types.UserSummary    `json:"created_by"`
-	AssignedUser      *types.UserSummary    `json:"assigned_user"`
-	ApprovalRequestID string                `json:"approval_request_id"`
-	StartsAt          *time.Time            `json:"starts_at"`
-	ExpiresAt         time.Time             `json:"expires_at"`
-	StartedAt         *time.Time            `json:"started_at"`
-	CompletedAt       *time.Time            `json:"completed_at"`
-	AddedAt           time.Time             `json:"added_at"`
-	UpdatedAt         time.Time             `json:"updated_at"`
-	SudoPolicies      []SudoPolicyInline    `json:"sudo_policies"`
-	Adjustments       *Adjustments          `json:"adjustments"`
-	Recommendations   []Recommendation      `json:"recommendations"`
+	ID            string                `json:"id"`
+	Title         string                `json:"title"`
+	Description   string                `json:"description"`
+	Status        string                `json:"status"`
+	RequesterType string                `json:"requester_type"`
+	Scopes        []string              `json:"scopes"`
+	Servers       []types.ServerSummary `json:"servers"`
+	// Clusters is the one cluster a kube work session targets; a session
+	// targets either servers or a cluster, never both.
+	Clusters          []types.ClusterSummary `json:"clusters"`
+	CreatedBy         *types.UserSummary     `json:"created_by"`
+	AssignedUser      *types.UserSummary     `json:"assigned_user"`
+	ApprovalRequestID string                 `json:"approval_request_id"`
+	StartsAt          *time.Time             `json:"starts_at"`
+	ExpiresAt         time.Time              `json:"expires_at"`
+	StartedAt         *time.Time             `json:"started_at"`
+	CompletedAt       *time.Time             `json:"completed_at"`
+	AddedAt           time.Time              `json:"added_at"`
+	UpdatedAt         time.Time              `json:"updated_at"`
+	SudoPolicies      []SudoPolicyInline     `json:"sudo_policies"`
+	Adjustments       *Adjustments           `json:"adjustments"`
+	Recommendations   []Recommendation       `json:"recommendations"`
 
 	// PendingExtensionRequest is the open extension request, nil when there is none. 'extend'
 	// answers 202 with it set when the workspace's approval policy holds the request, and later
@@ -96,16 +99,23 @@ type WorkSessionAttributes struct {
 	Status      string `json:"status"      table:"Status"`
 	Scopes      string `json:"scopes"      table:"Scopes"`
 	Servers     string `json:"servers"     table:"Servers"`
+	Clusters    string `json:"clusters"    table:"Clusters"`
 	ExpiresAt   string `json:"expires_at"  table:"Expires At"`
 	Description string `json:"description" table:"Description"`
 }
 
+// WorkSessionCreateRequest targets either Servers or Clusters, never both.
+// The lifetime is either ExpiresAt, an absolute RFC3339 time, or Duration,
+// which the server counts from activation so an approval wait does not
+// shorten it.
 type WorkSessionCreateRequest struct {
 	Description   string             `json:"description"`
 	RequesterType string             `json:"requester_type"`
 	Scopes        []string           `json:"scopes"`
-	Servers       []string           `json:"servers"`
-	ExpiresAt     string             `json:"expires_at"`
+	Servers       []string           `json:"servers,omitempty"`
+	Clusters      []string           `json:"clusters,omitempty"`
+	ExpiresAt     string             `json:"expires_at,omitempty"`
+	Duration      string             `json:"duration,omitempty"`
 	SudoPolicies  []SudoPolicyInline `json:"sudo_policies,omitempty"`
 	// TargetAccountUsername is the account the work runs as on the servers.
 	// Left out, the server decides the account itself.

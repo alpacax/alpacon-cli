@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +18,9 @@ import (
 const (
 	ConfigFileName = "config.json"
 	ConfigFileDir  = ".alpacon"
+	// KubeSessionDir, under ConfigFileDir, holds the kube sessions
+	// 'alpacon kube login' opened; logout removes it with the config.
+	KubeSessionDir = "kube"
 
 	// ServiceTokenPrefix is the server's default service-token key prefix. A self-hosted server
 	// configured with another prefix issues tokens this treats as generic. Personal API tokens
@@ -196,6 +200,12 @@ func DeleteConfig(login Config) error {
 			return ErrLoginChanged
 		}
 
+		// The kube session records hold bearer tokens that outlive this login.
+		// They go first: the config is what a retry checks the login against,
+		// so removing it first would let a retry pass over records left behind.
+		if err := deleteKubeSessions(filepath.Join(dir, KubeSessionDir)); err != nil {
+			return fmt.Errorf("failed to delete the saved kube sessions: %w", err)
+		}
 		// Remove what the link names, or the refresh token stays in the dotfiles tree;
 		// the link itself stays, so the next login writes through it.
 		configFile, err := resolveConfigWritePath(filepath.Join(dir, ConfigFileName))
@@ -206,6 +216,64 @@ func DeleteConfig(login Config) error {
 			return fmt.Errorf("failed to delete config file: %v", err)
 		}
 		return nil
+	})
+}
+
+// deleteKubeSessions removes the saved kube session records and any staging
+// file a killed write left, all of which can hold a token. The lock files and
+// the directory stay: a kube login waiting on approval holds one of those
+// locks, and removing the file under it would let a second login lock a new
+// file at the same path. A dir that is a symbolic link is left alone, since
+// kube login never writes through one, and inside a real one only the names
+// kube login writes are removed.
+func deleteKubeSessions(dir string) error {
+	info, err := os.Lstat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !kubeSessionFileName.MatchString(entry.Name()) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+// kubeSessionFileName matches a kube session record, a 16-hex-digit name
+// with .json, and the staging file a write renames into it.
+var kubeSessionFileName = regexp.MustCompile(`^[0-9a-f]{16}(\.json|\.[0-9]+\.tmp)$`)
+
+// WhileLoggedIn runs fn under the config lock while the config still holds
+// login's credentials, and returns ErrLoginChanged without running it once a
+// logout or another login has replaced them. A logout takes the same lock, so
+// nothing fn writes outside the config can land after the logout that should
+// have removed it. fn must not write the config: the lock is not reentrant.
+func WhileLoggedIn(login Config, fn func() error) error {
+	return withConfigLock(func() error {
+		cfg, err := LoadConfig()
+		if errors.Is(err, fs.ErrNotExist) {
+			return ErrLoginChanged
+		}
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if !cfg.sameLogin(login) {
+			return ErrLoginChanged
+		}
+		return fn()
 	})
 }
 

@@ -199,7 +199,7 @@ func TestKubeCommandNamesAndAliases(t *testing.T) {
 	assert.Equal(t, []string{"list"}, kubeListCmd.Aliases)
 	assert.Equal(t, []string{"desc"}, kubeDescribeCmd.Aliases)
 
-	for _, path := range [][]string{{"ls"}, {"list"}, {"describe"}, {"desc"}, {"config"}, {"proxy"}} {
+	for _, path := range [][]string{{"ls"}, {"list"}, {"describe"}, {"desc"}, {"config"}, {"login"}, {"credentials"}, {"proxy"}} {
 		found, _, err := KubeCmd.Find(path)
 		require.NoError(t, err, "%v", path)
 		assert.NotSame(t, KubeCmd, found, "%v must resolve to a subcommand", path)

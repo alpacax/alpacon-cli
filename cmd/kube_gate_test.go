@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alpacax/alpacon-cli/cmd/kube"
+	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -71,6 +71,8 @@ func TestKubeGateBlocksWhenDisabled(t *testing.T) {
 		{"--output", "json", "kube", "ls"},
 		{"kube", "config", "prod"},
 		{"kube", "config", "--help"},
+		{"kube", "login", "prod"},
+		{"kube", "login", "--help"},
 		{"kube", "proxy", "prod"},
 		{"kube", "proxy", "prod", "--port", "18444"},
 	}
@@ -83,7 +85,7 @@ func TestKubeGateBlocksWhenDisabled(t *testing.T) {
 				stdout, stderr, exitCode := runKubeGate(t, home, args...)
 
 				assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "%v", args)
-				assert.Contains(t, stderr, kube.NotEnabledMessage, "%v", args)
+				assert.Contains(t, stderr, kubernetes.SurfaceNotEnabledMessage, "%v", args)
 				assert.NotContains(t, stdout+stderr, "Usage:", "%v", args)
 				assert.NotContains(t, stderr, "report on", "an expected refusal carries no issue footer: %v", args)
 			}
@@ -138,13 +140,14 @@ func TestKubeGateEnabledReachesGroup(t *testing.T) {
 		assert.Regexp(t, `(?m)^\s+ls\s+List Kubernetes clusters`, stdout, "%v", args)
 		assert.Regexp(t, `(?m)^\s+describe\s+Show details of a Kubernetes cluster`, stdout, "%v", args)
 		assert.Regexp(t, `(?m)^\s+config\s+Write a kubeconfig context for a cluster`, stdout, "%v", args)
+		assert.Regexp(t, `(?m)^\s+login\s+Log in to a cluster for kubectl`, stdout, "%v", args)
 		assert.Regexp(t, `(?m)^\s+proxy\s+Run a local proxy for a cluster`, stdout, "%v", args)
 	}
 
 	_, stderr, exitCode := runKubeGate(t, home, "kube")
 	assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
 	assert.Contains(t, stderr, "a subcommand is required")
-	assert.NotContains(t, stderr, kube.NotEnabledMessage)
+	assert.NotContains(t, stderr, kubernetes.SurfaceNotEnabledMessage)
 }
 
 // A stale yes meets a 404 on the cluster list, which reads as not enabled;
@@ -175,13 +178,13 @@ func TestKubeGateMapsServerNotFound(t *testing.T) {
 	for _, args := range [][]string{{"kube", "ls"}, {"kube", "describe", "prod"}} {
 		_, stderr, exitCode := runKubeGate(t, home, args...)
 		assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "%v", args)
-		assert.Contains(t, stderr, kube.NotEnabledMessage, "%v", args)
+		assert.Contains(t, stderr, kubernetes.SurfaceNotEnabledMessage, "%v", args)
 	}
 
 	_, stderr, exitCode := runKubeGate(t, home, "kube", "describe", "gone")
 	assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
 	assert.Contains(t, stderr, "Failed to retrieve the cluster")
-	assert.NotContains(t, stderr, kube.NotEnabledMessage)
+	assert.NotContains(t, stderr, kubernetes.SurfaceNotEnabledMessage)
 }
 
 func TestKubeGateHelperProcess(t *testing.T) {
@@ -195,4 +198,23 @@ func TestKubeGateHelperProcess(t *testing.T) {
 	RootCmd.SetArgs(args)
 	Execute()
 	os.Exit(0)
+}
+
+// kubectl runs kube credentials for a context an earlier login wrote, so the
+// gate of whatever workspace is current now, or of no login at all, does not
+// stand in its way.
+func TestKubeGatePassesCredentialsThrough(t *testing.T) {
+	t.Parallel()
+	for _, cfg := range []map[string]any{
+		nil,
+		{"workspace_url": "https://ws.example.com", "workspace_name": "ws", "token": "tok", "kubernetes_surface": false},
+	} {
+		home := writeKubeGateConfig(t, cfg)
+
+		_, stderr, exitCode := runKubeGate(t, home, "kube", "credentials", "--cluster", "prod")
+
+		assert.Equal(t, utils.ExitCodeWorkSessionDenied, exitCode, "stderr: %s", stderr)
+		assert.Contains(t, stderr, "No kube session is saved for prod")
+		assert.NotContains(t, stderr, kubernetes.SurfaceNotEnabledMessage)
+	}
 }
