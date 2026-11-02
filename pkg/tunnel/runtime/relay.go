@@ -57,8 +57,12 @@ func relay(local, remote net.Conn, bound time.Duration) (cut bool) {
 	return cut
 }
 
+type closeWriter interface {
+	CloseWrite() error
+}
+
 func closeWriteSide(conn net.Conn) {
-	if cw, ok := conn.(interface{ CloseWrite() error }); ok {
+	if cw, ok := conn.(closeWriter); ok {
 		_ = cw.CloseWrite() // a FIN that fails is left to the bound, not a cut of the other direction
 	}
 }
