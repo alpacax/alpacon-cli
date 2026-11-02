@@ -301,7 +301,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 			}
 			utils.CliSuccess("%s", message)
 			PrintSessionAdvisories(activeSession)
-			printClusterNext(clusterName, activeSession)
+			printCreateNext(clusterName, activeSession)
 			return
 		case useDecisionSkipScheduled:
 			if !shouldWait {
@@ -311,6 +311,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 				}
 				utils.CliInfo("Session is scheduled to activate. Run 'alpacon work-session use %s' once active.", session.ID)
 				PrintSessionAdvisories(session)
+				printCreateNext(clusterName, session)
 				return
 			}
 		case useDecisionErrorNeedsWait:
@@ -328,6 +329,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 					fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID),
 					session.ApprovalRequestID,
 					afterApproval,
+					createUpdateNextActions(clusterName, session)...,
 				)
 				os.Exit(utils.ExitCodePendingApproval)
 			}
@@ -336,14 +338,14 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 				return
 			}
 			PrintSessionAdvisories(session)
-			printClusterNext(clusterName, session)
+			printCreateNext(clusterName, session)
 			return
 		}
 
 		// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
 		finalSession, err := waitForApproval(ac, session.ID, useAfterCreate, ApprovalPollInterval, waitTimeout, approvalSignaled)
 		if err != nil {
-			ExitOnWaitError(opCreate, session, afterApproval, err)
+			ExitOnWaitError(opCreate, session, afterApproval, err, createUpdateNextActions(clusterName, session)...)
 		}
 
 		if !useAfterCreate {
@@ -354,7 +356,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 			}
 			utils.CliSuccess("%s", message)
 			PrintSessionAdvisories(finalSession)
-			printClusterNext(clusterName, finalSession)
+			printCreateNext(clusterName, finalSession)
 			return
 		}
 
@@ -372,7 +374,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 		}
 		utils.CliSuccess("%s", message)
 		PrintSessionAdvisories(finalSession)
-		printClusterNext(clusterName, finalSession)
+		printCreateNext(clusterName, finalSession)
 	},
 }
 
@@ -381,7 +383,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 // outcome exits 6, and a wait that ran out with the outcome still open exits
 // 4 and offers next, the step to take once the session is approved. Only a
 // polling failure falls through to the general-error code.
-func ExitOnWaitError(operation string, session *wsapi.WorkSession, next utils.NextAction, err error) {
+func ExitOnWaitError(operation string, session *wsapi.WorkSession, next utils.NextAction, err error, pendingNext ...utils.NextAction) {
 	var terminal *terminalWaitError
 	if errors.As(err, &terminal) {
 		if utils.OutputFormat == utils.OutputFormatJSON {
@@ -398,7 +400,7 @@ func ExitOnWaitError(operation string, session *wsapi.WorkSession, next utils.Ne
 			fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err),
 			session.ApprovalRequestID,
 			next,
-			utils.RefusalNextActions(err)...,
+			append(utils.RefusalNextActions(err), pendingNext...)...,
 		)
 		os.Exit(utils.ExitCodePendingApproval)
 	}
@@ -602,11 +604,24 @@ func KubeLoginAction(clusterName, id string) utils.NextAction {
 	}
 }
 
-func printClusterNext(clusterName string, session *wsapi.WorkSession) {
-	if clusterName == "" {
+func createUpdateNextActions(clusterName string, session *wsapi.WorkSession) []utils.NextAction {
+	if clusterName != "" || (session.Status != wsapi.StatusPending && session.Status != wsapi.StatusApproved && session.Status != wsapi.StatusActive) {
+		return nil
+	}
+	return []utils.NextAction{{
+		Command:     fmt.Sprintf("alpacon work-session update %s --server <server,...>", session.ID),
+		Description: "add servers to this session; include every server to keep (--server replaces the whole list); an added server may need approval",
+	}}
+}
+
+func printCreateNext(clusterName string, session *wsapi.WorkSession) {
+	if clusterName != "" {
+		utils.CliInfo("Next: %s", KubeLoginAction(clusterName, session.ID).Command)
 		return
 	}
-	utils.CliInfo("Next: %s", KubeLoginAction(clusterName, session.ID).Command)
+	for _, action := range createUpdateNextActions(clusterName, session) {
+		utils.CliInfo("Next:\n  %s", action.PlainText())
+	}
 }
 
 // detectedAgentSuffix explains, after a refusal that applies to agent sessions,
