@@ -589,6 +589,28 @@ func TestDecideUseAction(t *testing.T) {
 	}
 }
 
+func TestSettledNegativelyNamesEveryEndedStatus(t *testing.T) {
+	t.Parallel()
+	for _, status := range wsapi.EndedStatuses() {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			terminal := settledNegatively(status, "ses-x")
+			require.NotNil(t, terminal)
+			assert.Equal(t, "ses-x", terminal.sessionID)
+		})
+	}
+}
+
+func TestSettledNegativelyIsNilForAStatusThatCanStillBecomeActive(t *testing.T) {
+	t.Parallel()
+	for _, status := range []string{wsapi.StatusPending, wsapi.StatusApproved, wsapi.StatusActive, "paused", ""} {
+		t.Run("status "+status, func(t *testing.T) {
+			t.Parallel()
+			assert.Nil(t, settledNegatively(status, "ses-x"))
+		})
+	}
+}
+
 func TestWorkSessionCreateWaitPrintsAdvisories(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -872,8 +894,7 @@ func TestPrintTerminalWaitErrorSanitizesTheSessionID(t *testing.T) {
 
 func TestPollForApproval_EveryEndedStatusHasACase(t *testing.T) {
 	t.Parallel()
-	// If the switch has no case for a status that IsEndedStatus accepts, the wait
-	// falls through to polling until the timeout instead of ending.
+	// A status IsEndedStatus accepts must end the wait, not poll until the timeout.
 	for _, status := range wsapi.EndedStatuses() {
 		t.Run(status, func(t *testing.T) {
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

@@ -316,17 +316,9 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 		}
 
 		if !shouldWait {
-			// A pending session needs a human to approve it out of band, so exit with
-			// ExitCodePendingApproval and let a machine consumer branch on it instead of reading
-			// success.
+			// Pending is not success, so a machine consumer can branch on the exit code.
 			if session.Status == wsapi.StatusPending {
-				utils.PrintPendingApproval(
-					fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID),
-					session.ApprovalRequestID,
-					afterApproval,
-					createUpdateNextActions(clusterName, session)...,
-				)
-				os.Exit(utils.ExitCodePendingApproval)
+				exitPending(session, afterApproval, fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID), createUpdateNextActions(clusterName, session)...)
 			}
 			if utils.OutputFormat == utils.OutputFormatJSON {
 				printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
@@ -381,25 +373,46 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 func ExitOnWaitError(operation string, session *wsapi.WorkSession, next utils.NextAction, err error, pendingNext ...utils.NextAction) {
 	var terminal *terminalWaitError
 	if errors.As(err, &terminal) {
-		if utils.OutputFormat == utils.OutputFormatJSON {
-			printTerminalWaitErrorJSON(operation, terminal, err)
-			os.Exit(utils.ExitCodeNotApproved)
-		}
-		printTerminalWaitError(terminal, err)
-		os.Exit(utils.ExitCodeNotApproved)
+		exitTerminalWait(operation, terminal, err)
 	}
 	var pending *pendingWaitError
 	if errors.As(err, &pending) {
 		// The refusal a timed-out wait ended on, if any, adds its hint.
-		utils.PrintPendingApproval(
-			fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err),
-			session.ApprovalRequestID,
-			next,
-			append(utils.RefusalNextActions(err), pendingNext...)...,
-		)
-		os.Exit(utils.ExitCodePendingApproval)
+		exitPending(session, next, fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err), append(utils.RefusalNextActions(err), pendingNext...)...)
 	}
 	utils.CliErrorEnvelopeWithExit(operation, err, "%s", err)
+}
+
+func exitPending(session *wsapi.WorkSession, next utils.NextAction, message string, extra ...utils.NextAction) {
+	utils.PrintPendingApproval(message, session.ApprovalRequestID, next, extra...)
+	os.Exit(utils.ExitCodePendingApproval)
+}
+
+func exitTerminalWait(operation string, terminal *terminalWaitError, err error) {
+	if utils.OutputFormat == utils.OutputFormatJSON {
+		printTerminalWaitErrorJSON(operation, terminal, err)
+	} else {
+		printTerminalWaitError(terminal, err)
+	}
+	os.Exit(utils.ExitCodeNotApproved)
+}
+
+// settledNegatively is the refusal a status stands for once the session can no longer
+// become approved or active; nil for any other status.
+func settledNegatively(status, id string) *terminalWaitError {
+	switch status {
+	case wsapi.StatusRejected:
+		return &terminalWaitError{message: "work session was rejected", sessionID: id}
+	case wsapi.StatusExpired:
+		return &terminalWaitError{message: "work session expired while waiting for approval", sessionID: id}
+	case wsapi.StatusRevoked:
+		return &terminalWaitError{message: "work session was revoked", sessionID: id}
+	case wsapi.StatusCancelled:
+		return &terminalWaitError{message: "work session was cancelled", sessionID: id}
+	case wsapi.StatusCompleted:
+		return &terminalWaitError{message: "work session was completed unexpectedly", sessionID: id}
+	}
+	return nil
 }
 
 // useDecision is what the post-create switch does about --use: nothing, attach
@@ -751,16 +764,9 @@ func WaitForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 			if !untilActive {
 				return s, nil
 			}
-		case wsapi.StatusRejected:
-			return nil, &terminalWaitError{message: "work session was rejected", sessionID: id}
-		case wsapi.StatusExpired:
-			return nil, &terminalWaitError{message: "work session expired while waiting for approval", sessionID: id}
-		case wsapi.StatusRevoked:
-			return nil, &terminalWaitError{message: "work session was revoked", sessionID: id}
-		case wsapi.StatusCancelled:
-			return nil, &terminalWaitError{message: "work session was cancelled", sessionID: id}
-		case wsapi.StatusCompleted:
-			return nil, &terminalWaitError{message: "work session was completed unexpectedly", sessionID: id}
+		}
+		if terminal := settledNegatively(s.Status, id); terminal != nil {
+			return nil, terminal
 		}
 
 		waitMsg := waitMsgApproval
