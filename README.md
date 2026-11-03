@@ -260,6 +260,10 @@ $ alpacon kube config <cluster> --work-session <ID>
 # Optional: send kubectl through a local proxy
 $ alpacon kube login <cluster> --proxy-port 18443
 $ alpacon kube proxy <cluster>                   # --port 18443 by default; Ctrl+C to stop
+
+# See your kube sessions, and log out of a cluster
+$ alpacon kube sessions                          # open sessions; --cluster <cluster>, --all
+$ alpacon kube logout <cluster>                  # without <cluster>, the current context
 ```
 
 The `kube` group appears only on workspaces whose server reports Kubernetes support. The CLI records that answer at `alpacon login` and `alpacon workspace switch`; elsewhere `kube` is hidden from help, and calling it prints a notice and exits with `1`. If support was turned on after you logged in, run `alpacon login` again.
@@ -271,6 +275,10 @@ A kube session runs under a work session that targets the cluster with the `kube
 `kube config` writes the same context with the session's token in plain text instead, under `--work-session` or the session `ALPACON_WORK_SESSION` names; your active work session targets servers, so it is not used. Without a usable one it exits with `3` and lists what to run next. Keep that file private (`chmod 600`); the token stops working when the work session ends.
 
 Both commands write to the file `kubectl config` itself writes (`--kubeconfig`, else the first existing file in `KUBECONFIG` or the last one listed when none exists, else `~/.kube/config`), keep the other entries in it, and rewrite the file in kubectl's layout.
+
+`kube sessions` lists the open kube sessions you can see, newest first; `--cluster` narrows them to one cluster and `--all` includes closed ones. On a cluster you manage it shows everyone's sessions, which is why each row names its user. A session reads as open until the server closes it, which can be a few minutes after its token has expired.
+
+`kube logout` removes the `alpacon-<cluster>` context, cluster and user from every file kubectl reads (or the one `--kubeconfig` names), deletes the token saved for the cluster, then asks the server to close the kube session. Without `<cluster>` it logs out of the current context, and exits `2` if alpacon did not write that context. Everything on your machine goes first, so it also works when you are logged out: a session the server cannot close only draws a warning, stays open until its work session ends, and the command exits `0`. A current-context that named the removed context is unset, and kubectl then uses the current-context of the next file in `KUBECONFIG`, if any, which the command tells you. The work session itself is not ended. While another alpacon command is using the cluster's saved session, such as a `kube login` waiting on approval, `kube logout` exits `1` and changes nothing. Like `kube credentials`, it stays available on a workspace without Kubernetes support, since it may be cleaning up a context from another workspace.
 
 `kube proxy` is optional. It listens on `127.0.0.1` and relays HTTP CONNECT only to the cluster's proxy host, without reading the traffic, so kubectl's TLS stays end to end. kubectl uses it only for a context written with `--proxy-port` set to the same port. It finds the context the way kubectl does, across every file in `KUBECONFIG` (or the one `--kubeconfig` names). One proxy runs per cluster and port.
 
