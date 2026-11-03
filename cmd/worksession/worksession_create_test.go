@@ -734,46 +734,6 @@ func TestWorkSessionCreateWaitJSONOutputIncludesAdjustments(t *testing.T) {
 	assert.Equal(t, "high", got.WorkSession.Recommendations[0].Severity)
 }
 
-// rejectedWaitServer answers a create whose first poll comes back rejected, so a
-// --wait run settles without a grant on its first tick.
-func rejectedWaitServer() *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/":
-			_, _ = w.Write([]byte(`{"id":"ses-x","status":"pending","approval_request_id":"apr-1","expires_at":"2026-06-01T12:00:00Z"}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/ses-x/":
-			_, _ = w.Write([]byte(`{"id":"ses-x","status":"rejected","expires_at":"2026-06-01T12:00:00Z"}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-}
-
-func rejectedWaitArgs() []string {
-	return []string{
-		"create", "--purpose", "incident", "--scope", "command", "--server", "prod",
-		"--expires-at", "2026-06-01T12:00:00Z", "--wait",
-	}
-}
-
-func TestWorkSessionCreateWaitRejectedNamesTheSessionOnStderr(t *testing.T) {
-	ts := rejectedWaitServer()
-	defer ts.Close()
-
-	_, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, rejectedWaitArgs()...)
-
-	assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "a refused wait is settled, not pending; stderr: %s", stderr)
-	assert.Contains(t, stderr, "ses-x")
-	assert.Contains(t, stderr, "alpacon work-session describe ses-x")
-	assert.Contains(t, stderr, "alpacon work-session complete ses-x")
-	assert.NotContains(t, stderr, "work-session use", "see TestRunUseSessionRefusesASettledSession")
-	assert.NotContains(t, stderr, "work-session update")
-	assert.NotContains(t, stderr, "report on https://github.com", "a reviewer saying no is not a bug to file")
-}
-
 func TestWorkSessionCreateUpdateNext(t *testing.T) {
 	const line = "  alpacon work-session update ses-x --server <server,...>  # add servers to this session; include every server to keep (--server replaces the whole list); an added server may need approval\n"
 	tests := []struct {
@@ -839,26 +799,6 @@ func TestWorkSessionCreateUpdateNext(t *testing.T) {
 			assert.Equal(t, 1, strings.Count(stderr, line))
 		})
 	}
-}
-
-func TestWorkSessionCreateWaitRejectedJSONCarriesTheSessionID(t *testing.T) {
-	ts := rejectedWaitServer()
-	defer ts.Close()
-
-	_, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, rejectedWaitArgs()...)
-
-	assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
-	assert.JSONEq(t, `{
-		"ok": false,
-		"exit_code": 6,
-		"error_code": "not_approved",
-		"message": "work session was rejected (work session ses-x)",
-		"context": {"operation": "create", "work_session_id": "ses-x"},
-		"next_actions": [
-			{"command": "alpacon work-session describe ses-x", "description": "why it settled"},
-			{"command": "alpacon work-session complete ses-x"}
-		]
-	}`, stderr)
 }
 
 // An agent runs the refusal's follow-ups, so each must be a command the session can still take.
@@ -948,4 +888,51 @@ func TestPollForApproval_PlainTimeoutCarriesNoHint(t *testing.T) {
 	_, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, 30*time.Millisecond)
 	require.Error(t, err)
 	assert.Empty(t, utils.RefusalNextActions(err))
+}
+
+// The session outlives a refusal, so every path that reports one names the session and only the
+// follow-ups it can still take: not 'work-session use' (see TestRunUseSessionRefusesASettledSession).
+func TestWorkSessionCreateSettledRefusalNamesTheSession(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		createStatus string
+		pollStatus   string
+		args         []string
+	}{
+		{name: "wait on a pending create", createStatus: "pending", pollStatus: "rejected", args: createArgs("--wait")},
+	}
+	for _, tt := range tests {
+		for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+			t.Run(tt.name+" "+outputFormat, func(t *testing.T) {
+				t.Parallel()
+				ts := newCreateServerAnswering(t, tt.createStatus, tt.pollStatus)
+
+				stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), outputFormat, ts.URL, tt.args...)
+
+				assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "a refusal is settled, not pending; stderr: %s", stderr)
+				assert.Empty(t, stdout)
+				if outputFormat == utils.OutputFormatJSON {
+					assert.JSONEq(t, `{
+						"ok": false,
+						"exit_code": 6,
+						"error_code": "not_approved",
+						"message": "work session was rejected (work session ses-x)",
+						"context": {"operation": "create", "work_session_id": "ses-x"},
+						"next_actions": [
+							{"command": "alpacon work-session describe ses-x", "description": "why it settled"},
+							{"command": "alpacon work-session complete ses-x"}
+						]
+					}`, stderr)
+					return
+				}
+				assert.Contains(t, stderr, "work session was rejected (work session ses-x)")
+				assert.Contains(t, stderr, "alpacon work-session describe ses-x")
+				assert.Contains(t, stderr, "alpacon work-session complete ses-x")
+				assert.NotContains(t, stderr, "work-session use")
+				assert.NotContains(t, stderr, "work-session update")
+				assert.NotContains(t, stderr, "report on https://github.com", "a reviewer saying no is not a bug to file")
+			})
+		}
+	}
 }
