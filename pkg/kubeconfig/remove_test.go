@@ -246,12 +246,12 @@ func TestContextTargetsFollowKubectlsMerge(t *testing.T) {
 			want: []Target{{Server: "https://b"}},
 		},
 		{
-			name: "each file's own cluster first",
+			name: "an earlier file's cluster and user win",
 			files: []string{
-				"clusters:\n- cluster: {server: 'https://a'}\n  name: c1\ncontexts:\n- context: {cluster: c1, user: alpacon-a}\n  name: alpacon-a\n",
-				"clusters:\n- cluster: {server: 'https://b'}\n  name: c1\ncontexts:\n- context: {cluster: c1, user: alpacon-a}\n  name: alpacon-a\n",
+				"clusters:\n- cluster: {server: 'https://a'}\n  name: c1\nusers:\n- name: u1\n  user: {token: x}\n",
+				"clusters:\n- cluster: {server: 'https://b'}\n  name: c1\ncontexts:\n- context: {cluster: c1, user: u1}\n  name: alpacon-a\n" + plugin("u1", "a"),
 			},
-			want: []Target{{Server: "https://a"}, {Server: "https://b"}},
+			want: []Target{{Server: "https://a", StaticToken: true}},
 		},
 		{
 			name:  "user of another name",
@@ -287,4 +287,17 @@ func TestContextTargetsFollowKubectlsMerge(t *testing.T) {
 			assert.Equal(t, tt.want, ContextTargets(paths, "alpacon-a"))
 		})
 	}
+}
+
+// Remove deletes the same-named cluster from every file, so the logout needs
+// the server of each, whatever context still names it.
+func TestClusterServers(t *testing.T) {
+	t.Parallel()
+	paths := []string{
+		writeKubeconfig(t, "clusters:\n- cluster: {server: 'https://a'}\n  name: alpacon-a\n- cluster: {server: 'https://other'}\n  name: other\n"),
+		filepath.Join(t.TempDir(), "none"),
+		writeKubeconfig(t, "clusters:\n- cluster: {server: 'https://b'}\n  name: alpacon-a\n- cluster: {server: 'https://a'}\n  name: alpacon-a\n"),
+		writeKubeconfig(t, "clusters: 1\n"),
+	}
+	assert.Equal(t, []string{"https://a", "https://b"}, ClusterServers(paths, "alpacon-a"))
 }

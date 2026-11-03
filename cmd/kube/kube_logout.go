@@ -493,10 +493,17 @@ func findLogoutTargets(result *kubeLogoutResult, in kubeLogoutInput, context str
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to read the saved kube sessions: %w", err)
 	}
+	// The servers are those kubectl reaches through each definition of the
+	// context, and those of the same-named clusters the logout deletes.
 	var servers []string
 	for _, t := range kubeconfig.ContextTargets(in.paths, context) {
 		if t.Server != "" && !slices.Contains(servers, t.Server) {
 			servers = append(servers, t.Server)
+		}
+	}
+	for _, server := range kubeconfig.ClusterServers(in.paths, context) {
+		if !slices.Contains(servers, server) {
+			servers = append(servers, server)
 		}
 	}
 	return files, saved, pickLogoutRecords(saved, servers, in.workspaceURL, in.explicit && len(files) == 0), nil
@@ -526,8 +533,8 @@ func scanKubeconfigs(result *kubeLogoutResult, paths []string, context string) (
 }
 
 // pickLogoutRecords chooses the saved sessions the logout covers: the one behind
-// each server the context points at, since the files can hold the same name for
-// different workspaces. A server no record names, as after a hand edit of the
+// each server the context or a deleted cluster points at, since the files can
+// hold the same name for different workspaces. A server no record names, as after a hand edit of the
 // server, falls back to the logged-in workspace's record. With no server to go
 // by, it chooses as the credential plugin does without one, unless elsewhere is
 // set: --kubeconfig named a file without the context, so the context, and the

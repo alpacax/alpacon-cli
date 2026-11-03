@@ -159,26 +159,15 @@ func Inspect(path, name string) (Holding, error) {
 }
 
 // ContextTargets returns, for each file in paths that defines the context name,
-// in order, what that definition points at. The cluster and user it names are
-// looked up in its own file first, as kubectl reads that file alone, then in
-// the first file of paths that defines each, as kubectl merges them: a context
-// and its cluster can sit in different files. The first Target is the context
-// kubectl uses. With no context of that name anywhere, the cluster and user
-// called name stand in for it. A file that is missing or cannot be parsed is
-// skipped.
+// in order, what that definition points at as kubectl merges paths: the cluster
+// and user it names are taken from the first file that defines each, which need
+// not be the file holding the context. The first Target is the context kubectl
+// uses. With no context of that name anywhere, the cluster and user called name
+// stand in for it. A file that is missing or cannot be parsed is skipped.
 func ContextTargets(paths []string, name string) []Target {
-	var roots []*yaml.Node
-	for _, path := range paths {
-		if root, err := readRoot(path); err == nil && root != nil {
-			roots = append(roots, root)
-		}
-	}
-	first := func(own *yaml.Node, list, name string) *yaml.Node {
-		search := roots
-		if own != nil {
-			search = append([]*yaml.Node{own}, roots...)
-		}
-		for _, root := range search {
+	roots := readRoots(paths)
+	first := func(list, name string) *yaml.Node {
+		for _, root := range roots {
 			if items := named(root, list, name); len(items) > 0 {
 				return items[0]
 			}
@@ -200,9 +189,9 @@ func ContextTargets(paths []string, name string) []Target {
 	}
 	// resolve follows the context's key field to the item of list with that
 	// name. An empty field names nothing, whatever shares the context's name.
-	resolve := func(own, context *yaml.Node, key, list string) *yaml.Node {
+	resolve := func(context *yaml.Node, key, list string) *yaml.Node {
 		if ref := contextField(context, key); ref != "" {
-			return first(own, list, ref)
+			return first(list, ref)
 		}
 		return nil
 	}
@@ -213,15 +202,46 @@ func ContextTargets(paths []string, name string) []Target {
 		if len(contexts) == 0 {
 			continue
 		}
-		targets = append(targets, target(resolve(root, contexts[0], "cluster", "clusters"), resolve(root, contexts[0], "user", "users")))
+		targets = append(targets, target(resolve(contexts[0], "cluster", "clusters"), resolve(contexts[0], "user", "users")))
 	}
 	if len(targets) > 0 {
 		return targets
 	}
-	if cluster, user := first(nil, "clusters", name), first(nil, "users", name); cluster != nil || user != nil {
+	if cluster, user := first("clusters", name), first("users", name); cluster != nil || user != nil {
 		return []Target{target(cluster, user)}
 	}
 	return nil
+}
+
+// ClusterServers returns the server of every cluster named name in paths, in
+// order and without repeats: the clusters Remove deletes, each of which may have
+// been written for another workspace. A file that is missing or cannot be
+// parsed is skipped.
+func ClusterServers(paths []string, name string) []string {
+	var servers []string
+	for _, root := range readRoots(paths) {
+		for _, cluster := range named(root, "clusters", name) {
+			_, inner := lookup(cluster, "cluster")
+			if inner == nil || inner.Kind != yaml.MappingNode {
+				continue
+			}
+			if server := stringValue(inner, "server"); server != "" && !slices.Contains(servers, server) {
+				servers = append(servers, server)
+			}
+		}
+	}
+	return servers
+}
+
+// readRoots parses each of paths that exists and parses, in order.
+func readRoots(paths []string) []*yaml.Node {
+	var roots []*yaml.Node
+	for _, path := range paths {
+		if root, err := readRoot(path); err == nil && root != nil {
+			roots = append(roots, root)
+		}
+	}
+	return roots
 }
 
 // pluginCommands are the names the credential plugin runs under: kube login

@@ -258,6 +258,37 @@ func TestKubeLogoutCoversTheRecordBehindEachFile(t *testing.T) {
 	assert.NoFileExists(t, f.in.store.recordPath(elsewhere.key()))
 }
 
+// With the context renamed, each file's same-named cluster still goes, and so
+// does the token saved for its server.
+func TestKubeLogoutCoversEveryClusterItDeletes(t *testing.T) {
+	t.Parallel()
+	const otherServer = "https://other-ws.example.com/kube/c-9"
+	renamed := func(server string) string {
+		path := kubeconfigWith(t, "other", [2]string{"prod-east", server})
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		body := strings.Replace(string(data), "    user: alpacon-prod-east\n  name: alpacon-prod-east\n", "    user: alpacon-prod-east\n  name: prod\n", 1)
+		require.Contains(t, body, "  name: prod\n", "the context must be renamed")
+		require.NoError(t, os.WriteFile(path, []byte(body), 0600))
+		return path
+	}
+	first, second := renamed(prodServer), renamed(otherServer)
+	f := newLogoutFixture(t, nil, first, second)
+	elsewhere := testRecord("prod-east")
+	elsewhere.WorkspaceURL = "https://other-ws.example.com"
+	elsewhere.ProxyURL = otherServer
+	elsewhere.KubeSessionID = "k-9"
+	require.NoError(t, f.in.store.write(elsewhere))
+
+	_, err := kubeLogout(f.in)
+	require.NoError(t, err)
+
+	assertGone(t, first, "alpacon-prod-east")
+	assertGone(t, second, "alpacon-prod-east")
+	assert.NoFileExists(t, f.in.store.recordPath(f.record.key()))
+	assert.NoFileExists(t, f.in.store.recordPath(elsewhere.key()))
+}
+
 func TestKubeLogoutLeavesARecordOfAnotherWorkspaceTheKubeconfigDoesNotUse(t *testing.T) {
 	t.Parallel()
 	path := kubeconfigWith(t, "other", [2]string{"prod-east", prodServer})
