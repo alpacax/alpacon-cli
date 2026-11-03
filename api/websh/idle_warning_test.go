@@ -13,7 +13,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestReadFromServer_IdleWarningUsesStderrAndLocalTime(t *testing.T) {
+func TestNewConnection_ShowsIdleWarningsInTheLocalZone(t *testing.T) {
+	t.Parallel()
+	assert.Same(t, time.Local, newConnection(nil).zone)
+}
+
+func TestReadFromServer_IdleWarningUsesStderrAndTheConnectionZone(t *testing.T) {
 	closesAt := time.Date(time.Now().Year()+1, time.January, 2, 6, 4, 5, 0, time.UTC)
 
 	_, stdout, stderr := readIdleFramesWith(t, time.FixedZone("test", 9*60*60), nil, idleWarningFrame(closesAt))

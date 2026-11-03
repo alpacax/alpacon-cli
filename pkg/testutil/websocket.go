@@ -12,9 +12,8 @@ import (
 // handlerExitWait bounds how long cleanup waits for a handler blocked on something other than its connection.
 const handlerExitWait = 10 * time.Second
 
-// NewWebSocketServer starts an httptest.Server for a handler that upgrades to a WebSocket. At the
-// end of tb it closes the hijacked connections that httptest.Server.Close leaves open and waits for
-// every handler to return, so none outlives the test and races with the next one.
+// NewWebSocketServer is httptest.NewServer for a WebSocket handler: at the end of tb it also closes
+// the hijacked connections Close leaves open and waits for every handler to return.
 func NewWebSocketServer(tb testing.TB, h http.Handler) *httptest.Server {
 	tb.Helper()
 	var (
@@ -36,7 +35,7 @@ func NewWebSocketServer(tb testing.TB, h http.Handler) *httptest.Server {
 	}
 	ts.Start()
 	tb.Cleanup(func() {
-		ts.Close() // returns once no request is in flight, so no handler starts after it
+		ts.Close() // waits for every request but the hijacked ones, so no handler starts after it
 		mu.Lock()
 		for _, conn := range hijacked {
 			_ = conn.Close()

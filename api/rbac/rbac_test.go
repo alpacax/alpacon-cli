@@ -531,8 +531,7 @@ func TestIAMHostedReadsHitTheRightPaths(t *testing.T) {
 	}
 }
 
-// A changed timeLayout, a dropped zone conversion, or a null added_at would otherwise render silently.
-// A render that skipped the conversion prints 03:04 instead.
+// A changed timeLayout, a dropped zone conversion (03:04, not 12:04), or a null added_at would otherwise render silently.
 func TestAttributesFrom_RenderTimesInTheGivenZone(t *testing.T) {
 	t.Parallel()
 	kst := time.FixedZone("KST", 9*60*60)
