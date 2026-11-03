@@ -515,7 +515,7 @@ func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalOutcome, 
 	rejected.SudoGrant = grant == outcomeRejected || grant == outcomeExpired
 	rejected.Expired = grant == outcomeExpired
 	outcome := grant
-	if event.IsRejectedStatus(details.Status) && (rejected.Cause != "" || grant != outcomeExpired) {
+	if details.IsRejected() && (rejected.Cause != "" || grant != outcomeExpired) {
 		outcome = outcomeRejected
 	}
 	return outcome, requestID, rejected, nil

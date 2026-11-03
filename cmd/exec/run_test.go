@@ -763,6 +763,36 @@ func TestPollApprovalOnceLegacyExpiry(t *testing.T) {
 	}
 }
 
+func TestPollApprovalOnceSettlesACompletedSignatureRefusal(t *testing.T) {
+	original := getCommandByID
+	t.Cleanup(func() { getCommandByID = original })
+	cases := []struct {
+		name, cause string
+		want        approvalOutcome
+	}{
+		{"signature refusal settles as rejected", event.RejectionCauseSignatureInvalid, outcomeRejected},
+		{"another cause on a completed command keeps waiting", "unsigned_file", outcomePending},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+				grantStatus := "pending_approval"
+				return event.EventDetails{
+					Status:           "completed",
+					CommandRejection: event.CommandRejection{RejectionCause: types.SentString{Value: tc.cause, Sent: true}},
+					SudoGrantStatus:  &grantStatus,
+				}, nil
+			}
+
+			outcome, _, rejected, err := pollApprovalOnce(nil, "cmd-1")
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, outcome)
+			assert.Equal(t, tc.cause, rejected.Cause)
+		})
+	}
+}
+
 // The throttle budget is spent, not re-earned. A successful read of a grant that
 // has not moved is no more progress than the 429 before it, so a wait that keeps
 // being throttled must still end within one timeout of extensions—not gain a
