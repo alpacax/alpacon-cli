@@ -849,3 +849,32 @@ func TestAcceptConnectionsKeepsTunnelOpenThroughDescriptorShortage(t *testing.T)
 	requireEcho(t, dialEcho(t, tcpListener.Addr().String(), agentSession), "new")
 	assert.NoError(t, r.Cause())
 }
+
+func TestIsRetryableAcceptError(t *testing.T) {
+	t.Parallel()
+	acceptErr := func(errno syscall.Errno) error {
+		return &net.OpError{Op: "accept", Net: "tcp", Err: os.NewSyscallError("accept", errno)}
+	}
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"EMFILE", acceptErr(syscall.EMFILE), true},
+		{"ENFILE", acceptErr(syscall.ENFILE), true},
+		{"ECONNABORTED", acceptErr(syscall.ECONNABORTED), true},
+		{"EINTR", acceptErr(syscall.EINTR), true},
+		{"timeout", &tempNetError{msg: "timeout", timeout: true}, true},
+		{"EBADF", acceptErr(syscall.EBADF), false},
+		{"EINVAL", acceptErr(syscall.EINVAL), false},
+		{"closed listener", &net.OpError{Op: "accept", Net: "tcp", Err: net.ErrClosed}, false},
+		{"temporary without timeout", &tempNetError{msg: "temporary", temporary: true}, false},
+		{"plain error", errors.New("accept failure"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, isRetryableAcceptError(tt.err))
+		})
+	}
+}
