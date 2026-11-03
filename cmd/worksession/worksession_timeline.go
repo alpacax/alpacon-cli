@@ -14,12 +14,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// recordingJSON is one Websh terminal of the timeline, numbered as
-// `recording --index` counts them. RecordChunksTotal is null when the server
-// could not count the chunks.
+// recordingJSON is one Websh terminal, numbered as `recording --index` counts them.
 type recordingJSON struct {
 	Index             int    `json:"index"`
-	SessionID         string `json:"session_id"`
+	WebshSessionID    string `json:"websh_session_id"`
 	Time              string `json:"time"`
 	Server            string `json:"server"`
 	RecordChunksTotal *int   `json:"record_chunks_total"`
@@ -110,8 +108,6 @@ func init() {
 		"Hide the recordings section (an empty recordings list in JSON)")
 }
 
-// recordingStatus reads a terminal's record_chunks_total. nil covers both a
-// server that could not count (null) and one that predates the count (no key).
 func recordingStatus(total *int) string {
 	switch {
 	case total == nil || *total < 0:
@@ -163,9 +159,8 @@ func printTimelineTableTo(w io.Writer, rows []wsapi.TimelineAttributes) {
 	_ = tw.Flush()
 }
 
-// printRecordingsSectionTo lists the terminals in timeline order, so [N] is the
-// --index that reads that terminal's recording. A terminal known to have no
-// recording gets no hint, since the command would only report that.
+// printRecordingsSectionTo numbers the terminals as --index takes them, and gives no hint to a
+// terminal known to have no recording.
 func printRecordingsSectionTo(w io.Writer, terminals []wsapi.TimelineItem, sessionID string, serverMap map[string]string) {
 	label := "terminals"
 	if len(terminals) == 1 {
@@ -190,7 +185,7 @@ func outputTimelineJSON(rows []wsapi.TimelineAttributes, terminals []wsapi.Timel
 		term := &terminals[i]
 		recEntries[i] = recordingJSON{
 			Index:             i + 1,
-			SessionID:         term.ID,
+			WebshSessionID:    term.ID,
 			Time:              resolveTimestamp(term.Timestamp),
 			Server:            resolveServer(term.ServerID, serverMap),
 			RecordChunksTotal: term.RecordChunksTotal,

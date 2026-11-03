@@ -454,7 +454,7 @@ func TestTimelineJSONRecordingsReadTheChunkCount(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stdout), &out), "stdout: %s", stdout)
 	assert.NotContains(t, stdout, "websh_record", "an embedded recording is not a timeline row")
 	entry := func(index int, id, timestamp, total, status string) string {
-		return fmt.Sprintf(`{"index":%d,"session_id":%q,"time":%q,"server":"web-01","record_chunks_total":%s,"status":%q}`,
+		return fmt.Sprintf(`{"index":%d,"websh_session_id":%q,"time":%q,"server":"web-01","record_chunks_total":%s,"status":%q}`,
 			index, id, formatTimestamp(timestamp), total, status)
 	}
 	assert.JSONEq(t, "["+strings.Join([]string{
@@ -466,9 +466,7 @@ func TestTimelineJSONRecordingsReadTheChunkCount(t *testing.T) {
 	}, ",")+"]", string(out.Recordings))
 }
 
-// --no-records keeps the contract scripts rely on: the section is left out of
-// the table, and JSON carries an empty recordings list.
-func TestTimelineNoRecordsHidesTheSection(t *testing.T) {
+func TestTimelineNoRecordsHidesTheTableSection(t *testing.T) {
 	t.Parallel()
 	ts, _ := timelinePagingServer(t)
 
@@ -478,8 +476,13 @@ func TestTimelineNoRecordsHidesTheSection(t *testing.T) {
 	assert.NotContains(t, stdout, "Recordings (")
 	assert.NotContains(t, stdout, "work-session recording")
 	assert.Empty(t, stderr)
+}
 
-	stdout, stderr, exitCode = runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, "timeline", "ses-1", "--no-records")
+func TestTimelineNoRecordsGivesAnEmptyJSONRecordingsList(t *testing.T) {
+	t.Parallel()
+	ts, _ := timelinePagingServer(t)
+
+	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, "timeline", "ses-1", "--no-records")
 	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
 	var out struct {
 		Timeline   []json.RawMessage `json:"timeline"`
@@ -488,4 +491,27 @@ func TestTimelineNoRecordsHidesTheSection(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stdout), &out))
 	assert.NotEmpty(t, out.Timeline)
 	assert.JSONEq(t, `[]`, string(out.Recordings))
+}
+
+// The pages read before a failure are not the timeline: the command fails and prints none of them.
+func TestTimelineFailsWhenALaterPageFails(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/work-sessions/sessions/ses-1/":
+			_, _ = w.Write([]byte(`{"id":"ses-1","status":"active"}`))
+		case r.URL.Path == "/api/work-sessions/sessions/ses-1/timeline/" && r.URL.Query().Get("cursor") == "":
+			_, _ = w.Write([]byte(`{"next":"p2","results":[{"type":"command","id":"c1","timestamp":"2024-01-15T10:30:00Z","line":"ls"}]}`))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"detail":"page failed"}`))
+		}
+	}))
+	t.Cleanup(ts.Close)
+
+	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, "timeline", "ses-1")
+	assert.Equal(t, 1, exitCode)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "Failed to retrieve work session timeline")
 }

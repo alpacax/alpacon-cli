@@ -254,13 +254,8 @@ func GetWorkSessionRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
 	return ac.SendGetRequest(api.IDURL(workSessionURL, pathID, "", nil))
 }
 
-// GetWorkSessionTimeline reads a work session's activity timeline by cursor.
-// Naming `cursor`, even empty, on the first request is what holds the server to
-// the paged shape, whose items carry no recordings: a Websh terminal reports its
-// recording's chunk count in record_chunks_total instead, and the recording itself
-// is read one terminal at a time through GetTerminalRecording. `include_records`
-// rides along for a server that predates the paged route, so its whole-list answer
-// leaves the recordings out too; a server that pages ignores it.
+// GetWorkSessionTimeline reads a work session's timeline by cursor. Its items carry no
+// recordings; read one with GetTerminalRecording.
 func GetWorkSessionTimeline(ac *client.AlpaconClient, id string) ([]TimelineItem, error) {
 	pathID, err := api.RequireID(id, "work session")
 	if err != nil {

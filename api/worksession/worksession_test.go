@@ -334,21 +334,14 @@ func TestCancelWorkSession(t *testing.T) {
 // so the handler can pin the whole path instead of its tail.
 const timelineSessionID = "ses-abc"
 
-// newTimelineContractServer serves the timeline route's two shapes, paged and
-// whole, switching on whether `cursor` is named.
+// newTimelineContractServer serves the paged timeline, pageSize items per page, leaving the
+// recordings out as a paging server does.
 func newTimelineContractServer(t *testing.T, items []TimelineItem, pageSize int) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/work-sessions/sessions/"+timelineSessionID+"/timeline/", r.URL.Path)
 		query := r.URL.Query()
 		w.Header().Set("Content-Type", "application/json")
-
-		if !query.Has("cursor") {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"results": filterTimelineRecords(items, query.Get("include_records") != "false"),
-			})
-			return
-		}
 
 		paged := filterTimelineRecords(items, false)
 		start := 0
@@ -402,9 +395,6 @@ func TestGetWorkSessionTimeline_FollowsTheCursor(t *testing.T) {
 	assert.Equal(t, "ls -la", result[0].Line)
 	assert.Equal(t, "wsh-1", result[1].ID)
 	assert.Equal(t, "systemctl status nginx", result[2].Line)
-	for _, item := range result {
-		assert.NotEqual(t, "websh_record", item.Type)
-	}
 }
 
 // The one-response answer would hold the same items as the walk, so only the
