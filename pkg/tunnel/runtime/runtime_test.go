@@ -4,13 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -770,4 +773,79 @@ func TestDialTunnelReportsTheDialErrorWhenTheLookupHangs(t *testing.T) {
 	assert.Nil(t, conn)
 	require.EqualError(t, err, "failed to connect to proxy server: websocket: bad handshake (status 503 Service Unavailable)")
 	assert.Equal(t, int32(1), lookups.Load())
+}
+
+// emfileListener fails the Accept after the first with EMFILE, in the shape net.TCPListener returns it,
+// once release is closed and until failures run out, then hands the rest to the real listener.
+type emfileListener struct {
+	net.Listener
+	release  chan struct{}
+	failures atomic.Int32
+	calls    atomic.Int32
+	retried  chan struct{}
+}
+
+func (l *emfileListener) Accept() (net.Conn, error) {
+	if l.calls.Add(1) > 1 {
+		<-l.release
+		if l.failures.Add(-1) >= 0 {
+			return nil, &net.OpError{Op: "accept", Net: "tcp", Addr: l.Addr(), Err: os.NewSyscallError("accept", syscall.EMFILE)}
+		}
+		select {
+		case <-l.retried:
+		default:
+			close(l.retried)
+		}
+	}
+	return l.Listener.Accept()
+}
+
+// dialEcho opens a tunnel connection whose remote end echoes what it reads.
+func dialEcho(t *testing.T, addr string, agentSession *smux.Session) net.Conn {
+	t.Helper()
+	conn, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	remote := acceptRemote(t, agentSession)
+	go func() { _, _ = io.Copy(remote, remote) }()
+	return conn
+}
+
+func requireEcho(t *testing.T, conn net.Conn, msg string) {
+	t.Helper()
+	require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+	_, err := conn.Write([]byte(msg))
+	require.NoError(t, err)
+	got := make([]byte, len(msg))
+	_, err = io.ReadFull(conn, got)
+	require.NoError(t, err)
+	assert.Equal(t, msg, string(got))
+}
+
+func TestAcceptConnectionsKeepsTunnelOpenThroughDescriptorShortage(t *testing.T) {
+	t.Parallel()
+	cliConn, agentConn := net.Pipe()
+	cliSession, agentSession := smuxPair(t, cliConn, agentConn)
+	tcpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	listener := &emfileListener{Listener: tcpListener, release: make(chan struct{}), retried: make(chan struct{})}
+	listener.failures.Store(2)
+	r := &Runtime{session: cliSession, listener: listener, remotePort: "80", done: make(chan struct{})}
+	t.Cleanup(func() { r.Close(nil) })
+	go r.acceptConnections()
+	existing := dialEcho(t, tcpListener.Addr().String(), agentSession)
+	requireEcho(t, existing, "before")
+
+	close(listener.release)
+
+	select {
+	case <-listener.retried:
+	case <-r.Done():
+		t.Fatalf("tunnel shut down on a descriptor shortage: %v", r.Cause())
+	case <-time.After(5 * time.Second):
+		t.Fatal("accept loop never retried after EMFILE")
+	}
+	requireEcho(t, existing, "after")
+	requireEcho(t, dialEcho(t, tcpListener.Addr().String(), agentSession), "new")
+	assert.NoError(t, r.Cause())
 }
