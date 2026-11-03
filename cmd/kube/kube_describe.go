@@ -3,6 +3,7 @@ package kube
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/client"
@@ -57,11 +58,11 @@ names and status and tags as the server stores them.`,
 			utils.CliErrorWithExit("Failed to retrieve the cluster: %s.", err)
 		}
 
-		utils.PrintTable(describeRows(cluster, kubernetes.ResolveGroupNames(ac, cluster.Groups)))
+		utils.PrintTable(describeRows(cluster, kubernetes.ResolveGroupNames(ac, cluster.Groups), time.Local))
 	},
 }
 
-func describeRows(cluster *kubernetes.ClusterDetail, groupNames []string) []describeRow {
+func describeRows(cluster *kubernetes.ClusterDetail, groupNames []string, zone *time.Location) []describeRow {
 	return []describeRow{
 		{"ID", cluster.ID},
 		{"Name", cluster.Name},
@@ -74,9 +75,9 @@ func describeRows(cluster *kubernetes.ClusterDetail, groupNames []string) []desc
 		{"Status", formatJSONValue(cluster.Status)},
 		{"Groups", strings.Join(groupNames, ", ")},
 		{"Tags", formatTags(cluster.Tags)},
-		{"Last connectivity", formatTime(cluster.LastConnectivity)},
-		{"Last synced at", formatTime(cluster.LastSyncedAt)},
-		{"Added at", formatTime(&cluster.AddedAt)},
-		{"Updated at", formatTime(&cluster.UpdatedAt)},
+		{"Last connectivity", formatTime(cluster.LastConnectivity, zone)},
+		{"Last synced at", formatTime(cluster.LastSyncedAt, zone)},
+		{"Added at", formatTime(&cluster.AddedAt, zone)},
+		{"Updated at", formatTime(&cluster.UpdatedAt, zone)},
 	}
 }

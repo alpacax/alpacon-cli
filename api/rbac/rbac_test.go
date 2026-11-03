@@ -272,7 +272,7 @@ func TestAuditAttributesFrom_ToleratesMissingActorAndRole(t *testing.T) {
 	rows := AuditAttributesFrom([]RoleAuditLogResponse{
 		{Action: "granted", RoleName: "admin", Scope: "global", ChangedBy: nil, Reason: ""},
 		{Action: "revoked", RoleName: "operator", Scope: "global", ChangedBy: &AuditActor{Label: "Jane Doe"}, Reason: "rotated off"},
-	})
+	}, time.UTC)
 
 	require.Len(t, rows, 2)
 	assert.Empty(t, rows[0].ChangedBy)
@@ -428,15 +428,15 @@ func TestHolderAttributesFrom_NilMapPrintsIDs(t *testing.T) {
 		{User: types.UserSummary{ID: userID, Name: "Jane Doe", Email: "jane@example.com"}, Role: RoleNested{Name: "admin"}},
 	}
 
-	unresolved := HolderAttributesFrom(bindings, nil)
+	unresolved := HolderAttributesFrom(bindings, nil, time.UTC)
 	require.Len(t, unresolved, 1)
 	assert.Equal(t, userID, unresolved[0].User)
 
-	resolved := HolderAttributesFrom(bindings, map[string]string{userID: "jane"})
+	resolved := HolderAttributesFrom(bindings, map[string]string{userID: "jane"}, time.UTC)
 	require.Len(t, resolved, 1)
 	assert.Equal(t, "jane", resolved[0].User)
 
-	missing := HolderAttributesFrom(bindings, map[string]string{"someone-else": "bob"})
+	missing := HolderAttributesFrom(bindings, map[string]string{"someone-else": "bob"}, time.UTC)
 	require.Len(t, missing, 1)
 	assert.Equal(t, "Jane Doe", missing[0].User)
 }
@@ -531,13 +531,10 @@ func TestIAMHostedReadsHitTheRightPaths(t *testing.T) {
 	}
 }
 
-// A changed timeLayout, a dropped .Local(), or a null added_at would otherwise render silently.
-// The zone is pinned so the UTC instant below has one correct rendering on every machine; a render
-// that skipped the conversion prints 03:04 instead.
-func TestAttributesFrom_RenderTimesInTheLocalZone(t *testing.T) {
-	restore := time.Local
-	t.Cleanup(func() { time.Local = restore })
-	time.Local = time.FixedZone("KST", 9*60*60)
+// A changed timeLayout, a dropped zone conversion (03:04, not 12:04), or a null added_at would otherwise render silently.
+func TestAttributesFrom_RenderTimesInTheGivenZone(t *testing.T) {
+	t.Parallel()
+	kst := time.FixedZone("KST", 9*60*60)
 
 	granted := time.Date(2026, 3, 4, 3, 4, 5, 0, time.UTC)
 	const rendered = "2026-03-04 12:04"
@@ -547,12 +544,12 @@ func TestAttributesFrom_RenderTimesInTheLocalZone(t *testing.T) {
 		{User: types.UserSummary{ID: userID}, Role: RoleNested{Name: "operator"}},
 	}
 
-	roles := BindingAttributesFrom(bindings)
+	roles := BindingAttributesFrom(bindings, kst)
 	require.Len(t, roles, 2)
 	assert.Equal(t, rendered, roles[0].GrantedAt)
 	assert.Empty(t, roles[1].GrantedAt, "a missing added_at must not render as year 1")
 
-	holders := HolderAttributesFrom(bindings, nil)
+	holders := HolderAttributesFrom(bindings, nil, kst)
 	require.Len(t, holders, 2)
 	assert.Equal(t, rendered, holders[0].GrantedAt)
 	assert.Empty(t, holders[1].GrantedAt)
@@ -560,7 +557,7 @@ func TestAttributesFrom_RenderTimesInTheLocalZone(t *testing.T) {
 	audit := AuditAttributesFrom([]RoleAuditLogResponse{
 		{Action: "granted", RoleName: "admin", AddedAt: granted},
 		{Action: "revoked", RoleName: "admin"},
-	})
+	}, kst)
 	require.Len(t, audit, 2)
 	assert.Equal(t, rendered, audit[0].At)
 	assert.Empty(t, audit[1].At)
