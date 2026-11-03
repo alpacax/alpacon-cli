@@ -8,12 +8,15 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode"
 
+	"github.com/alpacax/alpacon-cli/api"
 	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
@@ -85,9 +88,11 @@ func parsePorts(remotePort, localPort string) (target int, bind string, err erro
 
 // Start initializes a TCP tunnel runtime and starts accepting local TCP connections.
 func Start(opts StartOptions) (*Runtime, error) {
-	if opts.ServerName == "" {
-		return nil, errors.New("server name is required")
+	serverName, err := api.RequireName(opts.ServerName, "server name is required")
+	if err != nil {
+		return nil, err
 	}
+	opts.ServerName = serverName
 	if opts.Client == nil {
 		return nil, errors.New("client is required")
 	}
@@ -308,19 +313,9 @@ func (r *Runtime) handleTCPConnection(tcpConn net.Conn) {
 		utils.CliInfo("Connection opened: %s", tcpConn.RemoteAddr())
 	}
 
-	errChan := make(chan error, 2)
-
-	go func() {
-		_, err := basetunnel.CopyBuffered(stream, tcpConn)
-		errChan <- err
-	}()
-
-	go func() {
-		_, err := basetunnel.CopyBuffered(tcpConn, stream)
-		errChan <- err
-	}()
-
-	<-errChan
+	if relay(tcpConn, stream, halfCloseTimeout) {
+		utils.CliWarning("Closed a half-closed tunnel connection after %v: %s", halfCloseTimeout, tcpConn.RemoteAddr())
+	}
 	if r.verbose {
 		utils.CliInfo("Connection closed: %s", tcpConn.RemoteAddr())
 	}
@@ -368,6 +363,10 @@ func extractTCPPort(addr net.Addr) (int, error) {
 }
 
 func isRetryableAcceptError(err error) bool {
+	var errno syscall.Errno
+	if errors.As(err, &errno) && slices.Contains(retryableAcceptErrnos, errno) {
+		return true
+	}
 	var ne net.Error
 	return errors.As(err, &ne) && ne.Timeout()
 }

@@ -20,7 +20,6 @@ const (
 )
 
 // endedStatuses are the statuses after which a work session never runs again.
-// A new status also needs a case in the create --wait switch in cmd/worksession.
 var endedStatuses = []string{StatusCompleted, StatusExpired, StatusRevoked, StatusRejected, StatusCancelled}
 
 type WorkSession struct {
@@ -221,9 +220,10 @@ type TimelineItem struct {
 	Command   *string `json:"command"`
 	OneTime   bool    `json:"one_time"`
 
-	// websh_record
-	SessionID    string `json:"session_id"`
-	MaskedRecord string `json:"masked_record"`
+	// websh_session: record_chunks_total is nil both when the server sends null
+	// (it could not count) and when it sends no key (it predates the count), so
+	// neither reads as "no recording".
+	RecordChunksTotal *int `json:"record_chunks_total"`
 }
 
 type TimelineAttributes struct {

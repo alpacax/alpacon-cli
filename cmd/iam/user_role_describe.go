@@ -2,6 +2,7 @@ package iam
 
 import (
 	"os"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/rbac"
@@ -62,7 +63,7 @@ list was narrowed.`,
 		}
 
 		permissionRows := rbac.ScopeAttributesFrom(scopes)
-		holderRows := rbac.HolderAttributesFrom(holders, usernames)
+		holderRows := rbac.HolderAttributesFrom(holders, usernames, time.Local)
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
 			combined := map[string]any{

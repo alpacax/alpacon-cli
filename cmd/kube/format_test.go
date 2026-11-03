@@ -55,26 +55,19 @@ func TestFormatJSONValue(t *testing.T) {
 	}
 }
 
-// withLocalZone pins time.Local so expected cells are literals, not formatTime's own expression;
-// it reassigns a process-wide value, so its callers stay serial.
-func withLocalZone(t *testing.T) {
-	t.Helper()
-	orig := time.Local
-	time.Local = time.FixedZone("KST", 9*60*60)
-	t.Cleanup(func() { time.Local = orig })
-}
+var kst = time.FixedZone("KST", 9*60*60)
 
 func TestFormatTime(t *testing.T) {
-	withLocalZone(t)
+	t.Parallel()
 	ts := time.Date(2026, 9, 30, 8, 15, 42, 0, time.UTC)
 
-	assert.Empty(t, formatTime(nil))
-	assert.Empty(t, formatTime(&time.Time{}))
-	assert.Equal(t, "2026-09-30 17:15", formatTime(&ts))
+	assert.Empty(t, formatTime(nil, kst))
+	assert.Empty(t, formatTime(&time.Time{}, kst))
+	assert.Equal(t, "2026-09-30 17:15", formatTime(&ts, kst))
 }
 
 func TestDescribeRows(t *testing.T) {
-	withLocalZone(t)
+	t.Parallel()
 	version := "v1.31.2"
 	nodes := 3
 	seen := time.Date(2026, 9, 30, 8, 15, 0, 0, time.UTC)
@@ -141,7 +134,8 @@ func TestDescribeRows(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, describeRows(&tt.cluster, tt.groups))
+			t.Parallel()
+			assert.Equal(t, tt.expected, describeRows(&tt.cluster, tt.groups, kst))
 		})
 	}
 }

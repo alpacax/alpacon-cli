@@ -108,7 +108,7 @@ func TestRetryAfterSecondsRoundsUp(t *testing.T) {
 	}
 }
 
-func TestCliErrorEnvelopeWithExit_InvalidIDUsesUsageExit(t *testing.T) {
+func TestCliErrorEnvelopeWithExitOfAUsageErrorExitsTwo(t *testing.T) {
 	for _, format := range []string{OutputFormatJSON, OutputFormatTable} {
 		t.Run(format, func(t *testing.T) {
 			help := exec.Command(os.Args[0], "-test.run=^TestCliErrorEnvelopeWithExitInvalidIDHelperProcess$")
@@ -140,7 +140,7 @@ func TestCliErrorEnvelopeWithExitInvalidIDHelperProcess(t *testing.T) {
 		return
 	}
 	OutputFormat = format
-	err := fmt.Errorf("invalid target ID: %w", ErrInvalidID)
+	err := MarkUsageError(fmt.Errorf("invalid target ID: %w", ErrInvalidID))
 	CliErrorEnvelopeWithExit("wait", err, "Failed to wait: %s.", err)
 }
 

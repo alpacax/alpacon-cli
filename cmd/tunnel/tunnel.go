@@ -154,11 +154,10 @@ func runTunnel(cmd *cobra.Command, args []string) {
 
 	exitCode, err := executeTunnelCommand(ac, cmd, args, sigChan)
 	if err != nil {
-		utils.CliError("%s", err)
-		if exitCode == 0 {
-			exitCode = 1
+		if exitCode > 1 { // the local command's own exit code
+			utils.CliErrorWithExitCode(exitCode, "%s", err)
 		}
-		os.Exit(exitCode)
+		utils.CliErrorWithExit("%s", err)
 	}
 	if exitCode != 0 {
 		os.Exit(exitCode)
