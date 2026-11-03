@@ -285,27 +285,23 @@ func acceptErrno(errno syscall.Errno) error {
 
 func TestIsRetryableAcceptErrorRetriesOnlyTransientAcceptFailures(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
+	type acceptCase struct {
 		err  error
 		want bool
-	}{
-		{"timeout", &tempNetError{msg: "timeout", timeout: true}, true},
-		{"EBADF", acceptErrno(syscall.EBADF), false},
-		{"EINVAL", acceptErrno(syscall.EINVAL), false},
-		{"closed listener", &net.OpError{Op: "accept", Net: "tcp", Err: net.ErrClosed}, false},
-		{"temporary without timeout", &tempNetError{msg: "temporary", temporary: true}, false},
-		{"plain error", errors.New("accept failure"), false},
+	}
+	tests := map[string]acceptCase{
+		"timeout":                   {&tempNetError{msg: "timeout", timeout: true}, true},
+		"EBADF":                     {acceptErrno(syscall.EBADF), false},
+		"EINVAL":                    {acceptErrno(syscall.EINVAL), false},
+		"closed listener":           {&net.OpError{Op: "accept", Net: "tcp", Err: net.ErrClosed}, false},
+		"temporary without timeout": {&tempNetError{msg: "temporary", temporary: true}, false},
+		"plain error":               {errors.New("accept failure"), false},
 	}
 	for name, errno := range retryableAcceptErrnoCases {
-		tests = append(tests, struct {
-			name string
-			err  error
-			want bool
-		}{name, acceptErrno(errno), true})
+		tests[name] = acceptCase{acceptErrno(errno), true}
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tt.want, isRetryableAcceptError(tt.err))
 		})
@@ -340,8 +336,6 @@ func TestCloseEndsAcceptLoopBackingOffOnDescriptorShortage(t *testing.T) {
 	})
 }
 
-// emfileListener holds every Accept after the first until release closes, fails the next failures of them
-// with a descriptor shortage as net.TCPListener returns it, then closes retried and hands the rest to the real listener.
 type emfileListener struct {
 	net.Listener
 	release     chan struct{}
@@ -358,7 +352,7 @@ func (l *emfileListener) Accept() (net.Conn, error) {
 		<-l.release
 		if l.failures > 0 {
 			l.failures--
-			return nil, &net.OpError{Op: "accept", Net: "tcp", Addr: l.Addr(), Err: os.NewSyscallError("accept", descriptorShortage)}
+			return nil, acceptErrno(descriptorShortage)
 		}
 		l.retriedOnce.Do(func() { close(l.retried) })
 	}
