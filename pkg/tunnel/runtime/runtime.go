@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -361,14 +362,10 @@ func extractTCPPort(addr net.Addr) (int, error) {
 	return tcpAddr.Port, nil
 }
 
-// retryableAcceptErrnos clear on their own, such as a descriptor shortage that ends when any connection closes.
-var retryableAcceptErrnos = []syscall.Errno{syscall.EMFILE, syscall.ENFILE, syscall.ECONNABORTED, syscall.EINTR}
-
 func isRetryableAcceptError(err error) bool {
-	for _, errno := range retryableAcceptErrnos {
-		if errors.Is(err, errno) {
-			return true
-		}
+	var errno syscall.Errno
+	if errors.As(err, &errno) && slices.Contains(retryableAcceptErrnos, errno) {
+		return true
 	}
 	var ne net.Error
 	return errors.As(err, &ne) && ne.Timeout()
