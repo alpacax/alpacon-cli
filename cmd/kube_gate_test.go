@@ -218,3 +218,28 @@ func TestKubeGatePassesCredentialsThrough(t *testing.T) {
 		assert.NotContains(t, stderr, kubernetes.SurfaceNotEnabledMessage)
 	}
 }
+
+// kube logout cleans up a context of another workspace, so it stays usable on
+// one without Kubernetes, help included: the stand-in's help only refuses, and
+// a kept command must not inherit it.
+func TestKubeGatePassesLogoutThrough(t *testing.T) {
+	t.Parallel()
+	home := writeKubeGateConfig(t, map[string]any{
+		"workspace_url": "https://ws.example.com", "workspace_name": "ws", "token": "tok", "kubernetes_surface": false,
+	})
+
+	for _, args := range [][]string{{"kube", "logout", "--help"}, {"kube", "logout", "-h"}, {"help", "kube", "logout"}} {
+		stdout, stderr, exitCode := runKubeGate(t, home, args...)
+		assert.Equal(t, 0, exitCode, "%v stderr: %s", args, stderr)
+		assert.Contains(t, stdout, "alpacon kube logout [CLUSTER]", "%v", args)
+		assert.NotContains(t, stderr, kubernetes.SurfaceNotEnabledMessage, "%v", args)
+	}
+
+	_, stderr, exitCode := runKubeGate(t, home, "kube", "logout", "prod")
+	assert.Equal(t, 0, exitCode, "stderr: %s", stderr)
+	assert.Contains(t, stderr, "No kube login for prod was found")
+
+	_, stderr, exitCode = runKubeGate(t, home, "kube", "sessions")
+	assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
+	assert.Contains(t, stderr, kubernetes.SurfaceNotEnabledMessage)
+}

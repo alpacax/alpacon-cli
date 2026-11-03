@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/config"
@@ -82,7 +83,7 @@ func stagingPattern(k recordKey) string {
 	return recordBase(k) + ".*.tmp"
 }
 
-var errStoreLocked = errors.New("another 'alpacon kube login' for this cluster is running")
+var errStoreLocked = errors.New("another alpacon command is using the saved kube session of this cluster")
 
 // lock serializes the logins of one cluster, whichever kubeconfig each one
 // writes: each reads the record, replaces it and closes the session it named.
@@ -121,12 +122,21 @@ func (s kubeSessionStore) read(k recordKey) (*kubeSessionRecord, error) {
 // records returns every saved record for clusterName, across workspaces. A
 // file that cannot be read or parsed is skipped: it is no one's credential.
 func (s kubeSessionStore) records(clusterName string) ([]kubeSessionRecord, error) {
-	paths, err := filepath.Glob(filepath.Join(s.dir, "*.json"))
+	// ReadDir, not Glob: a home path holding a pattern character such as '['
+	// would make Glob match nothing.
+	entries, err := os.ReadDir(s.dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
 	var found []kubeSessionRecord
-	for _, path := range paths {
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(s.dir, entry.Name())
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
@@ -182,11 +192,40 @@ func (s kubeSessionStore) restore(k recordKey, previous *kubeSessionRecord) erro
 	if previous != nil {
 		return s.write(*previous)
 	}
-	err := os.Remove(s.recordPath(k))
+	return s.remove(k)
+}
+
+// remove deletes the record under k; one already gone is not an error. The
+// lock file stays, as in config.DeleteConfig: a kube login may hold it.
+func (s kubeSessionStore) remove(k recordKey) error {
+	if err := os.Remove(s.recordPath(k)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// removeStaging deletes the temp files a killed write left for the record,
+// which can hold its token.
+func (s kubeSessionStore) removeStaging(k recordKey) error {
+	entries, err := os.ReadDir(s.dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	prefix := recordBase(k) + "."
+	var failures []error
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".tmp") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(s.dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }
 
 // ensureDir creates the store's directory owner-only and narrows one that
