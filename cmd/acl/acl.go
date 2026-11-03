@@ -57,8 +57,8 @@ func (s *ledgerSession) resolveServiceToken(ref string) (string, error) {
 	return auth.ResolveServiceTokenID(ac, ref)
 }
 
-// listFilterID is resolveServiceToken for a listing filter: an id passes
-// through, so a personal API token's existing entries stay listable.
+// listFilterID is resolveServiceToken for a listing filter, but an id passes through
+// unchecked. ListEntries filters as service_token, so a personal API token's id lists nothing.
 func (s *ledgerSession) listFilterID(ref string) (string, error) {
 	if ref = strings.TrimSpace(ref); utils.IsUUID(ref) {
 		return ref, nil
