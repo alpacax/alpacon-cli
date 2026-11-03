@@ -30,8 +30,8 @@ const RejectionCauseUseFileExecution = "use_file_execution"
 const (
 	RejectionCauseApprovalExpired  = "approval_expired"
 	RejectionCauseApprovalRejected = "approval_rejected"
-	// RejectionCauseSignatureInvalid ends as completed, not rejected: the agent
-	// refuses the file after delivery.
+	// RejectionCauseSignatureInvalid comes with status completed, since the agent
+	// refuses the file after delivery, and IsRejected still counts it a rejection.
 	RejectionCauseSignatureInvalid = "signature_invalid"
 )
 
