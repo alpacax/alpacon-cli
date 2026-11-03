@@ -20,7 +20,6 @@ const (
 )
 
 // endedStatuses are the statuses after which a work session never runs again.
-// A new status also needs a case in the create --wait switch in cmd/worksession.
 var endedStatuses = []string{StatusCompleted, StatusExpired, StatusRevoked, StatusRejected, StatusCancelled}
 
 type WorkSession struct {
