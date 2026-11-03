@@ -34,6 +34,7 @@ func TestRejectedCommandReportsCauseGateAndNextStep(t *testing.T) {
 		wantCode    string
 		wantServer  map[string]any
 		wantNext    utils.NextAction
+		wantExit    int
 	}{
 		{
 			name:        "gated cause",
@@ -66,6 +67,7 @@ func TestRejectedCommandReportsCauseGateAndNextStep(t *testing.T) {
 			wantCode:    "signature_invalid",
 			wantServer:  map[string]any{"rejection_cause": "signature_invalid", "rejection_gate": nil},
 			wantNext:    utils.NextAction{Description: "Ask a workspace administrator to check file signing; the agent refuses a file whose signature does not verify."},
+			wantExit:    utils.ExitCodeGeneralError,
 		},
 		{
 			name:        "unknown cause falls back to its gate",
@@ -100,12 +102,16 @@ func TestRejectedCommandReportsCauseGateAndNextStep(t *testing.T) {
 			for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 				t.Run(surface.name+"/"+tc.name+"/"+format, func(t *testing.T) {
 					t.Parallel()
+					wantExit := tc.wantExit
+					if wantExit == 0 {
+						wantExit = utils.ExitCodeNotApproved
+					}
 					ts := newRejectedCommandServerWith("root", "wheel", tc.extra)
 					defer ts.Close()
 
 					stderr, exitCode := surface.run(t, ts.URL, format)
 
-					assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "stderr: %s", stderr)
+					assert.Equal(t, wantExit, exitCode, "stderr: %s", stderr)
 					if format == utils.OutputFormatTable {
 						assert.Contains(t, stderr, "Error: "+surface.subject+" "+tc.wantMessage+".\n")
 						assert.Contains(t, stderr, "Hint: "+tc.wantNext.PlainText()+"\n")
@@ -113,7 +119,7 @@ func TestRejectedCommandReportsCauseGateAndNextStep(t *testing.T) {
 					}
 					envelope := lastEnvelope(t, stderr)
 					assert.False(t, envelope.OK)
-					assert.Equal(t, utils.ExitCodeNotApproved, envelope.ExitCode)
+					assert.Equal(t, wantExit, envelope.ExitCode)
 					assert.Equal(t, tc.wantCode, envelope.ErrorCode)
 					assert.Equal(t, surface.subject+" "+tc.wantMessage+".", envelope.Message)
 					assert.Equal(t, tc.wantServer, envelope.Server)

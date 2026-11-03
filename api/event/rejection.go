@@ -7,8 +7,8 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// CommandRejectedError is a type so the CLI can exit ExitCodeNotApproved: a retry
-// is refused again or files another approval request.
+// CommandRejectedError is a type so the CLI can exit with ExitCode: a retry is
+// refused again or files another approval request.
 type CommandRejectedError struct {
 	CommandID string
 	Expired   bool
@@ -101,6 +101,15 @@ func (r CommandRejection) Label() string {
 		label += ", gate " + utils.SanitizeTerminalText(r.RejectionGate.Value)
 	}
 	return label
+}
+
+// ExitCode is ExitCodeNotApproved, except a signature refusal keeps exit 1, which
+// scripts already branch on for a completed command that failed.
+func (e *CommandRejectedError) ExitCode() int {
+	if e.Cause == RejectionCauseSignatureInvalid {
+		return utils.ExitCodeGeneralError
+	}
+	return utils.ExitCodeNotApproved
 }
 
 // Rejection is the error for a rejected command detail.

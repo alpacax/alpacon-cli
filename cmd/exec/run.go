@@ -875,15 +875,15 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 	}
 }
 
-// reportCommandRejection exits ExitCodeNotApproved, with the rejection's next
+// reportCommandRejection exits with the rejection's exit code, and its next
 // step when it has one.
 func reportCommandRejection(err error, rejected *event.CommandRejectedError) {
 	actions := rejected.NextActions()
 	if len(actions) == 0 {
-		utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, "command", err, "%s", rejected)
+		utils.CliErrorEnvelopeWithExitCode(rejected.ExitCode(), "command", err, "%s", rejected)
 		return
 	}
-	reportCodedRefusalWithExit(utils.ExitCodeNotApproved, "command", err, rejected.Error(), denialHintLine(actions[0].PlainText()+"\n"), actions)
+	reportCodedRefusalWithExit(rejected.ExitCode(), "command", err, rejected.Error(), denialHintLine(actions[0].PlainText()+"\n"), actions)
 }
 
 // remoteFailureReport is what HandleCommandResult writes to stderr for a
