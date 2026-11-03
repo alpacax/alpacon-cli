@@ -4,14 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -273,6 +277,141 @@ func TestAcceptConnectionsErrorTriggersShutdown(t *testing.T) {
 	if got := sessionCloseCount.Load(); got != 1 {
 		t.Fatalf("session Close() called %d times, want 1", got)
 	}
+}
+
+func acceptErrno(errno syscall.Errno) error {
+	return &net.OpError{Op: "accept", Net: "tcp", Err: os.NewSyscallError("accept", errno)}
+}
+
+func TestIsRetryableAcceptErrorRetriesOnlyTransientAcceptFailures(t *testing.T) {
+	t.Parallel()
+	type acceptCase struct {
+		err  error
+		want bool
+	}
+	tests := map[string]acceptCase{
+		"timeout":                   {&tempNetError{msg: "timeout", timeout: true}, true},
+		"EBADF":                     {acceptErrno(syscall.EBADF), false},
+		"EINVAL":                    {acceptErrno(syscall.EINVAL), false},
+		"closed listener":           {&net.OpError{Op: "accept", Net: "tcp", Err: net.ErrClosed}, false},
+		"temporary without timeout": {&tempNetError{msg: "temporary", temporary: true}, false},
+		"plain error":               {errors.New("accept failure"), false},
+	}
+	for name, errno := range retryableAcceptErrnoCases {
+		tests[name] = acceptCase{acceptErrno(errno), true}
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, isRetryableAcceptError(tt.err))
+		})
+	}
+}
+
+func TestCloseEndsAcceptLoopBackingOffOnDescriptorShortage(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		var attempts atomic.Int32
+		r := &Runtime{
+			listener: &mockListener{acceptFn: func() (net.Conn, error) {
+				attempts.Add(1)
+				return nil, acceptErrno(descriptorShortage)
+			}},
+			session: &mockSession{},
+			done:    make(chan struct{}),
+		}
+		loopDone := make(chan struct{})
+		go func() {
+			r.acceptConnections()
+			close(loopDone)
+		}()
+		time.Sleep(time.Second)
+		synctest.Wait()
+
+		r.Close(nil)
+
+		<-loopDone
+		assert.GreaterOrEqual(t, attempts.Load(), int32(3))
+		assert.NoError(t, r.Cause())
+	})
+}
+
+type emfileListener struct {
+	net.Listener
+	release     chan struct{}
+	releaseOnce sync.Once
+	failures    int
+	calls       int
+	retried     chan struct{}
+	retriedOnce sync.Once
+}
+
+func (l *emfileListener) Accept() (net.Conn, error) {
+	l.calls++
+	if l.calls > 1 {
+		<-l.release
+		if l.failures > 0 {
+			l.failures--
+			return nil, acceptErrno(descriptorShortage)
+		}
+		l.retriedOnce.Do(func() { close(l.retried) })
+	}
+	return l.Listener.Accept()
+}
+
+func (l *emfileListener) releaseAccept() {
+	l.releaseOnce.Do(func() { close(l.release) })
+}
+
+func dialEcho(t *testing.T, addr string, agentSession *smux.Session) net.Conn {
+	t.Helper()
+	conn, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	remote := acceptRemote(t, agentSession)
+	go func() { _, _ = io.Copy(remote, remote) }()
+	return conn
+}
+
+func requireEcho(t *testing.T, conn net.Conn, msg string) {
+	t.Helper()
+	require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+	_, err := conn.Write([]byte(msg))
+	require.NoError(t, err)
+	got := make([]byte, len(msg))
+	_, err = io.ReadFull(conn, got)
+	require.NoError(t, err)
+	assert.Equal(t, msg, string(got))
+}
+
+func TestAcceptConnectionsKeepsTunnelOpenThroughDescriptorShortage(t *testing.T) {
+	t.Parallel()
+	cliConn, agentConn := net.Pipe()
+	cliSession, agentSession := smuxPair(t, cliConn, agentConn)
+	tcpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	listener := &emfileListener{Listener: tcpListener, release: make(chan struct{}), failures: 2, retried: make(chan struct{})}
+	r := &Runtime{session: cliSession, listener: listener, remotePort: "80", done: make(chan struct{})}
+	t.Cleanup(func() {
+		r.Close(nil)
+		listener.releaseAccept()
+	})
+	go r.acceptConnections()
+	existing := dialEcho(t, tcpListener.Addr().String(), agentSession)
+	requireEcho(t, existing, "before")
+
+	listener.releaseAccept()
+
+	select {
+	case <-listener.retried:
+	case <-r.Done():
+		t.Fatalf("tunnel shut down on a descriptor shortage: %v", r.Cause())
+	case <-time.After(5 * time.Second):
+		t.Fatal("accept loop never retried after a descriptor shortage")
+	}
+	requireEcho(t, existing, "after")
+	requireEcho(t, dialEcho(t, tcpListener.Addr().String(), agentSession), "new")
+	assert.NoError(t, r.Cause())
 }
 
 func TestSessionCloseChanTriggersShutdown(t *testing.T) {

@@ -8,9 +8,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -361,6 +363,10 @@ func extractTCPPort(addr net.Addr) (int, error) {
 }
 
 func isRetryableAcceptError(err error) bool {
+	var errno syscall.Errno
+	if errors.As(err, &errno) && slices.Contains(retryableAcceptErrnos, errno) {
+		return true
+	}
 	var ne net.Error
 	return errors.As(err, &ne) && ne.Timeout()
 }
