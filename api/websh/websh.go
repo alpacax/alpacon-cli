@@ -169,7 +169,7 @@ func ReconnectToSession(ac *client.AlpaconClient, sessionID string) (SessionResp
 // resizes the remote PTY on every update, so this also redraws a shell that spent
 // a reconnect talking to nobody, even when the size itself has not changed.
 func SendTerminalSize(ac *client.AlpaconClient, sessionID string) error {
-	pathID, err := api.RequireID(sessionID, "Websh session")
+	pathID, err := api.RequireResponseID(sessionID, "Websh session")
 	if err != nil {
 		return err
 	}

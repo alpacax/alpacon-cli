@@ -357,7 +357,7 @@ func TestErrorFromDetails_PropagatesExitCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := errorFromDetails(EventDetails{
+			err := errorFromDetails(testPathID(t, "cmd-9"), EventDetails{
 				Status:     "completed",
 				Success:    tt.respSuccess,
 				ExitCode:   tt.respExitCode,
@@ -377,7 +377,7 @@ func TestErrorFromDetails_PropagatesExitCode(t *testing.T) {
 
 func TestErrorFromDetails_AwaitingApprovalReturnsPendingApprovalError(t *testing.T) {
 	t.Parallel()
-	err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "awaiting_approval"})
+	err := errorFromDetails(testPathID(t, "cmd-9"), EventDetails{Status: "awaiting_approval"})
 	var pending *PendingApprovalError
 	require.ErrorAs(t, err, &pending)
 	assert.Equal(t, "cmd-9", pending.CommandID)
@@ -385,7 +385,7 @@ func TestErrorFromDetails_AwaitingApprovalReturnsPendingApprovalError(t *testing
 
 func TestErrorFromDetails_RejectedReturnsCommandRejectedError(t *testing.T) {
 	t.Parallel()
-	err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "rejected"})
+	err := errorFromDetails(testPathID(t, "cmd-9"), EventDetails{Status: "rejected"})
 	var rejected *CommandRejectedError
 	require.ErrorAs(t, err, &rejected)
 	assert.Contains(t, err.Error(), "rejected by a reviewer")
@@ -409,7 +409,7 @@ func TestErrorFromDetails_UseFileExecutionCarriesCause(t *testing.T) {
 		"server": {"id": "srv-1", "name": "prod"}
 	}`), &d))
 
-	err := errorFromDetails(d)
+	err := errorFromDetails(testPathID(t, "cmd-9"), d)
 	var rejected *CommandRejectedError
 	require.ErrorAs(t, err, &rejected)
 	assert.Equal(t, RejectionCauseUseFileExecution, rejected.Cause)
@@ -444,7 +444,7 @@ func TestCommandRejectedError_CauseMapping(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.cause, func(t *testing.T) {
 			t.Parallel()
-			err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "rejected", RejectionCause: tc.cause})
+			err := errorFromDetails(testPathID(t, "cmd-9"), EventDetails{Status: "rejected", RejectionCause: tc.cause})
 			code, _ := utils.ParseErrorResponse(err)
 			assert.Equal(t, tc.cause, code)
 			assert.Equal(t, "command cmd-9 "+tc.want, err.Error())
@@ -2371,14 +2371,13 @@ func TestErrorFromDetails_RemoteCommandErrorCarriesCommandID(t *testing.T) {
 	exitCode := 1
 	success := false
 	details := EventDetails{
-		ID:       "cmd-1",
 		Status:   "failed",
 		Result:   "sudo: approval required",
 		Success:  &success,
 		ExitCode: &exitCode,
 	}
 
-	err := errorFromDetails(details)
+	err := errorFromDetails(testPathID(t, "cmd-1"), details)
 
 	var remoteErr *RemoteCommandError
 	require.ErrorAs(t, err, &remoteErr)
@@ -2487,6 +2486,32 @@ func TestRunCommandFallbackFromID_ChunkFetchFailure(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestRunCommandFallbackFromIDNamesTheCheckedIDWhenTheServerEchoesAnUnusableOne(t *testing.T) {
+	t.Parallel()
+	const cmdID = "a1b2c3d4-1234-5678-abcd-000000000000"
+	synctest.Test(t, func(t *testing.T) {
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.Contains(r.URL.Path, "/chunks/"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
+			case r.URL.Path == "/api/events/commands/"+cmdID+"/":
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"..","status":"rejected"}`))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+		err := runCommandFallbackFromID(ac, testPathID(t, cmdID), io.Discard, CommandPollTick, false, fmt.Errorf("websocket dial failed"))
+
+		var rejected *CommandRejectedError
+		require.ErrorAs(t, err, &rejected)
+		assert.Equal(t, cmdID, rejected.CommandID)
+	})
 }
 
 // A submission refused for MFA is retried once a second for minutes. The stream
@@ -2660,7 +2685,7 @@ func TestStreamApprovedCommand_RefusesACommandIDThatIsNotOneSegment(t *testing.T
 
 func TestPendingCommandCarriesConsoleURL(t *testing.T) {
 	t.Parallel()
-	err := errorFromDetails(EventDetails{Status: "awaiting_approval", ConsoleURL: "https://console.example/commands/1", WorkSession: &CommandWorkSession{ID: "ses-1"}})
+	err := errorFromDetails(testPathID(t, "cmd-1"), EventDetails{Status: "awaiting_approval", ConsoleURL: "https://console.example/commands/1", WorkSession: &CommandWorkSession{ID: "ses-1"}})
 	var pending *PendingApprovalError
 	require.ErrorAs(t, err, &pending)
 	assert.Equal(t, "https://console.example/commands/1", pending.ConsoleURL)
@@ -2764,7 +2789,7 @@ func TestSignalAccountFromCommandDetails(t *testing.T) {
 		t.Run(status, func(t *testing.T) {
 			t.Parallel()
 			success := false
-			err := errorFromDetails(EventDetails{Status: status, Username: "deploy", Success: &success})
+			err := errorFromDetails(testPathID(t, "cmd-1"), EventDetails{Status: status, Username: "deploy", Success: &success})
 			require.Error(t, err)
 			var carrier interface{ LocalSignalAccount() string }
 			require.ErrorAs(t, err, &carrier)
