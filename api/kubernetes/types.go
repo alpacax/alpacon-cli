@@ -65,6 +65,13 @@ type groupSummary struct {
 	Name string `json:"name"`
 }
 
+// clusterSummary is the part of a cluster that names it, decoded alone so a
+// change in another field cannot fail the name lookup.
+type clusterSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // ClientTypeCLI is the client_type a session opened from this CLI declares.
 const ClientTypeCLI = "cli"
 
@@ -95,4 +102,35 @@ type KubeSessionDetail struct {
 	ID             string     `json:"id"`
 	TokenExpiredAt *time.Time `json:"token_expired_at"`
 	ClosedAt       *time.Time `json:"closed_at"`
+}
+
+// KubeSessionUser is the person a listed kube session belongs to.
+type KubeSessionUser struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// KubeSessionListItem is one entry of the session list. It is apart from
+// KubeSessionDetail so a change in these fields cannot fail the read
+// 'kube credentials' makes on every kubectl call.
+type KubeSessionListItem struct {
+	ID             string           `json:"id"`
+	Cluster        string           `json:"cluster"`
+	User           *KubeSessionUser `json:"user"`
+	TokenExpiredAt *time.Time       `json:"token_expired_at"`
+	ClosedAt       *time.Time       `json:"closed_at"`
+}
+
+// KubeSessionAttributes is the 'kube sessions' row. The table shows the expiry
+// in local time; --output json also carries the cluster's ID and both times as
+// the server sent them.
+type KubeSessionAttributes struct {
+	ID             string     `json:"id" table:"ID"`
+	Cluster        string     `json:"cluster" table:"Cluster"`
+	ClusterID      string     `json:"cluster_id" table:"-"`
+	User           string     `json:"user" table:"User"`
+	Status         string     `json:"status" table:"Status"`
+	ExpiresAt      string     `json:"expires_at" table:"Expires At"`
+	TokenExpiredAt *time.Time `json:"token_expired_at" table:"-"`
+	ClosedAt       *time.Time `json:"closed_at" table:"-"`
 }
