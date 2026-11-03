@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -573,14 +575,16 @@ func TestDecideUseAction(t *testing.T) {
 	}{
 		{name: "use disabled with pending status", status: "pending", useEnabled: false, want: useDecisionNoop},
 		{name: "use disabled with active status", status: "active", useEnabled: false, want: useDecisionNoop},
-		{name: "use enabled with active status (superuser or post-poll)", status: "active", useEnabled: true, want: useDecisionUseNow},
-		{name: "use enabled with pending status (needs --wait)", status: "pending", useEnabled: true, want: useDecisionErrorNeedsWait},
-		{name: "use enabled with approved status (scheduled starts_at)", status: "approved", useEnabled: true, want: useDecisionSkipScheduled},
-		{name: "use enabled with rejected status (terminal)", status: "rejected", useEnabled: true, want: useDecisionErrorNeedsWait},
-		{name: "use enabled with expired status (terminal)", status: "expired", useEnabled: true, want: useDecisionErrorNeedsWait},
-		{name: "use enabled with revoked status (terminal)", status: "revoked", useEnabled: true, want: useDecisionErrorNeedsWait},
-		{name: "use enabled with completed status (terminal)", status: "completed", useEnabled: true, want: useDecisionErrorNeedsWait},
-		{name: "use enabled with empty status (defensive)", status: "", useEnabled: true, want: useDecisionErrorNeedsWait},
+		{name: "use enabled with active status", status: "active", useEnabled: true, want: useDecisionUseNow},
+		{name: "use enabled with pending status", status: "pending", useEnabled: true, want: useDecisionNeedsApproval},
+		{name: "use enabled with approved status", status: "approved", useEnabled: true, want: useDecisionSkipScheduled},
+		{name: "use enabled with rejected status", status: "rejected", useEnabled: true, want: useDecisionSettled},
+		{name: "use enabled with expired status", status: "expired", useEnabled: true, want: useDecisionSettled},
+		{name: "use enabled with revoked status", status: "revoked", useEnabled: true, want: useDecisionSettled},
+		{name: "use enabled with cancelled status", status: "cancelled", useEnabled: true, want: useDecisionSettled},
+		{name: "use enabled with completed status", status: "completed", useEnabled: true, want: useDecisionSettled},
+		{name: "use enabled with an unknown status", status: "paused", useEnabled: true, want: useDecisionUnknownStatus},
+		{name: "use enabled with an empty status", status: "", useEnabled: true, want: useDecisionUnknownStatus},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -890,6 +894,111 @@ func TestPollForApproval_PlainTimeoutCarriesNoHint(t *testing.T) {
 	assert.Empty(t, utils.RefusalNextActions(err))
 }
 
+func TestWorkSessionCreateUseWithoutAUsableLoginExitsOne(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		config      string
+		wantCode    string
+		wantMessage string
+		noBugFooter bool
+	}{
+		{name: "no config file", wantCode: utils.ErrorCodeNotLoggedIn, wantMessage: "Please run 'alpacon login'"},
+		{name: "config without a workspace", config: `{"workspace_url":"http://127.0.0.1:1","token":"t"}`, wantCode: utils.ErrorCodeNotLoggedIn, wantMessage: "--use requires an active workspace. Run 'alpacon login' first.", noBugFooter: true},
+		{name: "unreadable config", config: "{not json", wantCode: utils.ErrorCodeCLI, wantMessage: "failed to decode config file"},
+	}
+	for _, tt := range tests {
+		for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+			t.Run(tt.name+" "+outputFormat, func(t *testing.T) {
+				t.Parallel()
+				home := t.TempDir()
+				if tt.config != "" {
+					require.NoError(t, os.Mkdir(filepath.Join(home, ".alpacon"), 0o700))
+					require.NoError(t, os.WriteFile(filepath.Join(home, ".alpacon", "config.json"), []byte(tt.config), 0o600))
+				}
+
+				stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, append(agentHelperEnv(), "HOME="+home), outputFormat,
+					"http://127.0.0.1:1", createArgs("--use")...)
+
+				assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
+				assert.Empty(t, stdout)
+				if outputFormat == utils.OutputFormatTable {
+					assert.Contains(t, stderr, tt.wantMessage)
+					if tt.noBugFooter {
+						assert.NotContains(t, stderr, "For issues, check the latest version")
+					}
+					return
+				}
+				var got errorEnvelope
+				require.NoError(t, json.Unmarshal([]byte(stderr), &got), "stderr: %s", stderr)
+				assert.Equal(t, utils.ExitCodeGeneralError, got.ExitCode)
+				assert.Equal(t, tt.wantCode, got.ErrorCode)
+				assert.Equal(t, opCreate, got.Context.Operation)
+				assert.Contains(t, got.Message, tt.wantMessage)
+			})
+		}
+	}
+}
+
+func TestWorkSessionCreateUseReportsABadScopeBeforeAMissingLogin(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, append(agentHelperEnv(), "HOME="+t.TempDir()), utils.OutputFormatJSON,
+		"http://127.0.0.1:1", createArgs("--use", "--scope", "bogus")...)
+
+	assert.Equal(t, utils.ExitCodeUsageError, exitCode, "stderr: %s", stderr)
+	assert.Empty(t, stdout)
+	var got errorEnvelope
+	require.NoError(t, json.Unmarshal([]byte(stderr), &got), "stderr: %s", stderr)
+	assert.Equal(t, utils.ErrorCodeUsage, got.ErrorCode)
+	assert.Contains(t, got.Message, "Invalid --scope: bogus")
+}
+
+func TestWorkSessionCreateUseOnAPendingSessionReportsPendingApproval(t *testing.T) {
+	t.Parallel()
+	for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+		t.Run(outputFormat, func(t *testing.T) {
+			t.Parallel()
+			ts := newCreateServerAnswering(t, "pending", "pending")
+
+			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), outputFormat, ts.URL,
+				createArgs("--use")...)
+
+			require.Equal(t, utils.ExitCodePendingApproval, exitCode, "stdout: %s\nstderr: %s", stdout, stderr)
+			if outputFormat == utils.OutputFormatTable {
+				assert.Empty(t, stdout)
+				assert.Contains(t, stderr, "--use requires the session to be active, and work session ses-x is pending. A human must approve it in the Alpacon console (web).")
+				assert.Contains(t, stderr, "alpacon work-session use ses-x")
+				assert.Contains(t, stderr, "alpacon work-session update ses-x --server <server,...>")
+				assert.Equal(t, 1, strings.Count(stderr, "--wait-approval"), "stderr: %s", stderr)
+				return
+			}
+			var envelope struct {
+				Status    string `json:"status"`
+				ExitCode  int    `json:"exit_code"`
+				Message   string `json:"message"`
+				RequestID string `json:"request_id"`
+				Context   struct {
+					RequestID string `json:"request_id"`
+				} `json:"context"`
+				NextActions []utils.NextAction `json:"next_actions"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(stdout), &envelope), "stdout: %s", stdout)
+			assert.Empty(t, stderr)
+			assert.Equal(t, utils.PendingApprovalStatus, envelope.Status)
+			assert.Equal(t, utils.ExitCodePendingApproval, envelope.ExitCode)
+			assert.Equal(t, "apr-1", envelope.RequestID)
+			assert.Equal(t, "apr-1", envelope.Context.RequestID)
+			assert.Equal(t, "--use requires the session to be active, and work session ses-x is pending. A human must approve it in the Alpacon console (web).", envelope.Message)
+			commands := make([]string, 0, len(envelope.NextActions))
+			for _, action := range envelope.NextActions {
+				commands = append(commands, action.Command)
+			}
+			assert.Equal(t, []string{"alpacon work-session use ses-x", "", "alpacon work-session update ses-x --server <server,...>"}, commands)
+		})
+	}
+}
+
 // The session outlives a refusal, so every path that reports one names the session and only the
 // follow-ups it can still take: not 'work-session use' (see TestRunUseSessionRefusesASettledSession).
 func TestWorkSessionCreateSettledRefusalNamesTheSession(t *testing.T) {
@@ -901,6 +1010,8 @@ func TestWorkSessionCreateSettledRefusalNamesTheSession(t *testing.T) {
 		args         []string
 	}{
 		{name: "wait on a pending create", createStatus: "pending", pollStatus: "rejected", args: createArgs("--wait")},
+		{name: "use on a rejected create", createStatus: "rejected", pollStatus: "rejected", args: createArgs("--use")},
+		{name: "wait and use on a rejected create", createStatus: "rejected", pollStatus: "rejected", args: createArgs("--wait", "--use")},
 	}
 	for _, tt := range tests {
 		for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
@@ -934,5 +1045,44 @@ func TestWorkSessionCreateSettledRefusalNamesTheSession(t *testing.T) {
 				assert.NotContains(t, stderr, "report on https://github.com", "a reviewer saying no is not a bug to file")
 			})
 		}
+	}
+}
+
+func TestWorkSessionCreateWithoutUseReportsASettledSessionAsCreated(t *testing.T) {
+	t.Parallel()
+	ts := newCreateServerAnswering(t, "rejected", "rejected")
+
+	stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), utils.OutputFormatTable, ts.URL, createArgs()...)
+
+	assert.Equal(t, 0, exitCode, "stdout: %s\nstderr: %s", stdout, stderr)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "Work session created: ses-x (status: rejected")
+	assert.NotContains(t, stderr, "work session was rejected")
+}
+
+func TestWorkSessionCreateUseOnAnUnknownStatusExitsGeneralError(t *testing.T) {
+	t.Parallel()
+	for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+		t.Run(outputFormat, func(t *testing.T) {
+			t.Parallel()
+			ts := newCreateServerAnswering(t, "paused", "paused")
+
+			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), outputFormat, ts.URL,
+				createArgs("--use")...)
+
+			require.Equal(t, utils.ExitCodeGeneralError, exitCode, "stdout: %s\nstderr: %s", stdout, stderr)
+			assert.Empty(t, stdout)
+			const message = "--use requires the session to be active, but work session ses-x is paused."
+			if outputFormat == utils.OutputFormatTable {
+				assert.Contains(t, stderr, message)
+				return
+			}
+			var got errorEnvelope
+			require.NoError(t, json.Unmarshal([]byte(stderr), &got), "stderr: %s", stderr)
+			assert.Equal(t, utils.ExitCodeGeneralError, got.ExitCode)
+			assert.Equal(t, utils.ErrorCodeCLI, got.ErrorCode)
+			assert.Equal(t, opCreate, got.Context.Operation)
+			assert.Equal(t, message, got.Message)
+		})
 	}
 }

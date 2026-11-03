@@ -14,7 +14,6 @@ import (
 	"github.com/alpacax/alpacon-cli/api/server"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -31,8 +30,10 @@ const (
 const (
 	useDecisionNoop useDecision = iota
 	useDecisionUseNow
-	useDecisionErrorNeedsWait
 	useDecisionSkipScheduled
+	useDecisionNeedsApproval
+	useDecisionSettled
+	useDecisionUnknownStatus
 )
 
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh", ScopeKube, ScopeKubeExec}
@@ -181,15 +182,8 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 		}
 		shouldWait := waitTimeout > 0
 
-		// Check --use before the create, so it never leaves a session it cannot attach.
-		if useAfterCreate {
-			if sessionRequesterType == "agent" {
-				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use cannot be combined with an agent session (agent sessions are not workspace-attachable; pass the session ID to each command with --work-session).%s", detectedAgentSuffix(detected))
-			}
-			cfg, err := config.LoadConfig()
-			if err != nil || cfg.WorkspaceName == "" {
-				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use requires an active workspace. Run 'alpacon login' first.")
-			}
+		if useAfterCreate && sessionRequesterType == "agent" {
+			utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use cannot be combined with an agent session (agent sessions are not workspace-attachable; pass the session ID to each command with --work-session).%s", detectedAgentSuffix(detected))
 		}
 
 		var scopeList []string
@@ -232,6 +226,10 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorEnvelopeWithExit(opCreate, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		}
+		// Check --use before the create, so it never leaves a session it cannot attach.
+		if useAfterCreate && ac.WorkspaceName == "" {
+			utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeGeneralError, opCreate, utils.ErrNotLoggedIn, "--use requires an active workspace. Run 'alpacon login' first.")
 		}
 
 		req := wsapi.WorkSessionCreateRequest{
@@ -309,9 +307,18 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 				printCreateNext(clusterName, session)
 				return
 			}
-		case useDecisionErrorNeedsWait:
+		case useDecisionNeedsApproval:
 			if !shouldWait {
-				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use requires the session to be active. Pass --wait (or --wait-approval <duration> for a longer timeout) to wait for approval, or run 'alpacon work-session use %s' after approval.", session.ID)
+				exitPending(session, afterApproval, fmt.Sprintf("--use requires the session to be active, and work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID), createUpdateNextActions(clusterName, session)...)
+			}
+		case useDecisionSettled:
+			if !shouldWait {
+				terminal := settledNegatively(session.Status, session.ID)
+				exitTerminalWait(opCreate, terminal, terminal)
+			}
+		case useDecisionUnknownStatus:
+			if !shouldWait {
+				utils.CliErrorEnvelopeWithExit(opCreate, nil, "--use requires the session to be active, but work session %s is %s.", session.ID, session.Status)
 			}
 		}
 
@@ -415,18 +422,17 @@ func settledNegatively(status, id string) *terminalWaitError {
 	return nil
 }
 
-// useDecision is what the post-create switch does about --use: nothing, attach
-// now, refuse a session no approval can attach yet unless --wait was passed, or
-// wait out one the server has approved but not activated.
+// useDecision is what --use does after the create. Without --wait, an approved session is
+// reported as scheduled (exit 0), a pending one exits 4, an ended one 6 and any other 1.
 type useDecision int
 
-// terminalWaitError marks a wait that ended in a status the session can never leave.
+// terminalWaitError marks a session that ended in a status it can never leave.
 // Distinguished from a polling failure so the two do not share an exit code: an agent
 // that reads only the exit code would otherwise retry a rejected request forever.
 type terminalWaitError struct {
 	message string
-	// sessionID names the session the wait left behind. The session outlives a
-	// refusal, so a caller told only "rejected" has no way back to it.
+	// sessionID names the session left behind. The session outlives a refusal, so a
+	// caller told only "rejected" has no way back to it.
 	sessionID string
 }
 
@@ -451,7 +457,7 @@ type pendingWaitError struct {
 func (e *pendingWaitError) Error() string     { return e.message }
 func (e *pendingWaitError) ErrorHint() string { return e.hint }
 
-// terminalWaitErrorCtx is the JSON error context for a wait that settled without a grant;
+// terminalWaitErrorCtx is the JSON error context for a session that settled without a grant;
 // WorkSessionID is a field so a machine consumer need not parse the message.
 type terminalWaitErrorCtx struct {
 	Operation     string `json:"operation"`
@@ -564,9 +570,13 @@ func decideUseAction(status string, useEnabled bool) useDecision {
 		return useDecisionUseNow
 	case wsapi.StatusApproved:
 		return useDecisionSkipScheduled
-	default:
-		return useDecisionErrorNeedsWait
+	case wsapi.StatusPending:
+		return useDecisionNeedsApproval
 	}
+	if settledNegatively(status, "") != nil {
+		return useDecisionSettled
+	}
+	return useDecisionUnknownStatus
 }
 
 // resolveRequesterType picks the session's requester_type. --requester-type
