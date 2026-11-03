@@ -1,6 +1,8 @@
 package iam
 
 import (
+	"time"
+
 	"github.com/alpacax/alpacon-cli/api/rbac"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -45,7 +47,7 @@ scope.`,
 			utils.CliErrorWithExit("Failed to retrieve the role history: %s.", describeRBACError(alpaconClient, gateAuditRead, err))
 		}
 
-		utils.PrintTable(rbac.AuditAttributesFrom(entries))
+		utils.PrintTable(rbac.AuditAttributesFrom(entries, time.Local))
 	},
 }
 

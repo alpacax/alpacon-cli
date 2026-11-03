@@ -420,7 +420,7 @@ func printKubeConfigResult(result *kubeConfigResult, insecure bool) {
 		return
 	}
 
-	utils.CliInfo("Context %q written to %s (token expires %s).", result.Context, result.Kubeconfig, formatTime(&result.TokenExpiresAt))
+	utils.CliInfo("Context %q written to %s (token expires %s).", result.Context, result.Kubeconfig, formatTime(&result.TokenExpiresAt, time.Local))
 	printKubeConfigNext(result)
 }
 

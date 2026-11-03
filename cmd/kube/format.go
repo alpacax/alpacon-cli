@@ -48,9 +48,9 @@ func formatTags(raw json.RawMessage) string {
 	return strings.Join(pairs, ", ")
 }
 
-func formatTime(t *time.Time) string {
+func formatTime(t *time.Time, zone *time.Location) string {
 	if t == nil || t.IsZero() {
 		return ""
 	}
-	return t.Local().Format("2006-01-02 15:04")
+	return t.In(zone).Format("2006-01-02 15:04")
 }
