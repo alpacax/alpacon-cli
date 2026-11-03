@@ -26,6 +26,12 @@ const retrieveTimeout = 5 * time.Second
 
 var kubeCredentialsCluster string
 
+var (
+	errNoAnswer = errors.New("no answer")
+	// errCallInterrupted is a call a first Ctrl+C gave up on.
+	errCallInterrupted = errors.New("interrupted")
+)
+
 var kubeCredentialsCmd = &cobra.Command{
 	Use:   "credentials",
 	Short: "Print the token kubectl uses for a cluster",
@@ -134,19 +140,16 @@ func runKubeCredentials(cmd *cobra.Command, args []string) {
 	var retrieve func() (*kubernetes.KubeSessionDetail, error)
 	if loginErr == nil && record.WorkspaceURL == login.WorkspaceURL {
 		retrieve = func() (*kubernetes.KubeSessionDetail, error) {
-			return retrieveWithin(retrieveTimeout, func() (*kubernetes.KubeSessionDetail, error) {
-				ac, err := client.NewAlpaconAPIClient()
+			return within(retrieveTimeout, nil, func() (*kubernetes.KubeSessionDetail, error) {
+				ac, err := recordClient(record)
 				if err != nil {
 					return nil, err
-				}
-				if ac.BaseURL != record.WorkspaceURL {
-					return nil, errors.New("the login moved to another workspace")
 				}
 				return kubernetes.GetSession(ac, record.KubeSessionID)
 			})
 		}
 	}
-	expiry, checkErr := credentialExpiry(record, time.Now(), retrieve)
+	credential, checkErr := resolveCredential(record, time.Now(), retrieve)
 	if errors.Is(checkErr, errSessionGone) {
 		msg, msgArgs := sessionGoneMessage(cluster, checkErr)
 		utils.CliErrorWithExitCode(utils.ExitCodeWorkSessionDenied, msg, msgArgs...)
@@ -155,19 +158,29 @@ func runKubeCredentials(cmd *cobra.Command, args []string) {
 		utils.CliWarning("Could not check the kube session for %s (%s); using the saved token until it expires.", cluster, checkErr)
 	}
 
-	if loginErr == nil && !expiry.Equal(record.TokenExpiredAt) {
-		updated := *record
-		updated.TokenExpiredAt = expiry
-		saveExtendedRecord(store, login, updated)
+	if loginErr == nil {
+		saveMovedExpiry(store, login, record, credential)
 	}
 
-	if err := utils.PrintJSONValue(os.Stdout, execCredential{
+	if err := utils.PrintJSONValue(os.Stdout, credential); err != nil {
+		utils.CliErrorWithExit("Failed to print the credential: %s.", err)
+	}
+}
+
+// resolveCredential builds what kubectl receives. The token is always the saved
+// one: the server hands a session's token out only when it is created, so only
+// the expiry can move. A failed check that leaves the token usable returns the
+// credential along with its error.
+func resolveCredential(record *kubeSessionRecord, now time.Time, retrieve func() (*kubernetes.KubeSessionDetail, error)) (execCredential, error) {
+	expiry, err := credentialExpiry(record, now, retrieve)
+	if errors.Is(err, errSessionGone) {
+		return execCredential{}, err
+	}
+	return execCredential{
 		APIVersion: execCredentialVersion,
 		Kind:       "ExecCredential",
 		Status:     execCredentialStatus{Token: record.ChannelToken, ExpirationTimestamp: expiry.UTC()},
-	}); err != nil {
-		utils.CliErrorWithExit("Failed to print the credential: %s.", err)
-	}
+	}, err
 }
 
 // pickRecord chooses the record for the server kubectl is calling, since one
@@ -237,24 +250,53 @@ func credentialExpiry(record *kubeSessionRecord, now time.Time, retrieve func() 
 	return expiry, nil
 }
 
-// retrieveWithin runs read and gives up after timeout, leaving the request to
-// finish in the background of a process that is about to exit.
-func retrieveWithin(timeout time.Duration, read func() (*kubernetes.KubeSessionDetail, error)) (*kubernetes.KubeSessionDetail, error) {
+// within runs call and gives up after timeout, or once cancel closes, leaving
+// the request to finish in the background of a process that is about to exit.
+// A nil cancel never closes.
+func within[T any](timeout time.Duration, cancel <-chan struct{}, call func() (T, error)) (T, error) {
 	type result struct {
-		session *kubernetes.KubeSessionDetail
-		err     error
+		value T
+		err   error
 	}
 	done := make(chan result, 1)
 	go func() {
-		session, err := read()
-		done <- result{session, err}
+		value, err := call()
+		done <- result{value, err}
 	}()
+	var zero T
 	select {
 	case r := <-done:
-		return r.session, r.err
+		return r.value, r.err
 	case <-time.After(timeout):
-		return nil, fmt.Errorf("no answer within %s", timeout)
+		return zero, fmt.Errorf("%w within %s", errNoAnswer, timeout)
+	case <-cancel:
+		return zero, errCallInterrupted
 	}
+}
+
+// recordClient builds a client for the record's workspace, refusing one the
+// login has since moved away from: the record's session lives there.
+func recordClient(record *kubeSessionRecord) (*client.AlpaconClient, error) {
+	ac, err := client.NewAlpaconAPIClient()
+	if err != nil {
+		return nil, err
+	}
+	if ac.BaseURL != record.WorkspaceURL {
+		return nil, errors.New("the login moved to another workspace")
+	}
+	return ac, nil
+}
+
+// saveMovedExpiry saves the expiry the credential carries when it differs from
+// the record's.
+func saveMovedExpiry(store kubeSessionStore, login config.Config, record *kubeSessionRecord, credential execCredential) {
+	expiry := credential.Status.ExpirationTimestamp
+	if expiry.Equal(record.TokenExpiredAt) {
+		return
+	}
+	updated := *record
+	updated.TokenExpiredAt = expiry
+	saveExtendedRecord(store, login, updated)
 }
 
 // saveExtendedRecord keeps a moved expiry, so the next run need not learn it

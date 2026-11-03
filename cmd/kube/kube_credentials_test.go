@@ -143,13 +143,13 @@ func TestRetrieveWithinGivesUp(t *testing.T) {
 		block := make(chan struct{})
 		start := time.Now()
 
-		_, err := retrieveWithin(retrieveTimeout, func() (*kubernetes.KubeSessionDetail, error) {
+		_, err := within(retrieveTimeout, nil, func() (*kubernetes.KubeSessionDetail, error) {
 			<-block
 			return nil, nil
 		})
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no answer within")
+		require.ErrorIs(t, err, errNoAnswer)
+		require.ErrorContains(t, err, "no answer within")
 		assert.Equal(t, retrieveTimeout, time.Since(start))
 		close(block)
 	})
