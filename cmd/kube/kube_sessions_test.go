@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -41,14 +42,7 @@ func (f *sessionListServer) handler(t *testing.T) http.Handler {
 		switch r.URL.Path {
 		case "/api/kubernetes/sessions/":
 			f.listQueries = append(f.listQueries, r.URL.Query())
-			body := ""
-			for i, s := range f.sessions {
-				if i > 0 {
-					body += ","
-				}
-				body += s
-			}
-			_, _ = fmt.Fprintf(w, `{"count":%d,"current":1,"next":null,"previous":null,"last":1,"results":[%s]}`, len(f.sessions), body)
+			_, _ = fmt.Fprintf(w, `{"count":%d,"current":1,"next":null,"previous":null,"last":1,"results":[%s]}`, len(f.sessions), strings.Join(f.sessions, ","))
 		case "/api/kubernetes/clusters/":
 			f.clusterCalls++
 			if f.failClusters {
