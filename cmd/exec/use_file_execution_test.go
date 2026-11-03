@@ -130,8 +130,6 @@ func newRejectedCommandServerAs(cause, username, groupname string) *httptest.Ser
 	return newRejectedCommandServerWith(username, groupname, rejectionFields(cause))
 }
 
-// rejectionFields is the detail's two rejection keys for cause, or none when
-// cause is empty.
 func rejectionFields(cause string) map[string]any {
 	if cause == "" {
 		return nil
@@ -139,8 +137,6 @@ func rejectionFields(cause string) map[string]any {
 	return map[string]any{"rejection_cause": cause, "rejection_gate": "approval"}
 }
 
-// newRejectedCommandServerWith merges extra into the detail, so a test sends
-// rejection_cause and rejection_gate as a value, null, or neither.
 func newRejectedCommandServerWith(username, groupname string, extra map[string]any) *httptest.Server {
 	ts, _ := newRejectedCommandSequenceServer(username, groupname, extra, false, "")
 	return ts

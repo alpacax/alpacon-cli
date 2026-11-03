@@ -498,8 +498,7 @@ func isApprovalDenial(err error) bool {
 }
 
 // pollApprovalOnce reads the grant the denial left behind. The command it names
-// already ran and was blocked, so this is a status read, not a re-attempt. The
-// rejection it returns is what a settled outcome reports.
+// already ran and was blocked, so this is a status read, not a re-attempt.
 func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalOutcome, string, *event.CommandRejectedError, error) {
 	details, err := getCommandByID(ac, cmdID)
 	if err != nil {
@@ -875,8 +874,6 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 	}
 }
 
-// reportCommandRejection exits with the rejection's exit code, and its next
-// step when it has one.
 func reportCommandRejection(err error, rejected *event.CommandRejectedError) {
 	actions := rejected.NextActions()
 	if len(actions) == 0 {

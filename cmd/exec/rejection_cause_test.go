@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// rejectionEnvelope is cliErrorEnvelope with the server object the rejection fields ride in.
 type rejectionEnvelope struct {
 	cliErrorEnvelope
 	Server map[string]any `json:"server"`
