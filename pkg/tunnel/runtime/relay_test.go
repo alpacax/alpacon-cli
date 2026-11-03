@@ -5,6 +5,8 @@ import (
 	"io"
 	"net"
 	"os"
+	goruntime "runtime"
+	"runtime/debug"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -131,13 +133,19 @@ func startTunnelConnection(t *testing.T) (local *net.TCPConn, remote *smux.Strea
 func startStreamRelay(t *testing.T, cliConn, agentConn net.Conn, bound time.Duration) (local *net.TCPConn, remote *smux.Stream, run *relayRun) {
 	t.Helper()
 	cliSession, agentSession := smuxPair(t, cliConn, agentConn)
+	local, accepted := tcpPair(t)
+	remote, run = relayOverSession(t, cliSession, agentSession, accepted, bound)
+	return local, remote, run
+}
+
+func relayOverSession(t *testing.T, cliSession, agentSession *smux.Session, accepted net.Conn, bound time.Duration) (remote *smux.Stream, run *relayRun) {
+	t.Helper()
 	stream, err := cliSession.OpenStream()
 	require.NoError(t, err)
 	_, err = stream.Write([]byte{'\n'})
 	require.NoError(t, err)
 	remote = acceptRemote(t, agentSession)
-	local, accepted := tcpPair(t)
-	return local, remote, startRelay(accepted, stream, bound)
+	return remote, startRelay(accepted, stream, bound)
 }
 
 func startPipeStreamRelay(t *testing.T, bound time.Duration) (*net.TCPConn, *smux.Stream, *relayRun) {
@@ -475,4 +483,33 @@ func TestRelayKeepsOpenConnectionPastBoundUntilADirectionEnds(t *testing.T) {
 		_ = remote.Close()
 		<-run.done
 	})
+}
+
+// Serial: TotalAlloc counts every goroutine in the process.
+func TestRelayAllocatesLessThanACopyBufferPerConnection(t *testing.T) {
+	cliConn, agentConn := net.Pipe()
+	cliSession, agentSession := smuxPair(t, cliConn, agentConn)
+	relayOne := func(local, accepted *net.TCPConn) {
+		remote, run := relayOverSession(t, cliSession, agentSession, accepted, halfCloseTimeout)
+		sendAndHalfClose(t, local, remote, "request")
+		sendAndHalfClose(t, remote, local, "response")
+		assert.False(t, run.wait(t), "both directions ended before the bound")
+	}
+	const conns = 64
+	locals, accepted := make([]*net.TCPConn, conns), make([]*net.TCPConn, conns)
+	for i := range conns {
+		locals[i], accepted[i] = tcpPair(t)
+	}
+	relayOne(tcpPair(t)) // warms the copy buffer pool and the session
+
+	var before, after goruntime.MemStats
+	goruntime.GC()
+	defer debug.SetGCPercent(debug.SetGCPercent(-1)) // a collection empties the copy buffer pool
+	goruntime.ReadMemStats(&before)
+	for i := range conns {
+		relayOne(locals[i], accepted[i])
+	}
+	goruntime.ReadMemStats(&after)
+
+	assert.Less(t, (after.TotalAlloc-before.TotalAlloc)/conns, uint64(32*1024), "bytes allocated per relayed connection")
 }
