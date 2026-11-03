@@ -287,18 +287,13 @@ func clusterOfCurrentContext(paths []string) (string, error) {
 	if !ok || cluster == "" {
 		return "", notOurs
 	}
-	plugin, static := "", false
-	for _, path := range paths {
-		h, err := kubeconfig.Inspect(path, current)
-		if err != nil {
-			continue
-		}
-		if plugin == "" {
-			plugin = h.PluginCluster
-		}
-		static = static || h.StaticToken
+	// kubectl reads the context from the first file that defines it, and its
+	// user from the first file that defines that user.
+	targets := kubeconfig.ContextTargets(paths, current)
+	if len(targets) == 0 {
+		return "", notOurs
 	}
-	if plugin != cluster && (plugin != "" || !static) {
+	if t := targets[0]; t.PluginCluster != cluster && (t.PluginCluster != "" || !t.StaticToken) {
 		return "", notOurs
 	}
 	return cluster, nil
@@ -498,7 +493,13 @@ func findLogoutTargets(result *kubeLogoutResult, in kubeLogoutInput, context str
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to read the saved kube sessions: %w", err)
 	}
-	return files, saved, pickLogoutRecords(saved, files, in.workspaceURL, in.explicit), nil
+	var servers []string
+	for _, t := range kubeconfig.ContextTargets(in.paths, context) {
+		if t.Server != "" && !slices.Contains(servers, t.Server) {
+			servers = append(servers, t.Server)
+		}
+	}
+	return files, saved, pickLogoutRecords(saved, servers, in.workspaceURL, in.explicit && len(files) == 0), nil
 }
 
 // scanKubeconfigs reads each file without taking its lock, so a file with
@@ -525,21 +526,15 @@ func scanKubeconfigs(result *kubeLogoutResult, paths []string, context string) (
 }
 
 // pickLogoutRecords chooses the saved sessions the logout covers: the one behind
-// each server the kubeconfig files point the context at, since those files can
-// hold the same name for different workspaces. A server no record names, as
-// after a hand edit of the server, falls back to the logged-in workspace's
-// record. With no server to go by, it chooses as the credential plugin does
-// without one, unless --kubeconfig named a file without the context: the
-// context, and the token's use, are then somewhere else.
-func pickLogoutRecords(records []kubeSessionRecord, files []logoutFile, workspaceURL string, explicit bool) []kubeSessionRecord {
-	if explicit && len(files) == 0 {
+// each server the context points at, since the files can hold the same name for
+// different workspaces. A server no record names, as after a hand edit of the
+// server, falls back to the logged-in workspace's record. With no server to go
+// by, it chooses as the credential plugin does without one, unless elsewhere is
+// set: --kubeconfig named a file without the context, so the context, and the
+// token's use, are somewhere else.
+func pickLogoutRecords(records []kubeSessionRecord, servers []string, workspaceURL string, elsewhere bool) []kubeSessionRecord {
+	if elsewhere {
 		return nil
-	}
-	var servers []string
-	for _, f := range files {
-		if s := f.holding.Server; s != "" && !slices.Contains(servers, s) {
-			servers = append(servers, s)
-		}
 	}
 	var picked []kubeSessionRecord
 	add := func(r *kubeSessionRecord) {

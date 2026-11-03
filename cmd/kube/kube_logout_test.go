@@ -561,6 +561,90 @@ func TestClusterOfCurrentContext(t *testing.T) {
 	}
 }
 
+// kubectl takes a context from the first file that defines it and its user
+// from wherever that user is defined, whatever the user is called.
+func TestClusterOfCurrentContextReadsTheContextsUser(t *testing.T) {
+	t.Parallel()
+	_, _, users := pluginEntries("prod-east", prodServer)
+	movedUser := strings.Replace(users, "name: alpacon-prod-east", "name: u1", 1)
+	tests := []struct {
+		name  string
+		files []string
+		want  string
+		usage bool
+	}{
+		{
+			name:  "user of another name",
+			files: []string{"contexts:\n- context: {cluster: alpacon-prod-east, user: u1}\n  name: alpacon-prod-east\ncurrent-context: alpacon-prod-east\nusers:\n" + movedUser},
+			want:  "prod-east",
+		},
+		{
+			name: "user in a later file",
+			files: []string{
+				"contexts:\n- context: {cluster: alpacon-prod-east, user: u1}\n  name: alpacon-prod-east\ncurrent-context: alpacon-prod-east\n",
+				"users:\n" + movedUser,
+			},
+			want: "prod-east",
+		},
+		{
+			name: "a later file's context does not count",
+			files: []string{
+				"contexts:\n- context: {cluster: alpacon-prod-east, user: u1}\n  name: alpacon-prod-east\ncurrent-context: alpacon-prod-east\nusers:\n- name: u1\n  user:\n    client-certificate-data: abc\n",
+				pluginBody("prod-east"),
+			},
+			usage: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var paths []string
+			for _, body := range tt.files {
+				path := filepath.Join(t.TempDir(), "config")
+				require.NoError(t, os.WriteFile(path, []byte(body), 0600))
+				paths = append(paths, path)
+			}
+
+			got, err := clusterOfCurrentContext(paths)
+
+			if tt.usage {
+				require.Error(t, err)
+				assert.True(t, utils.IsUsageError(err), "naming CLUSTER fixes it, so it exits 2: %v", err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// A context and its cluster can sit in different files; the token picked is
+// the one behind the cluster's server, not the logged-in workspace's.
+func TestKubeLogoutFollowsTheContextToAClusterInAnotherFile(t *testing.T) {
+	t.Parallel()
+	const otherServer = "https://other-ws.example.com/kube/c-9"
+	_, _, users := pluginEntries("prod-east", otherServer)
+	dir := t.TempDir()
+	first := filepath.Join(dir, "contexts")
+	second := filepath.Join(dir, "clusters")
+	require.NoError(t, os.WriteFile(first, []byte("contexts:\n- context: {cluster: c-split, user: alpacon-prod-east}\n  name: alpacon-prod-east\nusers:\n"+users), 0600))
+	require.NoError(t, os.WriteFile(second, []byte("clusters:\n- cluster: {server: '"+otherServer+"'}\n  name: c-split\n"), 0600))
+	f := newLogoutFixture(t, nil, first, second)
+	elsewhere := testRecord("prod-east")
+	elsewhere.WorkspaceURL = "https://other-ws.example.com"
+	elsewhere.ProxyURL = otherServer
+	elsewhere.KubeSessionID = "k-9"
+	require.NoError(t, f.in.store.write(elsewhere))
+
+	_, err := kubeLogout(f.in)
+	require.NoError(t, err)
+
+	assert.NoFileExists(t, f.in.store.recordPath(elsewhere.key()))
+	assert.FileExists(t, f.in.store.recordPath(f.record.key()))
+	assert.Empty(t, f.closed, "the session behind the cluster belongs to another workspace")
+	assertGone(t, first, "alpacon-prod-east")
+}
+
 func pluginBody(cluster string) string {
 	clusters, contexts, users := pluginEntries(cluster, prodServer)
 	return fmt.Sprintf("clusters:\n%scontexts:\n%scurrent-context: %s%s\nusers:\n%s", clusters, contexts, contextPrefix, cluster, users)

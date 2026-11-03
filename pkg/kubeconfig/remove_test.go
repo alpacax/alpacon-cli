@@ -124,11 +124,11 @@ func TestInspect(t *testing.T) {
 
 	h, err := Inspect(path, "alpacon-a")
 	require.NoError(t, err)
-	assert.Equal(t, Holding{Entry: true, Current: true, Server: "https://a.example.com", PluginCluster: "a"}, h)
+	assert.Equal(t, Holding{Entry: true, Current: true}, h)
 
-	static, err := Inspect(path, "alpacon-b")
+	other, err := Inspect(path, "alpacon-b")
 	require.NoError(t, err)
-	assert.Equal(t, Holding{Entry: true, Server: "https://b.example.com", StaticToken: true}, static)
+	assert.Equal(t, Holding{Entry: true}, other)
 
 	missing, err := Inspect(filepath.Join(t.TempDir(), "none"), "alpacon-a")
 	require.NoError(t, err)
@@ -154,16 +154,26 @@ func TestCurrentContext(t *testing.T) {
 
 func TestPluginClusterNeedsTheCredentialsCommand(t *testing.T) {
 	t.Parallel()
-	path := writeKubeconfig(t, `users:
-- name: other
-  user:
-    exec:
-      args: [get-token, --cluster, a]
-      command: aws
-`)
-	h, err := Inspect(path, "other")
-	require.NoError(t, err)
-	assert.Empty(t, h.PluginCluster)
+	tests := []struct {
+		name    string
+		command string
+		args    string
+		want    string
+	}{
+		{name: "kube login's command", command: "alpacon", args: "[kube, credentials, --cluster, a]", want: "a"},
+		{name: "the alias by full path", command: "/usr/local/bin/ac", args: "[kube, credentials, --cluster, a]", want: "a"},
+		{name: "another plugin with the same args", command: "other-plugin", args: "[kube, credentials, --cluster, a]", want: ""},
+		{name: "another plugin's args", command: "aws", args: "[get-token, --cluster, a]", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeKubeconfig(t, "users:\n- name: alpacon-a\n  user:\n    exec:\n      args: "+tt.args+"\n      command: "+tt.command+"\n")
+			targets := ContextTargets([]string{path}, "alpacon-a")
+			require.Len(t, targets, 1)
+			assert.Equal(t, tt.want, targets[0].PluginCluster)
+		})
+	}
 }
 
 // A context can name a cluster and user of other names: by hand, or after
@@ -199,24 +209,82 @@ func TestRemoveReportsWhatItLeaves(t *testing.T) {
 	}
 }
 
-// The server comes from the cluster the context names, which need not share
-// its name; the logout picks the saved token by it.
-func TestInspectFollowsTheContextsCluster(t *testing.T) {
+// A context points at a cluster and user that need not share its name, nor its
+// file: kubectl looks each up in the first file that defines it. The logout
+// picks the saved token by the server and reads the plugin from the user.
+func TestContextTargetsFollowKubectlsMerge(t *testing.T) {
 	t.Parallel()
+	plugin := func(name, cluster string) string {
+		return "users:\n- name: " + name + "\n  user:\n    exec:\n      args: [kube, credentials, --cluster, " + cluster + "]\n      command: alpacon\n"
+	}
 	tests := []struct {
-		name       string
-		body       string
-		wantServer string
+		name  string
+		files []string
+		want  []Target
 	}{
-		{name: "cluster of another name", body: "clusters:\n- cluster: {server: 'https://own'}\n  name: alpacon-a\n- cluster: {server: 'https://moved'}\n  name: c1\ncontexts:\n- context: {cluster: c1, user: alpacon-a}\n  name: alpacon-a\n", wantServer: "https://moved"},
-		{name: "named cluster missing", body: "clusters:\n- cluster: {server: 'https://own'}\n  name: alpacon-a\ncontexts:\n- context: {cluster: c1, user: alpacon-a}\n  name: alpacon-a\n", wantServer: ""},
+		{
+			name:  "cluster of another name",
+			files: []string{"clusters:\n- cluster: {server: 'https://own'}\n  name: alpacon-a\n- cluster: {server: 'https://moved'}\n  name: c1\ncontexts:\n- context: {cluster: c1, user: alpacon-a}\n  name: alpacon-a\n"},
+			want:  []Target{{Server: "https://moved"}},
+		},
+		{
+			name:  "named cluster missing",
+			files: []string{"clusters:\n- cluster: {server: 'https://own'}\n  name: alpacon-a\ncontexts:\n- context: {cluster: c1, user: alpacon-a}\n  name: alpacon-a\n"},
+			want:  []Target{{}},
+		},
+		{
+			name:  "context naming no cluster",
+			files: []string{"clusters:\n- cluster: {server: 'https://own'}\n  name: alpacon-a\ncontexts:\n- context: {user: alpacon-a}\n  name: alpacon-a\n"},
+			want:  []Target{{}},
+		},
+		{
+			name: "cluster defined in a later file",
+			files: []string{
+				"contexts:\n- context: {cluster: c1, user: alpacon-a}\n  name: alpacon-a\n",
+				"clusters:\n- cluster: {server: 'https://b'}\n  name: c1\n",
+			},
+			want: []Target{{Server: "https://b"}},
+		},
+		{
+			name: "each file's own cluster first",
+			files: []string{
+				"clusters:\n- cluster: {server: 'https://a'}\n  name: c1\ncontexts:\n- context: {cluster: c1, user: alpacon-a}\n  name: alpacon-a\n",
+				"clusters:\n- cluster: {server: 'https://b'}\n  name: c1\ncontexts:\n- context: {cluster: c1, user: alpacon-a}\n  name: alpacon-a\n",
+			},
+			want: []Target{{Server: "https://a"}, {Server: "https://b"}},
+		},
+		{
+			name:  "user of another name",
+			files: []string{"contexts:\n- context: {cluster: alpacon-a, user: u1}\n  name: alpacon-a\n" + plugin("u1", "a")},
+			want:  []Target{{PluginCluster: "a"}},
+		},
+		{
+			name: "only the first file's context counts for kubectl",
+			files: []string{
+				"contexts:\n- context: {cluster: alpacon-a, user: u1}\n  name: alpacon-a\nusers:\n- name: u1\n  user: {token: x}\n",
+				"contexts:\n- context: {cluster: alpacon-a, user: alpacon-a}\n  name: alpacon-a\n" + plugin("alpacon-a", "a"),
+			},
+			want: []Target{{StaticToken: true}, {PluginCluster: "a"}},
+		},
+		{
+			name:  "no context falls back to the name",
+			files: []string{"clusters:\n- cluster: {server: 'https://own'}\n  name: alpacon-a\n" + plugin("alpacon-a", "a")},
+			want:  []Target{{Server: "https://own", PluginCluster: "a"}},
+		},
+		{
+			name:  "nothing of the name",
+			files: []string{"clusters:\n- cluster: {server: 'https://own'}\n  name: other\n"},
+			want:  nil,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			h, err := Inspect(writeKubeconfig(t, tt.body), "alpacon-a")
-			require.NoError(t, err)
-			assert.Equal(t, tt.wantServer, h.Server)
+			var paths []string
+			for _, body := range tt.files {
+				paths = append(paths, writeKubeconfig(t, body))
+			}
+			assert.Equal(t, tt.want, ContextTargets(paths, "alpacon-a"))
 		})
 	}
 }

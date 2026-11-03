@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -32,13 +34,17 @@ type Removal struct {
 type Holding struct {
 	Entry   bool // it has a cluster, user or context of that name
 	Current bool // its current-context is that name
-	// Server is the server of the cluster the name's context points at in this
-	// file, empty when this file does not say.
+}
+
+// Target is what a context points at once kubectl has merged the files.
+type Target struct {
+	// Server is the server of the cluster the context names, empty when no
+	// file defines that cluster or the context names none.
 	Server string
-	// PluginCluster is the --cluster the name's user passes to
-	// 'kube credentials', empty for a user that does not run the plugin.
+	// PluginCluster is the --cluster the context's user passes to
+	// 'alpacon kube credentials', empty for a user that does not run it.
 	PluginCluster string
-	// StaticToken reports that the name's user carries a bearer token.
+	// StaticToken reports that the context's user carries a bearer token.
 	StaticToken bool
 }
 
@@ -140,46 +146,91 @@ func removeNamed(root *yaml.Node, list, name string) bool {
 }
 
 // Inspect reads what path holds of name. A missing file is an empty Holding; a
-// file this package refuses to edit wraps ErrMalformed. A duplicated name is
-// read from its first item, as kubectl does, where Lookup refuses it: the
-// caller removes every item anyway.
+// file this package refuses to edit wraps ErrMalformed.
 func Inspect(path, name string) (Holding, error) {
 	root, err := readRoot(path)
 	if err != nil || root == nil {
 		return Holding{}, err
 	}
+	return Holding{
+		Entry:   len(named(root, "contexts", name)) > 0 || len(named(root, "clusters", name)) > 0 || len(named(root, "users", name)) > 0,
+		Current: stringValue(root, "current-context") == name,
+	}, nil
+}
 
-	first := func(list, name string) *yaml.Node {
-		if items := named(root, list, name); len(items) > 0 {
-			return items[0]
+// ContextTargets returns, for each file in paths that defines the context name,
+// in order, what that definition points at. The cluster and user it names are
+// looked up in its own file first, as kubectl reads that file alone, then in
+// the first file of paths that defines each, as kubectl merges them: a context
+// and its cluster can sit in different files. The first Target is the context
+// kubectl uses. With no context of that name anywhere, the cluster and user
+// called name stand in for it. A file that is missing or cannot be parsed is
+// skipped.
+func ContextTargets(paths []string, name string) []Target {
+	var roots []*yaml.Node
+	for _, path := range paths {
+		if root, err := readRoot(path); err == nil && root != nil {
+			roots = append(roots, root)
+		}
+	}
+	first := func(own *yaml.Node, list, name string) *yaml.Node {
+		search := roots
+		if own != nil {
+			search = append([]*yaml.Node{own}, roots...)
+		}
+		for _, root := range search {
+			if items := named(root, list, name); len(items) > 0 {
+				return items[0]
+			}
 		}
 		return nil
 	}
-	context, cluster, user := first("contexts", name), first("clusters", name), first("users", name)
-	h := Holding{
-		Entry:   context != nil || cluster != nil || user != nil,
-		Current: stringValue(root, "current-context") == name,
-	}
-	if context != nil {
-		if target := contextField(context, "cluster"); target != "" && target != name {
-			cluster = first("clusters", target)
+	target := func(cluster, user *yaml.Node) Target {
+		var t Target
+		if cluster != nil {
+			if _, inner := lookup(cluster, "cluster"); inner != nil && inner.Kind == yaml.MappingNode {
+				t.Server = stringValue(inner, "server")
+			}
 		}
-	}
-	if cluster != nil {
-		if _, inner := lookup(cluster, "cluster"); inner != nil && inner.Kind == yaml.MappingNode {
-			h.Server = stringValue(inner, "server")
+		if user != nil {
+			t.PluginCluster = pluginCluster(user)
+			t.StaticToken = holdsStaticToken(user)
 		}
+		return t
 	}
-	if user != nil {
-		h.PluginCluster = pluginCluster(user)
-		h.StaticToken = holdsStaticToken(user)
+	// resolve follows the context's key field to the item of list with that
+	// name. An empty field names nothing, whatever shares the context's name.
+	resolve := func(own, context *yaml.Node, key, list string) *yaml.Node {
+		if ref := contextField(context, key); ref != "" {
+			return first(own, list, ref)
+		}
+		return nil
 	}
-	return h, nil
+
+	var targets []Target
+	for _, root := range roots {
+		contexts := named(root, "contexts", name)
+		if len(contexts) == 0 {
+			continue
+		}
+		targets = append(targets, target(resolve(root, contexts[0], "cluster", "clusters"), resolve(root, contexts[0], "user", "users")))
+	}
+	if len(targets) > 0 {
+		return targets
+	}
+	if cluster, user := first(nil, "clusters", name), first(nil, "users", name); cluster != nil || user != nil {
+		return []Target{target(cluster, user)}
+	}
+	return nil
 }
 
-// pluginCluster reads the value after --cluster in a user's exec args, which
-// only a user running 'kube credentials' has. The shape is the one kube login
-// writes; a test there reads what it writes back through Inspect.
+// pluginCommands are the names the credential plugin runs under: kube login
+// writes alpacon, and ac is the CLI's alias.
+var pluginCommands = []string{"alpacon", "ac"}
+
+// pluginCluster reads the value after --cluster in a user's exec args when the
+// user runs 'alpacon kube credentials'. The shape is the one kube login writes;
+// a test there reads what it writes back through ContextTargets.
 func pluginCluster(item *yaml.Node) string {
 	_, user := lookup(item, "user")
 	if user == nil || user.Kind != yaml.MappingNode {
@@ -187,6 +238,10 @@ func pluginCluster(item *yaml.Node) string {
 	}
 	_, exec := lookup(user, "exec")
 	if exec == nil || exec.Kind != yaml.MappingNode {
+		return ""
+	}
+	command := strings.TrimSuffix(filepath.Base(stringValue(exec, "command")), ".exe")
+	if !slices.Contains(pluginCommands, command) {
 		return ""
 	}
 	_, args := lookup(exec, "args")

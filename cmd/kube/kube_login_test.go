@@ -259,9 +259,9 @@ func TestLogoutReadsTheClusterKubeLoginWrites(t *testing.T) {
 	require.NoError(t, ed.Save())
 	require.NoError(t, ed.Close())
 
-	h, err := kubeconfig.Inspect(path, "alpacon-prod-east")
-	require.NoError(t, err)
-	assert.Equal(t, "prod-east", h.PluginCluster)
+	targets := kubeconfig.ContextTargets([]string{path}, "alpacon-prod-east")
+	require.Len(t, targets, 1)
+	assert.Equal(t, "prod-east", targets[0].PluginCluster)
 }
 
 func testKey(cluster string) recordKey {
