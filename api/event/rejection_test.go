@@ -51,18 +51,18 @@ func TestRejectionNamesEachCause(t *testing.T) {
 		cause, gate, wantWhat string
 		wantNext              utils.NextAction
 	}{
-		{"command_acl_denied", "command_acl", "the command ACL did not admit it", utils.NextAction{Description: "Ask a Command ACL admin of this workspace whether the command can be pre-approved; until then it is refused the same way."}},
-		{"command_acl_unavailable", "command_acl", "the command ACL's verdict could not be obtained", utils.NextAction{Description: "Ask a workspace administrator to check the command pre-approval ledger; the command did not run."}},
-		{"risk_denied", "risk", "the risk assessor refused it", utils.NextAction{Description: "Ask a workspace administrator to review the risk policy that refused it; the same command is refused the same way."}},
-		{"risk_unavailable", "risk", "the risk assessor was unavailable", utils.NextAction{Description: "Ask a workspace administrator to check the risk assessor; the command did not run."}},
-		{"approval_policy_denied", "approval", "an approval policy refused it, or no one but the requester could decide it", utils.NextAction{Description: "Ask a workspace administrator about the approval policy, or to add an approver other than the requester."}},
+		{"command_acl_denied", "command_acl", "the command ACL did not admit it", utils.NextAction{Description: "The command needs a pre-approved command entry in this workspace; without one it is refused the same way."}},
+		{"command_acl_unavailable", "command_acl", "the command ACL's verdict could not be obtained", utils.NextAction{Description: "The command pre-approval ledger gave no verdict; the command did not run."}},
+		{"risk_denied", "risk", "the risk assessor refused it", utils.NextAction{Description: "The workspace risk policy refuses this command; the same command is refused the same way."}},
+		{"risk_unavailable", "risk", "the risk assessor was unavailable", utils.NextAction{Description: "The risk assessor gave no verdict; the command did not run."}},
+		{"approval_policy_denied", "approval", "an approval policy refused it, or no one but the requester could decide it", utils.NextAction{Description: "The approval policy needs an approver other than the requester, or refuses the command outright."}},
 		{"approval_rejected", "approval", "an approver rejected it", utils.NextAction{Description: "Ask the approver why; the decision is in the Alpacon console (web)."}},
-		{"approval_expired", "approval", "its approval request expired with no decision", utils.NextAction{Description: "Ask an approver why the request went undecided; an approver can extend a pending request before it expires."}},
+		{"approval_expired", "approval", "its approval request expired with no decision", utils.NextAction{Description: "Ask an approver why the request went undecided."}},
 		{"approval_cancelled", "approval", "the requester cancelled its approval request", utils.NextAction{Description: "Ask the requester why the approval request was withdrawn."}},
 		{"work_session_terminated", "work_session", "its work session ended while it was held", utils.NextAction{Command: "alpacon work-session current", Description: "the work session it was held under has ended; this shows the one in use now"}},
-		{"account_bound_to_other_person", "", "the account it would run as was linked to another person before it was delivered", utils.NextAction{Description: "Ask a workspace administrator about the account's link; only the person it is linked to can run commands as it."}},
-		{"unsigned_file", "", "the file command reached the agent without a signature", utils.NextAction{Description: "Ask a workspace administrator to check file signing; the agent runs only signed files."}},
-		{"signature_invalid", "", "the agent could not verify the file's signature", utils.NextAction{Description: "Ask a workspace administrator to check file signing; the agent refuses a file whose signature does not verify."}},
+		{"account_bound_to_other_person", "", "the account it would run as was linked to another person before it was delivered", utils.NextAction{Description: "Only the person the account is linked to can run commands as it."}},
+		{"unsigned_file", "", "the file command reached the agent without a signature", utils.NextAction{Description: "The file needs a signature; the agent runs only signed files."}},
+		{"signature_invalid", "", "the agent could not verify the file's signature", utils.NextAction{Description: "The file's signature has to verify; the agent refuses one that does not."}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.cause, func(t *testing.T) {
@@ -106,7 +106,7 @@ func TestNoRejectionTextSuggestsSubmittingTheCommandAgain(t *testing.T) {
 
 func TestRejectionFallbacks(t *testing.T) {
 	t.Parallel()
-	unknown := utils.NextAction{Description: "Ask a workspace administrator what this cause means; the command did not run."}
+	unknown := utils.NextAction{Description: "This CLI does not know the cause yet; the command did not run."}
 	cases := []struct {
 		name        string
 		body        string
@@ -117,7 +117,7 @@ func TestRejectionFallbacks(t *testing.T) {
 			name:        "unknown cause falls back to its gate",
 			body:        `,"rejection_cause":"new_cause","rejection_gate":"risk"`,
 			wantError:   "command cmd-9 was rejected: the risk assessor refused it (rejection_cause: new_cause, rejection_gate: risk)",
-			wantActions: []utils.NextAction{{Description: "Ask a workspace administrator about the risk policy."}},
+			wantActions: []utils.NextAction{{Description: "The workspace risk policy refuses this command."}},
 		},
 		{
 			name:        "unknown cause on the work session gate points at the current session",

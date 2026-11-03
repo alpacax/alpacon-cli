@@ -41,7 +41,7 @@ func TestRejectedCommandReportsCauseGateAndNextStep(t *testing.T) {
 			wantMessage: "was rejected: the risk assessor refused it (rejection_cause: risk_denied, rejection_gate: risk)",
 			wantCode:    "risk_denied",
 			wantServer:  map[string]any{"rejection_cause": "risk_denied", "rejection_gate": "risk"},
-			wantNext:    utils.NextAction{Description: "Ask a workspace administrator to review the risk policy that refused it; the same command is refused the same way."},
+			wantNext:    utils.NextAction{Description: "The workspace risk policy refuses this command; the same command is refused the same way."},
 		},
 		{
 			name:        "signature cause has a null gate",
@@ -49,7 +49,7 @@ func TestRejectedCommandReportsCauseGateAndNextStep(t *testing.T) {
 			wantMessage: "was rejected: the file command reached the agent without a signature (rejection_cause: unsigned_file)",
 			wantCode:    "unsigned_file",
 			wantServer:  map[string]any{"rejection_cause": "unsigned_file", "rejection_gate": nil},
-			wantNext:    utils.NextAction{Description: "Ask a workspace administrator to check file signing; the agent runs only signed files."},
+			wantNext:    utils.NextAction{Description: "The file needs a signature; the agent runs only signed files."},
 		},
 		{
 			name:        "null cause",
@@ -65,7 +65,7 @@ func TestRejectedCommandReportsCauseGateAndNextStep(t *testing.T) {
 			wantMessage: "was rejected: the agent could not verify the file's signature (rejection_cause: signature_invalid)",
 			wantCode:    "signature_invalid",
 			wantServer:  map[string]any{"rejection_cause": "signature_invalid", "rejection_gate": nil},
-			wantNext:    utils.NextAction{Description: "Ask a workspace administrator to check file signing; the agent refuses a file whose signature does not verify."},
+			wantNext:    utils.NextAction{Description: "The file's signature has to verify; the agent refuses one that does not."},
 			wantExit:    utils.ExitCodeGeneralError,
 		},
 		{
