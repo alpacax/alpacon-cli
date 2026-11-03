@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api"
 	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
@@ -380,6 +381,24 @@ func TestValidatePorts(t *testing.T) {
 	}
 }
 
+func TestStartRefusesABlankServerNameAsAUsageError(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, server string }{
+		{name: "empty", server: ""},
+		{name: "spaces", server: "  "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			rt, err := Start(StartOptions{ServerName: tc.server, RemotePort: "5432"})
+
+			require.ErrorIs(t, err, api.ErrBlankName)
+			assert.True(t, utils.IsUsageError(err), "err: %v", err)
+			assert.Nil(t, rt)
+		})
+	}
+}
+
 func TestStartRefusesANilClient(t *testing.T) {
 	t.Parallel()
 
@@ -387,6 +406,40 @@ func TestStartRefusesANilClient(t *testing.T) {
 
 	require.EqualError(t, err, "client is required")
 	assert.Nil(t, rt)
+}
+
+func TestStartNamesTheServerWithoutTheSpacesAroundIt(t *testing.T) {
+	t.Parallel()
+	const serverID = "a1b2c3d4-1234-5678-abcd-000000000000"
+	var wsURL string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			if got := r.URL.Query().Get("name"); got != "my-db" {
+				t.Errorf("lookup name = %q, want %q", got, "my-db")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"count": 1, "results": [{"id": "` + serverID + `", "name": "my-db"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/websh/tunnels/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id": "tun-1", "websocket_url": "` + wsURL + `"}`))
+		case r.URL.Path == "/ws/tunnel/channel-token/":
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/websh/tunnels/tun-1/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id": "tun-1", "open_status": "failed", "open_failure": {"result": "refused"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(ts.Close)
+	wsURL = "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/tunnel/channel-token/"
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	rt, err := Start(StartOptions{Client: ac, ServerName: "  my-db  ", RemotePort: "5432"})
+
+	assert.Nil(t, rt)
+	require.EqualError(t, err, "failed to open tunnel on my-db: refused")
 }
 
 func TestExtractTCPPort(t *testing.T) {

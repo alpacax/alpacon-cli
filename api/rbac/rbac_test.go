@@ -583,12 +583,6 @@ func TestRBACCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 		name string
 		call func(ac *client.AlpaconClient) error
 	}{
-		{"GetRoleScopes", func(ac *client.AlpaconClient) error {
-			_, err := GetRoleScopes(ac, badID)
-			return err
-		}},
-		{"RevokeRole", func(ac *client.AlpaconClient) error { return RevokeRole(ac, badID, "") }},
-		{"RevokeRole_with_reason", func(ac *client.AlpaconClient) error { return RevokeRole(ac, badID, "left the team") }},
 		{"GetEffectivePermissions", func(ac *client.AlpaconClient) error {
 			_, err := GetEffectivePermissions(ac, badID)
 			return err
@@ -611,6 +605,34 @@ func TestRBACCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 			err := tt.call(ac)
 
 			require.ErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
+}
+
+func TestRBACCallsRefuseAnUnusableIDFromAResponseBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = ".."
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{"GetRoleScopes", func(ac *client.AlpaconClient) error {
+			_, err := GetRoleScopes(ac, badID)
+			return err
+		}},
+		{"RevokeRole", func(ac *client.AlpaconClient) error { return RevokeRole(ac, badID, "") }},
+		{"RevokeRole_with_reason", func(ac *client.AlpaconClient) error { return RevokeRole(ac, badID, "left the team") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac)
+
+			require.ErrorIs(t, err, api.ErrUnusableID)
+			assert.False(t, utils.IsUsageError(err), "err: %v", err)
 		})
 	}
 }
