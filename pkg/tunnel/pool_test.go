@@ -15,7 +15,6 @@ type writerFunc func([]byte) (int, error)
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 
 type readFromWriter struct {
-	t      *testing.T
 	writes []int
 }
 
@@ -25,13 +24,12 @@ func (w *readFromWriter) Write(p []byte) (int, error) {
 }
 
 func (w *readFromWriter) ReadFrom(io.Reader) (int64, error) {
-	w.t.Errorf("ReadFrom bypassed the pooled buffer")
-	return 0, errors.New("unexpected ReadFrom")
+	return 0, errors.New("ReadFrom bypassed the pooled buffer")
 }
 
 func TestCopyBufferedWritesThroughThePooledBufferWhateverTheDestinationImplements(t *testing.T) {
 	t.Parallel()
-	dst := &readFromWriter{t: t}
+	dst := &readFromWriter{}
 
 	n, err := CopyBuffered(dst, strings.NewReader("data"))
 
@@ -63,4 +61,26 @@ func TestCopyBufferedNeverHandsOutABufferAWriteFailedOn(t *testing.T) {
 		require.NotNil(t, used)
 		require.False(t, failedOn[used], "smux may still read a buffer after a failed write")
 	}
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("connection reset") }
+
+// Serial: parallel copies draw from the same pool.
+func TestCopyBufferedReusesTheBufferAfterAReadError(t *testing.T) {
+	const copies = 16 // the race detector drops a quarter of pool puts
+	readFailedOn := make(map[*byte]bool)
+	for range copies {
+		var used *byte
+		_, err := CopyBuffered(writerFunc(func(p []byte) (int, error) {
+			used = &p[0]
+			return len(p), nil
+		}), io.MultiReader(strings.NewReader("data"), failingReader{}))
+		require.Error(t, err)
+		require.NotNil(t, used)
+		readFailedOn[used] = true
+	}
+
+	assert.Less(t, len(readFailedOn), copies, "a read error leaves no write holding the buffer")
 }

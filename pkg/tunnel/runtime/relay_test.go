@@ -138,7 +138,6 @@ func startStreamRelay(t *testing.T, cliConn, agentConn net.Conn, bound time.Dura
 	return local, remote, run
 }
 
-// relayOverSession opens a stream on cliSession, accepts it on agentSession and relays accepted to it.
 func relayOverSession(t *testing.T, cliSession, agentSession *smux.Session, accepted net.Conn, bound time.Duration) (remote *smux.Stream, run *relayRun) {
 	t.Helper()
 	stream, err := cliSession.OpenStream()
