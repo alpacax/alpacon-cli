@@ -31,7 +31,7 @@ func TestPollForApproval_TerminalStatusesAreDistinguishable(t *testing.T) {
 		wantMsg string
 	}{
 		{status: "rejected", wantMsg: "work session was rejected"},
-		{status: "expired", wantMsg: "work session expired while waiting for approval"},
+		{status: "expired", wantMsg: "work session expired before it was approved"},
 		{status: "revoked", wantMsg: "work session was revoked"},
 		{status: "cancelled", wantMsg: "work session was cancelled"},
 		{status: "completed", wantMsg: "work session was completed unexpectedly"},

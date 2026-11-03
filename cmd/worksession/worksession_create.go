@@ -411,7 +411,7 @@ func settledNegatively(status, id string) *terminalWaitError {
 	case wsapi.StatusRejected:
 		return &terminalWaitError{message: "work session was rejected", sessionID: id}
 	case wsapi.StatusExpired:
-		return &terminalWaitError{message: "work session expired while waiting for approval", sessionID: id}
+		return &terminalWaitError{message: "work session expired before it was approved", sessionID: id}
 	case wsapi.StatusRevoked:
 		return &terminalWaitError{message: "work session was revoked", sessionID: id}
 	case wsapi.StatusCancelled:
