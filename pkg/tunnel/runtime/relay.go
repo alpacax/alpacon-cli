@@ -13,7 +13,7 @@ import (
 // the same whether the peer half-closed or left, and smux drops writes to a stream its peer closed.
 const halfCloseTimeout = 5 * time.Minute
 
-// relay copies local to remote and back, then closes both before returning. A direction that ends
+// relay copies local to the smux stream remote and back, then closes both before returning. A direction that ends
 // cleanly half-closes its destination and gives the other bound to finish; cut reports the bound ended it.
 func relay(local, remote net.Conn, bound time.Duration) (cut bool) {
 	errChan := make(chan error, 2)
@@ -26,7 +26,7 @@ func relay(local, remote net.Conn, bound time.Duration) (cut bool) {
 		}
 	}
 	pipes.Go(func() { pipe(remote, local, basetunnel.CopyBuffered) })
-	pipes.Go(func() { pipe(local, remote, io.Copy) }) // a smux stream's WriteTo writes its own frame buffers
+	pipes.Go(func() { pipe(local, remote, io.Copy) }) // smux's WriteTo writes the frames it holds, so no copy buffer
 
 	closeBoth := func() {
 		_ = local.Close()

@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	goruntime "runtime"
+	"runtime/debug"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -132,13 +133,20 @@ func startTunnelConnection(t *testing.T) (local *net.TCPConn, remote *smux.Strea
 func startStreamRelay(t *testing.T, cliConn, agentConn net.Conn, bound time.Duration) (local *net.TCPConn, remote *smux.Stream, run *relayRun) {
 	t.Helper()
 	cliSession, agentSession := smuxPair(t, cliConn, agentConn)
+	local, accepted := tcpPair(t)
+	remote, run = relayOverSession(t, cliSession, agentSession, accepted, bound)
+	return local, remote, run
+}
+
+// relayOverSession opens a stream on cliSession, accepts it on agentSession and relays accepted to it.
+func relayOverSession(t *testing.T, cliSession, agentSession *smux.Session, accepted net.Conn, bound time.Duration) (remote *smux.Stream, run *relayRun) {
+	t.Helper()
 	stream, err := cliSession.OpenStream()
 	require.NoError(t, err)
 	_, err = stream.Write([]byte{'\n'})
 	require.NoError(t, err)
 	remote = acceptRemote(t, agentSession)
-	local, accepted := tcpPair(t)
-	return local, remote, startRelay(accepted, stream, bound)
+	return remote, startRelay(accepted, stream, bound)
 }
 
 func startPipeStreamRelay(t *testing.T, bound time.Duration) (*net.TCPConn, *smux.Stream, *relayRun) {
@@ -483,12 +491,7 @@ func TestRelayAllocatesLessThanACopyBufferPerConnection(t *testing.T) {
 	cliConn, agentConn := net.Pipe()
 	cliSession, agentSession := smuxPair(t, cliConn, agentConn)
 	relayOne := func(local, accepted *net.TCPConn) {
-		stream, err := cliSession.OpenStream()
-		require.NoError(t, err)
-		_, err = stream.Write([]byte{'\n'})
-		require.NoError(t, err)
-		remote := acceptRemote(t, agentSession)
-		run := startRelay(accepted, stream, halfCloseTimeout)
+		remote, run := relayOverSession(t, cliSession, agentSession, accepted, halfCloseTimeout)
 		sendAndHalfClose(t, local, remote, "request")
 		sendAndHalfClose(t, remote, local, "response")
 		assert.False(t, run.wait(t), "both directions ended before the bound")
@@ -502,6 +505,7 @@ func TestRelayAllocatesLessThanACopyBufferPerConnection(t *testing.T) {
 
 	var before, after goruntime.MemStats
 	goruntime.GC()
+	defer debug.SetGCPercent(debug.SetGCPercent(-1)) // a collection empties the copy buffer pool
 	goruntime.ReadMemStats(&before)
 	for i := range conns {
 		relayOne(locals[i], accepted[i])

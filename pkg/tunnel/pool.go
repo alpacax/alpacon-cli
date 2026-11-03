@@ -12,8 +12,8 @@ var copyBuffers = sync.Pool{
 	},
 }
 
-// CopyBuffered copies src to dst through a pooled buffer, hiding io.WriterTo and io.ReaderFrom so the copy uses it.
-// The buffer goes back only after a clean copy: a failed smux write can return while smux still reads the buffer.
+// CopyBuffered copies src to dst through a pooled buffer, hiding io.WriterTo and io.ReaderFrom so io.CopyBuffer cannot bypass it.
+// A failed copy leaves the buffer to the GC: a writer such as a smux stream can return an error while still reading it.
 func CopyBuffered(dst io.Writer, src io.Reader) (int64, error) {
 	buf := copyBuffers.Get().(*[]byte)
 	n, err := io.CopyBuffer(struct{ io.Writer }{dst}, struct{ io.Reader }{src}, *buf)
