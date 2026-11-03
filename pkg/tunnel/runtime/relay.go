@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -17,15 +18,15 @@ const halfCloseTimeout = 5 * time.Minute
 func relay(local, remote net.Conn, bound time.Duration) (cut bool) {
 	errChan := make(chan error, 2)
 	var pipes sync.WaitGroup
-	pipe := func(dst, src net.Conn) {
-		_, err := basetunnel.CopyBuffered(dst, src)
+	pipe := func(dst, src net.Conn, copyFn func(io.Writer, io.Reader) (int64, error)) {
+		_, err := copyFn(dst, src)
 		errChan <- err // the bound starts at EOF, not after a FIN a stalled transport can hold
 		if err == nil {
 			closeWriteSide(dst)
 		}
 	}
-	pipes.Go(func() { pipe(remote, local) })
-	pipes.Go(func() { pipe(local, remote) })
+	pipes.Go(func() { pipe(remote, local, basetunnel.CopyBuffered) })
+	pipes.Go(func() { pipe(local, remote, io.Copy) }) // a smux stream's WriteTo writes its own frame buffers
 
 	closeBoth := func() {
 		_ = local.Close()

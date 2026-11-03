@@ -5,35 +5,20 @@ import (
 	"sync"
 )
 
-var copyBuffer = &bufferPool{
-	size: 32 * 1024,
-	pool: sync.Pool{
-		New: func() any {
-			b := make([]byte, 32*1024)
-			return &b
-		},
+var copyBuffers = sync.Pool{
+	New: func() any {
+		b := make([]byte, 32*1024)
+		return &b
 	},
 }
 
-type bufferPool struct {
-	pool sync.Pool
-	size int
-}
-
-func (p *bufferPool) get() []byte {
-	return *p.pool.Get().(*[]byte)
-}
-
-func (p *bufferPool) put(buf []byte) {
-	if cap(buf) == p.size {
-		buf = buf[:p.size]
-		p.pool.Put(&buf)
-	}
-}
-
-// CopyBuffered performs io.CopyBuffer using pooled buffers.
+// CopyBuffered copies src to dst through a pooled buffer, hiding io.WriterTo and io.ReaderFrom so the copy uses it.
+// The buffer goes back only after a clean copy: a failed smux write can return while smux still reads the buffer.
 func CopyBuffered(dst io.Writer, src io.Reader) (int64, error) {
-	buf := copyBuffer.get()
-	defer copyBuffer.put(buf)
-	return io.CopyBuffer(dst, src, buf)
+	buf := copyBuffers.Get().(*[]byte)
+	n, err := io.CopyBuffer(struct{ io.Writer }{dst}, struct{ io.Reader }{src}, *buf)
+	if err == nil {
+		copyBuffers.Put(buf)
+	}
+	return n, err
 }
