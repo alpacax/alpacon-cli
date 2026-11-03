@@ -229,10 +229,10 @@ type TimelineItem struct {
 	RecordChunksTotal *int `json:"record_chunks_total"`
 }
 
-// IsRejected says a command item was refused before it ran: a rejected
-// verification_status, or any rejection cause.
+// IsRejected says a command item was refused before it ran; every rejection,
+// the agent's signature refusal included, leaves verification_status rejected.
 func (t TimelineItem) IsRejected() bool {
-	return event.IsRejectedStatus(t.VerificationStatus) || t.RejectionCause.Value != ""
+	return event.IsRejectedStatus(t.VerificationStatus)
 }
 
 type TimelineAttributes struct {

@@ -526,14 +526,20 @@ func TestTimelineShowsRejectionCauseAndGate(t *testing.T) {
 	}{
 		{
 			name:        "gated cause",
-			wire:        `{"type":"command","line":"sudo su","denied":true,"rejection_cause":"risk_denied","rejection_gate":"risk"}`,
+			wire:        `{"type":"command","line":"sudo su","success":false,"verification_status":"rejected","rejection_cause":"risk_denied","rejection_gate":"risk"}`,
 			wantDetails: "[rejected: risk_denied, gate risk] sudo su",
 			wantExtra:   `,"rejection_cause":"risk_denied","rejection_gate":"risk"`,
 		},
 		{
 			name:        "signature cause has a null gate",
-			wire:        `{"type":"command","line":"./run.sh","rejection_cause":"unsigned_file","rejection_gate":null}`,
-			wantDetails: "[rejected: unsigned_file] ./run.sh",
+			wire:        `{"type":"command","line":"./run.sh","success":false,"verification_status":"rejected","rejection_cause":"signature_invalid","rejection_gate":null}`,
+			wantDetails: "[rejected: signature_invalid] ./run.sh",
+			wantExtra:   `,"rejection_cause":"signature_invalid","rejection_gate":null`,
+		},
+		{
+			name:        "cause on a command not marked rejected keeps its result",
+			wire:        `{"type":"command","line":"ls","success":true,"verification_status":"verified","rejection_cause":"unsigned_file","rejection_gate":null}`,
+			wantDetails: "[ok] ls",
 			wantExtra:   `,"rejection_cause":"unsigned_file","rejection_gate":null`,
 		},
 		{
