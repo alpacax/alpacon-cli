@@ -229,3 +229,18 @@ func TestWindowsHomeDirSkipsReadOnlyDirectory(t *testing.T) {
 
 	assert.Equal(t, writable, got)
 }
+
+func TestUniqueFiles(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "config")
+	require.NoError(t, os.WriteFile(target, nil, 0600))
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	missing := filepath.Join(dir, "missing")
+
+	got := UniqueFiles([]string{target, dir + string(filepath.Separator) + "." + string(filepath.Separator) + "config", link, missing, missing})
+	assert.Equal(t, []string{target, missing}, got)
+}

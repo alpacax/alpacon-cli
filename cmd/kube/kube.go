@@ -28,6 +28,8 @@ func init() {
 	KubeCmd.AddCommand(kubeListCmd)
 	KubeCmd.AddCommand(kubeDescribeCmd)
 	KubeCmd.AddCommand(kubeLoginCmd)
+	KubeCmd.AddCommand(kubeLogoutCmd)
+	KubeCmd.AddCommand(kubeSessionsCmd)
 	KubeCmd.AddCommand(kubeCredentialsCmd)
 	KubeCmd.AddCommand(kubeConfigCmd)
 	KubeCmd.AddCommand(kubeProxyCmd)

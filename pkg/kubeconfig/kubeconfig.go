@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/utils"
@@ -508,16 +509,7 @@ func (ed *Editor) holdsToken() bool {
 	if users == nil || users.Kind != yaml.SequenceNode {
 		return false
 	}
-	for _, item := range users.Content {
-		_, user := lookup(item, "user")
-		if user == nil || user.Kind != yaml.MappingNode {
-			continue
-		}
-		if _, token := lookup(user, "token"); token != nil && !isNull(token) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(users.Content, holdsStaticToken)
 }
 
 // readableByOthers reports a group- or world-readable mode. Windows has no
@@ -551,18 +543,13 @@ func Lookup(paths []string, contextName string) (server, proxyURL string, err er
 	}
 	var files []file
 	for _, path := range paths {
-		data, err := os.ReadFile(path)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return "", "", fmt.Errorf("failed to read %s: %w", path, err)
-		}
-		_, root, err := parse(path, data)
+		root, err := readRoot(path)
 		if err != nil {
 			return "", "", err
 		}
-		files = append(files, file{path: path, root: root})
+		if root != nil {
+			files = append(files, file{path: path, root: root})
+		}
 	}
 	searched := strings.Join(paths, ", ")
 

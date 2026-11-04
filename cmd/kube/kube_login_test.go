@@ -13,6 +13,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
+	"github.com/alpacax/alpacon-cli/pkg/kubeconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -245,6 +246,22 @@ func TestCredentialPluginNamesTheCluster(t *testing.T) {
 	exec := credentialPlugin("prod-east")
 	assert.Equal(t, "alpacon", exec.Command)
 	assert.Equal(t, []string{"kube", "credentials", "--cluster", "prod-east"}, exec.Args)
+}
+
+// kube logout without CLUSTER reads the cluster back out of what kube login
+// writes, so the two shapes must agree.
+func TestLogoutReadsTheClusterKubeLoginWrites(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config")
+	ed, err := kubeconfig.Open(path)
+	require.NoError(t, err)
+	ed.Apply(kubeconfig.Entry{Name: "alpacon-prod-east", Server: prodServer, Exec: credentialPlugin("prod-east")})
+	require.NoError(t, ed.Save())
+	require.NoError(t, ed.Close())
+
+	targets := kubeconfig.ContextTargets([]string{path}, "alpacon-prod-east")
+	require.Len(t, targets, 1)
+	assert.Equal(t, "prod-east", targets[0].PluginCluster)
 }
 
 func testKey(cluster string) recordKey {
