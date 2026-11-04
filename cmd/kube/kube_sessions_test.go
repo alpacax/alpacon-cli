@@ -119,12 +119,13 @@ func TestListKubeSessionsAskClusterNamesOnlyWhenNeeded(t *testing.T) {
 		sessions     []string
 		failClusters bool
 		wantCalls    int
+		wantRows     int
 		wantCluster  string
 	}{
-		{name: "an empty list needs no names", wantCalls: 0},
-		{name: "rows need one read", sessions: []string{openSessionJSON}, wantCalls: 1, wantCluster: "prod-east"},
-		{name: "a named cluster needs only its lookup", cluster: "prod-east", sessions: []string{openSessionJSON}, wantCalls: 1, wantCluster: "prod-east"},
-		{name: "a failed read shows the ID", sessions: []string{openSessionJSON}, failClusters: true, wantCalls: 1, wantCluster: "c-prod"},
+		{name: "an empty list needs no names", wantCalls: 0, wantRows: 0},
+		{name: "rows need one read", sessions: []string{openSessionJSON}, wantCalls: 1, wantRows: 1, wantCluster: "prod-east"},
+		{name: "a named cluster needs only its lookup", cluster: "prod-east", sessions: []string{openSessionJSON}, wantCalls: 1, wantRows: 1, wantCluster: "prod-east"},
+		{name: "a failed read shows the ID", sessions: []string{openSessionJSON}, failClusters: true, wantCalls: 1, wantRows: 1, wantCluster: "c-prod"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -137,8 +138,8 @@ func TestListKubeSessionsAskClusterNamesOnlyWhenNeeded(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantCalls, f.clusterCalls)
+			require.Len(t, rows, tt.wantRows)
 			if tt.wantCluster != "" {
-				require.Len(t, rows, 1)
 				assert.Equal(t, tt.wantCluster, rows[0].Cluster)
 			}
 		})

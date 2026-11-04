@@ -174,7 +174,7 @@ func TestKubeLogoutCommandExitCodes(t *testing.T) {
 	}{
 		{name: "current context is not ours", kubeconfig: "current-context: minikube\n", args: []string{"logout"}, wantCode: utils.ExitCodeUsageError, wantStderr: "not written by alpacon"},
 		{name: "blank cluster", kubeconfig: "", args: []string{"logout", " "}, wantCode: utils.ExitCodeUsageError, wantStderr: "CLUSTER must name a cluster"},
-		{name: "too many arguments", kubeconfig: "", args: []string{"logout", "a", "b"}, wantCode: utils.ExitCodeUsageError},
+		{name: "too many arguments", kubeconfig: "", args: []string{"logout", "a", "b"}, wantCode: utils.ExitCodeUsageError, wantStderr: "accepts at most 1 arg(s)"},
 		{name: "a broken file naming the context", kubeconfig: "clusters: 1\n# alpacon-prod-east\n", args: []string{"logout", "prod-east"}, wantCode: utils.ExitCodeGeneralError, wantStderr: "did not finish"},
 		{name: "nothing to log out of", kubeconfig: "", args: []string{"logout", "prod-east"}, wantCode: 0, wantStderr: "No kube login for prod-east was found"},
 	}

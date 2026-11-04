@@ -85,8 +85,9 @@ func stagingPattern(k recordKey) string {
 
 var errStoreLocked = errors.New("another alpacon command is using the saved kube session of this cluster")
 
-// lock serializes the logins of one cluster, whichever kubeconfig each one
-// writes: each reads the record, replaces it and closes the session it named.
+// lock serializes the logins and logouts of one cluster, whichever kubeconfig
+// each one writes: each reads the record, replaces or removes it, and closes
+// the session it named.
 func (s kubeSessionStore) lock(k recordKey) (*filelock.Lock, error) {
 	if err := s.ensureDir(); err != nil {
 		return nil, err

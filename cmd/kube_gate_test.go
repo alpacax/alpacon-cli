@@ -34,7 +34,9 @@ func writeKubeGateConfig(t *testing.T, cfg map[string]any) string {
 func runKubeGate(t *testing.T, home string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
 	return runHelperProcess(t, "TestKubeGateHelperProcess", "kube-gate-helper", args,
-		"GO_WANT_KUBE_GATE_HELPER=1", homeEnvVar()+"="+home)
+		// KUBECONFIG is pinned under home, after os.Environ, so a logout never
+		// edits the developer's own kubeconfig.
+		"GO_WANT_KUBE_GATE_HELPER=1", homeEnvVar()+"="+home, "KUBECONFIG="+filepath.Join(home, "kubeconfig"))
 }
 
 func TestKubeGateBlocksWhenDisabled(t *testing.T) {

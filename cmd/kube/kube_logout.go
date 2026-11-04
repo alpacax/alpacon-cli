@@ -94,6 +94,9 @@ type kubeLogoutResult struct {
 
 	warnings     []logoutNotice
 	currentUnset bool // the merged current-context was read after the edit and is empty
+	// keptElsewhere is set when --kubeconfig named a file without the context
+	// and the saved tokens were kept on purpose, so "nothing found" would be wrong.
+	keptElsewhere bool
 }
 
 func (r *kubeLogoutResult) warn(format string, args ...any) {
@@ -348,9 +351,15 @@ func kubeLogout(in kubeLogoutInput) (*kubeLogoutResult, error) {
 	if err != nil {
 		return result, err
 	}
-	warnOtherRecords(result, saved, picked)
-	if in.explicit && len(files) == 0 && len(saved) > 0 {
-		result.warn("%s is not in %s, so the token saved for %s was kept.", context, strings.Join(in.paths, ", "), in.cluster)
+	if in.explicit && len(files) == 0 {
+		// pickLogoutRecords kept every record on purpose, so none of them
+		// waits on a login to another workspace.
+		if len(saved) > 0 {
+			result.keptElsewhere = true
+			result.warn("%s is not in %s, so the token saved for %s was kept.", context, strings.Join(in.paths, ", "), in.cluster)
+		}
+	} else {
+		warnOtherRecords(result, saved, picked)
 	}
 	unreadable := unreadableLoginRecord(in, records)
 
@@ -666,9 +675,8 @@ func printKubeLogoutResult(result *kubeLogoutResult, complete bool) {
 		return
 	}
 	if !result.Found {
-		utils.CliInfo("No kube login for %s was found.", result.Cluster)
-		if name, ok := strings.CutPrefix(result.Cluster, contextPrefix); ok && name != "" {
-			utils.CliInfo("CLUSTER is the cluster's name, without the %s prefix: alpacon kube logout %s", contextPrefix, shellQuote(name))
+		for _, line := range notFoundLines(result) {
+			utils.CliInfo("%s", line)
 		}
 		return
 	}
@@ -686,4 +694,16 @@ func printKubeLogoutResult(result *kubeLogoutResult, complete bool) {
 	if result.currentUnset {
 		utils.CliInfo("current-context is now unset; pick one with 'kubectl config use-context NAME'.")
 	}
+}
+
+// notFoundLines is what a logout that removed nothing says.
+func notFoundLines(result *kubeLogoutResult) []string {
+	if result.keptElsewhere {
+		return []string{fmt.Sprintf("Nothing was removed for %s.", result.Cluster)}
+	}
+	lines := []string{fmt.Sprintf("No kube login for %s was found.", result.Cluster)}
+	if name, ok := strings.CutPrefix(result.Cluster, contextPrefix); ok && name != "" {
+		lines = append(lines, fmt.Sprintf("CLUSTER is the cluster's name, without the %s prefix: alpacon kube logout %s", contextPrefix, shellQuote(name)))
+	}
+	return lines
 }

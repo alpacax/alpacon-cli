@@ -721,6 +721,8 @@ func TestKubeLogoutKeepsTheTokenWhenTheNamedFileLacksTheContext(t *testing.T) {
 	assert.FileExists(t, f.in.store.recordPath(f.record.key()))
 	assert.Empty(t, f.closed)
 	assert.Contains(t, warningsOf(result), "so the token saved for prod-east was kept")
+	assert.NotContains(t, warningsOf(result), "log in to that workspace")
+	assert.Equal(t, []string{"Nothing was removed for prod-east."}, notFoundLines(result))
 }
 
 func TestKubeLogoutDeletesARecordItCannotRead(t *testing.T) {

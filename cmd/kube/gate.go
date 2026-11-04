@@ -23,7 +23,7 @@ func exitNotEnabled() {
 // kube credentials stays reachable under the stand-in. kubectl runs it for a context an earlier login
 // wrote, perhaps in another workspace or before a logout, and it reads only the saved session, so the
 // current workspace's answer says nothing about it. kube logout stays for the same reason: it cleans up
-// such a context and its saved token, which needs nothing from the current workspace.
+// such a context and its saved token, and needs the server only for a best-effort close.
 func ApplySurfaceGate(root *cobra.Command, enabled bool) {
 	applySurfaceGate(root, KubeCmd, enabled, kubeCredentialsCmd, kubeLogoutCmd)
 }
