@@ -53,40 +53,10 @@ func (s *fileUploadServer) record(step string) {
 func newFileUploadServer(s *fileUploadServer, status string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if s.serveUpload(w, r, status) {
+			return
+		}
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/api/auth0/mfa/":
-			_, _ = w.Write([]byte(`{"mfa_url":"https://example.com/mfa"}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/":
-			body, _ := io.ReadAll(r.Body)
-			s.mu.Lock()
-			refuse := s.createRefusals > 0
-			if refuse {
-				s.createRefusals--
-			} else {
-				_ = json.Unmarshal(body, &s.uploadRequest)
-			}
-			s.mu.Unlock()
-			if refuse {
-				s.record("upload-create-refused")
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = w.Write([]byte(`{"code":"auth_mfa_required","source":"webftp"}`))
-				return
-			}
-			s.record("upload-create")
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"id":"upload-1","upload_url":"http://` + r.Host + `/s3/deploy.sh"}`))
-		case r.Method == http.MethodPut && r.URL.Path == "/s3/deploy.sh":
-			body, _ := io.ReadAll(r.Body)
-			s.mu.Lock()
-			s.putBody = body
-			s.mu.Unlock()
-			s.record("upload-put")
-		case r.Method == http.MethodGet && r.URL.Path == "/api/webftp/uploads/upload-1/upload/":
-			s.record("upload-trigger")
-		case r.Method == http.MethodGet && r.URL.Path == "/api/webftp/uploads/upload-1/status/":
-			_, _ = w.Write([]byte(status))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
 			body, _ := io.ReadAll(r.Body)
 			s.mu.Lock()
@@ -98,6 +68,49 @@ func newFileUploadServer(s *fileUploadServer, status string) *httptest.Server {
 			http.NotFound(w, r)
 		}
 	}))
+}
+
+// serveUpload answers the routes both file-lane fixtures share: the server lookup and the WebFTP
+// write steps, status being the transfer's status body. It reports whether it served the request.
+func (s *fileUploadServer) serveUpload(w http.ResponseWriter, r *http.Request, status string) bool {
+	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+		_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+	case r.Method == http.MethodGet && r.URL.Path == "/api/auth0/mfa/":
+		_, _ = w.Write([]byte(`{"mfa_url":"https://example.com/mfa"}`))
+	case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/":
+		body, _ := io.ReadAll(r.Body)
+		s.mu.Lock()
+		refuse := s.createRefusals > 0
+		if refuse {
+			s.createRefusals--
+		} else {
+			_ = json.Unmarshal(body, &s.uploadRequest)
+		}
+		s.mu.Unlock()
+		if refuse {
+			s.record("upload-create-refused")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code":"auth_mfa_required","source":"webftp"}`))
+			return true
+		}
+		s.record("upload-create")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"upload-1","upload_url":"http://` + r.Host + `/s3/deploy.sh"}`))
+	case r.Method == http.MethodPut && r.URL.Path == "/s3/deploy.sh":
+		body, _ := io.ReadAll(r.Body)
+		s.mu.Lock()
+		s.putBody = body
+		s.mu.Unlock()
+		s.record("upload-put")
+	case r.Method == http.MethodGet && r.URL.Path == "/api/webftp/uploads/upload-1/upload/":
+		s.record("upload-trigger")
+	case r.Method == http.MethodGet && r.URL.Path == "/api/webftp/uploads/upload-1/status/":
+		_, _ = w.Write([]byte(status))
+	default:
+		return false
+	}
+	return true
 }
 
 // TestExecFileUploadWritesThenSubmitsTheSameBytes drives the one-step form end
