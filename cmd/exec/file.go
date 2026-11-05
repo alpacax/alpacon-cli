@@ -101,10 +101,10 @@ var fileExecRefusals = []struct {
 	},
 }
 
-// FileExecArgs is the file lane as given on the command line: --file, --file-from, --interpreter,
-// --reuse-days, --upload, --overwrite, --from-server and the arguments after --. From and
-// Interpreter stay empty when their flag was not given, so a re-run hint repeats only what the
-// user typed.
+// FileExecArgs is the file lane as given on the command line, or synthesized from an oversized
+// command line: --file, --file-from, --interpreter, --reuse-days, --upload, --overwrite,
+// --from-server and the arguments after --. From and Interpreter stay empty when their flag was
+// not given, so a re-run hint repeats only what the user typed.
 type FileExecArgs struct {
 	// Path is the script's location on the target server, and by default the
 	// local file the content is read from.
@@ -126,6 +126,9 @@ type FileExecArgs struct {
 	// FromServer reads the content from Path on the server instead of a local
 	// file, for a script that exists only there.
 	FromServer bool
+	// FromCommand marks content that came from an oversized command line: no local copy exists,
+	// but the uploaded copy is on the server.
+	FromCommand bool
 }
 
 // loadFileExecution reads the script's bytes and builds the submission, or

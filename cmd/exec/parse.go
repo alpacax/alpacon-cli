@@ -74,6 +74,9 @@ type RemoteExecArgs struct {
 	// File is set by --file and selects the verified file lane, in which case Command is empty and
 	// the words after -- are the script's arguments. Nil on the generic lane.
 	File *FileExecArgs
+	// ReuseDays is the --reuse-days given on a command line, used only if the command switches to
+	// the file lane. On the file lane it lives in File.ReuseDays, so at most one of the two is set.
+	ReuseDays int
 }
 
 // ParseRemoteExecArgs parses raw CLI arguments with manual flag handling. Flags are recognized
@@ -274,9 +277,6 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		if interpreter != "" {
 			return fail("--interpreter requires --file")
 		}
-		if reuseDays > 0 {
-			return fail("--reuse-days requires --file; only a verified file execution can propose a reuse duration")
-		}
 		if upload {
 			return fail("--upload requires --file; it writes the script to the --file path on the server")
 		}
@@ -337,6 +337,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		return parsed
 	}
 	parsed.Command = ShellJoin(commandParts)
+	parsed.ReuseDays = reuseDays
 	return parsed
 }
 

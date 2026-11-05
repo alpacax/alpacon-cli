@@ -67,6 +67,15 @@ re-queues review. The approver decides whether to grant reuse, and a grant
 always expires: after the days --reuse-days proposed, or at the workspace
 ceiling (1 to 366 days, default 90).
 
+The server refuses a command line over its length limit. exec then reruns it
+as a verified file: the command is written to /tmp/.alpacon-exec-<hash>.sh,
+where <hash> comes from its content, and runs with /bin/bash. The switch is
+announced on stderr and the file stays on the server. -u, -g, --purpose,
+--work-session, --detach and --reuse-days carry over, and the approver sees a
+file execution instead of a command line. The switch also needs the WebFTP
+upload to be allowed. A command with --env, over 64 KB, or not valid UTF-8 is
+refused with the --upload --file command to run.
+
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
   -g, --groupname [GROUP_NAME]  Specify the group name for command execution.
@@ -112,13 +121,15 @@ Flags:
                                 an absolute path; a bare name would let the server's
                                 PATH decide what runs.
   --reuse-days N                Propose how long an approval of --file stays
-                                reusable, 1 to 366 days. The approver decides
-                                whether to grant reuse, and a grant expires after
-                                N days or at the workspace ceiling (1 to 366 days,
-                                default 90), whichever is sooner. A ceiling lower
-                                than N refuses the request. Without the flag no
-                                duration is proposed; the approver may still
-                                grant reuse up to the ceiling.
+                                reusable, 1 to 366 days. On a command line it
+                                applies only if exec switches to the file lane.
+                                The approver decides whether to grant reuse, and
+                                a grant expires after N days or at the workspace
+                                ceiling (1 to 366 days, default 90), whichever is
+                                sooner. A ceiling lower than N refuses the
+                                request. Without the flag no duration is
+                                proposed; the approver may still grant reuse up
+                                to the ceiling.
   --work-session [UUID]         Attach this command to a work-session.
                                 Overrides the workspace's active session set via
                                 'alpacon work-session use'.
@@ -279,6 +290,13 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 
 	workSessionID := worksession.ResolveOrExit(alpaconClient, parsed.WorkSessionID)
 
+	runPrepared(alpaconClient, parsed, file, workSessionID, authMethod)
+}
+
+// runPrepared runs the command or file on a client and WorkSession already resolved. On the
+// generic lane a server refusal for length reruns it once through the file lane with file set.
+func runPrepared(alpaconClient *client.AlpaconClient, parsed RemoteExecArgs, file *event.FileExecution, workSessionID, authMethod string) {
+	var err error
 	if file != nil && parsed.File.Upload {
 		uploadFileOrExit(alpaconClient, parsed, *file, workSessionID, authMethod)
 	}
@@ -304,6 +322,10 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 			}))
 		}
 		if err != nil {
+			if file == nil && isLineTooLong(err) {
+				runOversizedAsFile(alpaconClient, parsed, err, workSessionID, authMethod)
+				return
+			}
 			utils.HandleWorkSessionError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID)
 			if HandleFileExecRefusal(err, parsed.Server) {
 				return
@@ -346,6 +368,10 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	} else {
 		err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
 	}
+	if file == nil && isLineTooLong(err) {
+		runOversizedAsFile(alpaconClient, parsed, err, workSessionID, authMethod)
+		return
+	}
 	utils.HandleWorkSessionError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID)
 	// A purpose demand has no approval request yet, so it is reported before the pending-approval
 	// path, which would name a queue the command is not in.
@@ -378,6 +404,19 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	HandleCommandResult(err, parsed.InvokedAs)
 }
 
+// runOversizedAsFile reruns a command line the server refused for length (refused) as a verified
+// file, or exits 1 naming the explicit file-lane command when the file lane cannot take it.
+func runOversizedAsFile(alpaconClient *client.AlpaconClient, parsed RemoteExecArgs, refused error, workSessionID, authMethod string) {
+	switched, refusal := fileLaneForCommand(parsed)
+	if refusal != nil {
+		reportCodedRefusalWithExit(1, "command", refused, refusal.message, denialHintLine("run it as a verified file yourself:\n  "+refusal.action.Command+"\n"), []utils.NextAction{refusal.action})
+		return
+	}
+	file := newFileExecution(*switched.File, parsed.Command)
+	utils.CliInfo("%s", oversizedNotice(file))
+	runPrepared(alpaconClient, switched, &file, workSessionID, authMethod)
+}
+
 // reRunHint reconstructs the exec invocation (server, command, any -u/-g/--work-session flags and
 // --env keys) so the pending-approval message shows what to re-run once the request is approved.
 // -- precedes the command so remote flags are never re-parsed as alpacon flags. The server is
@@ -385,10 +424,10 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 // keys are not quoted. Command stays executable as is; with --env keys the caveat goes in
 // Description, since a consumer replaying Command would otherwise submit without them.
 // It names exec even when invoked as websh, which has no --wait.
-// On the file lane it repeats only the --file flags the user gave, each quoted with argvQuote since
-// they were argv, never a shell line. It drops --upload and --overwrite, because the first run
-// already wrote the file and the re-run verifies it in place, and keeps --from-server, since there
-// may be no local copy to read.
+// On the file lane it repeats the --file flags, each quoted with argvQuote since they were argv,
+// never a shell line. It drops --upload and --overwrite, because the first run already wrote the
+// file and the re-run verifies it in place, and keeps --from-server, since there may be no local
+// copy to read, and an oversized command line never has one.
 func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 	parts := append([]string{string(ExecInvocation)}, runAsFlags(parsed)...)
 	// Env keys only, never values: the rerun re-reads each value from the shell, keeping secrets
@@ -406,7 +445,7 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 		if parsed.File.From != "" {
 			parts = append(parts, "--file-from "+argvQuote(parsed.File.From))
 		}
-		if parsed.File.FromServer {
+		if parsed.File.FromServer || parsed.File.FromCommand {
 			parts = append(parts, "--from-server")
 		}
 		if parsed.File.Interpreter != "" {
