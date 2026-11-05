@@ -328,7 +328,7 @@ func TestExecLogsRejectedExits6(t *testing.T) {
 	t.Run("table", func(t *testing.T) {
 		_, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, jobID)
 		assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "a rejection is final; exit 1 reads as retryable")
-		assert.Contains(t, stderr, "rejected by a reviewer")
+		assert.Contains(t, stderr, "was rejected; the server did not record why")
 	})
 
 	t.Run("json", func(t *testing.T) {
@@ -343,7 +343,7 @@ func TestExecLogsRejectedExits6(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(stderr), &got), "stderr: %s", stderr)
 		assert.False(t, got.OK)
 		assert.Equal(t, utils.ExitCodeNotApproved, got.ExitCode)
-		assert.Contains(t, got.Message, "rejected by a reviewer")
+		assert.Contains(t, got.Message, "was rejected; the server did not record why")
 	})
 }
 
@@ -367,7 +367,7 @@ func TestExecRejectedExits6(t *testing.T) {
 
 	_, stderr, exitCode := runExecHelper(t, ts.URL, "prod", "--", "sudo", "reboot")
 	assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
-	assert.Contains(t, stderr, "rejected by a reviewer")
+	assert.Contains(t, stderr, "Error: command cmd-1 was rejected; the server did not record why.\n")
 }
 
 // TestExecRejectedMidWaitExits6 traces the wait loop's rejection branch out to

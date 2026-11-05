@@ -205,11 +205,12 @@ func outputTimelineJSON(rows []wsapi.TimelineAttributes, terminals []wsapi.Timel
 
 func projectTimelineAttributes(item *wsapi.TimelineItem, serverMap map[string]string) wsapi.TimelineAttributes {
 	return wsapi.TimelineAttributes{
-		Time:    resolveTimestamp(item.Timestamp),
-		Type:    formatType(item.Type),
-		Server:  resolveServer(item.ServerID, serverMap),
-		User:    item.Username,
-		Details: formatDetails(item),
+		Time:             resolveTimestamp(item.Timestamp),
+		Type:             formatType(item.Type),
+		Server:           resolveServer(item.ServerID, serverMap),
+		User:             item.Username,
+		Details:          formatDetails(item),
+		CommandRejection: item.CommandRejection,
 	}
 }
 
@@ -240,7 +241,9 @@ func formatDetails(item *wsapi.TimelineItem) string {
 	switch item.Type {
 	case "command":
 		status := "unknown"
-		if item.Denied {
+		if item.IsRejected() {
+			status = item.Label()
+		} else if item.Denied {
 			status = "denied"
 		} else if item.Success != nil {
 			if *item.Success {

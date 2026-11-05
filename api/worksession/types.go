@@ -5,6 +5,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/types"
 )
 
@@ -200,11 +201,13 @@ type TimelineItem struct {
 	ClientType string  `json:"client_type"`
 
 	// command
-	Shell       string  `json:"shell"`
-	Line        string  `json:"line"`
-	Success     *bool   `json:"success"`
-	Denied      bool    `json:"denied"`
-	ElapsedTime float64 `json:"elapsed_time"`
+	Shell              string  `json:"shell"`
+	Line               string  `json:"line"`
+	Success            *bool   `json:"success"`
+	Denied             bool    `json:"denied"`
+	ElapsedTime        float64 `json:"elapsed_time"`
+	VerificationStatus string  `json:"verification_status"`
+	event.CommandRejection
 
 	// tunnel_session
 	IsTunnel   bool `json:"is_tunnel"`
@@ -226,12 +229,19 @@ type TimelineItem struct {
 	RecordChunksTotal *int `json:"record_chunks_total"`
 }
 
+// IsRejected says a command item was refused before it ran; every rejection,
+// the agent's signature refusal included, leaves verification_status rejected.
+func (t TimelineItem) IsRejected() bool {
+	return event.IsRejectedStatus(t.VerificationStatus)
+}
+
 type TimelineAttributes struct {
-	Time    string `json:"timestamp" table:"Time"`
-	Type    string `json:"type"      table:"Type"`
-	Server  string `json:"server"    table:"Server"`
-	User    string `json:"user"      table:"User"`
-	Details string `json:"details"   table:"Details"`
+	Time                   string `json:"timestamp" table:"Time"`
+	Type                   string `json:"type"      table:"Type"`
+	Server                 string `json:"server"    table:"Server"`
+	User                   string `json:"user"      table:"User"`
+	Details                string `json:"details"   table:"Details"`
+	event.CommandRejection `table:"-"`
 }
 
 // RecordChunk is one entry of the per-session recording route's cursor envelope.
