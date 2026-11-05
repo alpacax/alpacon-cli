@@ -192,6 +192,14 @@ func TestContextRows(t *testing.T) {
 			},
 		},
 		{
+			name: "file execution leaves the run-as account to its own block",
+			body: `{"metadata":{"command":{"line":"sh /tmp/a.sh","server_name":"my-server","runas":"deploy","file_execution":{"sha256":"abc","path":"/tmp/a.sh","interpreter":"/bin/sh","args":[],"runas":"deploy"}}}}`,
+			want: []describeRow{
+				{"Command", "sh /tmp/a.sh"},
+				{"Server", "my-server"},
+			},
+		},
+		{
 			name: "sudo request shows the purpose after the run-as account",
 			body: `{"metadata":{"sudo":{"command":"apt update","runas":"root","purpose":"patch openssl","server_name":"my-server"}}}`,
 			want: []describeRow{
@@ -333,6 +341,20 @@ func TestDescribeRowsPutContextBetweenBaseAndFileExecution(t *testing.T) {
 		"Session purpose", "Command",
 		"File execution", "  Interpreter", "  Path", "  Arguments", "  SHA-256",
 	}, fields)
+}
+
+func TestDescribeRowsShowFileExecutionRunAsOnce(t *testing.T) {
+	t.Parallel()
+	req := decodeFixture(t, `{"id":"apr-1","request_type":"command_exec","added_at":"2030-01-01T00:00:00Z","metadata":{"command":{"line":"sh /tmp/a.sh","runas":"deploy","file_execution":{"sha256":"abc","path":"/tmp/a.sh","interpreter":"/bin/sh","args":[],"runas":"deploy"}}}}`)
+
+	var runAs []describeRow
+	for _, r := range describeRows(req, fileExecutionOf(req)) {
+		if strings.TrimSpace(r.Field) == "Run as" {
+			runAs = append(runAs, r)
+		}
+	}
+
+	assert.Equal(t, []describeRow{{"  Run as", "deploy"}}, runAs)
 }
 
 func TestApprovalDescribeJSONPreservesSudoRunAs(t *testing.T) {

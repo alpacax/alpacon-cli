@@ -53,9 +53,9 @@ type RiskFactor struct {
 }
 
 // SudoDetail is the sudo approval's detail payload. Purpose is that of the
-// command that started the sudo, null for a sudo typed in the web terminal.
-// Tier2Reasoning and DescriptionAligned reach deciders only; a null
-// DescriptionAligned is no judgment.
+// command that started the sudo, null for a sudo typed in Websh. Tier2Reasoning
+// and DescriptionAligned reach deciders only; a null DescriptionAligned is no
+// judgment.
 type SudoDetail struct {
 	Command            string `json:"command"`
 	RunAs              string `json:"runas"`
