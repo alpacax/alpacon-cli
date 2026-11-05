@@ -29,8 +29,8 @@ const (
 
 // Gates for describeRBACError. gateRoleRead is first so the zero value is the safest gate.
 const (
-	// gateRoleRead is a read on /api/rbac/. An API token is refused outright on an
-	// Alpacon Cloud workspace. The role and binding reads narrow a caller who cannot see
+	// gateRoleRead is a read on /api/rbac/. An API token is refused outright on every
+	// deployment. The role and binding reads narrow a caller who cannot see
 	// the target to 200 rather than refusing, so an uncoded 403 from them is unexpected;
 	// the troubleshoot read is the exception, and it refuses with a code.
 	gateRoleRead rbacGate = iota
@@ -62,8 +62,7 @@ type rewritten struct {
 // which needs both the gate and the credential to name a fix that can work.
 //
 // The credential kind must come off the client: config.IsSaaS only reports that an
-// access token is stored, which cannot separate a refused Alpacon Cloud token session
-// from a working self-hosted one.
+// access token is stored, which does not say which credential this request carried.
 func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error {
 	if err == nil {
 		return nil
@@ -110,12 +109,12 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 		case gate == gateAuditRead && !ac.IsBearerAuth():
 			return rewrite(err, "this API token is missing the role_audit_log:read scope, which the role history requires. Widen the token's scopes, or run 'alpacon login' to read it through a browser session")
 		case gate == gateRoleWrite && !ac.IsBearerAuth():
-			return rewrite(err, "a role-binding write requires the superuser role, and this credential may be refused outright: the RBAC API accepts no API token on an Alpacon Cloud workspace. Run 'alpacon login' to authenticate through the browser")
+			return rewrite(err, "a role-binding write requires the superuser role, and this credential may be refused outright: the RBAC API accepts no API token. Run 'alpacon login' to authenticate through the browser")
 		case gate == gateRoleWrite:
 			return rewrite(err, "a role-binding write requires the superuser role")
 		case !ac.IsBearerAuth():
-			// Lead with the reading that holds on both deployments: only Alpacon Cloud refuses the token.
-			return rewrite(err, "your account may not see the account or role named. On an Alpacon Cloud workspace the cause is the credential instead: the RBAC API refuses API tokens there, so run 'alpacon login' to authenticate through the browser")
+			// Lead with the account: this branch also holds a browser login on a self-hosted workspace.
+			return rewrite(err, "your account may not see the account or role named. If this credential is an API token the cause is the token instead: the RBAC API refuses API tokens, so run 'alpacon login' to authenticate through the browser")
 		default:
 			return rewrite(err, "this workspace refused the read without stating a reason, which usually means your account may not see the account or role named")
 		}
