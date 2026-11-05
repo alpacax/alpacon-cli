@@ -290,3 +290,31 @@ func TestIsRejectedReadsTheStatusAndACompletedCommandsCause(t *testing.T) {
 		})
 	}
 }
+
+func TestAnApproverReasonTakesThePlaceOfAskTheApprover(t *testing.T) {
+	t.Parallel()
+	body := `,"rejection_cause":"approval_rejected","rejection_gate":"approval","rejection_note":"Add a guard\non line 23.\u001b[2K"`
+
+	err := errorFromDetails(testPathID(t, "cmd-9"), rejectedDetails(t, body))
+
+	var rejected *CommandRejectedError
+	require.ErrorAs(t, err, &rejected)
+	assert.Equal(t, "command cmd-9 was rejected: an approver rejected it (rejection_cause: approval_rejected, rejection_gate: approval)", err.Error())
+	assert.Equal(t, []utils.NextAction{{Description: `The approver wrote: "Add a guard on line 23."`}}, rejected.NextActions())
+	assert.Equal(t, "Add a guard\non line 23.\u001b[2K", rejected.ErrorFields()["rejection_note"])
+}
+
+func TestNoReasonKeepsTheAskTheApproverStep(t *testing.T) {
+	t.Parallel()
+	for name, note := range map[string]string{"absent": ``, "null": `,"rejection_note":null`, "empty": `,"rejection_note":""`} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			body := `,"rejection_cause":"approval_rejected","rejection_gate":"approval"` + note
+
+			rejected := rejectedDetails(t, body).Rejection()
+
+			assert.Equal(t, []utils.NextAction{causeTexts[RejectionCauseApprovalRejected].next}, rejected.NextActions())
+			assert.NotContains(t, rejected.ErrorFields(), "rejection_note")
+		})
+	}
+}

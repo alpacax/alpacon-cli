@@ -153,6 +153,10 @@ type EventDetails struct {
 	// a script on the target; absent otherwise and on older servers.
 	FileExecutionSuggestion *FileExecutionSuggestion `json:"file_execution_suggestion"`
 	CommandRejection
+	// RejectionNote is what the approver wrote when rejecting the hold: null unless a
+	// person rejected it, sent only to the requester and the approvers, and absent on
+	// an older server.
+	RejectionNote *string `json:"rejection_note"`
 	// The account the command ran as and the work session it ran under, so a
 	// re-run printed from the detail repeats them. WorkSession is null when the
 	// command ran under none.

@@ -88,6 +88,10 @@ func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecutio
 		{"Reviewed at", reviewedAt},
 		{"Added at", req.AddedAt.Local().Format("2006-01-02 15:04")},
 	}
+	if req.RejectionNote != "" {
+		// The approver's own words, stripped of terminal escapes like any server value.
+		rows = append(rows, describeRow{"Rejection reason", utils.SanitizeTerminalOneLine(req.RejectionNote)})
+	}
 	rows = append(rows, contextRows(req.Metadata)...)
 	if fe != nil {
 		rows = append(rows, fileExecutionRows(fe)...)

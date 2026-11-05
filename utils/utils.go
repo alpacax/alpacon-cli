@@ -581,6 +581,13 @@ func SanitizeTerminalText(s string) string {
 	return StripControlChars(StripFormatAndANSI(s))
 }
 
+// SanitizeTerminalOneLine fits free text a person wrote, such as an approver's
+// reason, onto one terminal line: line breaks and runs of space become one space,
+// where SanitizeTerminalText would run the lines together.
+func SanitizeTerminalOneLine(s string) string {
+	return strings.Join(strings.Fields(SanitizeTerminalText(strings.ReplaceAll(s, "\n", " "))), " ")
+}
+
 // SanitizeTerminalLine is SanitizeTerminalText plus the answer to whether it had
 // to take anything out. A \n counts as altered here: the caller's value is one
 // line by contract, so a newline in it is a forged line and not a line ending

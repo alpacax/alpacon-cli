@@ -15,8 +15,11 @@ type ApprovalRequest struct {
 	RequestedBy *types.UserSummary `json:"requested_by"`
 	ReviewedBy  *types.UserSummary `json:"reviewed_by"`
 	ReviewedAt  *time.Time         `json:"reviewed_at"`
-	AddedAt     time.Time          `json:"added_at"`
-	Metadata    *ApprovalMetadata  `json:"metadata"`
+	// RejectionNote is the reason the approver wrote when rejecting; empty when
+	// they gave none, and absent on an older server.
+	RejectionNote string            `json:"rejection_note"`
+	AddedAt       time.Time         `json:"added_at"`
+	Metadata      *ApprovalMetadata `json:"metadata"`
 }
 
 // ApprovalMetadata is the part of an approval's metadata the CLI renders.
