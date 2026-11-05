@@ -39,7 +39,7 @@ var workspaceSwitchCmd = &cobra.Command{
 			return
 		}
 
-		newURL, newName, err := resolveSwitchTarget(cfg, targetName, renewWorkspaceClaim)
+		newURL, newName, renewed, err := resolveSwitchTarget(cfg, targetName, renewWorkspaceClaim)
 		if err != nil {
 			utils.CliErrorWithExit("%s", err)
 		}
@@ -48,7 +48,7 @@ var workspaceSwitchCmd = &cobra.Command{
 		// the switch and lands in the same save as the workspace it describes.
 		kubernetesSurface := fetchKubernetesSurface(newURL, newName, cfg.Insecure)
 
-		if err := commitSwitch(cfg, newURL, newName, kubernetesSurface, verifyConnection); err != nil {
+		if err := commitSwitch(cfg, newURL, newName, kubernetesSurface, renewed, verifyConnection); err != nil {
 			utils.CliErrorWithExit("%s", err)
 		}
 
@@ -57,28 +57,28 @@ var workspaceSwitchCmd = &cobra.Command{
 }
 
 // resolveSwitchTarget looks targetName up in the token's workspaces claim, fixed when the token is issued,
-// so a miss renews the token once, when a refresh token exists, and looks again.
-func resolveSwitchTarget(cfg config.Config, targetName string, renew func(config.Config) (string, error)) (newURL, newName string, err error) {
+// so a miss renews the token once, when a refresh token exists, and looks again; renewed is that token.
+func resolveSwitchTarget(cfg config.Config, targetName string, renew func(config.Config) (*config.RenewedToken, error)) (newURL, newName string, renewed *config.RenewedToken, err error) {
 	newURL, newName, err = workspace.ResolveWorkspaceURL(cfg.AccessToken, targetName, cfg.BaseDomain)
 	if !errors.Is(err, workspace.ErrWorkspaceNotFound) {
-		return newURL, newName, err
+		return newURL, newName, nil, err
 	}
 	if cfg.RefreshToken == "" {
-		return "", "", staleWorkspaceList(err)
+		return "", "", nil, staleWorkspaceList(err)
 	}
 
-	accessToken, renewErr := renew(cfg)
+	renewed, renewErr := renew(cfg)
 	if errors.Is(renewErr, errRefreshRejected) {
-		return "", "", staleWorkspaceList(fmt.Errorf("%w, and renewing the access token failed: %w", err, renewErr))
+		return "", "", nil, staleWorkspaceList(fmt.Errorf("%w, and renewing the access token failed: %w", err, renewErr))
 	}
 	if renewErr != nil {
-		return "", "", fmt.Errorf("%w, and renewing the access token to look again failed. Please retry: %w", err, renewErr)
+		return "", "", nil, fmt.Errorf("%w, and renewing the access token to look again failed. Please retry: %w", err, renewErr)
 	}
-	newURL, newName, err = workspace.ResolveWorkspaceURL(accessToken, targetName, cfg.BaseDomain)
+	newURL, newName, err = workspace.ResolveWorkspaceURL(renewed.AccessToken, targetName, cfg.BaseDomain)
 	if err != nil {
-		return "", "", fmt.Errorf("%w after renewing the access token. Check the name, or if the workspace was just created, run 'alpacon login' and retry", err)
+		return "", "", nil, fmt.Errorf("%w after renewing the access token. Check the name, or if the workspace was just created, run 'alpacon login' and retry", err)
 	}
-	return newURL, newName, nil
+	return newURL, newName, renewed, nil
 }
 
 var errRefreshRejected = errors.New("the authentication server refused the refresh token")
@@ -87,19 +87,19 @@ func staleWorkspaceList(err error) error {
 	return fmt.Errorf("%w. Your workspace list reflects your last sign-in; run 'alpacon login' and retry", err)
 }
 
-// renewWorkspaceClaim runs the refresh-token grant, which also saves the new token while the config holds the same login.
-func renewWorkspaceClaim(cfg config.Config) (string, error) {
+// renewWorkspaceClaim runs the refresh-token grant. Its own save is best effort, so the switch saves the token again.
+func renewWorkspaceClaim(cfg config.Config) (*config.RenewedToken, error) {
 	spinner := utils.NewSpinner("Refreshing access token...")
 	spinner.Start()
 	tokenRes, err := auth0.RefreshAccessToken(cfg.WorkspaceURL, httpclient.New(cfg.Insecure), cfg.RefreshToken)
 	spinner.Stop()
 	if auth0.IsRefreshTokenRejected(err) {
-		return "", fmt.Errorf("%w: %w", errRefreshRejected, err)
+		return nil, fmt.Errorf("%w: %w", errRefreshRejected, err)
 	}
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return tokenRes.AccessToken, nil
+	return &config.RenewedToken{AccessToken: tokenRes.AccessToken, ExpiresIn: tokenRes.ExpiresIn}, nil
 }
 
 func verifyConnection() error {
@@ -107,10 +107,10 @@ func verifyConnection() error {
 	return err
 }
 
-// commitSwitch saves the new workspace with its Kubernetes surface answer, then runs verify; on failure
-// it restores orig in one save unless another login or switch has replaced the new workspace since.
-func commitSwitch(orig config.Config, newURL, newName string, kubernetesSurface bool, verify func() error) error {
-	if err := config.SwitchWorkspace(orig, newURL, newName, kubernetesSurface); err != nil {
+// commitSwitch saves the new workspace with its Kubernetes surface answer and any renewed token, then runs verify;
+// on failure it restores orig's workspace in one save unless another login or switch has replaced the new one since.
+func commitSwitch(orig config.Config, newURL, newName string, kubernetesSurface bool, renewed *config.RenewedToken, verify func() error) error {
+	if err := config.SwitchWorkspace(orig, newURL, newName, kubernetesSurface, renewed); err != nil {
 		return fmt.Errorf("failed to update config: %w", err)
 	}
 

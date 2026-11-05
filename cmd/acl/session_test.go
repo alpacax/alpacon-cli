@@ -323,7 +323,7 @@ func TestCacheSignerToken_FailsOnceTheConfigMoved(t *testing.T) {
 			return config.CreateConfig(testWorkspaceURL, "ws1", "", "", "access-2", "refresh-2", "alpacon.io", 3600, false)
 		}},
 		{name: "a workspace switch", move: func(started config.Config) error {
-			return config.SwitchWorkspace(started, "https://ws2.us1.alpacon.io", "ws2", false)
+			return config.SwitchWorkspace(started, "https://ws2.us1.alpacon.io", "ws2", false, nil)
 		}},
 	}
 	for _, tt := range tests {

@@ -49,21 +49,27 @@ func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, re
 	})
 }
 
-// SwitchWorkspace moves from's login to newURL, saving the name, identity and Kubernetes surface
-// answer in one write; once another login or switch has replaced from, it writes nothing.
-func SwitchWorkspace(from Config, newURL, newName string, kubernetesSurface bool) error {
+// RenewedToken is an access token a refresh-token grant returned, with its lifetime in seconds.
+type RenewedToken struct {
+	AccessToken string
+	ExpiresIn   int
+}
+
+// SwitchWorkspace moves from's login to newURL, saving the name, identity, Kubernetes surface answer and,
+// when not nil, renewed in one write; once another login or switch has replaced from, it writes nothing.
+func SwitchWorkspace(from Config, newURL, newName string, kubernetesSurface bool, renewed *RenewedToken) error {
 	// The new URL is built from the schema name, so it is also the identity;
 	// keeping the old workspace's value would name the wrong one.
-	return moveWorkspace(from.WorkspaceURL, from, Config{WorkspaceURL: newURL, WorkspaceName: newName, SchemaName: newName, KubernetesSurface: kubernetesSurface})
+	return moveWorkspace(from.WorkspaceURL, from, Config{WorkspaceURL: newURL, WorkspaceName: newName, SchemaName: newName, KubernetesSurface: kubernetesSurface}, renewed)
 }
 
 // RestoreWorkspace puts orig's workspace back in one save while the config still holds orig's login on
 // switchedURL, the workspace a failed switch saved; otherwise it writes nothing.
 func RestoreWorkspace(switchedURL string, orig Config) error {
-	return moveWorkspace(switchedURL, orig, orig)
+	return moveWorkspace(switchedURL, orig, orig, nil)
 }
 
-func moveWorkspace(fromURL string, login, to Config) error {
+func moveWorkspace(fromURL string, login, to Config, renewed *RenewedToken) error {
 	return updateConfig(func(cfg *Config) (bool, error) {
 		if cfg.WorkspaceURL != fromURL {
 			return false, ErrWorkspaceChanged
@@ -75,6 +81,9 @@ func moveWorkspace(fromURL string, login, to Config) error {
 		cfg.WorkspaceName = to.WorkspaceName
 		cfg.SchemaName = to.SchemaName
 		cfg.KubernetesSurface = to.KubernetesSurface
+		if renewed != nil {
+			cfg.setAccessToken(renewed.AccessToken, renewed.ExpiresIn)
+		}
 		return true, nil
 	})
 }
@@ -174,10 +183,14 @@ func SaveRefreshedAuth0Token(refreshToken, accessToken string, expiresIn int) er
 		if cfg.RefreshToken != refreshToken {
 			return false, ErrLoginChanged
 		}
-		cfg.AccessToken = accessToken
-		cfg.AccessTokenExpiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second).Format(time.RFC3339)
+		cfg.setAccessToken(accessToken, expiresIn)
 		return true, nil
 	})
+}
+
+func (c *Config) setAccessToken(accessToken string, expiresIn int) {
+	c.AccessToken = accessToken
+	c.AccessTokenExpiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second).Format(time.RFC3339)
 }
 
 // DeleteConfig removes the config while it still holds login's credentials; a login another shell made since

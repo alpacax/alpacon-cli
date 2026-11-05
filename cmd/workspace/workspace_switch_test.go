@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -67,10 +68,17 @@ func TestCommitSwitch(t *testing.T) {
 		verifyErr         error
 		expectURL         string
 		expectSchemaName  string
+		renewed           *config.RenewedToken
 		expectSurface     bool
+		expectAccessToken string
 		expectErrContains string
 	}{
 		{name: "switch records the new answer", newSurface: true, expectURL: "https://next.us1.alpacon.io", expectSchemaName: "next", expectSurface: true},
+		{name: "switch saves the token renewed to find the workspace", renewed: &config.RenewedToken{AccessToken: "renewed-token", ExpiresIn: 3600},
+			expectURL: "https://next.us1.alpacon.io", expectSchemaName: "next", expectAccessToken: "renewed-token"},
+		{name: "failed connection keeps the renewed token", renewed: &config.RenewedToken{AccessToken: "renewed-token", ExpiresIn: 3600}, verifyErr: errUnreachable,
+			expectURL: "https://prev-slug.us1.alpacon.io", expectSchemaName: "prev", expectSurface: true, expectAccessToken: "renewed-token",
+			expectErrContains: `failed to connect to workspace "next": connection refused; reverted to "prev"`},
 		{name: "switch to a workspace without kubernetes", expectURL: "https://next.us1.alpacon.io", expectSchemaName: "next"},
 		{name: "failed connection restores the original answer", newSurface: false, verifyErr: errUnreachable,
 			expectURL: "https://prev-slug.us1.alpacon.io", expectSchemaName: "prev", expectSurface: true,
@@ -85,7 +93,7 @@ func TestCommitSwitch(t *testing.T) {
 			orig, err := config.LoadConfig()
 			require.NoError(t, err)
 
-			err = commitSwitch(orig, "https://next.us1.alpacon.io", "next", tt.newSurface, func() error { return tt.verifyErr })
+			err = commitSwitch(orig, "https://next.us1.alpacon.io", "next", tt.newSurface, tt.renewed, func() error { return tt.verifyErr })
 			if tt.expectErrContains != "" {
 				require.ErrorIs(t, err, tt.verifyErr)
 				assert.Contains(t, err.Error(), tt.expectErrContains)
@@ -98,7 +106,8 @@ func TestCommitSwitch(t *testing.T) {
 			assert.Equal(t, tt.expectURL, cfg.WorkspaceURL)
 			assert.Equal(t, tt.expectSchemaName, cfg.WorkspaceIdentity())
 			assert.Equal(t, tt.expectSurface, cfg.KubernetesSurface)
-			assert.Equal(t, "access-token", cfg.AccessToken)
+			expectAccessToken := cmp.Or(tt.expectAccessToken, "access-token")
+			assert.Equal(t, expectAccessToken, cfg.AccessToken)
 		})
 	}
 }
@@ -130,7 +139,7 @@ func TestCommitSwitch_FailedConnectionLeavesALoginMadeMeanwhile(t *testing.T) {
 				return errors.New("connection refused")
 			}
 
-			err = commitSwitch(orig, "https://next.us1.alpacon.io", "next", false, verify)
+			err = commitSwitch(orig, "https://next.us1.alpacon.io", "next", false, nil, verify)
 
 			require.ErrorIs(t, err, tt.wantErr)
 			require.ErrorContains(t, err, `failed to connect to "next": connection refused; left the config as another login or switch set it since`)
@@ -145,7 +154,7 @@ func TestCommitSwitch_ConfigWriteFailure(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	verified := false
-	err := commitSwitch(config.Config{}, "https://next.us1.alpacon.io", "next", true, func() error { verified = true; return nil })
+	err := commitSwitch(config.Config{}, "https://next.us1.alpacon.io", "next", true, nil, func() error { verified = true; return nil })
 
 	require.ErrorContains(t, err, "failed to update config")
 	assert.False(t, verified, "no connection check runs when the config could not be written")
@@ -209,24 +218,31 @@ func TestResolveSwitchTarget(t *testing.T) {
 			t.Parallel()
 			cfg := config.Config{AccessToken: tt.accessToken, RefreshToken: tt.refreshToken, BaseDomain: "alpacon.io"}
 			renews := 0
-			renew := func(got config.Config) (string, error) {
+			var issued *config.RenewedToken
+			renew := func(got config.Config) (*config.RenewedToken, error) {
 				renews++
 				assert.Equal(t, cfg, got)
-				return tt.renewedToken, tt.renewErr
+				if tt.renewErr != nil {
+					return nil, tt.renewErr
+				}
+				issued = &config.RenewedToken{AccessToken: tt.renewedToken, ExpiresIn: 3600}
+				return issued, nil
 			}
 
-			newURL, newName, err := resolveSwitchTarget(cfg, "next", renew)
+			newURL, newName, renewed, err := resolveSwitchTarget(cfg, "next", renew)
 
 			assert.Equal(t, tt.expectRenews, renews)
 			if tt.expectErr == "" {
 				require.NoError(t, err)
 				assert.Equal(t, tt.expectURL, newURL)
 				assert.Equal(t, "next", newName)
+				assert.Same(t, issued, renewed)
 				return
 			}
 			require.EqualError(t, err, tt.expectErr)
 			assert.Empty(t, newURL)
 			assert.Empty(t, newName)
+			assert.Nil(t, renewed)
 			for _, target := range tt.expectErrIs {
 				require.ErrorIs(t, err, target)
 			}
