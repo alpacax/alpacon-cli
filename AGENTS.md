@@ -149,7 +149,7 @@ Use: "records SESSION_ID"
 
 - `Short`: Concise, starts with a verb, under 50 chars
 - `Long`: Document SSH-like `user@host` syntax where supported
-- `Example`: Use realistic values (e.g., `my-server`, not `[SERVER_NAME]`)
+- `Example`: Use realistic values (e.g., `my-server`, not `[SERVER_NAME]`). Every resource ID in an `Example`, a `Long` or a usage error is `550e8400-e29b-41d4-a716-446655440000`, and a second ID in the same example is `3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47`. Only the example value becomes a UUID: an argument's name stays UPPERCASE wherever it is named—in `Use`, in `Long` prose (`by passing its SESSION_ID`) and in a usage error (`invalid JOB_ID %q`). WorkSession, approval request and Websh session IDs are plain UUIDs, so never `abc123`, `ses-…` or `apr-…`.
 
 ### Error handling
 
