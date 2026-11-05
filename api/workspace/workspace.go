@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/alpacax/alpacon-cli/config"
@@ -11,6 +12,8 @@ import (
 const (
 	claimNamespace = "https://alpacon.io/"
 )
+
+var ErrWorkspaceNotFound = errors.New("not found in your account")
 
 // GetWorkspacesFromToken decodes the JWT access token and extracts the workspaces claim.
 func GetWorkspacesFromToken(accessToken string) ([]Workspace, error) {
@@ -76,7 +79,7 @@ func ResolveWorkspaceURL(accessToken, targetName, baseDomain string) (newURL, ne
 		}
 	}
 
-	return "", "", fmt.Errorf("workspace %q not found in your account", targetName)
+	return "", "", fmt.Errorf("workspace %q %w", targetName, ErrWorkspaceNotFound)
 }
 
 // ValidateAndBuildWorkspaceURL is ResolveWorkspaceURL with cfg's access token and base domain.
