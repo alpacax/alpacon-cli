@@ -24,6 +24,8 @@ func TestWordNamingNoSubcommandExitsTwoAsUnknownCommand(t *testing.T) {
 		{name: "kube", args: []string{"kube", "lst"}, want: []string{`unknown command "lst" for "alpacon kube"`, "Did you mean this?\n\tls\n"}},
 		{name: "token acl server", args: []string{"token", "acl", "server", "lst"}, want: []string{`unknown command "lst"`, "Did you mean this?\n\tls\n"}},
 		{name: "workspace a", args: []string{"workspace", "a"}, want: []string{`unknown command "a"`, "Did you mean this?\n\taccess-control\n\tauthentication\n\tls\n"}},
+		{name: "approval guidance", args: []string{"approval", "deny", "550e8400-e29b-41d4-a716-446655440000"}, want: []string{"Approval and rejection happen in the Alpacon console (web) or Slack."}},
+		{name: "work session guidance", args: []string{"work-session", "deny", "550e8400-e29b-41d4-a716-446655440000"}, want: []string{"Approval and rejection happen in the Alpacon console (web) or Slack."}},
 		{name: "word with no close subcommand", args: []string{"workspace", "zzzzzz"}, want: []string{`unknown command "zzzzzz" for "alpacon workspace"` + "\nRun 'alpacon workspace --help' for usage."}},
 	}
 	for _, tt := range tests {

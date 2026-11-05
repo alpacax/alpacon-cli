@@ -5,6 +5,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const approvalGuidance = "Approval and rejection happen in the Alpacon console (web) or Slack."
+
 var ApprovalCmd = &cobra.Command{
 	Use:     "approval",
 	Aliases: []string{"req"},
@@ -22,8 +24,9 @@ Subcommands for tracking:
   ls        List approval requests (--my for your own)
   describe  Show details of a request
   cancel    Cancel a pending request you submitted`,
+	Args: utils.RejectUnknownSubcommand(approvalGuidance),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return utils.RequireSubcommand(cmd, "Approval and rejection happen in the Alpacon console (web) or Slack.")
+		return utils.RequireSubcommand(cmd, approvalGuidance)
 	},
 }
 
