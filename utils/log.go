@@ -22,15 +22,10 @@ func reportCLIError() {
 	_, _ = fmt.Fprintln(TrackedStderr(), "For issues, check the latest version or report on", gitIssueURL)
 }
 
-// cliMessage sanitizes the rendered message because the server's error detail reaches every Cli*
-// helper through %s; the --output json envelope escapes it instead (escapeJSONControls). A \n
-// from the server survives, so the detail can add a line that looks like
-// our prefix; \r is dropped, so it cannot overwrite what is on screen. Arguments are stripped too,
-// so color a value after sanitizing it, as cmd/server does a registration key, never before
-// handing it to a Cli* helper.
+// cliMessage sanitizes because the server's error detail reaches every Cli* helper through %s. \n and
+// \t survive, \r does not, and a value colored before it gets here comes out plain.
 func cliMessage(msg string, args ...any) string {
-	clean, _ := SanitizeTerminalBlock(fmt.Sprintf(msg, args...))
-	return clean
+	return SanitizeTerminalBlockKeepingTabs(fmt.Sprintf(msg, args...))
 }
 
 // WarnTerminalTextAltered takes a writer and an indent because its callers

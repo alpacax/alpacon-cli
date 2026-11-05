@@ -492,7 +492,7 @@ func printTerminalWaitError(terminal *terminalWaitError, err error) {
 	var sb strings.Builder
 	// The message carries a server-issued session id, so it takes the sanitizer
 	// CliError would otherwise have applied on the way out.
-	message, _ := utils.SanitizeTerminalBlock(err.Error())
+	message := utils.SanitizeTerminalBlockKeepingTabs(err.Error())
 	fmt.Fprintf(&sb, "%s: %s\n", utils.Red("Error"), message)
 	fmt.Fprintln(&sb)
 	fmt.Fprintln(&sb, "Next:")

@@ -604,6 +604,18 @@ func SanitizeTerminalBlock(s string) (clean string, altered bool) {
 	return clean, clean != normalized
 }
 
+func SanitizeTerminalBlockKeepingTabs(s string) string {
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		segments := strings.Split(StripFormatAndANSI(line), "\t")
+		for j, segment := range segments {
+			segments[j] = StripControlChars(segment)
+		}
+		lines[i] = strings.Join(segments, "\t")
+	}
+	return strings.Join(lines, "\n")
+}
+
 // ProcessEditedData facilitates user modifications to original data,
 // formats it, supports editing via a temp file, compares the edited data against the original,
 // and parses it into JSON. If no changes are made, the update is aborted and an error is returned.
