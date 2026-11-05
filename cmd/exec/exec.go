@@ -405,8 +405,8 @@ func runPrepared(alpaconClient *client.AlpaconClient, parsed RemoteExecArgs, fil
 	HandleCommandResult(err, parsed.InvokedAs)
 }
 
-// runOversizedAsFile reruns a command line the server refused for length (refused) as a verified
-// file, or exits 1 naming the explicit file-lane command when the file lane cannot take it.
+// runOversizedAsFile reruns a command line refused for length as a verified file, or exits 1 with
+// that refusal and the explicit file-lane command when the file lane cannot take it.
 func runOversizedAsFile(alpaconClient *client.AlpaconClient, parsed RemoteExecArgs, refused error, workSessionID, authMethod string) {
 	switched, refusal := fileLaneForCommand(parsed)
 	if refusal != nil {

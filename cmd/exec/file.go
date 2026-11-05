@@ -408,7 +408,7 @@ func useFileExecutionRefusal(commandID, server string, accountFlags []string, wi
 	return message, actions
 }
 
-// displayServer is a server name safe for a raw write, SERVER when it is empty.
+// displayServer returns server sanitized for a raw write, or SERVER when it is empty.
 func displayServer(server string) string {
 	server = utils.SanitizeTerminalText(server)
 	if server == "" {

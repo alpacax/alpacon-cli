@@ -24,9 +24,8 @@ const (
 	oversizedNoticeStart = "Command line exceeds the server's limit; running it as a verified file at /tmp/.alpacon-exec-"
 )
 
-// refusalsFrom drives the real client against a server that answers one request with status and
-// body, and returns the error the detach lane (SubmitCommand) and the streaming lane
-// (RunExecWithApprovalWait) each produce.
+// refusalsFrom returns the errors the detach lane (SubmitCommand) and the streaming lane
+// (RunExecWithApprovalWait) produce against a server answering status and body.
 func refusalsFrom(t *testing.T, status int, body string) (detach, stream error) {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

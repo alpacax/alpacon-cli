@@ -12,16 +12,15 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// fileLaneRefusal says why an oversized command line cannot take the file lane and the command to
+// fileLaneRefusal holds why an oversized command line cannot take the file lane and the command to
 // run instead.
 type fileLaneRefusal struct {
 	message string
 	action  utils.NextAction
 }
 
-// isLineTooLong reports whether err is the server's 400 for a command line over its length limit:
-// field_errors.line carries an entry coded max_length. A max_length on another field, or only on
-// the top-level code, is some other refusal.
+// isLineTooLong reports whether err is a 400 whose field_errors.line has a max_length entry; the
+// same code on another field, or only at the top level, is some other refusal.
 func isLineTooLong(err error) bool {
 	return utils.HTTPStatusCode(err) == http.StatusBadRequest && utils.HasFieldErrorCode(err, "line", "max_length")
 }
@@ -37,9 +36,8 @@ func oversizedNotice(file event.FileExecution) string {
 	return fmt.Sprintf("Command line exceeds the server's limit; running it as a verified file at %s with %s (the file stays on the server)", file.Path, file.Interpreter)
 }
 
-// fileLaneForCommand turns an inline command the server refused for length into file-lane
-// arguments at a content-derived path, or answers why the file lane cannot take it: --env, content
-// over the 64 KB ceiling, or content that is not valid UTF-8.
+// fileLaneForCommand turns a command refused for length into file-lane arguments, or says why the
+// file lane cannot take it: --env, content over 64 KB, or content that is not valid UTF-8.
 func fileLaneForCommand(parsed RemoteExecArgs) (RemoteExecArgs, *fileLaneRefusal) {
 	var reason string
 	if len(parsed.Env) > 0 {
