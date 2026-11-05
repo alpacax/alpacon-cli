@@ -214,7 +214,7 @@ func TestResolveWorkspaceURL(t *testing.T) {
 			name:       "Non-existent workspace",
 			target:     "ws-nonexistent",
 			baseDomain: "alpacon.io",
-			expectErr:  ErrWorkspaceNotFound,
+			expectErr:  ErrWorkspaceNotInToken,
 		},
 	}
 

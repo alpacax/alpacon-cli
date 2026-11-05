@@ -13,7 +13,7 @@ const (
 	claimNamespace = "https://alpacon.io/"
 )
 
-var ErrWorkspaceNotFound = errors.New("not found in your account")
+var ErrWorkspaceNotInToken = errors.New("not found in your account")
 
 // GetWorkspacesFromToken decodes the JWT access token and extracts the workspaces claim.
 func GetWorkspacesFromToken(accessToken string) ([]Workspace, error) {
@@ -79,5 +79,5 @@ func ResolveWorkspaceURL(accessToken, targetName, baseDomain string) (newURL, ne
 		}
 	}
 
-	return "", "", fmt.Errorf("workspace %q %w", targetName, ErrWorkspaceNotFound)
+	return "", "", fmt.Errorf("workspace %q %w", targetName, ErrWorkspaceNotInToken)
 }

@@ -60,7 +60,7 @@ var workspaceSwitchCmd = &cobra.Command{
 // so a miss renews the token once, when a refresh token exists, and looks again; renewed is that token.
 func resolveSwitchTarget(cfg config.Config, targetName string, renew func(config.Config) (*config.RenewedToken, error)) (newURL, newName string, renewed *config.RenewedToken, err error) {
 	newURL, newName, err = workspace.ResolveWorkspaceURL(cfg.AccessToken, targetName, cfg.BaseDomain)
-	if !errors.Is(err, workspace.ErrWorkspaceNotFound) {
+	if !errors.Is(err, workspace.ErrWorkspaceNotInToken) {
 		return newURL, newName, nil, err
 	}
 	if cfg.RefreshToken == "" {
