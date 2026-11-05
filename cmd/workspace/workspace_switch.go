@@ -3,6 +3,7 @@ package workspace
 import (
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/api/workspace"
@@ -12,6 +13,8 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
+
+var errRefreshRejected = errors.New("refresh token refused")
 
 var workspaceSwitchCmd = &cobra.Command{
 	Use:   "switch WORKSPACE",
@@ -39,7 +42,9 @@ var workspaceSwitchCmd = &cobra.Command{
 			return
 		}
 
-		newURL, newName, renewed, err := resolveSwitchTarget(cfg, targetName, renewWorkspaceClaim)
+		newURL, newName, renewed, err := resolveSwitchTarget(cfg, targetName, func(cfg config.Config) (*config.RenewedToken, error) {
+			return renewWorkspaceClaim(cfg, httpclient.New(cfg.Insecure))
+		})
 		if err != nil {
 			utils.CliErrorWithExit("%s", err)
 		}
@@ -69,29 +74,30 @@ func resolveSwitchTarget(cfg config.Config, targetName string, renew func(config
 
 	renewed, renewErr := renew(cfg)
 	if errors.Is(renewErr, errRefreshRejected) {
-		return "", "", nil, staleWorkspaceList(fmt.Errorf("%w, and renewing the access token failed: %w", err, renewErr))
+		return "", "", nil, fmt.Errorf("%w: renewing the access token failed: %w", staleWorkspaceList(err), renewErr)
 	}
 	if renewErr != nil {
 		return "", "", nil, fmt.Errorf("%w, and renewing the access token to look again failed. Please retry: %w", err, renewErr)
 	}
 	newURL, newName, err = workspace.ResolveWorkspaceURL(renewed.AccessToken, targetName, cfg.BaseDomain)
-	if err != nil {
+	if errors.Is(err, workspace.ErrWorkspaceNotInToken) {
 		return "", "", nil, fmt.Errorf("%w after renewing the access token. Check the name, or if the workspace was just created, run 'alpacon login' and retry", err)
+	}
+	if err != nil {
+		return "", "", nil, fmt.Errorf("could not read the renewed access token: %w. Run 'alpacon login' and retry", err)
 	}
 	return newURL, newName, renewed, nil
 }
-
-var errRefreshRejected = errors.New("the authentication server refused the refresh token")
 
 func staleWorkspaceList(err error) error {
 	return fmt.Errorf("%w. Your workspace list reflects your last sign-in; run 'alpacon login' and retry", err)
 }
 
 // renewWorkspaceClaim runs the refresh-token grant. Its own save is best effort, so the switch saves the token again.
-func renewWorkspaceClaim(cfg config.Config) (*config.RenewedToken, error) {
+func renewWorkspaceClaim(cfg config.Config, httpClient *http.Client) (*config.RenewedToken, error) {
 	spinner := utils.NewSpinner("Refreshing access token...")
 	spinner.Start()
-	tokenRes, err := auth0.RefreshAccessToken(cfg.WorkspaceURL, httpclient.New(cfg.Insecure), cfg.RefreshToken)
+	tokenRes, err := auth0.RefreshAccessToken(cfg.WorkspaceURL, httpClient, cfg.RefreshToken)
 	spinner.Stop()
 	if auth0.IsRefreshTokenRejected(err) {
 		return nil, fmt.Errorf("%w: %w", errRefreshRejected, err)
