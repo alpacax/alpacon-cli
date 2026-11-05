@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -984,4 +985,51 @@ func TestWhileLoggedInRunsOnlyForTheSameLogin(t *testing.T) {
 
 	require.NoError(t, DeleteConfig(loadedConfig(t)))
 	require.ErrorIs(t, WhileLoggedIn(login, func() error { t.Error("ran after a logout"); return nil }), ErrLoginChanged)
+}
+
+func tokenExpiringAt(t *testing.T, exp int64) string {
+	t.Helper()
+	payload, err := json.Marshal(map[string]any{"exp": exp})
+	require.NoError(t, err)
+	return "e30." + base64.RawURLEncoding.EncodeToString(payload) + ".sig"
+}
+
+// Serial: each case sets HOME.
+func TestRenewedTokenNeverReplacesALaterOne(t *testing.T) {
+	earlier, later := tokenExpiringAt(t, 1000), tokenExpiringAt(t, 2000)
+	writers := []struct {
+		name  string
+		write func(started Config, accessToken string) error
+	}{
+		{name: "refresh", write: func(started Config, accessToken string) error {
+			return SaveRefreshedAuth0Token(started.RefreshToken, accessToken, 3600)
+		}},
+		{name: "switch", write: func(started Config, accessToken string) error {
+			return SwitchWorkspace(started, "https://ws2.us1.alpacon.io", "ws2", false, &RenewedToken{AccessToken: accessToken, ExpiresIn: 3600})
+		}},
+	}
+	tests := []struct {
+		name   string
+		saved  string
+		write  string
+		expect string
+	}{
+		{name: "later token replaces an earlier one", saved: earlier, write: later, expect: later},
+		{name: "earlier token leaves a later one", saved: later, write: earlier, expect: later},
+		{name: "token without exp replaces a saved one", saved: later, write: "opaque-token", expect: "opaque-token"},
+		{name: "saved token without exp is replaced", saved: "opaque-token", write: earlier, expect: earlier},
+	}
+
+	for _, w := range writers {
+		for _, tt := range tests {
+			t.Run(w.name+"/"+tt.name, func(t *testing.T) {
+				setupTestConfig(t)
+				require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "", "", tt.saved, "refresh-token", "alpacon.io", 3600, false))
+
+				require.NoError(t, w.write(loadedConfig(t), tt.write))
+
+				assert.Equal(t, tt.expect, loadedConfig(t).AccessToken)
+			})
+		}
+	}
 }

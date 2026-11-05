@@ -183,14 +183,30 @@ func SaveRefreshedAuth0Token(refreshToken, accessToken string, expiresIn int) er
 		if cfg.RefreshToken != refreshToken {
 			return false, ErrLoginChanged
 		}
-		cfg.setAccessToken(accessToken, expiresIn)
-		return true, nil
+		return cfg.setAccessToken(accessToken, expiresIn), nil
 	})
 }
 
-func (c *Config) setAccessToken(accessToken string, expiresIn int) {
+// setAccessToken installs accessToken unless the saved token expires later, which means another
+// process renewed it after this one did; it reports whether it changed anything.
+func (c *Config) setAccessToken(accessToken string, expiresIn int) bool {
+	saved, savedOK := tokenExpiry(c.AccessToken)
+	candidate, candidateOK := tokenExpiry(accessToken)
+	if savedOK && candidateOK && saved > candidate {
+		return false
+	}
 	c.AccessToken = accessToken
 	c.AccessTokenExpiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second).Format(time.RFC3339)
+	return true
+}
+
+func tokenExpiry(token string) (float64, bool) {
+	claims, err := utils.DecodeJWTPayload(token)
+	if err != nil {
+		return 0, false
+	}
+	exp, ok := claims["exp"].(float64)
+	return exp, ok
 }
 
 // DeleteConfig removes the config while it still holds login's credentials; a login another shell made since
