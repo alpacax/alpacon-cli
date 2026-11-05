@@ -11,7 +11,7 @@ var workspaceListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
 	Short:   "List available workspaces",
-	Long:    "Display all workspaces associated with your account.",
+	Long:    "Display the workspaces your current access token lists. A workspace created after the token was issued appears once the token is renewed, which 'alpacon workspace switch' to it does, or after 'alpacon login'.",
 	Example: `
 	alpacon workspace ls
 	alpacon ws list

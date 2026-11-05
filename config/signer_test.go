@@ -86,7 +86,7 @@ func TestSaveSignerToken_WritesNothingOnceTheConfigMoved(t *testing.T) {
 			return CreateConfig(signerTestWorkspace, "ws1", "", "", "access-2", "refresh-2", "alpacon.io", 3600, false)
 		}},
 		{name: "a switch", wantErr: ErrWorkspaceChanged, move: func(started Config) error {
-			return SwitchWorkspace(started, signerTestOtherWorkspace, "ws2", false)
+			return SwitchWorkspace(started, signerTestOtherWorkspace, "ws2", false, nil)
 		}},
 		{name: "a logout", wantErr: fs.ErrNotExist, move: DeleteConfig},
 	}
