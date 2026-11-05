@@ -734,6 +734,30 @@ func RequirePositiveInt(flagName string, value int) {
 	}
 }
 
+func RejectUnknownSubcommand(notes ...string) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		err := cobra.NoArgs(cmd, args)
+		if err == nil {
+			return nil
+		}
+		if cmd.SuggestionsMinimumDistance <= 0 {
+			cmd.SuggestionsMinimumDistance = 2
+		}
+		var message strings.Builder
+		message.WriteString(err.Error())
+		for _, note := range notes {
+			message.WriteString("\n" + note)
+		}
+		if names := cmd.SuggestionsFor(args[0]); len(names) > 0 {
+			message.WriteString("\n\nDid you mean this?\n")
+			for _, name := range names {
+				message.WriteString("\t" + name + "\n")
+			}
+		}
+		return errors.New(message.String())
+	}
+}
+
 // RequireSubcommand prints cmd's help, then returns an error that points to --help
 // instead of repeating the subcommand list the help already printed.
 func RequireSubcommand(cmd *cobra.Command, notes ...string) error {
