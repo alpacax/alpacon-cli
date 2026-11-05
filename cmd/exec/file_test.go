@@ -599,7 +599,7 @@ func TestFileExecRefusalStripsControlBytesFromServerName(t *testing.T) {
 
 func TestReRunHint_CommandFileReadsTheServerCopy(t *testing.T) {
 	t.Parallel()
-	path := commandFilePath("echo hi")
+	path := commandFilePath("root", "echo hi")
 	hint := reRunHint(RemoteExecArgs{
 		Username: "root",
 		Server:   "prod",

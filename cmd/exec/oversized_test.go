@@ -88,24 +88,34 @@ func TestCommandFilePath(t *testing.T) {
 	t.Parallel()
 	format := regexp.MustCompile(`^/tmp/\.alpacon-exec-[0-9a-f]{16}\.sh$`)
 
-	t.Run("same content gives the same path", func(t *testing.T) {
+	t.Run("same account and content give the same path", func(t *testing.T) {
 		t.Parallel()
-		first, second := commandFilePath("echo hi"), commandFilePath("echo hi")
+		first, second := commandFilePath("deploy", "echo hi"), commandFilePath("deploy", "echo hi")
 		assert.Equal(t, first, second)
 		assert.Regexp(t, format, first)
 	})
 	t.Run("different content gives a different path", func(t *testing.T) {
 		t.Parallel()
-		assert.NotEqual(t, commandFilePath("echo hi"), commandFilePath("echo hi "))
+		assert.NotEqual(t, commandFilePath("deploy", "echo hi"), commandFilePath("deploy", "echo hi "))
+	})
+	t.Run("another run-as account gives a different path", func(t *testing.T) {
+		t.Parallel()
+		assert.NotEqual(t, commandFilePath("alice", "echo hi"), commandFilePath("bob", "echo hi"))
+		assert.NotEqual(t, commandFilePath("", "echo hi"), commandFilePath("root", "echo hi"))
+	})
+	t.Run("the separator keeps the account and the content apart", func(t *testing.T) {
+		t.Parallel()
+		assert.NotEqual(t, commandFilePath("ab", "c"), commandFilePath("a", "bc"))
 	})
 	t.Run("pins the first 16 hex characters of the sha256", func(t *testing.T) {
 		t.Parallel()
-		assert.Equal(t, "/tmp/.alpacon-exec-"+pinnedEchoHiDigest+".sh", commandFilePath("echo hi"))
+		assert.Equal(t, "/tmp/.alpacon-exec-"+pinnedDeployEchoHiDigest+".sh", commandFilePath("deploy", "echo hi"))
 	})
 }
 
-// pinnedEchoHiDigest is the first 16 hex characters of sha256("echo hi") (printf 'echo hi' | sha256sum).
-const pinnedEchoHiDigest = "56a79f3b11544807"
+// pinnedDeployEchoHiDigest is the first 16 hex characters of sha256("deploy\x00echo hi")
+// (printf 'deploy\0echo hi' | sha256sum).
+const pinnedDeployEchoHiDigest = "e8be0b57e5a44222"
 
 func TestFileLaneForCommand(t *testing.T) {
 	t.Parallel()
@@ -123,7 +133,7 @@ func TestFileLaneForCommand(t *testing.T) {
 		assert.Equal(t, RemoteExecArgs{
 			Username: "deploy", Groupname: "ops", WorkSessionID: "ses-1", Purpose: "rollout",
 			Detach: true, Server: "prod", InvokedAs: ExecInvocation, OutputFormat: "json",
-			File: &FileExecArgs{Path: commandFilePath(long), Upload: true, Overwrite: true, ReuseDays: 30, FromCommand: true},
+			File: &FileExecArgs{Path: commandFilePath("deploy", long), Upload: true, Overwrite: true, ReuseDays: 30, FromCommand: true},
 		}, got)
 	})
 
@@ -133,7 +143,7 @@ func TestFileLaneForCommand(t *testing.T) {
 		got, refusal := fileLaneForCommand(RemoteExecArgs{Server: "prod", Command: command})
 		assert.Nil(t, refusal)
 		require.NotNil(t, got.File)
-		assert.Equal(t, commandFilePath(command), got.File.Path)
+		assert.Equal(t, commandFilePath("", command), got.File.Path)
 		assert.True(t, got.File.FromCommand)
 	})
 
@@ -287,7 +297,7 @@ func TestExecAcceptedInlineSendsNoUploadAndNoNotice(t *testing.T) {
 func TestExecOversizedCommandRunsAsAVerifiedFile(t *testing.T) {
 	t.Parallel()
 	command := oversizedCommand()
-	path := commandFilePath(command)
+	path := commandFilePath("deploy", command)
 	s := &oversizedServer{result: "remote output\n", success: true}
 	ts := newOversizedServer(t, s)
 
@@ -445,7 +455,7 @@ func TestExecMaxLengthOnAnotherFieldIsReportedWithoutASwitch(t *testing.T) {
 func TestExecOversizedCommandPendingApprovalHintReadsTheServerCopy(t *testing.T) {
 	t.Parallel()
 	command := oversizedCommand()
-	path := commandFilePath(command)
+	path := commandFilePath("", command)
 	s := &oversizedServer{result: denialLine("SUDO_APPROVAL_REQUIRED"), success: false, exitCode: 1}
 	ts := newOversizedServer(t, s)
 

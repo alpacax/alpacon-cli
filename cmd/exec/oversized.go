@@ -26,10 +26,10 @@ func isLineTooLong(err error) bool {
 	return utils.HTTPStatusCode(err) == http.StatusBadRequest && utils.HasFieldErrorCode(err, "line", "max_length")
 }
 
-// commandFilePath derives the server path an oversized command is written to from its content, so
-// the same command lands on the same path and a standing approval of it is reused.
-func commandFilePath(content string) string {
-	sum := sha256.Sum256([]byte(content))
+// commandFilePath hashes the run-as account with the content, so a rerun reuses one file and its
+// approval, and another account never meets a file under sticky /tmp it cannot overwrite.
+func commandFilePath(username, content string) string {
+	sum := sha256.Sum256([]byte(username + "\x00" + content))
 	return "/tmp/.alpacon-exec-" + hex.EncodeToString(sum[:])[:16] + ".sh"
 }
 
@@ -67,7 +67,7 @@ func fileLaneForCommand(parsed RemoteExecArgs) (RemoteExecArgs, *fileLaneRefusal
 	switched.Command = ""
 	switched.ReuseDays = 0
 	switched.File = &FileExecArgs{
-		Path:        commandFilePath(parsed.Command),
+		Path:        commandFilePath(parsed.Username, parsed.Command),
 		Upload:      true,
 		Overwrite:   true,
 		ReuseDays:   parsed.ReuseDays,
