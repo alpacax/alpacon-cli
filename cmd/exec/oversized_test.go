@@ -21,6 +21,7 @@ const (
 	otherFieldMaxLength  = `{"code":"max_length","field_errors":{"purpose":[{"code":"max_length","message":"Ensure this field has no more than 2000 characters."}]}}`
 	topLevelOnlyBody     = `{"code":"max_length"}`
 	lineOtherCodeBody    = `{"code":"invalid","field_errors":{"line":[{"code":"blank","message":"This field may not be blank."}]}}`
+	oversizedLogin       = "alice"
 	oversizedNoticeStart = "Command line exceeds the server's limit; running it as a verified file at /tmp/.alpacon-exec-"
 )
 
@@ -132,7 +133,7 @@ func TestFileLaneForCommand(t *testing.T) {
 		assert.Equal(t, RemoteExecArgs{
 			Username: "deploy", Groupname: "ops", WorkSessionID: "ses-1", Purpose: "rollout",
 			Detach: true, Server: "prod", InvokedAs: ExecInvocation, OutputFormat: "json",
-			File: &FileExecArgs{Path: commandFilePath("deploy", long), Upload: true, Overwrite: true, ReuseDays: 30, FromCommand: true},
+			File: &FileExecArgs{Interpreter: "/bin/sh", Upload: true, Overwrite: true, ReuseDays: 30, FromCommand: true},
 		}, got)
 	})
 
@@ -142,7 +143,6 @@ func TestFileLaneForCommand(t *testing.T) {
 		got, refusal := fileLaneForCommand(RemoteExecArgs{Server: "prod", Command: command})
 		assert.Nil(t, refusal)
 		require.NotNil(t, got.File)
-		assert.Equal(t, commandFilePath("", command), got.File.Path)
 		assert.True(t, got.File.FromCommand)
 	})
 
@@ -196,6 +196,7 @@ type oversizedServer struct {
 	fileUploadServer
 	inlineBodies   [][]byte
 	fileBody       []byte
+	userStatus     int    // 0 answers the login lookup
 	inlineStatus   int    // 0 accepts the inline line
 	inlineResponse string // body for a refused inline line
 	fileStatus     int    // 0 accepts the file submission
@@ -212,6 +213,13 @@ func (s *oversizedServer) handler() http.Handler {
 			return
 		}
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/iam/users/-/":
+			if s.userStatus != 0 {
+				w.WriteHeader(s.userStatus)
+				_, _ = w.Write([]byte(`{"detail":"unavailable"}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"username": oversizedLogin})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/events/sessions/":
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"detail":"disabled"}`))
@@ -306,7 +314,7 @@ func TestExecOversizedCommandRunsAsAVerifiedFile(t *testing.T) {
 	assert.Equal(t, "remote output\n", stdoutOf(stdout))
 	assert.Equal(t, []string{"inline-submit", "upload-create", "upload-put", "upload-trigger", "file-submit"}, s.snapshotSteps())
 	assert.Equal(t, 1, strings.Count(stderr, oversizedNoticeStart))
-	assert.Contains(t, stderr, path+" with /bin/bash (the file stays on the server)")
+	assert.Contains(t, stderr, path+" with /bin/sh (the file stays on the server)")
 	assert.NotContains(t, stdout, "exceeds the server's limit")
 
 	s.mu.Lock()
@@ -339,13 +347,94 @@ func TestExecOversizedCommandRunsAsAVerifiedFile(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(s.fileBody, &payload))
 	assert.Equal(t, path, payload.File.Path)
-	assert.Equal(t, "/bin/bash", payload.File.Interpreter)
+	assert.Equal(t, "/bin/sh", payload.File.Interpreter)
 	assert.Equal(t, command, payload.File.Content)
 	assert.Equal(t, 9, payload.File.ReuseDays)
 	assert.Equal(t, "deploy", payload.Username)
 	assert.Equal(t, "ops", payload.Groupname)
 	assert.Equal(t, "rollout", payload.Purpose)
 	assert.Equal(t, "ses-1", payload.WorkSession)
+}
+
+func TestExecOversizedCommandWithoutRunAsAccountHashesTheLogin(t *testing.T) {
+	t.Parallel()
+	command := oversizedCommand()
+	s := &oversizedServer{}
+	ts := newOversizedServer(t, s)
+
+	_, stderr, exitCode := runExecHelper(t, ts.URL, "prod", "--", command)
+
+	assert.Equal(t, 0, exitCode, "stderr: %s", stderr)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	assert.Equal(t, strings.TrimPrefix(commandFilePath(oversizedLogin, command), "/tmp/"), s.uploadRequest["name"])
+	assert.Empty(t, s.uploadRequest["username"], "the upload still leaves the account to the server")
+}
+
+func TestExecOversizedCommandStopsBeforeUploadWhenTheLoginCannotBeRead(t *testing.T) {
+	t.Parallel()
+	s := &oversizedServer{userStatus: http.StatusServiceUnavailable}
+	ts := newOversizedServer(t, s)
+
+	_, stderr, exitCode := runExecHelper(t, ts.URL, "prod", "--", oversizedCommand())
+
+	assert.Equal(t, 1, exitCode, "stderr: %s", stderr)
+	assert.Contains(t, stderr, "the account to run it as could not be read")
+	assert.Equal(t, []string{"inline-submit"}, s.snapshotSteps())
+}
+
+func TestExecOversizedCommandLaneRefusalComesAfterTheUpload(t *testing.T) {
+	t.Parallel()
+	s := &oversizedServer{fileStatus: http.StatusBadRequest, fileResponse: `{"code":"file_exec_unsupported_agent","source":"command"}`}
+	ts := newOversizedServer(t, s)
+
+	_, stderr, exitCode := runExecHelper(t, ts.URL, "-u", "deploy", "prod", "--", oversizedCommand())
+
+	assert.Equal(t, 1, exitCode, "stderr: %s", stderr)
+	assert.Equal(t, []string{"inline-submit", "upload-create", "upload-put", "upload-trigger", "file-submit"}, s.snapshotSteps())
+	assert.NotContains(t, stderr, "file_exec_unsupported_agent", "the code is rendered as guidance, not echoed")
+}
+
+func TestCallerAccount(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		token    string
+		route    string
+		body     string
+		want     string
+		wantFail bool
+	}{
+		{name: "user login", token: "plain-key", route: "/api/iam/users/-/", body: `{"username":"alice"}`, want: "alice"},
+		{name: "service token", token: "alpst-key", route: "/api/auth/whoami/", body: `{"principal_type":"application","application":{"username":"svc-deploy"}}`, want: "svc-deploy"},
+		{name: "user with no name", token: "plain-key", route: "/api/iam/users/-/", body: `{"username":""}`, wantFail: true},
+		{name: "service token with no application", token: "alpst-key", route: "/api/auth/whoami/", body: `{"principal_type":"application"}`, wantFail: true},
+		{name: "lookup fails", token: "plain-key", route: "/api/none/", body: `{}`, wantFail: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tc.route {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, Token: tc.token}
+
+			got, err := callerAccount(ac)
+
+			if tc.wantFail {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func TestExecOversizedCommandKeepsTheRemoteExitCode(t *testing.T) {
@@ -454,7 +543,7 @@ func TestExecMaxLengthOnAnotherFieldIsReportedWithoutASwitch(t *testing.T) {
 func TestExecOversizedCommandPendingApprovalHintReadsTheServerCopy(t *testing.T) {
 	t.Parallel()
 	command := oversizedCommand()
-	path := commandFilePath("", command)
+	path := commandFilePath(oversizedLogin, command)
 	s := &oversizedServer{result: denialLine("SUDO_APPROVAL_REQUIRED"), success: false, exitCode: 1}
 	ts := newOversizedServer(t, s)
 
@@ -464,6 +553,6 @@ func TestExecOversizedCommandPendingApprovalHintReadsTheServerCopy(t *testing.T)
 	var got pendingApprovalSignal
 	require.NoError(t, json.Unmarshal([]byte(stdout), &got), "stdout: %s", stdout)
 	require.NotEmpty(t, got.NextActions)
-	assert.Equal(t, "alpacon exec --file "+path+" --from-server prod", got.NextActions[0].Command)
+	assert.Equal(t, "alpacon exec --file "+path+" --from-server --interpreter /bin/sh prod", got.NextActions[0].Command)
 	assert.NotContains(t, stdout+stderr, command)
 }

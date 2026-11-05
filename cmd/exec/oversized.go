@@ -3,14 +3,21 @@ package exec
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 )
+
+const inlineLineInterpreter = "/bin/sh" // what the agent hands an inline line to, so the rerun means the same
 
 // fileLaneRefusal holds why an oversized command line cannot take the file lane and the command to
 // run instead.
@@ -32,12 +39,37 @@ func commandFilePath(username, content string) string {
 	return "/tmp/.alpacon-exec-" + hex.EncodeToString(sum[:])[:16] + ".sh"
 }
 
+// callerAccount names the login behind the client, for a run with no -u: another caller on the host
+// must not land on this caller's file.
+func callerAccount(ac *client.AlpaconClient) (string, error) {
+	var name string
+	if config.IsServiceToken(ac.Token) {
+		who, err := auth.GetWhoami(ac)
+		if err != nil {
+			return "", err
+		}
+		if who.Application != nil {
+			name = who.Application.Username
+		}
+	} else {
+		user, err := iam.GetCurrentUser(ac)
+		if err != nil {
+			return "", err
+		}
+		name = user.Username
+	}
+	if name == "" {
+		return "", errors.New("the server named no account for this login")
+	}
+	return name, nil
+}
+
 func oversizedNotice(file event.FileExecution) string {
 	return fmt.Sprintf("Command line exceeds the server's limit; running it as a verified file at %s with %s (the file stays on the server)", file.Path, file.Interpreter)
 }
 
-// fileLaneForCommand turns a command refused for length into file-lane arguments, or says why the
-// file lane cannot take it: --env, content over 64 KB, or content that is not valid UTF-8.
+// fileLaneForCommand turns a command refused for length into file-lane arguments with no Path yet,
+// or says why the file lane cannot take it: --env, content over 64 KB, or content that is not valid UTF-8.
 func fileLaneForCommand(parsed RemoteExecArgs) (RemoteExecArgs, *fileLaneRefusal) {
 	var reason string
 	if len(parsed.Env) > 0 {
@@ -65,7 +97,7 @@ func fileLaneForCommand(parsed RemoteExecArgs) (RemoteExecArgs, *fileLaneRefusal
 	switched.Command = ""
 	switched.ReuseDays = 0
 	switched.File = &FileExecArgs{
-		Path:        commandFilePath(parsed.Username, parsed.Command),
+		Interpreter: inlineLineInterpreter,
 		Upload:      true,
 		Overwrite:   true,
 		ReuseDays:   parsed.ReuseDays,

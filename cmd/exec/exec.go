@@ -69,8 +69,8 @@ ceiling (1 to 366 days, default 90).
 
 The server refuses a command line over its length limit. exec then reruns it
 as a verified file: the command is written to /tmp/.alpacon-exec-<hash>.sh,
-where <hash> comes from the run-as account and the content, and runs with
-/bin/bash. The switch is
+where <hash> comes from the run-as account (your login's name without -u) and
+the content, and runs with /bin/sh, as a command line does. The switch is
 announced on stderr and the file stays on the server. -u, -g, --purpose,
 --work-session, --detach and --reuse-days carry over, and the approver sees a
 file execution instead of a command line. The switch also needs the WebFTP
@@ -413,6 +413,15 @@ func runOversizedAsFile(alpaconClient *client.AlpaconClient, parsed RemoteExecAr
 		reportCodedRefusalWithExit(1, "command", refused, refusal.message, denialHintLine("run it as a verified file yourself:\n  "+refusal.action.Command+"\n"), []utils.NextAction{refusal.action})
 		return
 	}
+	account := parsed.Username
+	if account == "" {
+		var err error
+		if account, err = callerAccount(alpaconClient); err != nil {
+			utils.CliErrorWithExit("the server refused this command line for its length, and the account to run it as could not be read: %s", err)
+			return
+		}
+	}
+	switched.File.Path = commandFilePath(account, parsed.Command)
 	file := newFileExecution(*switched.File, parsed.Command)
 	utils.CliInfo("%s", oversizedNotice(file))
 	runPrepared(alpaconClient, switched, &file, workSessionID, authMethod)
