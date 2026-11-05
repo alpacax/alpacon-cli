@@ -210,15 +210,22 @@ func GetEventList(ac *client.AlpaconClient, tail int, serverName string, userNam
 
 	eventList := make([]EventAttributes, 0, len(events))
 	for _, event := range events {
+		status := utils.BoolPointerToString(event.Success)
+		cell := status
+		if event.IsRejected() {
+			cell = event.Label()
+		}
 		eventList = append(eventList, EventAttributes{
 			Server:                event.Server.Name,
 			Shell:                 event.Shell,
 			Command:               event.Line,
 			Result:                utils.TruncateString(event.Result, 70),
-			Status:                utils.BoolPointerToString(event.Success),
+			Status:                status,
+			StatusCell:            cell,
 			Operator:              event.RequestedBy.Name,
 			RequestedAt:           utils.TimeUtils(event.AddedAt),
 			ApprovedFileExecution: event.ApprovedFileExecution,
+			CommandRejection:      event.CommandRejection,
 		})
 	}
 	return eventList, nil
@@ -781,8 +788,10 @@ func errorFromDetails(id api.PathID, d EventDetails) error {
 	if IsAwaitingApprovalStatus(d.Status) {
 		return &PendingApprovalError{Username: d.Username, CommandID: id.String(), FileSuggestion: d.FileExecutionSuggestion, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID()}
 	}
-	if IsRejectedStatus(d.Status) {
-		return &CommandRejectedError{Username: d.Username, CommandID: id.String(), Cause: d.RejectionCause, Gate: d.RejectionGate, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID()}
+	if d.IsRejected() {
+		rejected := d.Rejection()
+		rejected.CommandID = id.String()
+		return rejected
 	}
 	if IsStatusOnlyFailure(d.Status) {
 		phase := ""

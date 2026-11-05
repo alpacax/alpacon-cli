@@ -192,20 +192,22 @@ func TestWorkSessionCreate_BlankAccountRefused(t *testing.T) {
 	}
 }
 
-// newPendingCreateServer answers a work-session create with a session that
-// stays pending, on the create and on every poll.
-func newPendingCreateServer(t *testing.T) *httptest.Server {
+// newCreateServerAnswering answers a work-session create with a session in
+// createStatus and every poll of it with pollStatus.
+func newCreateServerAnswering(t *testing.T, createStatus, pollStatus string) *httptest.Server {
 	t.Helper()
-	const pending = `{"id":"ses-x","status":"pending","approval_request_id":"apr-1","expires_at":"2026-06-01T12:00:00Z"}`
+	session := func(status string) []byte {
+		return []byte(`{"id":"ses-x","status":"` + status + `","approval_request_id":"apr-1","expires_at":"2026-06-01T12:00:00Z"}`)
+	}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/":
-			_, _ = w.Write([]byte(pending))
+			_, _ = w.Write(session(createStatus))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/ses-x/":
-			_, _ = w.Write([]byte(pending))
+			_, _ = w.Write(session(pollStatus))
 		default:
 			http.NotFound(w, r)
 		}
@@ -241,7 +243,7 @@ func TestWorkSessionCreate_PendingFollowUpMatchesRequesterType(t *testing.T) {
 		for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 			t.Run(tt.name+"/"+outputFormat, func(t *testing.T) {
 				t.Parallel()
-				ts := newPendingCreateServer(t)
+				ts := newCreateServerAnswering(t, "pending", "pending")
 
 				stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, tt.env, outputFormat, ts.URL,
 					createArgs(tt.extra...)...)

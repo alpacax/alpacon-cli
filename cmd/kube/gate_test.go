@@ -109,3 +109,29 @@ func TestApplySurfaceGate_DisabledKeepsAPassThroughChild(t *testing.T) {
 	require.NoError(t, root.Execute())
 	assert.True(t, ran, "the kept child runs instead of the not-enabled notice")
 }
+
+// Serial: it moves the package-level commands, and puts them back afterwards.
+func TestApplySurfaceGate_DisabledKeepsCredentialsAndLogout(t *testing.T) {
+	root := &cobra.Command{Use: "alpacon"}
+	root.AddCommand(KubeCmd)
+	t.Cleanup(func() {
+		for _, parent := range []*cobra.Command{kubeCredentialsCmd.Parent(), kubeLogoutCmd.Parent()} {
+			if parent != nil && parent != KubeCmd {
+				parent.RemoveCommand(kubeCredentialsCmd, kubeLogoutCmd)
+			}
+		}
+		KubeCmd.AddCommand(kubeCredentialsCmd, kubeLogoutCmd)
+		root.RemoveCommand(KubeCmd)
+	})
+
+	ApplySurfaceGate(root, false)
+
+	for path, want := range map[string]*cobra.Command{"credentials": kubeCredentialsCmd, "logout": kubeLogoutCmd} {
+		found, _, err := root.Find([]string{"kube", path})
+		require.NoError(t, err)
+		assert.Same(t, want, found)
+	}
+	found, _, err := root.Find([]string{"kube", "sessions"})
+	require.NoError(t, err)
+	assert.NotSame(t, kubeSessionsCmd, found, "sessions needs the workspace, so the stand-in answers it")
+}

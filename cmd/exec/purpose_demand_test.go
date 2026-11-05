@@ -205,7 +205,7 @@ func TestExecLogsAfterPurposeLapse(t *testing.T) {
 		{name: "finished", status: "completed", want: "command finished", exit: 0},
 		{name: "finished with output", status: "completed", result: "done", want: "command finished", exit: 0},
 		{name: "awaiting human approval", status: "awaiting_approval", want: "awaiting human approval (approval request: apr-1)", exit: utils.ExitCodePendingApproval},
-		{name: "refused", status: "rejected", cause: "risk_denied", want: "command was refused (risk_denied)", exit: utils.ExitCodeNotApproved},
+		{name: "refused", status: "rejected", cause: "risk_denied", want: "command was rejected: the risk assessor refused it (rejection_cause: risk_denied)", exit: utils.ExitCodeNotApproved},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

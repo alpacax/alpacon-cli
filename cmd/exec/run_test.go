@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -693,7 +694,7 @@ func TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait(t *testing.T) {
 	}
 	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 		status := "rejected"
-		return event.EventDetails{SudoGrantStatus: &status, RejectionGate: "approval", ConsoleURL: "https://console.example/commands/1"}, nil
+		return event.EventDetails{SudoGrantStatus: &status, CommandRejection: event.CommandRejection{RejectionGate: types.SentString{Value: "approval", Sent: true}}, ConsoleURL: "https://console.example/commands/1"}, nil
 	}
 	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
 		t.Fatal("stream must not run for a rejected command")
@@ -755,17 +756,50 @@ func TestPollApprovalOnceLegacyExpiry(t *testing.T) {
 				requestID := "apr-1"
 				return event.EventDetails{
 					Status:                tc.status,
-					RejectionCause:        tc.cause,
+					CommandRejection:      event.CommandRejection{RejectionCause: types.SentString{Value: tc.cause, Sent: true}},
 					SudoGrantStatus:       &grantStatus,
 					SudoApprovalRequestID: &requestID,
 				}, nil
 			}
 
-			outcome, requestID, details, err := pollApprovalOnce(nil, "cmd-1")
+			outcome, requestID, rejected, err := pollApprovalOnce(nil, "cmd-1")
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, outcome)
 			assert.Equal(t, "apr-1", requestID)
-			assert.Equal(t, tc.cause, details.RejectionCause)
+			assert.Equal(t, tc.cause, rejected.Cause)
+			assert.Equal(t, "cmd-1", rejected.CommandID)
+			assert.True(t, rejected.SudoGrant)
+			assert.True(t, rejected.Expired)
+		})
+	}
+}
+
+func TestPollApprovalOnceSettlesACompletedSignatureRefusal(t *testing.T) {
+	original := getCommandByID
+	t.Cleanup(func() { getCommandByID = original })
+	cases := []struct {
+		name, cause string
+		want        approvalOutcome
+	}{
+		{"signature refusal settles as rejected", event.RejectionCauseSignatureInvalid, outcomeRejected},
+		{"another cause on a completed command keeps waiting", "unsigned_file", outcomePending},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+				grantStatus := "pending_approval"
+				return event.EventDetails{
+					Status:           "completed",
+					CommandRejection: event.CommandRejection{RejectionCause: types.SentString{Value: tc.cause, Sent: true}},
+					SudoGrantStatus:  &grantStatus,
+				}, nil
+			}
+
+			outcome, _, rejected, err := pollApprovalOnce(nil, "cmd-1")
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, outcome)
+			assert.Equal(t, tc.cause, rejected.Cause)
 		})
 	}
 }

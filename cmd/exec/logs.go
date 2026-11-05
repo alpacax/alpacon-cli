@@ -89,10 +89,10 @@ Run the command again later to check for completion.`,
 			os.Exit(utils.ExitCodePendingApproval)
 		}
 
-		// Exit 6 through the envelope, as exec and work-session create do: retrying only files
-		// another approval request.
-		if event.IsRejectedStatus(details.Status) {
-			rejected := &event.CommandRejectedError{CommandID: details.ID, Cause: details.RejectionCause, Gate: details.RejectionGate, ConsoleURL: details.ConsoleURL, WorkSessionID: details.WorkSessionID()}
+		// Exit 6 through the envelope, as exec does: a retry is refused again or
+		// files another approval request.
+		if details.IsRejected() {
+			rejected := details.Rejection()
 			utils.SignalRefusal(utils.WithSignalFields(rejected, localsignal.Fields{Command: true, Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username}, alpaconClient))
 			// A script-body refusal has file-execution guidance of its own.
 			if rejected.Cause == event.RejectionCauseUseFileExecution {
@@ -100,10 +100,8 @@ Run the command again later to check for completion.`,
 				reportUseFileExecution(rejected, details.Server.Name, accountFlags, false, accountNote)
 				return
 			}
-			// The caller already supplied the job ID, so keep the outcome line focused on the refusal.
-			rejected.CommandID = ""
-			utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, "command", rejected,
-				"%s (status: %s)", rejected, details.Status)
+			rejected.CommandID = "" // the caller already named the job
+			reportCommandRejection(rejected, rejected)
 			return
 		}
 

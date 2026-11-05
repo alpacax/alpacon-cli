@@ -500,20 +500,25 @@ func isApprovalDenial(err error) bool {
 
 // pollApprovalOnce reads the grant the denial left behind. The command it names
 // already ran and was blocked, so this is a status read, not a re-attempt.
-func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalOutcome, string, event.EventDetails, error) {
+func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalOutcome, string, *event.CommandRejectedError, error) {
 	details, err := getCommandByID(ac, cmdID)
 	if err != nil {
-		return outcomePending, "", event.EventDetails{}, err
+		return outcomePending, "", nil, err
 	}
 	requestID := ""
 	if details.SudoApprovalRequestID != nil {
 		requestID = *details.SudoApprovalRequestID
 	}
-	outcome := approvalOutcomeOf(details.SudoGrantStatus)
-	if event.IsRejectedStatus(details.Status) && (details.RejectionCause != "" || outcome != outcomeExpired) {
+	grant := approvalOutcomeOf(details.SudoGrantStatus)
+	rejected := details.Rejection()
+	rejected.CommandID = cmdID
+	rejected.SudoGrant = grant == outcomeRejected || grant == outcomeExpired
+	rejected.Expired = grant == outcomeExpired
+	outcome := grant
+	if details.IsRejected() && (rejected.Cause != "" || grant != outcomeExpired) {
 		outcome = outcomeRejected
 	}
-	return outcome, requestID, details, nil
+	return outcome, requestID, rejected, nil
 }
 
 // RunExecWithApprovalWait runs a command via RunExecWithPresenceStepUp and, when it is denied with
@@ -626,7 +631,7 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 			utils.CliWarning("%s", utils.HintOnly(fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", waitTimeout), lastRefusal))
 			return pendingWithRequestID(pendingDenial, lastRequestID)
 		case <-poll.C:
-			outcome, requestID, details, err := pollApprovalOnce(ac, cmdID)
+			outcome, requestID, rejected, err := pollApprovalOnce(ac, cmdID)
 			lastRefusal = nil
 			if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
 				lastRefusal = err
@@ -681,7 +686,7 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 			case outcomeRejected, outcomeExpired:
 				spinner.Stop()
 				// Settled without a grant; CommandRejectedError carries it to ExitCodeNotApproved.
-				return &event.CommandRejectedError{Username: details.Username, CommandID: cmdID, Expired: outcome == outcomeExpired, Cause: details.RejectionCause, Gate: details.RejectionGate, ConsoleURL: details.ConsoleURL, WorkSessionID: details.WorkSessionID()}
+				return rejected
 			}
 			// A fixed gap over a 30m wait outspends the server's service-token
 			// throttle, so the gap widens as the wait ages.
@@ -875,8 +880,8 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 		}
 		var rejected *event.CommandRejectedError
 		if errors.As(err, &rejected) {
-			// Settled without a grant: retrying only files another approval request.
-			utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, "command", err, "%s", rejected)
+			// Final for this command line: a retry is refused again or files another approval request.
+			reportCommandRejection(err, rejected)
 			return
 		}
 		if isCommandInlineCredentialError(err) {
@@ -885,6 +890,15 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 		}
 		utils.CliErrorWithExit("%s", err)
 	}
+}
+
+func reportCommandRejection(err error, rejected *event.CommandRejectedError) {
+	actions := rejected.NextActions()
+	if len(actions) == 0 {
+		utils.CliErrorEnvelopeWithExitCode(rejected.ExitCode(), "command", err, "%s", rejected)
+		return
+	}
+	reportCodedRefusalWithExit(rejected.ExitCode(), "command", err, rejected.Error(), denialHintLine(actions[0].PlainText()+"\n"), actions)
 }
 
 // remoteFailureReport is what HandleCommandResult writes to stderr for a

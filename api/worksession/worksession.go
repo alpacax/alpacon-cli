@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -14,14 +13,6 @@ import (
 )
 
 const workSessionURL = "/api/work-sessions/sessions/"
-
-// ErrTimelinePaginated is returned when a whole-timeline read is answered with
-// a `next`, so a page is never shown as the whole session.
-var ErrTimelinePaginated = errors.New(
-	"this server paginates the work session timeline, which this version of alpacon reads only whole, " +
-		"so it would show the first page as the whole session; run 'alpacon update' to install a version " +
-		"that reads the timeline page by page and its recordings through the per-session recording route",
-)
 
 func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType, assignedUser string) ([]WorkSessionAttributes, error) {
 	params := map[string]string{}
@@ -263,57 +254,35 @@ func GetWorkSessionRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
 	return ac.SendGetRequest(api.IDURL(workSessionURL, pathID, "", nil))
 }
 
-// GetWorkSessionTimeline reads a work session's activity timeline. A request
-// naming `cursor`, even empty, is paginated and its pages carry no recordings;
-// one naming no `cursor` gets the whole timeline with recordings and no `next`
-// key. So includeRecords picks the shape. `include_records` rides on the
-// paginated read too, for a server that does not paginate this route.
-func GetWorkSessionTimeline(ac *client.AlpaconClient, id string, includeRecords bool) ([]TimelineItem, error) {
+// GetWorkSessionTimeline reads a work session's timeline by cursor. Its items carry no
+// recordings; read one with GetTerminalRecording.
+func GetWorkSessionTimeline(ac *client.AlpaconClient, id string) ([]TimelineItem, error) {
 	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
 		return nil, err
 	}
 	endpoint := api.IDURL(workSessionURL, pathID, "timeline", nil)
-	params := map[string]string{"include_records": strconv.FormatBool(includeRecords)}
-	if includeRecords {
-		return getWholeWorkSessionTimeline(ac, endpoint, params)
-	}
-	return api.FetchAllCursorPages[TimelineItem](ac, endpoint, params)
+	return api.FetchAllCursorPages[TimelineItem](ac, endpoint, map[string]string{"include_records": "false"})
 }
 
-// getWholeWorkSessionTimeline reads the unpaginated shape in one request. Naming no `cursor` is
-// what holds the server to that shape, so neither `cursor` nor `page_size` may be added here.
-func getWholeWorkSessionTimeline(ac *client.AlpaconClient, endpoint string, params map[string]string) ([]TimelineItem, error) {
-	body, err := ac.SendGetRequest(utils.BuildURL(endpoint, "", params))
-	if err != nil {
-		return nil, err
-	}
-	var response struct {
-		Results []TimelineItem  `json:"results"`
-		Next    json.RawMessage `json:"next"`
-	}
-	if err = json.Unmarshal(body, &response); err != nil {
-		return nil, err
-	}
-	// A null `next` counts: it is a paginator's last page.
-	if len(response.Next) > 0 {
-		return nil, ErrTimelinePaginated
-	}
-	return response.Results, nil
+// IsTerminal reports whether a timeline item is a Websh terminal, the unit that
+// `recording --index` counts. Tunnels are Websh sessions the server lists under
+// their own type and have no recording, so they are not terminals.
+func IsTerminal(item *TimelineItem) bool {
+	return item.Type == "websh_session" && !item.IsTunnel
 }
 
-// ListTerminalSessionIDs returns the ids of a work session's Websh terminals in timeline order.
-// Tunnels are Websh sessions the server lists under their own type and have no recording, so they
-// are not terminals.
+// ListTerminalSessionIDs returns the ids of a work session's Websh terminals in
+// timeline order.
 func ListTerminalSessionIDs(ac *client.AlpaconClient, id string) ([]string, error) {
-	items, err := GetWorkSessionTimeline(ac, id, false /* includeRecords */)
+	items, err := GetWorkSessionTimeline(ac, id)
 	if err != nil {
 		return nil, err
 	}
 	var ids []string
-	for _, item := range items {
-		if item.Type == "websh_session" && !item.IsTunnel {
-			ids = append(ids, item.ID)
+	for i := range items {
+		if IsTerminal(&items[i]) {
+			ids = append(ids, items[i].ID)
 		}
 	}
 	return ids, nil

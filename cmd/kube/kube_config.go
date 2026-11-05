@@ -98,7 +98,7 @@ func (e *sessionCreateError) Error() string { return e.err.Error() }
 func (e *sessionCreateError) Unwrap() error { return e.err }
 
 func runKubeConfig(cmd *cobra.Command, args []string) {
-	clusterName := args[0]
+	clusterName := strings.TrimSpace(args[0]) // as kube login and logout read it
 	proxyPort := 0
 	if cmd.Flags().Changed("proxy-port") {
 		if err := validatePort(kubeConfigFlags.proxyPort); err != nil {
@@ -173,7 +173,7 @@ func holdKubeconfig(path string, quit func(msg string)) (*heldKubeconfig, error)
 	// OnceFunc makes a release from the watcher and one from the command safe
 	// to overlap.
 	release := sync.OnceFunc(func() { _ = editor.Close() })
-	interrupt := watchInterrupt(func() {
+	interrupt := watchInterrupt("Interrupted; stopping once the kube session is closed. Press Ctrl+C again to quit now.", func() {
 		release()
 		quit(interruptedMessage)
 	})
@@ -191,13 +191,14 @@ func (h *heldKubeconfig) done() {
 // after, closing the session it opened. A second Ctrl+C quits at once.
 type interruptWatch struct {
 	fired   atomic.Bool
+	first   chan struct{} // closed on the first Ctrl+C
 	signals chan os.Signal
 	done    chan struct{}
 	stop    func()
 }
 
-func watchInterrupt(quit func()) *interruptWatch {
-	w := &interruptWatch{signals: make(chan os.Signal, 2), done: make(chan struct{})}
+func watchInterrupt(firstNotice string, quit func()) *interruptWatch {
+	w := &interruptWatch{first: make(chan struct{}), signals: make(chan os.Signal, 2), done: make(chan struct{})}
 	signal.Notify(w.signals, os.Interrupt, syscall.SIGTERM)
 	w.stop = sync.OnceFunc(func() {
 		signal.Stop(w.signals)
@@ -211,7 +212,8 @@ func watchInterrupt(quit func()) *interruptWatch {
 					quit()
 					return
 				}
-				utils.CliWarning("Interrupted; stopping once the kube session is closed. Press Ctrl+C again to quit now.")
+				close(w.first)
+				utils.CliWarning("%s", firstNotice)
 			case <-w.done:
 				return
 			}
@@ -420,7 +422,7 @@ func printKubeConfigResult(result *kubeConfigResult, insecure bool) {
 		return
 	}
 
-	utils.CliInfo("Context %q written to %s (token expires %s).", result.Context, result.Kubeconfig, formatTime(&result.TokenExpiresAt))
+	utils.CliInfo("Context %q written to %s (token expires %s).", result.Context, result.Kubeconfig, formatTime(&result.TokenExpiresAt, time.Local))
 	printKubeConfigNext(result)
 }
 

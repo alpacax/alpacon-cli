@@ -22,9 +22,10 @@ func exitNotEnabled() {
 //
 // kube credentials stays reachable under the stand-in. kubectl runs it for a context an earlier login
 // wrote, perhaps in another workspace or before a logout, and it reads only the saved session, so the
-// current workspace's answer says nothing about it.
+// current workspace's answer says nothing about it. kube logout stays for the same reason: it cleans up
+// such a context and its saved token, and needs the server only for a best-effort close.
 func ApplySurfaceGate(root *cobra.Command, enabled bool) {
-	applySurfaceGate(root, KubeCmd, enabled, kubeCredentialsCmd)
+	applySurfaceGate(root, KubeCmd, enabled, kubeCredentialsCmd, kubeLogoutCmd)
 }
 
 // applySurfaceGate moves keep, children of real, under the stand-in.
@@ -32,10 +33,14 @@ func applySurfaceGate(root, real *cobra.Command, enabled bool, keep ...*cobra.Co
 	if enabled {
 		return
 	}
+	// The children kept under the stand-in would inherit its help, which only
+	// refuses; they keep the help they had.
+	help := root.HelpFunc()
 	root.RemoveCommand(real)
 	disabled := newDisabledKubeCmd(real)
 	for _, child := range keep {
 		real.RemoveCommand(child)
+		child.SetHelpFunc(help)
 		disabled.AddCommand(child)
 	}
 	root.AddCommand(disabled)

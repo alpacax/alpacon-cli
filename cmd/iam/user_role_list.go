@@ -1,6 +1,8 @@
 package iam
 
 import (
+	"time"
+
 	"github.com/alpacax/alpacon-cli/api/rbac"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -37,6 +39,6 @@ narrows the answer to your own rather than refusing, so an empty table can mean
 			utils.CliErrorWithExit("Failed to retrieve the role bindings: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
-		utils.PrintTable(rbac.BindingAttributesFrom(bindings))
+		utils.PrintTable(rbac.BindingAttributesFrom(bindings, time.Local))
 	},
 }

@@ -143,13 +143,13 @@ func TestRetrieveWithinGivesUp(t *testing.T) {
 		block := make(chan struct{})
 		start := time.Now()
 
-		_, err := retrieveWithin(retrieveTimeout, func() (*kubernetes.KubeSessionDetail, error) {
+		_, err := within(retrieveTimeout, nil, func() (*kubernetes.KubeSessionDetail, error) {
 			<-block
 			return nil, nil
 		})
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no answer within")
+		require.ErrorIs(t, err, errNoAnswer)
+		require.ErrorContains(t, err, "no answer within")
 		assert.Equal(t, retrieveTimeout, time.Since(start))
 		close(block)
 	})
@@ -178,6 +178,61 @@ func loggedIn(t *testing.T) config.Config {
 	login, err := config.LoadConfig()
 	require.NoError(t, err)
 	return login
+}
+
+// Serial: it sets HOME. The server hands a token out only once, so across a
+// session's life, its extensions and the expiry the plugin saves included, the
+// token stays what login stored; the first run at or past the expiry is refused.
+func TestCredentialTokenStableUntilExpiry(t *testing.T) {
+	login := loggedIn(t)
+	store := kubeSessionStore{dir: t.TempDir()}
+	start := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	saved := testRecord("prod-east")
+	saved.ChannelToken = "stored-token"
+	saved.TokenExpiredAt = start.Add(time.Hour)
+	require.NoError(t, store.write(saved))
+
+	// One run of the plugin: read what is stored, ask the server, keep a moved expiry.
+	retrievals := 0
+	run := func(now, serverExpiry time.Time) (execCredential, error) {
+		record, err := store.read(saved.key())
+		require.NoError(t, err)
+		require.NotNil(t, record)
+		credential, err := resolveCredential(record, now, func() (*kubernetes.KubeSessionDetail, error) {
+			retrievals++
+			return &kubernetes.KubeSessionDetail{TokenExpiredAt: &serverExpiry}, nil
+		})
+		if err != nil {
+			return credential, err
+		}
+		saveMovedExpiry(store, login, record, credential)
+		return credential, nil
+	}
+
+	end := start.Add(time.Hour)
+	for _, offset := range []time.Duration{0, 30 * time.Minute, time.Hour - time.Second} {
+		credential, err := run(start.Add(offset), end)
+		require.NoError(t, err, "at +%s", offset)
+		assert.Equal(t, "stored-token", credential.Status.Token)
+		assert.Equal(t, end, credential.Status.ExpirationTimestamp)
+	}
+	assert.Equal(t, 3, retrievals, "each run checks the session once")
+
+	for _, now := range []time.Time{end, end.Add(time.Second)} {
+		_, err := run(now, end)
+		require.ErrorIs(t, err, errSessionGone, "at %s", now)
+	}
+
+	// An extension moves the saved expiry and leaves the token alone.
+	extended := end.Add(time.Hour)
+	credential, err := run(end, extended)
+	require.NoError(t, err)
+	assert.Equal(t, "stored-token", credential.Status.Token)
+	assert.Equal(t, extended, credential.Status.ExpirationTimestamp)
+	record, err := store.read(saved.key())
+	require.NoError(t, err)
+	assert.Equal(t, extended, record.TokenExpiredAt.UTC())
+	assert.Equal(t, "stored-token", record.ChannelToken)
 }
 
 // Serial: it sets HOME.

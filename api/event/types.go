@@ -102,36 +102,6 @@ type FileExecutionSuggestion struct {
 	Args            []string `json:"args"`
 }
 
-// CommandRejectedError is a type so the CLI can exit ExitCodeNotApproved: an
-// agent reading a generic failure code retries, filing a fresh approval request.
-// Expired separates the two settled-without-a-grant outcomes: both exit
-// ExitCodeNotApproved, but only a reviewer's refusal is answered by going back to
-// the reviewer—a window that simply lapsed is answered by requesting again.
-type CommandRejectedError struct {
-	Username      string
-	Gate          string
-	ConsoleURL    string
-	WorkSessionID string
-	CommandID     string
-	Expired       bool
-	// Cause is the server's rejection_cause, such as approval_rejected for a
-	// reviewer's refusal; empty on older servers.
-	Cause string
-}
-
-// RejectionCauseUseFileExecution is the rejection_cause of a command whose line
-// carried a script body: a heredoc, a multi-line -c or -e body, or a decoded
-// payload piped into a shell. Nothing can verify a script in that shape, so the
-// server can refuse it after submission, when the workspace approval policy
-// blocks script bodies, and ask for the file lane instead. The refusal is per
-// command, so it covers one server even when the same script went to several.
-const RejectionCauseUseFileExecution = "use_file_execution"
-
-const (
-	RejectionCauseApprovalExpired  = utils.ApprovalExpired
-	RejectionCauseApprovalRejected = "approval_rejected"
-)
-
 // AwaitingPurposeError is returned when the server parked a command at the
 // "awaiting_purpose" status: instead of queuing it for a human, the gate asks the
 // requester what the command is for. Nobody has been notified, so the answer is the
@@ -150,10 +120,12 @@ type EventAttributes struct {
 	Shell                 string           `json:"shell"`
 	Command               string           `json:"command"`
 	Result                string           `json:"result"`
-	Status                string           `json:"status"`
+	Status                string           `json:"status" table:"-"`
+	StatusCell            string           `json:"-" table:"Status"`
 	Operator              string           `json:"operator"`
 	RequestedAt           string           `json:"requested_at" table:"Requested At"`
 	ApprovedFileExecution *json.RawMessage `json:"approved_file_execution,omitempty" table:"-"`
+	CommandRejection      `table:"-"`
 }
 
 type EventDetails struct {
@@ -187,10 +159,8 @@ type EventDetails struct {
 	// FileExecutionSuggestion is set on a held command line the server reads as
 	// a script on the target; absent otherwise and on older servers.
 	FileExecutionSuggestion *FileExecutionSuggestion `json:"file_execution_suggestion"`
-	// RejectionCause says why a rejected command was refused; empty on older servers.
-	RejectionCause string `json:"rejection_cause"`
-	RejectionGate  string `json:"rejection_gate"`
-	ConsoleURL     string `json:"console_url,omitempty"`
+	ConsoleURL              string                   `json:"console_url,omitempty"`
+	CommandRejection
 	// The account the command ran as and the work session it ran under, so a
 	// re-run printed from the detail repeats them. WorkSession is null when the
 	// command ran under none.
@@ -326,38 +296,6 @@ func (*AwaitingPurposeError) Error() string {
 	return "command is awaiting the requester's stated purpose"
 }
 
-func (e *CommandRejectedError) Error() string {
-	reason := "was rejected by a reviewer"
-	switch {
-	case e.Cause == RejectionCauseUseFileExecution:
-		reason = "was refused because its command line carries a script body (" + RejectionCauseUseFileExecution + ")"
-	case e.Cause == RejectionCauseApprovalExpired || e.Expired:
-		reason = "was not approved before the approval request expired"
-	case e.Cause != "" && e.Cause != RejectionCauseApprovalRejected:
-		reason = "was refused (" + utils.SanitizeTerminalText(e.Cause) + ")"
-	}
-	if e.CommandID == "" {
-		return "command " + reason
-	}
-	return fmt.Sprintf("command %s %s", e.CommandID, reason)
-}
-
-// ErrorCode preserves the rejection cause for callers that distinguish expiry,
-// a reviewer's decision, and other refusals without parsing the message.
-func (e *CommandRejectedError) ErrorCode() string {
-	if e.Cause != "" {
-		return e.Cause
-	}
-	if e.Expired {
-		return RejectionCauseApprovalExpired
-	}
-	return ""
-}
-
-// ErrorSource completes the coded error the envelope reads; a rejection names
-// no source.
-func (*CommandRejectedError) ErrorSource() string { return "" }
-
 // DescribePhase returns the human-readable description for an error_phase,
 // or the raw identifier when the phase is unknown. An unknown file_* phase
 // gets a generic file lane description instead of the bare code.
@@ -407,8 +345,14 @@ func IsAwaitingPurposeStatus(status string) bool {
 	return status == "awaiting_purpose"
 }
 
+// IsCompletedStatus reports whether status is the server's terminal state for a
+// command the agent finished, successfully or not.
+func IsCompletedStatus(status string) bool {
+	return status == "completed"
+}
+
 // IsRejectedStatus reports whether status is the server's terminal state for a
-// command a reviewer or the gate refused. It never ran.
+// command refused before it ran.
 func IsRejectedStatus(status string) bool {
 	return status == "rejected"
 }
@@ -424,9 +368,6 @@ func (e *CommandRejectedError) RejectedCommand() bool {
 	return !e.Expired && !utils.IsApprovalLapse(e.Cause)
 }
 func (e *CommandRejectedError) ErrorGate() string { return e.Gate }
-func (e *CommandRejectedError) ErrorFields() map[string]any {
-	return map[string]any{"console_url": e.ConsoleURL, "work_session_id": e.WorkSessionID}
-}
 func (e *PendingApprovalError) ErrorFields() map[string]any {
 	return map[string]any{"console_url": e.ConsoleURL, "work_session_id": e.WorkSessionID}
 }

@@ -329,15 +329,11 @@ func closePreviousSession(ac *client.AlpaconClient, previous *kubeSessionRecord,
 	// The context already works, so a server that stops answering must not
 	// hold the command, or the store lock that keeps out the next login of
 	// this cluster, past closeTimeout.
-	done := make(chan error, 1)
-	go func() { done <- kubernetes.CloseSession(ac, previous.KubeSessionID) }()
-	select {
-	case err := <-done:
-		if err != nil {
-			utils.CliWarning("Failed to close the previous kube session %s: %s. It stays open until its WorkSession ends.", previous.KubeSessionID, err)
-		}
-	case <-time.After(closeTimeout):
-		utils.CliWarning("Closing the previous kube session %s took longer than %s; it stays open until its WorkSession ends.", previous.KubeSessionID, closeTimeout)
+	_, err := within(closeTimeout, nil, func() (struct{}, error) {
+		return struct{}{}, kubernetes.CloseSession(ac, previous.KubeSessionID)
+	})
+	if err != nil {
+		utils.CliWarning("Failed to close the previous kube session %s: %s. It stays open until its WorkSession ends.", previous.KubeSessionID, err)
 	}
 }
 
