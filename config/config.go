@@ -28,6 +28,12 @@ const (
 	ServiceTokenPrefix = "alpst-"
 )
 
+// RenewedToken is an access token a refresh-token grant returned, with its lifetime in seconds.
+type RenewedToken struct {
+	AccessToken string
+	ExpiresIn   int
+}
+
 func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, refreshToken, baseDomain string, expiresIn int, insecure bool) error {
 	config := Config{
 		WorkspaceURL:  workspaceURL,
@@ -47,12 +53,6 @@ func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, re
 	return withConfigLock(func() error {
 		return saveConfig(&config)
 	})
-}
-
-// RenewedToken is an access token a refresh-token grant returned, with its lifetime in seconds.
-type RenewedToken struct {
-	AccessToken string
-	ExpiresIn   int
 }
 
 // SwitchWorkspace moves from's login to newURL, saving the name, identity, Kubernetes surface answer and,
