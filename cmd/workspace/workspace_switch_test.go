@@ -1,11 +1,15 @@
 package workspace
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
@@ -145,4 +149,95 @@ func TestCommitSwitch_ConfigWriteFailure(t *testing.T) {
 
 	require.ErrorContains(t, err, "failed to update config")
 	assert.False(t, verified, "no connection check runs when the config could not be written")
+}
+
+func workspacesToken(t *testing.T, names ...string) string {
+	t.Helper()
+	workspaces := make([]map[string]string, 0, len(names))
+	for _, name := range names {
+		workspaces = append(workspaces, map[string]string{"schema_name": name, "region": "us1"})
+	}
+	payload, err := json.Marshal(map[string]any{"https://alpacon.io/workspaces": workspaces})
+	require.NoError(t, err)
+	return "e30." + base64.RawURLEncoding.EncodeToString(payload) + ".sig"
+}
+
+func TestResolveSwitchTarget(t *testing.T) {
+	t.Parallel()
+	rejected := fmt.Errorf("%w: invalid_grant", errRefreshRejected)
+	unreachable := errors.New("connection refused")
+	const notFound = `workspace "next" not found in your account`
+	const signInAgain = notFound + ". Your workspace list reflects your last sign-in; run 'alpacon login' and retry"
+	tests := []struct {
+		name         string
+		accessToken  string
+		refreshToken string
+		renewedToken string
+		renewErr     error
+		expectRenews int
+		expectURL    string
+		expectErr    string
+		expectErrIs  []error
+		expectNotIs  error
+	}{
+		{name: "workspace in the token resolves without renewal", accessToken: workspacesToken(t, "prev", "next"), refreshToken: "refresh-token",
+			expectURL: "https://next.us1.alpacon.io"},
+		{name: "workspace created after sign-in resolves after one renewal", accessToken: workspacesToken(t, "prev"), refreshToken: "refresh-token",
+			renewedToken: workspacesToken(t, "prev", "next"), expectRenews: 1, expectURL: "https://next.us1.alpacon.io"},
+		{name: "workspace missing after renewal suggests the name or a login", accessToken: workspacesToken(t, "prev"), refreshToken: "refresh-token",
+			renewedToken: workspacesToken(t, "prev"), expectRenews: 1, expectErrIs: []error{workspace.ErrWorkspaceNotFound},
+			expectErr: notFound + " after renewing the access token. Check the name, or if the workspace was just created, run 'alpacon login' and retry"},
+		{name: "unreadable renewed token suggests a login", accessToken: workspacesToken(t, "prev"), refreshToken: "refresh-token",
+			renewedToken: "not-a-jwt", expectRenews: 1, expectNotIs: workspace.ErrWorkspaceNotFound,
+			expectErr: "failed to decode access token: invalid JWT format: expected 3 parts, got 1 after renewing the access token. Check the name, or if the workspace was just created, run 'alpacon login' and retry"},
+		{name: "rejected refresh token asks for login", accessToken: workspacesToken(t, "prev"), refreshToken: "refresh-token",
+			renewErr: rejected, expectRenews: 1, expectErrIs: []error{workspace.ErrWorkspaceNotFound, errRefreshRejected},
+			expectErr: notFound + ", and renewing the access token failed: the authentication server refused the refresh token: invalid_grant. Your workspace list reflects your last sign-in; run 'alpacon login' and retry"},
+		{name: "transient renewal failure asks for a retry", accessToken: workspacesToken(t, "prev"), refreshToken: "refresh-token",
+			renewErr: unreachable, expectRenews: 1, expectErrIs: []error{workspace.ErrWorkspaceNotFound, unreachable},
+			expectErr: notFound + ", and renewing the access token to look again failed. Please retry: connection refused"},
+		{name: "no refresh token asks for login without renewal", accessToken: workspacesToken(t, "prev"),
+			expectErrIs: []error{workspace.ErrWorkspaceNotFound}, expectErr: signInAgain},
+		{name: "unreadable token fails without renewal", accessToken: "not-a-jwt", refreshToken: "refresh-token",
+			expectNotIs: workspace.ErrWorkspaceNotFound, expectErr: "failed to decode access token: invalid JWT format: expected 3 parts, got 1"},
+		{name: "token without a workspaces claim fails without renewal", accessToken: workspacesClaimlessToken(t), refreshToken: "refresh-token",
+			expectNotIs: workspace.ErrWorkspaceNotFound, expectErr: "workspaces claim not found in token"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := config.Config{AccessToken: tt.accessToken, RefreshToken: tt.refreshToken, BaseDomain: "alpacon.io"}
+			renews := 0
+			renew := func(got config.Config) (string, error) {
+				renews++
+				assert.Equal(t, cfg, got)
+				return tt.renewedToken, tt.renewErr
+			}
+
+			newURL, newName, err := resolveSwitchTarget(cfg, "next", renew)
+
+			assert.Equal(t, tt.expectRenews, renews)
+			if tt.expectErr == "" {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectURL, newURL)
+				assert.Equal(t, "next", newName)
+				return
+			}
+			require.EqualError(t, err, tt.expectErr)
+			assert.Empty(t, newURL)
+			assert.Empty(t, newName)
+			for _, target := range tt.expectErrIs {
+				require.ErrorIs(t, err, target)
+			}
+			if tt.expectNotIs != nil {
+				assert.NotErrorIs(t, err, tt.expectNotIs)
+			}
+		})
+	}
+}
+
+func workspacesClaimlessToken(t *testing.T) string {
+	t.Helper()
+	return "e30." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"alice"}`)) + ".sig"
 }

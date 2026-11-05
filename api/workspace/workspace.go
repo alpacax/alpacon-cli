@@ -81,8 +81,3 @@ func ResolveWorkspaceURL(accessToken, targetName, baseDomain string) (newURL, ne
 
 	return "", "", fmt.Errorf("workspace %q %w", targetName, ErrWorkspaceNotFound)
 }
-
-// ValidateAndBuildWorkspaceURL is ResolveWorkspaceURL with cfg's access token and base domain.
-func ValidateAndBuildWorkspaceURL(cfg config.Config, targetName string) (newURL, newName string, err error) {
-	return ResolveWorkspaceURL(cfg.AccessToken, targetName, cfg.BaseDomain)
-}
