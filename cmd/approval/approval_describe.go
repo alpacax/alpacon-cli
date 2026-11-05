@@ -177,6 +177,11 @@ func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 	if c := meta.Command; c != nil {
 		add("Command", c.Line)
 		add("Server", c.ServerName)
+		// A file execution shows its own run-as account under File execution,
+		// and that is the one the console shows for it.
+		if c.FileExecution == nil {
+			add("Run as", c.RunAs)
+		}
 		add("Risk level", c.RiskLevel)
 		if c.RunsWithSudo {
 			add("Runs with sudo", "yes")
@@ -194,6 +199,7 @@ func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 	if s := meta.Sudo; s != nil {
 		add("Sudo command", s.Command)
 		add("  Run as", s.RunAs)
+		add("Purpose", s.Purpose)
 		add("Server", s.ServerName)
 		add("Risk level", s.RiskLevel)
 		add("Grant status", s.GrantStatus)
