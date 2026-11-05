@@ -174,6 +174,42 @@ func TestContextRows(t *testing.T) {
 			want: []describeRow{{"Command", "ls"}},
 		},
 		{
+			name: "command request shows the run-as account",
+			body: `{"metadata":{"command":{"line":"ls","server_name":"my-server","runas":"deploy","risk_level":"low"}}}`,
+			want: []describeRow{
+				{"Command", "ls"},
+				{"Server", "my-server"},
+				{"Run as", "deploy"},
+				{"Risk level", "low"},
+			},
+		},
+		{
+			name: "command request with null runas leaves out the row",
+			body: `{"metadata":{"command":{"line":"ls","server_name":"my-server","runas":null}}}`,
+			want: []describeRow{
+				{"Command", "ls"},
+				{"Server", "my-server"},
+			},
+		},
+		{
+			name: "sudo request shows the purpose after the run-as account",
+			body: `{"metadata":{"sudo":{"command":"apt update","runas":"root","purpose":"patch openssl","server_name":"my-server"}}}`,
+			want: []describeRow{
+				{"Sudo command", "apt update"},
+				{"  Run as", "root"},
+				{"Purpose", "patch openssl"},
+				{"Server", "my-server"},
+			},
+		},
+		{
+			name: "sudo request with null purpose leaves out the row",
+			body: `{"metadata":{"sudo":{"command":"apt update","runas":"root","purpose":null}}}`,
+			want: []describeRow{
+				{"Sudo command", "apt update"},
+				{"  Run as", "root"},
+			},
+		},
+		{
 			name: "sudo request shows the run-as account",
 			body: `{"metadata":{"sudo":{"command":"apt update","runas":"root"}}}`,
 			want: []describeRow{
