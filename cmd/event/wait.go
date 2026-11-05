@@ -45,8 +45,8 @@ after every reconnect, since events published while disconnected are lost—the
 event channel has no history to replay. No other type gets that read.
 
 Run 'alpacon work-session ls' or the Alpacon console to find a target ID.`,
-	Example: `  alpacon event wait --type work_session --target a1b2c3d4-5678-abcd-ef01-234567890abc
-  alpacon event wait --type work_session --target a1b2c3d4-5678-abcd-ef01-234567890abc --timeout 30m
+	Example: `  alpacon event wait --type work_session --target 550e8400-e29b-41d4-a716-446655440000
+  alpacon event wait --type work_session --target 550e8400-e29b-41d4-a716-446655440000 --timeout 30m
   alpacon event wait --type notification --until created`,
 	Args: cobra.NoArgs,
 	Run:  runWait,

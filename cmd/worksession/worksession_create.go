@@ -109,7 +109,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 
   # AI agent: no --use and no websh scope; name the session on each command instead
   alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "auto-remediate disk-full alert on web-01: rotate logs, restart rsyslog" --requester-type agent --wait
-  alpacon exec --work-session SESSION_ID web-01 -- df -h
+  alpacon exec --work-session 550e8400-e29b-41d4-a716-446655440000 web-01 -- df -h
   alpacon work-session create --scope command,sudo --server web-01 --expires-in 1h --purpose "restart nginx" --account root
 
   alpacon work-session create --server web-01 --expires-in 2h --purpose "nginx hotfix" \
@@ -117,7 +117,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 
   # Kubernetes: target a cluster, then open it with 'kube login'
   alpacon work-session create --scope kube,kube_exec --cluster prod-east --expires-in 2h --purpose "debug crashlooping api pods" --wait
-  alpacon kube login prod-east --work-session SESSION_ID`,
+  alpacon kube login prod-east --work-session 550e8400-e29b-41d4-a716-446655440000`,
 	Run: func(cmd *cobra.Command, args []string) {
 		purpose = strings.TrimSpace(purpose)
 		if purpose == "" {

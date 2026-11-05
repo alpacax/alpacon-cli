@@ -192,12 +192,12 @@ need 'alpacon login' without -t (on a machine without a browser, open the printe
   alpacon websh join --url https://myws.us1.alpacon.io/websh/shared/abcd1234?channel=default --password my-session-pass
 
   # Session management
-  alpacon websh ls                          # List active sessions
-  alpacon websh describe SESSION_ID         # Show session details
-  alpacon websh watch SESSION_ID            # Watch a session (read-only, staff/superuser only)
-  alpacon websh invite SESSION_ID --email user@example.com
-  alpacon websh close SESSION_ID            # Close a session
-  alpacon websh force-close SESSION_ID      # Force close (Superuser only)
+  alpacon websh ls                                                # List active sessions
+  alpacon websh describe 550e8400-e29b-41d4-a716-446655440000     # Show session details
+  alpacon websh watch 550e8400-e29b-41d4-a716-446655440000        # Watch a session (read-only, staff/superuser only)
+  alpacon websh invite 550e8400-e29b-41d4-a716-446655440000 --email user@example.com
+  alpacon websh close 550e8400-e29b-41d4-a716-446655440000        # Close a session
+  alpacon websh force-close 550e8400-e29b-41d4-a716-446655440000  # Force close (Superuser only)
 
 Flags:
   -u, --username [USER_NAME]         Specify the username for command execution.

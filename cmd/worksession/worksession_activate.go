@@ -11,7 +11,7 @@ var workSessionActivateCmd = &cobra.Command{
 	Use:     "activate SESSION_ID",
 	Short:   "Activate an approved work session",
 	Args:    cobra.ExactArgs(1),
-	Example: `  alpacon work-session activate ses-abc123`,
+	Example: `  alpacon work-session activate 550e8400-e29b-41d4-a716-446655440000`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {

@@ -11,7 +11,7 @@ var workSessionCompleteCmd = &cobra.Command{
 	Use:     "complete SESSION_ID",
 	Short:   "Mark an active work session as completed",
 	Args:    cobra.ExactArgs(1),
-	Example: `  alpacon work-session complete ses-abc123`,
+	Example: `  alpacon work-session complete 550e8400-e29b-41d4-a716-446655440000`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
