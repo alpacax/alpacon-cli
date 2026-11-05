@@ -12,7 +12,7 @@ var workSessionCancelCmd = &cobra.Command{
 	Short:   "Withdraw your own pending work session request",
 	Long:    "Withdraw a pending work session you requested before it is reviewed. Restricted to the session's requester (or a superuser); only pending sessions can be cancelled.",
 	Args:    cobra.ExactArgs(1),
-	Example: `  alpacon work-session cancel ses-abc123`,
+	Example: `  alpacon work-session cancel 550e8400-e29b-41d4-a716-446655440000`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {

@@ -24,9 +24,9 @@ var workSessionRecordingCmd = &cobra.Command{
 chosen terminal's recording is downloaded. Tunnels are not terminals and are not counted.
 The [N] beside each terminal in 'alpacon work-session timeline' is its --index.`,
 	Args: cobra.ExactArgs(1),
-	Example: `  alpacon work-session recording ses-abc123
-  alpacon work-session recording ses-abc123 --index 2
-  alpacon work-session rec ses-abc123`,
+	Example: `  alpacon work-session recording 550e8400-e29b-41d4-a716-446655440000
+  alpacon work-session recording 550e8400-e29b-41d4-a716-446655440000 --index 2
+  alpacon work-session rec 550e8400-e29b-41d4-a716-446655440000`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {

@@ -17,7 +17,7 @@ pending request.
 Cancelling a work_session request also cancels the linked work
 session.`,
 	Args:    cobra.ExactArgs(1),
-	Example: `  alpacon approval cancel apr-abc123`,
+	Example: `  alpacon approval cancel 550e8400-e29b-41d4-a716-446655440000`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
