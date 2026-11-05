@@ -365,7 +365,7 @@ func IsStatusOnlyFailure(status string) bool {
 }
 
 func (e *CommandRejectedError) RejectedCommand() bool {
-	return !e.Expired && !utils.IsApprovalLapse(e.Cause)
+	return !utils.IsApprovalLapse(e.ErrorCode())
 }
 func (e *CommandRejectedError) ErrorGate() string { return e.Gate }
 func (e *PendingApprovalError) ErrorFields() map[string]any {

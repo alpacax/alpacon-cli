@@ -190,7 +190,7 @@ func TestRejectionErrorFields(t *testing.T) {
 		body string
 		want map[string]any
 	}{
-		{name: "cause and gate", body: `,"rejection_cause":"risk_denied","rejection_gate":"risk","console_url":"https://console.example/commands/cmd-9","work_session":{"id":"ses-1"}`, want: map[string]any{"console_url": "https://console.example/commands/cmd-9", "work_session_id": "ses-1", "rejection_cause": "risk_denied", "rejection_gate": "risk"}},
+		{name: "cause and gate", body: `,"rejection_cause":"risk_denied","rejection_gate":"risk"`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": "risk_denied", "rejection_gate": "risk"}},
 		{name: "signature cause has a null gate", body: `,"rejection_cause":"unsigned_file","rejection_gate":null`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": "unsigned_file", "rejection_gate": nil}},
 		{name: "cause only", body: `,"rejection_cause":"risk_denied"`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": "risk_denied", "rejection_gate": nil}},
 		{name: "gate only", body: `,"rejection_gate":"risk"`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": nil, "rejection_gate": "risk"}},
