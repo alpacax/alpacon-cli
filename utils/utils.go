@@ -582,10 +582,11 @@ func SanitizeTerminalText(s string) string {
 }
 
 // SanitizeTerminalOneLine fits free text a person wrote, such as an approver's
-// reason, onto one terminal line: line breaks and runs of space become one space,
-// where SanitizeTerminalText would run the lines together.
+// reason, onto one terminal line: line breaks, tabs and runs of space become one
+// space. Whitespace is folded before sanitizing, since SanitizeTerminalText drops
+// \t, \r and \n and would run the words on either side together.
 func SanitizeTerminalOneLine(s string) string {
-	return strings.Join(strings.Fields(SanitizeTerminalText(strings.ReplaceAll(s, "\n", " "))), " ")
+	return strings.Join(strings.Fields(SanitizeTerminalText(strings.Join(strings.Fields(s), " "))), " ")
 }
 
 // SanitizeTerminalLine is SanitizeTerminalText plus the answer to whether it had
