@@ -91,16 +91,11 @@ func TestValidateTunnelArgs(t *testing.T) {
 }
 
 func TestExecuteTunnelCommandRunModeReturnsErrorForInvalidRemotePort(t *testing.T) {
-	originalFlags := tunnelFlags
-	t.Cleanup(func() {
-		tunnelFlags = originalFlags
-	})
-
-	tunnelFlags.localPort = "5432"
-	tunnelFlags.remotePort = "invalid"
+	t.Parallel()
+	flags := tunnelFlagValues{localPort: "5432", remotePort: "invalid"}
 
 	cmd, args := parseTunnelCommandArgs(t, []string{"prod-db", "--", "psql"})
-	exitCode, err := executeTunnelCommand(&client.AlpaconClient{}, cmd, args, nil)
+	exitCode, err := executeTunnelCommand(&client.AlpaconClient{}, flags, cmd, args, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -148,7 +143,7 @@ func TestHandleTunnelStartError_TokenRefusalAsksForInteractiveLogin(t *testing.T
 			t.Parallel()
 			err := tunnelCreateError(t, tt.code)
 
-			got := handleTunnelStartError(&client.AlpaconClient{}, err, "my-server", nil)
+			got := handleTunnelStartError(&client.AlpaconClient{}, tunnelFlagValues{}, err, "my-server", nil)
 
 			assert.EqualError(t, got, "a token cannot open a tunnel; run 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device) and try again")
 		})
@@ -159,7 +154,7 @@ func TestHandleTunnelStartError_NonGateRefusalPassesThrough(t *testing.T) {
 	t.Parallel()
 	err := tunnelCreateError(t, "some_other_refusal")
 
-	got := handleTunnelStartError(&client.AlpaconClient{}, err, "my-server", nil)
+	got := handleTunnelStartError(&client.AlpaconClient{}, tunnelFlagValues{}, err, "my-server", nil)
 
 	assert.Equal(t, err, got)
 }
@@ -168,7 +163,7 @@ func TestHandleTunnelStartError_NonGateRefusalPassesThrough(t *testing.T) {
 func TestHandleTunnelStartError_CodeQuotedInAgentReportIsNotAGateRefusal(t *testing.T) {
 	err := fmt.Errorf("failed to open tunnel on my-server: connection refused; code: %s", utils.WorkSessionRequired)
 
-	got := handleTunnelStartError(&client.AlpaconClient{}, err, "my-server", nil)
+	got := handleTunnelStartError(&client.AlpaconClient{}, tunnelFlagValues{}, err, "my-server", nil)
 
 	assert.Equal(t, err, got)
 }
@@ -235,10 +230,9 @@ func TestHandleTunnelStartErrorGateHelperProcess(t *testing.T) {
 		return
 	}
 	utils.OutputFormat = utils.OutputFormatJSON
-	tunnelFlags.workSessionID = tunnelGateSessionID
-	tunnelFlags.authMethod = "Browser login"
+	flags := tunnelFlagValues{workSessionID: tunnelGateSessionID, authMethod: "Browser login"}
 	err := tunnelCreateError(t, code)
-	_ = handleTunnelStartError(&client.AlpaconClient{}, err, "my-server", nil)
+	_ = handleTunnelStartError(&client.AlpaconClient{}, flags, err, "my-server", nil)
 	os.Exit(0)
 }
 

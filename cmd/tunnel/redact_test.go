@@ -5,15 +5,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // A malformed tunnel URL quotes its path token in the dial error; the token must
 // not print.
-func TestExecuteTunnel_DialErrorOmitsThePathToken(t *testing.T) {
+func TestTunnelCommand_DialErrorOmitsThePathToken(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -28,17 +27,9 @@ func TestExecuteTunnel_DialErrorOmitsThePathToken(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 
-	t.Setenv("HOME", t.TempDir())
-	require.NoError(t, config.CreateConfig(ts.URL, "my-workspace", "api-token", "", "", "", "", 0, false))
-	saved := tunnelFlags
-	t.Cleanup(func() { tunnelFlags = saved })
-	tunnelFlags = tunnelFlagValues{localPort: "0", remotePort: "5432"}
+	code, stderr := runTunnelCommand(t, stubClient(ts), tunnelArgs("my-server")...)
 
-	ac, err := client.NewAlpaconAPIClient()
-	require.NoError(t, err)
-
-	err = executeTunnel(ac, "my-server", nil)
-
-	require.ErrorContains(t, err, "failed to connect to proxy server")
-	assert.NotContains(t, err.Error(), "PATHTOKEN123")
+	assert.Equal(t, utils.ExitCodeGeneralError, code)
+	assert.Contains(t, stderr, "failed to connect to proxy server")
+	assert.NotContains(t, stderr, "PATHTOKEN123")
 }
