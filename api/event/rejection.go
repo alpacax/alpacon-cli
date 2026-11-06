@@ -21,6 +21,8 @@ type CommandRejectedError struct {
 	// SudoGrant marks an outcome read from the sudo grant this command raised; with
 	// no cause and not Expired, a reviewer decided it.
 	SudoGrant bool
+	// Note is the reason the approver wrote, empty when they gave none.
+	Note string
 }
 
 // RejectionCauseUseFileExecution is the rejection_cause of a command line that
@@ -114,12 +116,16 @@ func (e *CommandRejectedError) ExitCode() int {
 
 // Rejection is the error for a rejected command detail.
 func (d EventDetails) Rejection() *CommandRejectedError {
-	return &CommandRejectedError{
+	e := &CommandRejectedError{
 		CommandID: d.ID,
 		Cause:     d.RejectionCause.Value,
 		Gate:      d.RejectionGate.Value,
 		Reported:  d.Reported(),
 	}
+	if d.RejectionNote != nil {
+		e.Note = *d.RejectionNote
+	}
+	return e
 }
 
 func (e *CommandRejectedError) Error() string {
@@ -187,6 +193,9 @@ func (e *CommandRejectedError) NextActions() []utils.NextAction {
 	if e.Cause == RejectionCauseUseFileExecution || (e.Cause == "" && (e.SudoGrant || e.Expired)) {
 		return nil
 	}
+	if note := utils.SanitizeTerminalOneLine(e.Note); e.Cause == RejectionCauseApprovalRejected && note != "" {
+		return []utils.NextAction{{Description: `The approver wrote: "` + note + `"`}}
+	}
 	return []utils.NextAction{e.text().next}
 }
 
@@ -196,10 +205,14 @@ func (e *CommandRejectedError) ErrorFields() map[string]any {
 	if !e.Reported {
 		return nil
 	}
-	return map[string]any{
+	fields := map[string]any{
 		"rejection_cause": nullIfEmpty(e.Cause),
 		"rejection_gate":  nullIfEmpty(e.Gate),
 	}
+	if e.Note != "" {
+		fields["rejection_note"] = e.Note
+	}
+	return fields
 }
 
 func nullIfEmpty(s string) any {
