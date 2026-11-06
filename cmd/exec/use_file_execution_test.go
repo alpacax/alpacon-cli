@@ -4,11 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	osexec "os/exec"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -204,10 +203,8 @@ type cliErrorEnvelope struct {
 // real exec command: the run exits 6, names the code for a script reading
 // stderr, and points at --file on the same server and account.
 func TestExecUseFileExecutionRefusalPrintsGuidance(t *testing.T) {
-	t.Parallel()
 
 	t.Run("table", func(t *testing.T) {
-		t.Parallel()
 		ts := newRejectedCommandServer("use_file_execution")
 		defer ts.Close()
 
@@ -224,7 +221,6 @@ func TestExecUseFileExecutionRefusalPrintsGuidance(t *testing.T) {
 	})
 
 	t.Run("json", func(t *testing.T) {
-		t.Parallel()
 		ts := newRejectedCommandServer("use_file_execution")
 		defer ts.Close()
 
@@ -257,7 +253,6 @@ func TestExecUseFileExecutionRefusalPrintsGuidance(t *testing.T) {
 }
 
 func TestExecRejectionWithoutCauseStaysOffTheFileLane(t *testing.T) {
-	t.Parallel()
 	ts := newRejectedCommandServer("")
 	defer ts.Close()
 
@@ -270,7 +265,6 @@ func TestExecRejectionWithoutCauseStaysOffTheFileLane(t *testing.T) {
 // TestApprovalRejectionCauseMessages pins one message and error_code per cause on
 // every path, exit 6 throughout and no --file guidance.
 func TestApprovalRejectionCauseMessages(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name        string
 		format      string
@@ -349,10 +343,8 @@ func TestApprovalRejectionCauseMessages(t *testing.T) {
 	}
 	for _, cause := range causes {
 		t.Run(cause.name, func(t *testing.T) {
-			t.Parallel()
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
-					t.Parallel()
 					ts, reads := newRejectedCommandSequenceServer("root", "wheel", rejectionFields(cause.cause), tc.wait, tc.grantStatus)
 					defer ts.Close()
 
@@ -433,10 +425,8 @@ func TestLogsAccountFlags(t *testing.T) {
 // TestExecLogsUseFileExecutionRefusal covers the detach path: exec logs reads
 // the refusal from the command detail and gives the same guidance.
 func TestExecLogsUseFileExecutionRefusal(t *testing.T) {
-	t.Parallel()
 
 	t.Run("table", func(t *testing.T) {
-		t.Parallel()
 		ts := newRejectedCommandServer("use_file_execution")
 		defer ts.Close()
 
@@ -449,7 +439,6 @@ func TestExecLogsUseFileExecutionRefusal(t *testing.T) {
 	})
 
 	t.Run("json", func(t *testing.T) {
-		t.Parallel()
 		ts := newRejectedCommandServer("use_file_execution")
 		defer ts.Close()
 
@@ -475,10 +464,8 @@ func TestExecLogsUseFileExecutionRefusal(t *testing.T) {
 // line as the server's default account, so both commands carry placeholders
 // and the message says to fill them in.
 func TestExecLogsUseFileExecutionRefusalWithoutAccount(t *testing.T) {
-	t.Parallel()
 
 	t.Run("table", func(t *testing.T) {
-		t.Parallel()
 		ts := newRejectedCommandServerAs("use_file_execution", "", "")
 		defer ts.Close()
 
@@ -490,7 +477,6 @@ func TestExecLogsUseFileExecutionRefusalWithoutAccount(t *testing.T) {
 	})
 
 	t.Run("json", func(t *testing.T) {
-		t.Parallel()
 		ts := newRejectedCommandServerAs("use_file_execution", "", "")
 		defer ts.Close()
 
@@ -510,7 +496,6 @@ func TestExecLogsUseFileExecutionRefusalWithoutAccount(t *testing.T) {
 	})
 
 	t.Run("group named", func(t *testing.T) {
-		t.Parallel()
 		ts := newRejectedCommandServerAs("use_file_execution", "", "wheel")
 		defer ts.Close()
 
@@ -562,22 +547,35 @@ func TestReRunHintQuotesServer(t *testing.T) {
 	}
 }
 
-func TestReportCodedRefusalOfAnInvalidIDExitsTwoInEitherFormat(t *testing.T) {
-	t.Parallel()
+// reportRefusal runs report under format and returns the exit and what reaching cmd.Execute would
+// print: what report wrote, then the failure FprintExitError writes.
+func reportRefusal(t *testing.T, format string, report func(io.Writer) error) (exitCode int, stderr string) {
+	t.Helper()
+	orig := utils.OutputFormat
+	t.Cleanup(func() { utils.OutputFormat = orig })
+	utils.OutputFormat = format
+	var buf bytes.Buffer
+
+	err := report(&buf)
+
+	exitErr, ok := errors.AsType[*utils.ExitError](err)
+	require.True(t, ok, "a refusal must return utils.ExitError: %v", err)
+	utils.FprintExitError(&buf, exitErr)
+	return exitErr.Code, buf.String()
+}
+
+func TestCodedRefusalOfAnInvalidIDExitsTwoInEitherFormat(t *testing.T) {
 	for _, format := range []string{utils.OutputFormatJSON, utils.OutputFormatTable} {
 		t.Run(format, func(t *testing.T) {
-			t.Parallel()
-			helper := osexec.Command(os.Args[0], "-test.run=^TestReportCodedRefusalInvalidIDHelperProcess$")
-			helper.Env = append(os.Environ(), "GO_WANT_CODED_REFUSAL_INVALID_ID_HELPER="+format)
-			var stderr bytes.Buffer
-			helper.Stderr = &stderr
+			_, idErr := api.RequireID("../x", "work session")
 
-			err := helper.Run()
-			var exitErr *osexec.ExitError
-			require.ErrorAs(t, err, &exitErr)
-			assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode())
+			exitCode, stderr := reportRefusal(t, format, func(w io.Writer) error {
+				return codedRefusal(w, "command", idErr, "work session ID is unusable", "")
+			})
+
+			assert.Equal(t, utils.ExitCodeUsageError, exitCode)
 			if format == utils.OutputFormatTable {
-				assert.Contains(t, stderr.String(), "work session ID is unusable.")
+				assert.Contains(t, stderr, "work session ID is unusable.")
 				return
 			}
 			var envelope struct {
@@ -585,7 +583,7 @@ func TestReportCodedRefusalOfAnInvalidIDExitsTwoInEitherFormat(t *testing.T) {
 				ErrorCode string `json:"error_code"`
 				Message   string `json:"message"`
 			}
-			require.NoError(t, json.Unmarshal(stderr.Bytes(), &envelope), "stderr: %s", stderr.String())
+			require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), "stderr: %s", stderr)
 			assert.Equal(t, utils.ExitCodeUsageError, envelope.ExitCode)
 			assert.Equal(t, utils.ErrorCodeUsage, envelope.ErrorCode)
 			assert.Equal(t, "work session ID is unusable.", envelope.Message)
@@ -593,53 +591,25 @@ func TestReportCodedRefusalOfAnInvalidIDExitsTwoInEitherFormat(t *testing.T) {
 	}
 }
 
-func TestReportCodedRefusalInvalidIDHelperProcess(t *testing.T) {
-	format := os.Getenv("GO_WANT_CODED_REFUSAL_INVALID_ID_HELPER")
-	if format == "" {
-		return
-	}
-	utils.OutputFormat = format
-	_, err := api.RequireID("../x", "work session")
-	reportCodedRefusal("command", err, "work session ID is unusable", "")
-}
-
-func TestReportCodedRefusalOfAUsageErrorExitsTwoOnlyInPlaceOfOne(t *testing.T) {
-	t.Parallel()
+func TestCodedRefusalOfAUsageErrorExitsTwoOnlyInPlaceOfOne(t *testing.T) {
 	cases := []struct {
 		name     string
-		code     string
+		code     int
 		wantExit int
 	}{
-		{name: "exit code 1 becomes 2", code: "1", wantExit: utils.ExitCodeUsageError},
-		{name: "a chosen exit code other than 1 is kept", code: "6", wantExit: utils.ExitCodeNotApproved},
+		{name: "exit code 1 becomes 2", code: utils.ExitCodeGeneralError, wantExit: utils.ExitCodeUsageError},
+		{name: "a chosen exit code other than 1 is kept", code: utils.ExitCodeNotApproved, wantExit: utils.ExitCodeNotApproved},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			helper := osexec.Command(os.Args[0], "-test.run=^TestReportCodedRefusalUsageErrorHelperProcess$")
-			helper.Env = append(os.Environ(), "GO_WANT_CODED_REFUSAL_USAGE_HELPER="+tc.code)
-			var stderr bytes.Buffer
-			helper.Stderr = &stderr
+			flagErr := utils.MarkUsageError(errors.New("bad flag"))
 
-			err := helper.Run()
+			exitCode, stderr := reportRefusal(t, utils.OutputFormatTable, func(w io.Writer) error {
+				return codedRefusalWithExit(w, tc.code, "command", flagErr, "the flag is unusable", "", nil)
+			})
 
-			var exitErr *osexec.ExitError
-			require.ErrorAs(t, err, &exitErr)
-			assert.Equal(t, tc.wantExit, exitErr.ExitCode())
-			assert.Contains(t, stderr.String(), "the flag is unusable.")
+			assert.Equal(t, tc.wantExit, exitCode)
+			assert.Contains(t, stderr, "the flag is unusable.")
 		})
 	}
-}
-
-func TestReportCodedRefusalUsageErrorHelperProcess(t *testing.T) {
-	code := os.Getenv("GO_WANT_CODED_REFUSAL_USAGE_HELPER")
-	if code == "" {
-		return
-	}
-	utils.OutputFormat = utils.OutputFormatTable
-	err := utils.MarkUsageError(errors.New("bad flag"))
-	if code == "1" {
-		reportCodedRefusal("command", err, "the flag is unusable", "")
-	}
-	reportCodedRefusalWithExit(utils.ExitCodeNotApproved, "command", err, "the flag is unusable", "", nil)
 }

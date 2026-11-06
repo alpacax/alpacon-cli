@@ -245,7 +245,6 @@ func TestLogsCommandOutcomeSanitizesServerText(t *testing.T) {
 // there leaves Result empty and nothing to print, and exit 0 tells the caller
 // the command finished having produced no output.
 func TestExecLogsChunkFetchFailureExitsNonZero(t *testing.T) {
-	t.Parallel()
 	const jobID = "a1b2c3d4-5678-abcd-ef01-234567890abc"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -276,7 +275,6 @@ func TestExecLogsChunkFetchFailureExitsNonZero(t *testing.T) {
 // take its place. A status-only failure prints no output at all, so it is never
 // fetched for.
 func TestExecLogsChunkFetchFailureYieldsToTheCommandsOwnFailure(t *testing.T) {
-	t.Parallel()
 	const jobID = "a1b2c3d4-5678-abcd-ef01-234567890abc"
 	tests := []struct {
 		name          string
@@ -301,7 +299,6 @@ func TestExecLogsChunkFetchFailureYieldsToTheCommandsOwnFailure(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var chunkReads atomic.Int32
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
@@ -336,7 +333,6 @@ func TestExecLogsChunkFetchFailureYieldsToTheCommandsOwnFailure(t *testing.T) {
 }
 
 func TestExecLogsSuccessfulCompletionLine(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name      string
 		status    string
@@ -352,7 +348,6 @@ func TestExecLogsSuccessfulCompletionLine(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]any{

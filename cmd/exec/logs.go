@@ -2,140 +2,134 @@ package exec
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/alpacax/alpacon-cli/api/approval"
 	"github.com/alpacax/alpacon-cli/api/event"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var logsCmd = &cobra.Command{
-	Use:   "logs JOB_ID",
-	Short: "Fetch the result of a detached command",
-	Long: `Fetch the result of a command submitted with --detach.
+func newLogsCommand(newClient clientFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:   "logs JOB_ID",
+		Short: "Fetch the result of a detached command",
+		Long: `Fetch the result of a command submitted with --detach.
 
 If the command is still running, prints the current status and exits.
 Run the command again later to check for completion.`,
-	Example: `  alpacon exec logs 550e8400-e29b-41d4-a716-446655440000`,
-	Args:    cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		jobID := args[0]
+		Example: `  alpacon exec logs 550e8400-e29b-41d4-a716-446655440000`,
+		Args:    cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			jobID := args[0]
+			stdout, stderr := cmd.OutOrStdout(), cmd.ErrOrStderr()
 
-		if !utils.IsUUID(jobID) {
-			utils.CliUsageErrorWithExit("invalid JOB_ID %q: must be a UUID (e.g. 550e8400-e29b-41d4-a716-446655440000)", jobID)
-			return
-		}
-
-		authMethod := config.ResolveAuthMethod()
-
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-			return
-		}
-
-		details, err := event.GetCommandByID(alpaconClient, jobID)
-		if err != nil {
-			utils.HandleWorkSessionError(err, utils.OperationCommand, "", authMethod, "")
-			utils.CliErrorWithExit("failed to fetch command result: %s", err)
-			return
-		}
-		if line := event.StandingGrantLine(details); line != "" {
-			fmt.Fprintln(os.Stderr, line)
-		}
-
-		// A parked command has no approval request, so this precedes the approval hold. This is the
-		// detach path's only sight of the demand: SubmitCommand returns before the verdict.
-		if event.IsAwaitingPurposeStatus(details.Status) {
-			utils.PrintPurposeDemand(
-				utils.PurposeDemandLead, details.ID, details.PurposeExpiresAt,
-			)
-			os.Exit(utils.ExitCodePurposeRequired)
-		}
-
-		// Exit 0 would read as a command that finished with nothing to show.
-		if event.IsAwaitingApprovalStatus(details.Status) {
-			requestID, lookupErr := approval.FindCommandApprovalRequestID(alpaconClient, details.ID)
-			if lookupErr != nil {
-				utils.CliWarning("failed to read approval request: %s", lookupErr)
+			if !utils.IsUUID(jobID) {
+				return utils.NewUsageExitError("invalid JOB_ID %q: must be a UUID (e.g. 550e8400-e29b-41d4-a716-446655440000)", jobID)
 			}
-			message := fmt.Sprintf("Approval required—this command is awaiting human approval in the Alpacon console (web); status %s. It runs automatically once approved.", details.Status)
-			if requestID != "" {
-				message = fmt.Sprintf("Approval required—this command is awaiting human approval (approval request: %s) in the Alpacon console (web); status %s. It runs automatically once approved.", utils.SanitizeTerminalText(requestID), details.Status)
+
+			authMethod := config.ResolveAuthMethod()
+
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
-			utils.PrintPendingApproval(
-				message,
-				requestID,
-				utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", details.ID)},
-			)
-			os.Exit(utils.ExitCodePendingApproval)
-		}
 
-		// Exit 6 through the envelope, as exec does: a retry is refused again or
-		// files another approval request.
-		if details.IsRejected() {
-			rejected := details.Rejection()
-			// A script-body refusal has file-execution guidance of its own.
-			if rejected.Cause == event.RejectionCauseUseFileExecution {
-				accountFlags, accountNote := logsAccountFlags(details)
-				reportUseFileExecution(rejected, details.Server.Name, accountFlags, false, accountNote)
-				return
+			details, err := event.GetCommandByID(alpaconClient, jobID)
+			if err != nil {
+				if wsErr := utils.WorkSessionExitError(err, utils.OperationCommand, "", authMethod, ""); wsErr != nil {
+					return wsErr
+				}
+				return utils.NewExitError("failed to fetch command result: %s", err)
 			}
-			rejected.CommandID = "" // the caller already named the job
-			reportCommandRejection(rejected, rejected)
-			return
-		}
-
-		// Fetch output only for statuses whose outcome prints it. A status-only failure prints a
-		// line of its own, so a hanging chunk store would only cost the wait; a running status
-		// exits 0, so a read error would take the exitCode == 0 gate below and bury the "still
-		// running" line.
-		var readErr error
-		if !event.IsRunningStatus(details.Status) && !event.IsStatusOnlyFailure(details.Status) {
-			output, oerr := event.ResolveCommandOutput(alpaconClient, jobID, details.Result)
-			if oerr != nil {
-				readErr = oerr
-			} else {
-				details.Result = output
+			if line := event.StandingGrantLine(details); line != "" {
+				_, _ = fmt.Fprintln(stderr, line)
 			}
-		}
 
-		// The stated purpose goes to stderr ahead of the outcome, keeping stdout the command's
-		// output. It is sanitized because text one principal wrote reaches another principal's
-		// terminal.
-		if details.Purpose != "" {
-			fmt.Fprintf(os.Stderr, "Stated purpose: %s\n",
-				utils.SanitizeTerminalText(details.Purpose))
-		}
+			// A parked command has no approval request, so this precedes the approval hold. This is the
+			// detach path's only sight of the demand: SubmitCommand returns before the verdict.
+			if event.IsAwaitingPurposeStatus(details.Status) {
+				utils.PrintPurposeDemand(
+					utils.PurposeDemandLead, details.ID, details.PurposeExpiresAt,
+				)
+				return &utils.ExitError{Code: utils.ExitCodePurposeRequired}
+			}
 
-		stdoutLine, stderrLine, exitCode := logsCommandOutcome(details)
-		if exitCode == 0 && stderrLine == "" && details.PurposeExpiresAt != nil {
-			stderrLine = fmt.Sprintf("command finished (status: %s).\n", utils.SanitizeTerminalText(details.Status))
-		}
-		// The command's own failure carries the remote exit code this command
-		// propagates, so it outranks an unreadable output—the order
-		// runCommandFallbackFromID keeps on the polling path.
-		if exitCode == 0 && readErr != nil {
-			utils.CliErrorWithExit("failed to read command output: %s", readErr)
-			return
-		}
-		if stdoutLine != "" {
-			fmt.Println(stdoutLine)
-		}
-		if stderrLine != "" {
-			fmt.Fprint(os.Stderr, stderrLine)
-		}
-		if exitCode != 0 {
-			os.Exit(exitCode)
-		}
-	},
-}
+			// Exit 0 would read as a command that finished with nothing to show.
+			if event.IsAwaitingApprovalStatus(details.Status) {
+				requestID, lookupErr := approval.FindCommandApprovalRequestID(alpaconClient, details.ID)
+				if lookupErr != nil {
+					utils.CliWarning("failed to read approval request: %s", lookupErr)
+				}
+				message := fmt.Sprintf("Approval required—this command is awaiting human approval in the Alpacon console (web); status %s. It runs automatically once approved.", details.Status)
+				if requestID != "" {
+					message = fmt.Sprintf("Approval required—this command is awaiting human approval (approval request: %s) in the Alpacon console (web); status %s. It runs automatically once approved.", utils.SanitizeTerminalText(requestID), details.Status)
+				}
+				utils.PrintPendingApproval(
+					message,
+					requestID,
+					utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", details.ID)},
+				)
+				return &utils.ExitError{Code: utils.ExitCodePendingApproval}
+			}
 
-func init() {
-	ExecCmd.AddCommand(logsCmd)
+			// Exit 6 through the envelope, as exec does: a retry is refused again or
+			// files another approval request.
+			if details.IsRejected() {
+				rejected := details.Rejection()
+				// A script-body refusal has file-execution guidance of its own.
+				if rejected.Cause == event.RejectionCauseUseFileExecution {
+					accountFlags, accountNote := logsAccountFlags(details)
+					return reportUseFileExecution(stderr, rejected, details.Server.Name, accountFlags, false, accountNote)
+				}
+				rejected.CommandID = "" // the caller already named the job
+				return commandRejectionFailure(stderr, rejected, rejected)
+			}
+
+			// Fetch output only for statuses whose outcome prints it. A status-only failure prints a
+			// line of its own, so a hanging chunk store would only cost the wait; a running status
+			// exits 0, so a read error would take the exitCode == 0 gate below and bury the "still
+			// running" line.
+			var readErr error
+			if !event.IsRunningStatus(details.Status) && !event.IsStatusOnlyFailure(details.Status) {
+				output, oerr := event.ResolveCommandOutput(alpaconClient, jobID, details.Result)
+				if oerr != nil {
+					readErr = oerr
+				} else {
+					details.Result = output
+				}
+			}
+
+			// The stated purpose goes to stderr ahead of the outcome, keeping stdout the command's
+			// output. It is sanitized because text one principal wrote reaches another principal's
+			// terminal.
+			if details.Purpose != "" {
+				_, _ = fmt.Fprintf(stderr, "Stated purpose: %s\n",
+					utils.SanitizeTerminalText(details.Purpose))
+			}
+
+			stdoutLine, stderrLine, exitCode := logsCommandOutcome(details)
+			if exitCode == 0 && stderrLine == "" && details.PurposeExpiresAt != nil {
+				stderrLine = fmt.Sprintf("command finished (status: %s).\n", utils.SanitizeTerminalText(details.Status))
+			}
+			// The command's own failure carries the remote exit code this command
+			// propagates, so it outranks an unreadable output—the order
+			// runCommandFallbackFromID keeps on the polling path.
+			if exitCode == 0 && readErr != nil {
+				return utils.NewExitError("failed to read command output: %s", readErr)
+			}
+			if stdoutLine != "" {
+				_, _ = fmt.Fprintln(stdout, stdoutLine)
+			}
+			if stderrLine != "" {
+				_, _ = fmt.Fprint(stderr, stderrLine)
+			}
+			if exitCode != 0 {
+				return &utils.ExitError{Code: exitCode}
+			}
+			return nil
+		}),
+	}
 }
 
 // logsAccountFlags repeats the refused run's -u, -g and --work-session flags

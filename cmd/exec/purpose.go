@@ -1,19 +1,17 @@
 package exec
 
 import (
-	"os"
-
 	"github.com/alpacax/alpacon-cli/api/event"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var purposeCmd = &cobra.Command{
-	Use:   "purpose JOB_ID PURPOSE",
-	Short: "State what a held command is for",
-	Long: `State what a held command is for, and send it back for judgment.
+func newPurposeCommand(newClient clientFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:   "purpose JOB_ID PURPOSE",
+		Short: "State what a held command is for",
+		Long: `State what a held command is for, and send it back for judgment.
 
 When a command an agent submitted draws a verdict that would queue it for a
 human, the server holds it and asks what the command is for instead of opening
@@ -47,52 +45,48 @@ Exit code 1 covers every refusal from the server. A settled command and an answe
 from the wrong principal share one server error, so this cannot report which
 happened; read the command's state with 'alpacon exec logs JOB_ID' rather than
 re-submitting it.`,
-	Example: `  # Answer a demand reported by 'alpacon exec' (exit code 7)
+		Example: `  # Answer a demand reported by 'alpacon exec' (exit code 7)
   alpacon exec purpose 550e8400-e29b-41d4-a716-446655440000 \
     'The host clock is 40s ahead, so the renewed cert reads as not-yet-valid.'
 
   # State it up front instead, and skip the demand entirely
   alpacon exec --purpose 'chronyd drifted; the cert reads as future-dated' \
     prod-web -- systemctl restart chronyd`,
-	Args: cobra.ExactArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
-		jobID, purpose := args[0], args[1]
+		Args: cobra.ExactArgs(2),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			jobID, purpose := args[0], args[1]
 
-		if !utils.IsUUID(jobID) {
-			utils.CliUsageErrorWithExit("invalid JOB_ID %q: must be a UUID (e.g. 550e8400-e29b-41d4-a716-446655440000)", jobID)
-			return
-		}
-		// Same ceiling and wording as --purpose, counted the same way.
-		purpose, msg := checkPurpose("PURPOSE", purpose)
-		if msg != "" {
-			utils.CliUsageErrorWithExit("%s", msg)
-			return
-		}
+			if !utils.IsUUID(jobID) {
+				return utils.NewUsageExitError("invalid JOB_ID %q: must be a UUID (e.g. 550e8400-e29b-41d4-a716-446655440000)", jobID)
+			}
+			// Same ceiling and wording as --purpose, counted the same way.
+			purpose, msg := checkPurpose("PURPOSE", purpose)
+			if msg != "" {
+				return utils.NewUsageExitError("%s", msg)
+			}
 
-		authMethod := config.ResolveAuthMethod()
+			authMethod := config.ResolveAuthMethod()
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-			return
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		if err = event.AnswerPurposeDemand(alpaconClient, jobID, purpose); err != nil {
-			utils.HandleWorkSessionError(err, utils.OperationCommand, "", authMethod, "")
-			// The server answers a settled command and a bystander's answer with
-			// one code, so this cannot say which happened—which is exactly the
-			// branch a machine consumer needs a field rather than prose for.
-			utils.PrintPurposeRefused(jobID, err)
-			os.Exit(utils.ExitCodeGeneralError)
-			return
-		}
+			if err = event.AnswerPurposeDemand(alpaconClient, jobID, purpose); err != nil {
+				if wsErr := utils.WorkSessionExitError(err, utils.OperationCommand, "", authMethod, ""); wsErr != nil {
+					return wsErr
+				}
+				// The server answers a settled command and a bystander's answer with
+				// one code, so this cannot say which happened—which is exactly the
+				// branch a machine consumer needs a field rather than prose for.
+				utils.PrintPurposeRefused(jobID, err)
+				return &utils.ExitError{Code: utils.ExitCodeGeneralError}
+			}
 
-		// The command re-enters judgment on the worker, so there is no verdict to
-		// report here; naming where to read it keeps the caller off a resubmit.
-		utils.PrintPurposeAccepted(jobID)
-	},
-}
-
-func init() {
-	ExecCmd.AddCommand(purposeCmd)
+			// The command re-enters judgment on the worker, so there is no verdict to
+			// report here; naming where to read it keeps the caller off a resubmit.
+			utils.PrintPurposeAccepted(jobID)
+			return nil
+		}),
+	}
 }

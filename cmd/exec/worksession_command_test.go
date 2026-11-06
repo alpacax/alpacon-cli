@@ -1,26 +1,26 @@
 package exec
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/httpclient"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestExecCommandWorkSessionGateExits3WithJSONDiagnostic(t *testing.T) {
-	t.Parallel()
 	var sawCommandPost atomic.Bool
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -41,35 +41,10 @@ func TestExecCommandWorkSessionGateExits3WithJSONDiagnostic(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	home := t.TempDir()
-	writeExecCommandTestConfig(t, home, ts.URL)
+	stdout, stderr, exitCode := runExecHelper(t, ts.URL, "--output", "json", "prod", "id")
 
-	helper := osexec.Command(
-		os.Args[0],
-		"-test.run=^TestExecCommandWorkSessionGateHelperProcess$",
-		"--",
-		"exec-worksession-helper",
-		"--output",
-		"json",
-		"prod",
-		"id",
-	)
-	helper.Env = append(os.Environ(),
-		"GO_WANT_EXEC_WORKSESSION_HELPER=1",
-		"ALPACON_WORK_SESSION=",
-		"HOME="+home,
-	)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	helper.Stdout = &stdout
-	helper.Stderr = &stderr
-
-	err := helper.Run()
-	require.Error(t, err)
-	var exitErr *osexec.ExitError
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, utils.ExitCodeWorkSessionDenied, exitErr.ExitCode())
-	assert.Empty(t, stdout.String())
+	assert.Equal(t, utils.ExitCodeWorkSessionDenied, exitCode)
+	assert.Empty(t, stdout)
 	assert.True(t, sawCommandPost.Load(), "expected exec command to submit the remote command request")
 
 	var envelope struct {
@@ -83,7 +58,7 @@ func TestExecCommandWorkSessionGateExits3WithJSONDiagnostic(t *testing.T) {
 			TargetServers []string `json:"target_servers"`
 		} `json:"context"`
 	}
-	require.NoError(t, json.Unmarshal(stderr.Bytes(), &envelope), "stderr: %s", stderr.String())
+	require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), "stderr: %s", stderr)
 	assert.False(t, envelope.OK)
 	assert.Equal(t, utils.ExitCodeWorkSessionDenied, envelope.ExitCode)
 	assert.Equal(t, utils.WorkSessionRequired, envelope.ErrorCode)
@@ -93,40 +68,53 @@ func TestExecCommandWorkSessionGateExits3WithJSONDiagnostic(t *testing.T) {
 	assert.Equal(t, []string{"prod"}, envelope.Context.TargetServers)
 }
 
-const execWorkSessionHelperMarker = "exec-worksession-helper"
-
-func TestExecCommandWorkSessionGateHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_EXEC_WORKSESSION_HELPER") != "1" {
-		return
-	}
-
-	args, ok := helperArgsAfter(os.Args, execWorkSessionHelperMarker)
-	if !ok {
-		fmt.Fprintln(os.Stderr, "missing "+execWorkSessionHelperMarker+" marker")
-		os.Exit(2)
-	}
-	// The wait loop's poll interval is a package var the parent cannot reach
-	// across the process boundary; unset, the default 5s stands.
-	if v := os.Getenv("ALPACON_TEST_POLL_INTERVAL"); v != "" {
-		d, err := time.ParseDuration(v)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "bad ALPACON_TEST_POLL_INTERVAL: "+v)
-			os.Exit(2)
-		}
-		approvalWaitPollInterval = d
+// runInProcess runs the exec command tree against workspaceURL as cmd.Execute would and returns
+// what it wrote and the exit code it leaves with: args go to the exec command, or to the
+// subcommand sub names, and a failure is printed to stderr with utils.FprintExitError. It sets
+// HOME, the output format and the result poll tick and swaps stdout and stderr, so its callers
+// stay serial. An empty outputFormat leaves the one the command line chooses.
+func runInProcess(t *testing.T, workspaceURL, sub, outputFormat string, args []string) (stdout, stderr string, exitCode int) {
+	t.Helper()
+	home := t.TempDir()
+	writeExecCommandTestConfig(t, home, workspaceURL)
+	t.Setenv("HOME", home)
+	t.Setenv("ALPACON_WORK_SESSION", "")
+	origFormat, origTick := utils.OutputFormat, event.CommandPollTick
+	t.Cleanup(func() { utils.OutputFormat, event.CommandPollTick = origFormat, origTick })
+	utils.OutputFormat = utils.OutputFormatTable
+	if outputFormat != "" {
+		utils.OutputFormat = outputFormat
 	}
 	event.CommandPollTick = 10 * time.Millisecond
-	ExecCmd.Run(ExecCmd, args)
+
+	root := newCommand(testClientFactory(workspaceURL))
+	var err error
+	stdout, stderr = testutil.CaptureOutput(t, func() {
+		if sub == "" {
+			err = root.RunE(root, args) // as exec runs: Cobra's subcommand lookup is cmd.Execute's to skip
+		} else {
+			root.SetArgs(append([]string{sub}, args...))
+			err = root.Execute()
+		}
+		if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+			utils.FprintExitError(os.Stderr, exitErr)
+		}
+	})
+	if err == nil {
+		return stdout, stderr, 0
+	}
+	exitErr, ok := errors.AsType[*utils.ExitError](err)
+	require.True(t, ok, "a failure must reach cmd.Execute as utils.ExitError: %v", err)
+	return stdout, stderr, exitErr.Code
 }
 
-// helperArgsAfter returns the args after marker—the helper's, not go test's.
-func helperArgsAfter(args []string, marker string) ([]string, bool) {
-	for i := range args {
-		if args[i] == marker {
-			return args[i+1:], true
-		}
+// testClientFactory builds the client cmd.Execute would build from the config runInProcess writes.
+func testClientFactory(workspaceURL string) clientFactory {
+	return func() (*client.AlpaconClient, error) {
+		ac := &client.AlpaconClient{HTTPClient: httpclient.New(false), BaseURL: workspaceURL, WorkspaceName: "test", UserAgent: "alpacon-test"}
+		ac.SetAccessToken("access-token")
+		return ac, nil
 	}
-	return nil, false
 }
 
 func writeExecCommandTestConfig(t *testing.T, home, workspaceURL string) {
