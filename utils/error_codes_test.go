@@ -127,6 +127,40 @@ func TestServerErrorFields(t *testing.T) {
 	}
 }
 
+func TestHasFieldErrorCode(t *testing.T) {
+	t.Parallel()
+	fields := map[string]any{
+		"field_errors": map[string]any{
+			"line":    []any{map[string]any{"code": "max_length", "message": "too long"}},
+			"purpose": []any{map[string]any{"code": "blank"}, "not a map"},
+		},
+	}
+	tests := []struct {
+		name        string
+		err         error
+		field, code string
+		want        bool
+	}{
+		{name: "nil error", err: nil, field: "line", code: "max_length"},
+		{name: "plain error", err: errors.New("x"), field: "line", code: "max_length"},
+		{name: "matching entry", err: &fakeAPIError{fields: fields}, field: "line", code: "max_length", want: true},
+		{name: "wrapped carrier", err: fmt.Errorf("w: %w", &fakeAPIError{fields: fields}), field: "line", code: "max_length", want: true},
+		{name: "wrapper without fields above the carrier", err: fmt.Errorf("w: %w", &statusWrap{err: &fakeAPIError{fields: fields}, status: 400}), field: "line", code: "max_length", want: true},
+		{name: "code on another field", err: &fakeAPIError{fields: fields}, field: "purpose", code: "max_length"},
+		{name: "another code on the field", err: &fakeAPIError{fields: fields}, field: "line", code: "blank"},
+		{name: "entry that is not an object", err: &fakeAPIError{fields: fields}, field: "purpose", code: "not a map"},
+		{name: "missing field", err: &fakeAPIError{fields: fields}, field: "username", code: "max_length"},
+		{name: "top-level code only", err: &fakeAPIError{code: "max_length", fields: map[string]any{"code": "max_length"}}, field: "line", code: "max_length"},
+		{name: "field_errors of the wrong shape", err: &fakeAPIError{fields: map[string]any{"field_errors": "x"}}, field: "line", code: "max_length"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, HasFieldErrorCode(tt.err, tt.field, tt.code))
+		})
+	}
+}
+
 func TestMarkUsageErrorKeepsItsCauseAndMessage(t *testing.T) {
 	t.Parallel()
 	cause := errors.New("bad flag")

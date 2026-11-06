@@ -24,6 +24,10 @@ const FileContentMaxBytes = 65536
 // DefaultInterpreter runs a verified file when --interpreter names none.
 const DefaultInterpreter = "/bin/bash"
 
+// The refused body may be perl -e or another interpreter's, and --file runs the script with
+// DefaultInterpreter unless --interpreter names another.
+const interpreterNote = "--interpreter ABSOLUTE_PATH for a script " + DefaultInterpreter + " does not run"
+
 const (
 	reuseDaysMin = 1
 	reuseDaysMax = 366
@@ -381,10 +385,7 @@ func HandleFileExecInlineCredential(err error) bool {
 // accountNote, when set, follows the message; exec logs passes one to mark the account flags as
 // placeholders.
 func useFileExecutionRefusal(commandID, server string, accountFlags []string, withEnv bool, accountNote string) (message string, actions []utils.NextAction) {
-	server = utils.SanitizeTerminalText(server) // reportUseFileExecution writes raw
-	if server == "" {
-		server = "SERVER"
-	}
+	server = displayServer(server)
 	message = fmt.Sprintf("the server refused command %s on '%s': its command line carries a script body, which runs only as a verified file (%s)",
 		utils.SanitizeTerminalText(commandID), server, event.RejectionCauseUseFileExecution)
 	if withEnv {
@@ -394,21 +395,33 @@ func useFileExecutionRefusal(commandID, server string, accountFlags []string, wi
 		message += ". " + accountNote
 	}
 	prefix := strings.Join(append([]string{string(ExecInvocation)}, accountFlags...), " ")
-	serverArg := argvQuote(server)
-	// The refused body may be perl -e or another interpreter's, and --file runs
-	// the script with DefaultInterpreter unless --interpreter names another.
-	const interpreterNote = "--interpreter ABSOLUTE_PATH for a script " + DefaultInterpreter + " does not run"
 	actions = []utils.NextAction{
+		uploadScriptAction(accountFlags, server),
 		{
-			Command:     prefix + " --upload --file /path/to/script.sh --file-from ./script.sh " + serverArg,
-			Description: "save the script to a local file, then write it to the server and run it in one step, adding --overwrite to replace a file already at that path and " + interpreterNote,
-		},
-		{
-			Command:     prefix + " --file /path/to/script.sh --from-server " + serverArg,
+			Command:     prefix + " --file /path/to/script.sh --from-server " + argvQuote(server),
 			Description: "when a copy is already saved at that path on the server, run it there, adding " + interpreterNote,
 		},
 	}
 	return message, actions
+}
+
+// displayServer returns server sanitized for a raw write, or SERVER when it is empty.
+func displayServer(server string) string {
+	server = utils.SanitizeTerminalText(server)
+	if server == "" {
+		return "SERVER"
+	}
+	return server
+}
+
+// uploadScriptAction is the action that writes a local script to the server and runs it in one
+// step, with accountFlags in front of --upload.
+func uploadScriptAction(accountFlags []string, server string) utils.NextAction {
+	prefix := strings.Join(append([]string{string(ExecInvocation)}, accountFlags...), " ")
+	return utils.NextAction{
+		Command:     prefix + " --upload --file /path/to/script.sh --file-from ./script.sh " + argvQuote(displayServer(server)),
+		Description: "save the script to a local file, then write it to the server and run it in one step, adding --overwrite to replace a file already at that path and " + interpreterNote,
+	}
 }
 
 // runAsFlags returns a run's -u, -g and --work-session flags for a hint to repeat, sanitized for a

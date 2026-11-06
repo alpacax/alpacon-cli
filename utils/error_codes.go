@@ -134,6 +134,18 @@ type fieldsCarrier interface {
 	ErrorFields() map[string]any
 }
 
+// HasFieldErrorCode reports whether the server's field_errors list an entry for field with code.
+func HasFieldErrorCode(err error, field, code string) bool {
+	fieldErrors, _ := serverErrorFields(err)["field_errors"].(map[string]any)
+	entries, _ := fieldErrors[field].([]any)
+	for _, entry := range entries {
+		if item, ok := entry.(map[string]any); ok && item["code"] == code {
+			return true
+		}
+	}
+	return false
+}
+
 func serverErrorFields(err error) map[string]any {
 	for e := range errorChain(err) {
 		if carrier, ok := e.(fieldsCarrier); ok {
