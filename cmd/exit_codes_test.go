@@ -309,7 +309,7 @@ func TestExecuteExitsTwoWhenTheCommandLineIsMalformed(t *testing.T) {
 	runExitCases(t, []exitCase{
 		{name: "unknown shorthand flag", args: []string{"server", "ls", "-Z"}, wantExit: usage, wantStderr: "unknown shorthand flag"},
 		{name: "unknown command", args: []string{"bogus"}, wantExit: usage, wantStderr: `unknown command "bogus"`},
-		{name: "unknown subcommand of a group", args: []string{"token", "bogus"}, wantExit: usage, wantStderr: "a subcommand is required"},
+		{name: "unknown subcommand of a group", args: []string{"token", "bogus"}, wantExit: usage, wantStderr: `unknown command "bogus" for "alpacon token"`},
 		{name: "group without a subcommand", args: []string{"token", "acl"}, wantExit: usage, wantStderr: "a subcommand is required"},
 		{name: "too few arguments", args: []string{"exec", "logs"}, wantExit: usage, wantStderr: "accepts 1 arg(s), received 0"},
 		{name: "bad flag value", args: []string{"websh", "ls", "--tail", "x"}, wantExit: usage, wantStderr: "invalid argument"},
@@ -385,6 +385,33 @@ func TestExecBoolFlagBeforeTheServerSubmitsARemoteCommandNamedLikeASubcommand(t 
 			assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
 			assert.Empty(t, stdout)
 			assert.Contains(t, stderr, tt.wantStderr, "the remote --output json must not reach alpacon")
+		})
+	}
+}
+
+func TestUnknownSubcommandEmitsOneJSONEnvelope(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"--output", "json", "workspace", "lss"},
+		{"workspace", "lss", "--output", "json"},
+	} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			t.Parallel()
+
+			_, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, args,
+				exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir())
+
+			assert.Equal(t, utils.ExitCodeUsageError, exitCode)
+			var envelope struct {
+				ExitCode  int    `json:"exit_code"`
+				ErrorCode string `json:"error_code"`
+				Message   string `json:"message"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), "stderr must be one envelope: %s", stderr)
+			assert.Equal(t, utils.ExitCodeUsageError, envelope.ExitCode)
+			assert.Equal(t, utils.ErrorCodeUsage, envelope.ErrorCode)
+			assert.Contains(t, envelope.Message, `unknown command "lss" for "alpacon workspace"`)
+			assert.Contains(t, envelope.Message, "Did you mean this?\n\tls\n")
 		})
 	}
 }

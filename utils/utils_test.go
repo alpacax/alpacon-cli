@@ -865,3 +865,39 @@ func TestSanitizeTerminalBlock(t *testing.T) {
 		})
 	}
 }
+
+func TestRejectUnknownSubcommandRefusesAWordWithNotesAndCloseNames(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		notes []string
+		word  string
+		want  string
+	}{
+		{name: "close word", word: "lst", want: "unknown command \"lst\" for \"group\"\n\nDid you mean this?\n\tls\n"},
+		{name: "far word", word: "zzzzzz", want: "unknown command \"zzzzzz\" for \"group\""},
+		{name: "note on a far word", notes: []string{"guidance"}, word: "zzzzzz", want: "unknown command \"zzzzzz\" for \"group\"\nguidance"},
+		{name: "note before close names", notes: []string{"guidance"}, word: "lst", want: "unknown command \"lst\" for \"group\"\nguidance\n\nDid you mean this?\n\tls\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			group := &cobra.Command{Use: "group"}
+			group.AddCommand(&cobra.Command{Use: "ls", Run: func(*cobra.Command, []string) {}})
+
+			err := RejectUnknownSubcommand(tt.notes...)(group, []string{tt.word})
+
+			assert.EqualError(t, err, tt.want)
+		})
+	}
+}
+
+func TestRejectUnknownSubcommandPassesWhenNoWordIsGiven(t *testing.T) {
+	t.Parallel()
+	group := &cobra.Command{Use: "group"}
+	group.AddCommand(&cobra.Command{Use: "ls", Run: func(*cobra.Command, []string) {}})
+
+	err := RejectUnknownSubcommand("guidance")(group, nil)
+
+	assert.NoError(t, err)
+}

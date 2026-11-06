@@ -304,3 +304,26 @@ func TestKeepWithOwnParserHandsAnUnknownFlagBeforeASubcommandToTheParent(t *test
 		})
 	}
 }
+
+func TestRejectUnknownSubcommandsRespectsCommandSettings(t *testing.T) {
+	t.Parallel()
+	child := func() *cobra.Command { return &cobra.Command{Use: "child", Run: func(*cobra.Command, []string) {}} }
+	root := &cobra.Command{Use: "root"}
+	declared := &cobra.Command{Use: "declared", Args: cobra.MaximumNArgs(1)}
+	ownParser := &cobra.Command{Use: "own-parser", DisableFlagParsing: true}
+	parent := &cobra.Command{Use: "parent"}
+	nested := &cobra.Command{Use: "nested"}
+	declared.AddCommand(child())
+	ownParser.AddCommand(child())
+	nested.AddCommand(child())
+	parent.AddCommand(nested)
+	root.AddCommand(declared, ownParser, parent)
+
+	rejectUnknownSubcommands(root)
+
+	assert.Nil(t, root.Args)
+	assert.Nil(t, ownParser.Args)
+	require.NoError(t, declared.ValidateArgs([]string{"word"}))
+	require.ErrorContains(t, parent.ValidateArgs([]string{"word"}), "unknown command")
+	assert.ErrorContains(t, nested.ValidateArgs([]string{"word"}), "unknown command")
+}
