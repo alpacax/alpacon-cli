@@ -101,6 +101,5 @@ func ExitIfUsageError(code int, operation string, err error, format string, args
 // CliUsageErrorEnvelopeWithExit reports a bad flag or argument and exits 2 with error_code usage_error.
 // The envelope keeps no error from args, so a server refusal must not go through it.
 func CliUsageErrorEnvelopeWithExit(operation string, format string, args ...any) {
-	ExitWithFailureJSON(Failure{ExitCode: ExitCodeUsageError, ErrorCode: ErrorCodeUsage, Operation: operation, Message: fmt.Sprintf(format, args...)})
-	CliErrorWithExitCode(ExitCodeUsageError, format, args...)
+	exitWithError(newUsageExitError(operation, format, args))
 }
