@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	osexec "os/exec"
 	"strings"
@@ -477,4 +478,55 @@ func TestPartialListOutputHelperProcess(t *testing.T) {
 		PrintListOrExit([]outputTestItem{}, boom, "Failed to get logs")
 	}
 	os.Exit(0)
+}
+
+func TestOutputFormatInReadsTheLastOutputFlagBeforeTheSeparator(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "no output flag", args: []string{"server", "ls", "--bogus"}},
+		{name: "separate value", args: []string{"server", "ls", "--bogus", "--output", "json"}, want: "json"},
+		{name: "equals form", args: []string{"server", "ls", "--bogus", "--output=json"}, want: "json"},
+		{name: "last one wins", args: []string{"--output", "json", "server", "ls", "--output=table"}, want: "table"},
+		{name: "flag without a value", args: []string{"server", "ls", "--output"}},
+		{name: "after the separator", args: []string{"tunnel", "my-server", "--", "tool", "--output", "json"}},
+		{name: "before the separator", args: []string{"tunnel", "--output=json", "my-server", "--", "tool", "--output", "table"}, want: "json"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, OutputFormatIn(tt.args))
+		})
+	}
+}
+
+func TestSetOutputFormatAppliesTableOrJSON(t *testing.T) {
+	for _, value := range []string{OutputFormatTable, OutputFormatJSON} {
+		t.Run(value, func(t *testing.T) {
+			withFormat("", func() {
+				err := SetOutputFormat(value)
+
+				require.NoError(t, err)
+				assert.Equal(t, value, OutputFormat)
+			})
+		})
+	}
+}
+
+func TestSetOutputFormatRefusesAnyOtherValueAsAUsageError(t *testing.T) {
+	for _, tt := range []struct{ name, value string }{{name: "xml", value: "xml"}, {name: "empty", value: ""}} {
+		t.Run(tt.name, func(t *testing.T) {
+			withFormat(OutputFormatTable, func() {
+				err := SetOutputFormat(tt.value)
+
+				require.EqualError(t, err, fmt.Sprintf("invalid --output value %q (expected \"table\" or \"json\")", tt.value))
+				assert.True(t, IsUsageError(err), "err: %v", err)
+				assert.Equal(t, OutputFormatTable, OutputFormat)
+			})
+		})
+	}
 }

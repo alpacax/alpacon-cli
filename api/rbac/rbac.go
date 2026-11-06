@@ -81,7 +81,7 @@ func ResolveRole(ac *client.AlpaconClient, nameOrID string) (*RoleResponse, erro
 }
 
 func GetRoleScopes(ac *client.AlpaconClient, roleID string) (*RoleScopesResponse, error) {
-	pathID, err := api.RequireID(roleID, "role")
+	pathID, err := api.RequireResponseID(roleID, "role")
 	if err != nil {
 		return nil, err
 	}
@@ -173,13 +173,13 @@ func RoleAttributesFrom(roles []RoleResponse) []RoleAttributes {
 	return result
 }
 
-func BindingAttributesFrom(bindings []UserRoleResponse) []UserRoleAttributes {
+func BindingAttributesFrom(bindings []UserRoleResponse, zone *time.Location) []UserRoleAttributes {
 	var result []UserRoleAttributes
 	for _, binding := range bindings {
 		result = append(result, UserRoleAttributes{
 			Role:      binding.Role.Name,
 			Scope:     binding.ScopeLabel(),
-			GrantedAt: localTimestamp(binding.AddedAt),
+			GrantedAt: timestampIn(binding.AddedAt, zone),
 		})
 	}
 
@@ -189,7 +189,7 @@ func BindingAttributesFrom(bindings []UserRoleResponse) []UserRoleAttributes {
 // HolderAttributesFrom labels holders by username. A nil usernames map means names were never
 // resolved, so the id—the value other commands accept—stands in; the display name is a fallback
 // only when resolution ran and missed.
-func HolderAttributesFrom(bindings []UserRoleResponse, usernames map[string]string) []RoleHolderAttributes {
+func HolderAttributesFrom(bindings []UserRoleResponse, usernames map[string]string, zone *time.Location) []RoleHolderAttributes {
 	var result []RoleHolderAttributes
 	for _, binding := range bindings {
 		user := binding.User.ID
@@ -204,7 +204,7 @@ func HolderAttributesFrom(bindings []UserRoleResponse, usernames map[string]stri
 		result = append(result, RoleHolderAttributes{
 			User:      user,
 			Scope:     binding.ScopeLabel(),
-			GrantedAt: localTimestamp(binding.AddedAt),
+			GrantedAt: timestampIn(binding.AddedAt, zone),
 		})
 	}
 
@@ -228,7 +228,7 @@ func ScopeAttributesFrom(scopes *RoleScopesResponse) []RoleScopeAttributes {
 	return result
 }
 
-func AuditAttributesFrom(entries []RoleAuditLogResponse) []RoleAuditAttributes {
+func AuditAttributesFrom(entries []RoleAuditLogResponse, zone *time.Location) []RoleAuditAttributes {
 	var result []RoleAuditAttributes
 	for _, entry := range entries {
 		changedBy := ""
@@ -242,7 +242,7 @@ func AuditAttributesFrom(entries []RoleAuditLogResponse) []RoleAuditAttributes {
 			Scope:     tierLabel(entry.Scope),
 			ChangedBy: changedBy,
 			Reason:    entry.Reason,
-			At:        localTimestamp(entry.AddedAt),
+			At:        timestampIn(entry.AddedAt, zone),
 		})
 	}
 
@@ -256,7 +256,7 @@ func GrantRole(ac *client.AlpaconClient, request BindingCreateRequest) error {
 }
 
 func RevokeRole(ac *client.AlpaconClient, bindingID, reason string) error {
-	pathID, err := api.RequireID(bindingID, "role binding")
+	pathID, err := api.RequireResponseID(bindingID, "role binding")
 	if err != nil {
 		return err
 	}
@@ -371,13 +371,13 @@ func PermissionPatternAttributesFrom(patterns *PermissionPatternsResponse) []Per
 	return result
 }
 
-// localTimestamp blanks a missing timestamp: a zero time.Time formats as "0001-01-01 00:00",
+// timestampIn blanks a missing timestamp: a zero time.Time formats as "0001-01-01 00:00",
 // which reads like a real grant date.
-func localTimestamp(at time.Time) string {
+func timestampIn(at time.Time, zone *time.Location) string {
 	if at.IsZero() {
 		return ""
 	}
-	return at.Local().Format(timeLayout)
+	return at.In(zone).Format(timeLayout)
 }
 
 // tierLabel names a scope tier for the sources that carry no id pair and so cannot use

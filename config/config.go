@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,12 +18,21 @@ import (
 const (
 	ConfigFileName = "config.json"
 	ConfigFileDir  = ".alpacon"
+	// KubeSessionDir, under ConfigFileDir, holds the kube sessions
+	// 'alpacon kube login' opened; logout removes it with the config.
+	KubeSessionDir = "kube"
 
 	// ServiceTokenPrefix is the server's default service-token key prefix. A self-hosted server
 	// configured with another prefix issues tokens this treats as generic. Personal API tokens
 	// use "alpat-".
 	ServiceTokenPrefix = "alpst-"
 )
+
+// RenewedToken is an access token a refresh-token grant returned, with its lifetime in seconds.
+type RenewedToken struct {
+	AccessToken string
+	ExpiresIn   int
+}
 
 func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, refreshToken, baseDomain string, expiresIn int, insecure bool) error {
 	config := Config{
@@ -45,21 +55,21 @@ func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, re
 	})
 }
 
-// SwitchWorkspace moves from's login to newURL, saving the name, identity and Kubernetes surface
-// answer in one write; once another login or switch has replaced from, it writes nothing.
-func SwitchWorkspace(from Config, newURL, newName string, kubernetesSurface bool) error {
+// SwitchWorkspace moves from's login to newURL, saving the name, identity, Kubernetes surface answer and,
+// when not nil, renewed in one write; once another login or switch has replaced from, it writes nothing.
+func SwitchWorkspace(from Config, newURL, newName string, kubernetesSurface bool, renewed *RenewedToken) error {
 	// The new URL is built from the schema name, so it is also the identity;
 	// keeping the old workspace's value would name the wrong one.
-	return moveWorkspace(from.WorkspaceURL, from, Config{WorkspaceURL: newURL, WorkspaceName: newName, SchemaName: newName, KubernetesSurface: kubernetesSurface})
+	return moveWorkspace(from.WorkspaceURL, from, Config{WorkspaceURL: newURL, WorkspaceName: newName, SchemaName: newName, KubernetesSurface: kubernetesSurface}, renewed)
 }
 
 // RestoreWorkspace puts orig's workspace back in one save while the config still holds orig's login on
 // switchedURL, the workspace a failed switch saved; otherwise it writes nothing.
 func RestoreWorkspace(switchedURL string, orig Config) error {
-	return moveWorkspace(switchedURL, orig, orig)
+	return moveWorkspace(switchedURL, orig, orig, nil)
 }
 
-func moveWorkspace(fromURL string, login, to Config) error {
+func moveWorkspace(fromURL string, login, to Config, renewed *RenewedToken) error {
 	return updateConfig(func(cfg *Config) (bool, error) {
 		if cfg.WorkspaceURL != fromURL {
 			return false, ErrWorkspaceChanged
@@ -71,6 +81,9 @@ func moveWorkspace(fromURL string, login, to Config) error {
 		cfg.WorkspaceName = to.WorkspaceName
 		cfg.SchemaName = to.SchemaName
 		cfg.KubernetesSurface = to.KubernetesSurface
+		if renewed != nil {
+			cfg.setAccessToken(renewed.AccessToken, renewed.ExpiresIn)
+		}
 		return true, nil
 	})
 }
@@ -170,10 +183,30 @@ func SaveRefreshedAuth0Token(refreshToken, accessToken string, expiresIn int) er
 		if cfg.RefreshToken != refreshToken {
 			return false, ErrLoginChanged
 		}
-		cfg.AccessToken = accessToken
-		cfg.AccessTokenExpiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second).Format(time.RFC3339)
-		return true, nil
+		return cfg.setAccessToken(accessToken, expiresIn), nil
 	})
+}
+
+// setAccessToken installs accessToken unless the saved token expires later, which means another
+// process renewed it after this one did; it reports whether it changed anything.
+func (c *Config) setAccessToken(accessToken string, expiresIn int) bool {
+	saved, savedOK := tokenExpiry(c.AccessToken)
+	candidate, candidateOK := tokenExpiry(accessToken)
+	if savedOK && candidateOK && saved > candidate {
+		return false
+	}
+	c.AccessToken = accessToken
+	c.AccessTokenExpiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second).Format(time.RFC3339)
+	return true
+}
+
+func tokenExpiry(token string) (float64, bool) {
+	claims, err := utils.DecodeJWTPayload(token)
+	if err != nil {
+		return 0, false
+	}
+	exp, ok := claims["exp"].(float64)
+	return exp, ok
 }
 
 // DeleteConfig removes the config while it still holds login's credentials; a login another shell made since
@@ -196,6 +229,12 @@ func DeleteConfig(login Config) error {
 			return ErrLoginChanged
 		}
 
+		// The kube session records hold bearer tokens that outlive this login.
+		// They go first: the config is what a retry checks the login against,
+		// so removing it first would let a retry pass over records left behind.
+		if err := deleteKubeSessions(filepath.Join(dir, KubeSessionDir)); err != nil {
+			return fmt.Errorf("failed to delete the saved kube sessions: %w", err)
+		}
 		// Remove what the link names, or the refresh token stays in the dotfiles tree;
 		// the link itself stays, so the next login writes through it.
 		configFile, err := resolveConfigWritePath(filepath.Join(dir, ConfigFileName))
@@ -206,6 +245,64 @@ func DeleteConfig(login Config) error {
 			return fmt.Errorf("failed to delete config file: %v", err)
 		}
 		return nil
+	})
+}
+
+// deleteKubeSessions removes the saved kube session records and any staging
+// file a killed write left, all of which can hold a token. The lock files and
+// the directory stay: a kube login waiting on approval holds one of those
+// locks, and removing the file under it would let a second login lock a new
+// file at the same path. A dir that is a symbolic link is left alone, since
+// kube login never writes through one, and inside a real one only the names
+// kube login writes are removed.
+func deleteKubeSessions(dir string) error {
+	info, err := os.Lstat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !kubeSessionFileName.MatchString(entry.Name()) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+// kubeSessionFileName matches a kube session record, a 16-hex-digit name
+// with .json, and the staging file a write renames into it.
+var kubeSessionFileName = regexp.MustCompile(`^[0-9a-f]{16}(\.json|\.[0-9]+\.tmp)$`)
+
+// WhileLoggedIn runs fn under the config lock while the config still holds
+// login's credentials, and returns ErrLoginChanged without running it once a
+// logout or another login has replaced them. A logout takes the same lock, so
+// nothing fn writes outside the config can land after the logout that should
+// have removed it. fn must not write the config: the lock is not reentrant.
+func WhileLoggedIn(login Config, fn func() error) error {
+	return withConfigLock(func() error {
+		cfg, err := LoadConfig()
+		if errors.Is(err, fs.ErrNotExist) {
+			return ErrLoginChanged
+		}
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if !cfg.sameLogin(login) {
+			return ErrLoginChanged
+		}
+		return fn()
 	})
 }
 

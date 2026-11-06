@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -28,7 +31,7 @@ func TestPollForApproval_TerminalStatusesAreDistinguishable(t *testing.T) {
 		wantMsg string
 	}{
 		{status: "rejected", wantMsg: "work session was rejected"},
-		{status: "expired", wantMsg: "work session expired while waiting for approval"},
+		{status: "expired", wantMsg: "work session expired before it was approved"},
 		{status: "revoked", wantMsg: "work session was revoked"},
 		{status: "cancelled", wantMsg: "work session was cancelled"},
 		{status: "completed", wantMsg: "work session was completed unexpectedly"},
@@ -44,7 +47,7 @@ func TestPollForApproval_TerminalStatusesAreDistinguishable(t *testing.T) {
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-			_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
+			_, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantMsg)
@@ -66,7 +69,7 @@ func TestPollForApproval_WidensTheGapAsTheWaitAges(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	// 1ms base tick: the fast window is the first 10ms, then the gap is 5ms.
-	_, err := pollForApproval(ac, "ws-1", false, time.Millisecond, 60*time.Millisecond)
+	_, err := WaitForApproval(ac, "ws-1", false, time.Millisecond, 60*time.Millisecond)
 
 	require.Error(t, err)
 	got := polls.Load()
@@ -81,7 +84,7 @@ func TestPollForApproval_RejectionNamesTheSession(t *testing.T) {
 	defer ts.Close()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := pollForApproval(ac, "ws-1", false, time.Millisecond, time.Second)
+	_, err := WaitForApproval(ac, "ws-1", false, time.Millisecond, time.Second)
 
 	var terminal *terminalWaitError
 	require.ErrorAs(t, err, &terminal)
@@ -98,7 +101,7 @@ func TestPollForApproval_APIFailureIsNotTerminal(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
+	_, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
 
 	require.Error(t, err)
 	var terminal *terminalWaitError
@@ -120,7 +123,7 @@ func TestPollForApproval_GivingUpIsPending(t *testing.T) {
 
 	var err error
 	_, stderr := testutil.CaptureOutput(t, func() {
-		_, err = pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Minute)
+		_, err = WaitForApproval(ac, "ws-uuid", false, time.Millisecond, time.Minute)
 	})
 
 	var pending *pendingWaitError
@@ -146,7 +149,7 @@ func TestPollForApproval_RidesThroughATransientFailure(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	session, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
+	session, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
 
 	require.NoError(t, err)
 	require.NotNil(t, session)
@@ -176,7 +179,7 @@ func TestPollForApproval_WarningSanitizesServerText(t *testing.T) {
 
 	var err error
 	_, stderr := testutil.CaptureOutput(t, func() {
-		_, err = pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
+		_, err = WaitForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
 	})
 
 	require.NoError(t, err)
@@ -195,7 +198,7 @@ func TestPollForApproval_FatalClientErrorEndsTheWaitAtOnce(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Minute)
+	_, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, time.Minute)
 
 	require.Error(t, err)
 	assert.Equal(t, 1, requests, "a 404 must not be retried")
@@ -211,7 +214,7 @@ func TestPollForApproval_TimeoutIsNotTerminal(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, 50*time.Millisecond)
+	_, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, 50*time.Millisecond)
 
 	require.Error(t, err)
 	// Still pending is exit 4's territory, not the settled-negative code.
@@ -241,7 +244,7 @@ func TestPollForApproval_ThrottleExtendsTheDeadline(t *testing.T) {
 	var elapsed time.Duration
 	synctest.Test(t, func(*testing.T) {
 		start := time.Now()
-		session, err = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+		session, err = WaitForApproval(ac, "ws-uuid", false, interval, timeout)
 		elapsed = time.Since(start)
 	})
 
@@ -273,7 +276,7 @@ func TestPollForApproval_SustainedThrottleDoesNotTripTheFailureCap(t *testing.T)
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	session, err := pollForApproval(ac, "ws-uuid", false, interval, timeout)
+	session, err := WaitForApproval(ac, "ws-uuid", false, interval, timeout)
 
 	require.NoError(t, err)
 	require.NotNil(t, session)
@@ -303,7 +306,7 @@ func TestPollForApproval_APendingReadDoesNotRefillTheThrottleBudget(t *testing.T
 	testutil.CaptureOutput(t, func() {
 		synctest.Test(t, func(*testing.T) {
 			start := time.Now()
-			_, err = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+			_, err = WaitForApproval(ac, "ws-uuid", false, interval, timeout)
 			elapsed = time.Since(start)
 		})
 	})
@@ -334,7 +337,7 @@ func TestPollForApproval_ThrottleWarnsOnce(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	_, stderr := testutil.CaptureOutput(t, func() {
-		_, _ = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+		_, _ = WaitForApproval(ac, "ws-uuid", false, interval, timeout)
 	})
 
 	assert.Equal(t, 1, strings.Count(stderr, "rate limited by the server"))
@@ -364,7 +367,7 @@ func TestPollForApproval_ElapsedTracksWallClockAcrossAThrottleExtension(t *testi
 
 	_, stderr := testutil.CaptureOutput(t, func() {
 		synctest.Test(t, func(*testing.T) {
-			_, _ = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+			_, _ = WaitForApproval(ac, "ws-uuid", false, interval, timeout)
 		})
 	})
 
@@ -387,7 +390,7 @@ func TestPollForApproval_WaitsFullTimeout(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	timeout := 30 * time.Millisecond
 	start := time.Now()
-	_, err := pollForApproval(ac, "ses-p", false, 10*time.Millisecond, timeout)
+	_, err := WaitForApproval(ac, "ses-p", false, 10*time.Millisecond, timeout)
 	elapsed := time.Since(start)
 
 	require.Error(t, err)
@@ -488,20 +491,20 @@ func TestResolveWaitTimeout(t *testing.T) {
 
 func TestValidateAgentScopes_AgentWithWebsh(t *testing.T) {
 	t.Parallel()
-	err := validateAgentScopes("agent", []string{"command", "websh"})
+	err := ValidateAgentScopes("agent", []string{"command", "websh"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "\"websh\" is not allowed")
 }
 
 func TestValidateAgentScopes_AgentWithoutWebsh(t *testing.T) {
 	t.Parallel()
-	err := validateAgentScopes("agent", []string{"command", "webftp"})
+	err := ValidateAgentScopes("agent", []string{"command", "webftp"})
 	assert.NoError(t, err)
 }
 
 func TestValidateAgentScopes_UserWithWebsh(t *testing.T) {
 	t.Parallel()
-	err := validateAgentScopes("user", []string{"command", "websh"})
+	err := ValidateAgentScopes("user", []string{"command", "websh"})
 	assert.NoError(t, err)
 }
 
@@ -572,18 +575,42 @@ func TestDecideUseAction(t *testing.T) {
 	}{
 		{name: "use disabled with pending status", status: "pending", useEnabled: false, want: useDecisionNoop},
 		{name: "use disabled with active status", status: "active", useEnabled: false, want: useDecisionNoop},
-		{name: "use enabled with active status (superuser or post-poll)", status: "active", useEnabled: true, want: useDecisionUseNow},
-		{name: "use enabled with pending status (needs --wait)", status: "pending", useEnabled: true, want: useDecisionErrorNeedsWait},
-		{name: "use enabled with approved status (scheduled starts_at)", status: "approved", useEnabled: true, want: useDecisionSkipScheduled},
-		{name: "use enabled with rejected status (terminal)", status: "rejected", useEnabled: true, want: useDecisionErrorNeedsWait},
-		{name: "use enabled with expired status (terminal)", status: "expired", useEnabled: true, want: useDecisionErrorNeedsWait},
-		{name: "use enabled with revoked status (terminal)", status: "revoked", useEnabled: true, want: useDecisionErrorNeedsWait},
-		{name: "use enabled with completed status (terminal)", status: "completed", useEnabled: true, want: useDecisionErrorNeedsWait},
-		{name: "use enabled with empty status (defensive)", status: "", useEnabled: true, want: useDecisionErrorNeedsWait},
+		{name: "use enabled with active status", status: "active", useEnabled: true, want: useDecisionUseNow},
+		{name: "use enabled with pending status", status: "pending", useEnabled: true, want: useDecisionNeedsApproval},
+		{name: "use enabled with approved status", status: "approved", useEnabled: true, want: useDecisionSkipScheduled},
+		{name: "use enabled with rejected status", status: "rejected", useEnabled: true, want: useDecisionSettled},
+		{name: "use enabled with expired status", status: "expired", useEnabled: true, want: useDecisionSettled},
+		{name: "use enabled with revoked status", status: "revoked", useEnabled: true, want: useDecisionSettled},
+		{name: "use enabled with cancelled status", status: "cancelled", useEnabled: true, want: useDecisionSettled},
+		{name: "use enabled with completed status", status: "completed", useEnabled: true, want: useDecisionSettled},
+		{name: "use enabled with an unknown status", status: "paused", useEnabled: true, want: useDecisionUnknownStatus},
+		{name: "use enabled with an empty status", status: "", useEnabled: true, want: useDecisionUnknownStatus},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, decideUseAction(tt.status, tt.useEnabled))
+		})
+	}
+}
+
+func TestSettledNegativelyNamesEveryEndedStatus(t *testing.T) {
+	t.Parallel()
+	for _, status := range wsapi.EndedStatuses() {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			terminal := settledNegatively(status, "ses-x")
+			require.NotNil(t, terminal)
+			assert.Equal(t, "ses-x", terminal.sessionID)
+		})
+	}
+}
+
+func TestSettledNegativelyIsNilForAStatusThatCanStillBecomeActive(t *testing.T) {
+	t.Parallel()
+	for _, status := range []string{wsapi.StatusPending, wsapi.StatusApproved, wsapi.StatusActive, "paused", ""} {
+		t.Run("status "+status, func(t *testing.T) {
+			t.Parallel()
+			assert.Nil(t, settledNegatively(status, "ses-x"))
 		})
 	}
 }
@@ -711,63 +738,71 @@ func TestWorkSessionCreateWaitJSONOutputIncludesAdjustments(t *testing.T) {
 	assert.Equal(t, "high", got.WorkSession.Recommendations[0].Severity)
 }
 
-// rejectedWaitServer answers a create whose first poll comes back rejected, so a
-// --wait run settles without a grant on its first tick.
-func rejectedWaitServer() *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/":
-			_, _ = w.Write([]byte(`{"id":"ses-x","status":"pending","approval_request_id":"apr-1","expires_at":"2026-06-01T12:00:00Z"}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/ses-x/":
-			_, _ = w.Write([]byte(`{"id":"ses-x","status":"rejected","expires_at":"2026-06-01T12:00:00Z"}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-}
-
-func rejectedWaitArgs() []string {
-	return []string{
-		"create", "--purpose", "incident", "--scope", "command", "--server", "prod",
-		"--expires-at", "2026-06-01T12:00:00Z", "--wait",
+func TestWorkSessionCreateUpdateNext(t *testing.T) {
+	const line = "  alpacon work-session update ses-x --server <server,...>  # add servers to this session; include every server to keep (--server replaces the whole list); an added server may need approval\n"
+	tests := []struct {
+		name       string
+		status     string
+		extra      []string
+		refused    bool
+		outputJSON bool
+	}{
+		{name: "active", status: wsapi.StatusActive},
+		{name: "approved", status: wsapi.StatusApproved},
+		{name: "active with use", status: wsapi.StatusActive, extra: []string{"--use"}},
+		{name: "scheduled with use", status: wsapi.StatusApproved, extra: []string{"--use"}},
+		{name: "wait approved", status: wsapi.StatusApproved, extra: []string{"--wait"}},
+		{name: "wait and use", status: wsapi.StatusActive, extra: []string{"--wait", "--use"}},
+		{name: "refused create", refused: true},
+		{name: "success JSON keeps its schema", status: wsapi.StatusActive, outputJSON: true},
 	}
-}
-
-func TestWorkSessionCreateWaitRejectedNamesTheSessionOnStderr(t *testing.T) {
-	ts := rejectedWaitServer()
-	defer ts.Close()
-
-	_, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, rejectedWaitArgs()...)
-
-	assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "a refused wait is settled, not pending; stderr: %s", stderr)
-	assert.Contains(t, stderr, "ses-x")
-	assert.Contains(t, stderr, "alpacon work-session describe ses-x")
-	assert.Contains(t, stderr, "alpacon work-session complete ses-x")
-	assert.NotContains(t, stderr, "work-session use", "see TestRunUseSessionRefusesASettledSession")
-	assert.NotContains(t, stderr, "report on https://github.com", "a reviewer saying no is not a bug to file")
-}
-
-func TestWorkSessionCreateWaitRejectedJSONCarriesTheSessionID(t *testing.T) {
-	ts := rejectedWaitServer()
-	defer ts.Close()
-
-	_, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, rejectedWaitArgs()...)
-
-	assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
-	assert.JSONEq(t, `{
-		"ok": false,
-		"exit_code": 6,
-		"error_code": "not_approved",
-		"message": "work session was rejected (work session ses-x)",
-		"context": {"operation": "create", "work_session_id": "ses-x"},
-		"next_actions": [
-			{"command": "alpacon work-session describe ses-x", "description": "why it settled"},
-			{"command": "alpacon work-session complete ses-x"}
-		]
-	}`, stderr)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.URL.Path == "/api/servers/servers/":
+					_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+				case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/":
+					if tt.refused {
+						w.WriteHeader(http.StatusForbidden)
+						_, _ = w.Write([]byte(`{"code":"permission_denied"}`))
+						return
+					}
+					status := tt.status
+					if slices.Contains(tt.extra, "--wait") {
+						status = wsapi.StatusPending
+					}
+					_, _ = fmt.Fprintf(w, `{"id":"ses-x","status":%q}`, status)
+				case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/ses-x/":
+					_, _ = fmt.Fprintf(w, `{"id":"ses-x","status":%q}`, tt.status)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(ts.Close)
+			format := utils.OutputFormatTable
+			if tt.outputJSON {
+				format = utils.OutputFormatJSON
+			}
+			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), format, ts.URL, createArgs(tt.extra...)...)
+			if tt.refused {
+				assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
+				assert.NotContains(t, stdout+stderr, "work-session update")
+				return
+			}
+			require.Zero(t, exitCode, "stderr: %s", stderr)
+			if tt.outputJSON {
+				var output map[string]any
+				require.NoError(t, json.Unmarshal([]byte(stdout), &output))
+				assert.NotContains(t, output, "next_actions")
+				assert.Empty(t, stderr)
+				return
+			}
+			assert.Contains(t, stderr, "Next:\n"+line)
+			assert.Equal(t, 1, strings.Count(stderr, line))
+		})
+	}
 }
 
 // An agent runs the refusal's follow-ups, so each must be a command the session can still take.
@@ -803,8 +838,7 @@ func TestPrintTerminalWaitErrorSanitizesTheSessionID(t *testing.T) {
 
 func TestPollForApproval_EveryEndedStatusHasACase(t *testing.T) {
 	t.Parallel()
-	// If the switch has no case for a status that IsEndedStatus accepts, the wait
-	// falls through to polling until the timeout instead of ending.
+	// A status IsEndedStatus accepts must end the wait, not poll until the timeout.
 	for _, status := range wsapi.EndedStatuses() {
 		t.Run(status, func(t *testing.T) {
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -814,7 +848,7 @@ func TestPollForApproval_EveryEndedStatusHasACase(t *testing.T) {
 			defer ts.Close()
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, 50*time.Millisecond)
+			_, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, 50*time.Millisecond)
 
 			var terminal *terminalWaitError
 			assert.ErrorAs(t, err, &terminal, "no case for ended status %q in the create --wait switch", status)
@@ -833,7 +867,7 @@ func TestPollForApproval_TimeoutOnARefusalKeepsTheHint(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, 30*time.Millisecond)
+	_, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, 30*time.Millisecond)
 
 	require.Error(t, err)
 	var pending *pendingWaitError
@@ -855,7 +889,200 @@ func TestPollForApproval_PlainTimeoutCarriesNoHint(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, 30*time.Millisecond)
+	_, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, 30*time.Millisecond)
 	require.Error(t, err)
 	assert.Empty(t, utils.RefusalNextActions(err))
+}
+
+func TestWorkSessionCreateUseWithoutAUsableLoginExitsOne(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		config      string
+		wantCode    string
+		wantMessage string
+		noBugFooter bool
+	}{
+		{name: "no config file", wantCode: utils.ErrorCodeNotLoggedIn, wantMessage: "Please run 'alpacon login'"},
+		{name: "config without a workspace", config: `{"workspace_url":"http://127.0.0.1:1","token":"t"}`, wantCode: utils.ErrorCodeNotLoggedIn, wantMessage: "--use requires an active workspace. Run 'alpacon login' first.", noBugFooter: true},
+		{name: "unreadable config", config: "{not json", wantCode: utils.ErrorCodeCLI, wantMessage: "failed to decode config file"},
+	}
+	for _, tt := range tests {
+		for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+			t.Run(tt.name+" "+outputFormat, func(t *testing.T) {
+				t.Parallel()
+				home := t.TempDir()
+				if tt.config != "" {
+					require.NoError(t, os.Mkdir(filepath.Join(home, ".alpacon"), 0o700))
+					require.NoError(t, os.WriteFile(filepath.Join(home, ".alpacon", "config.json"), []byte(tt.config), 0o600))
+				}
+
+				stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, append(agentHelperEnv(), "HOME="+home), outputFormat,
+					"http://127.0.0.1:1", createArgs("--use")...)
+
+				assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
+				assert.Empty(t, stdout)
+				if outputFormat == utils.OutputFormatTable {
+					assert.Contains(t, stderr, tt.wantMessage)
+					if tt.noBugFooter {
+						assert.NotContains(t, stderr, "For issues, check the latest version")
+					}
+					return
+				}
+				var got errorEnvelope
+				require.NoError(t, json.Unmarshal([]byte(stderr), &got), "stderr: %s", stderr)
+				assert.Equal(t, utils.ExitCodeGeneralError, got.ExitCode)
+				assert.Equal(t, tt.wantCode, got.ErrorCode)
+				assert.Equal(t, opCreate, got.Context.Operation)
+				assert.Contains(t, got.Message, tt.wantMessage)
+			})
+		}
+	}
+}
+
+func TestWorkSessionCreateUseReportsABadScopeBeforeAMissingLogin(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, append(agentHelperEnv(), "HOME="+t.TempDir()), utils.OutputFormatJSON,
+		"http://127.0.0.1:1", createArgs("--use", "--scope", "bogus")...)
+
+	assert.Equal(t, utils.ExitCodeUsageError, exitCode, "stderr: %s", stderr)
+	assert.Empty(t, stdout)
+	var got errorEnvelope
+	require.NoError(t, json.Unmarshal([]byte(stderr), &got), "stderr: %s", stderr)
+	assert.Equal(t, utils.ErrorCodeUsage, got.ErrorCode)
+	assert.Contains(t, got.Message, "Invalid --scope: bogus")
+}
+
+func TestWorkSessionCreateUseOnAPendingSessionReportsPendingApproval(t *testing.T) {
+	t.Parallel()
+	for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+		t.Run(outputFormat, func(t *testing.T) {
+			t.Parallel()
+			ts := newCreateServerAnswering(t, "pending", "pending")
+
+			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), outputFormat, ts.URL,
+				createArgs("--use")...)
+
+			require.Equal(t, utils.ExitCodePendingApproval, exitCode, "stdout: %s\nstderr: %s", stdout, stderr)
+			if outputFormat == utils.OutputFormatTable {
+				assert.Empty(t, stdout)
+				assert.Contains(t, stderr, "--use requires the session to be active, and work session ses-x is pending. A human must approve it in the Alpacon console (web).")
+				assert.Contains(t, stderr, "alpacon work-session use ses-x")
+				assert.Contains(t, stderr, "alpacon work-session update ses-x --server <server,...>")
+				assert.Equal(t, 1, strings.Count(stderr, "--wait-approval"), "stderr: %s", stderr)
+				return
+			}
+			var envelope struct {
+				Status    string `json:"status"`
+				ExitCode  int    `json:"exit_code"`
+				Message   string `json:"message"`
+				RequestID string `json:"request_id"`
+				Context   struct {
+					RequestID string `json:"request_id"`
+				} `json:"context"`
+				NextActions []utils.NextAction `json:"next_actions"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(stdout), &envelope), "stdout: %s", stdout)
+			assert.Empty(t, stderr)
+			assert.Equal(t, utils.PendingApprovalStatus, envelope.Status)
+			assert.Equal(t, utils.ExitCodePendingApproval, envelope.ExitCode)
+			assert.Equal(t, "apr-1", envelope.RequestID)
+			assert.Equal(t, "apr-1", envelope.Context.RequestID)
+			assert.Equal(t, "--use requires the session to be active, and work session ses-x is pending. A human must approve it in the Alpacon console (web).", envelope.Message)
+			commands := make([]string, 0, len(envelope.NextActions))
+			for _, action := range envelope.NextActions {
+				commands = append(commands, action.Command)
+			}
+			assert.Equal(t, []string{"alpacon work-session use ses-x", "", "alpacon work-session update ses-x --server <server,...>"}, commands)
+		})
+	}
+}
+
+// The session outlives a refusal, so every path that reports one names the session and only the
+// follow-ups it can still take: not 'work-session use' (see TestRunUseSessionRefusesASettledSession).
+func TestWorkSessionCreateSettledRefusalNamesTheSession(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		createStatus string
+		pollStatus   string
+		args         []string
+	}{
+		{name: "wait on a pending create", createStatus: "pending", pollStatus: "rejected", args: createArgs("--wait")},
+		{name: "use on a rejected create", createStatus: "rejected", pollStatus: "rejected", args: createArgs("--use")},
+		{name: "wait and use on a rejected create", createStatus: "rejected", pollStatus: "rejected", args: createArgs("--wait", "--use")},
+	}
+	for _, tt := range tests {
+		for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+			t.Run(tt.name+" "+outputFormat, func(t *testing.T) {
+				t.Parallel()
+				ts := newCreateServerAnswering(t, tt.createStatus, tt.pollStatus)
+
+				stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), outputFormat, ts.URL, tt.args...)
+
+				assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "a refusal is settled, not pending; stderr: %s", stderr)
+				assert.Empty(t, stdout)
+				if outputFormat == utils.OutputFormatJSON {
+					assert.JSONEq(t, `{
+						"ok": false,
+						"exit_code": 6,
+						"error_code": "not_approved",
+						"message": "work session was rejected (work session ses-x)",
+						"context": {"operation": "create", "work_session_id": "ses-x"},
+						"next_actions": [
+							{"command": "alpacon work-session describe ses-x", "description": "why it settled"},
+							{"command": "alpacon work-session complete ses-x"}
+						]
+					}`, stderr)
+					return
+				}
+				assert.Contains(t, stderr, "work session was rejected (work session ses-x)")
+				assert.Contains(t, stderr, "alpacon work-session describe ses-x")
+				assert.Contains(t, stderr, "alpacon work-session complete ses-x")
+				assert.NotContains(t, stderr, "work-session use")
+				assert.NotContains(t, stderr, "work-session update")
+				assert.NotContains(t, stderr, "report on https://github.com", "a reviewer saying no is not a bug to file")
+			})
+		}
+	}
+}
+
+func TestWorkSessionCreateWithoutUseReportsASettledSessionAsCreated(t *testing.T) {
+	t.Parallel()
+	ts := newCreateServerAnswering(t, "rejected", "rejected")
+
+	stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), utils.OutputFormatTable, ts.URL, createArgs()...)
+
+	assert.Equal(t, 0, exitCode, "stdout: %s\nstderr: %s", stdout, stderr)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "Work session created: ses-x (status: rejected")
+	assert.NotContains(t, stderr, "work session was rejected")
+}
+
+func TestWorkSessionCreateUseOnAnUnknownStatusExitsGeneralError(t *testing.T) {
+	t.Parallel()
+	for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+		t.Run(outputFormat, func(t *testing.T) {
+			t.Parallel()
+			ts := newCreateServerAnswering(t, "paused", "paused")
+
+			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), outputFormat, ts.URL,
+				createArgs("--use")...)
+
+			require.Equal(t, utils.ExitCodeGeneralError, exitCode, "stdout: %s\nstderr: %s", stdout, stderr)
+			assert.Empty(t, stdout)
+			const message = "--use requires the session to be active, but work session ses-x is paused."
+			if outputFormat == utils.OutputFormatTable {
+				assert.Contains(t, stderr, message)
+				return
+			}
+			var got errorEnvelope
+			require.NoError(t, json.Unmarshal([]byte(stderr), &got), "stderr: %s", stderr)
+			assert.Equal(t, utils.ExitCodeGeneralError, got.ExitCode)
+			assert.Equal(t, utils.ErrorCodeCLI, got.ErrorCode)
+			assert.Equal(t, opCreate, got.Context.Operation)
+			assert.Equal(t, message, got.Message)
+		})
+	}
 }

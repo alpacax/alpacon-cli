@@ -169,7 +169,7 @@ func ReconnectToSession(ac *client.AlpaconClient, sessionID string) (SessionResp
 // resizes the remote PTY on every update, so this also redraws a shell that spent
 // a reconnect talking to nobody, even when the size itself has not changed.
 func SendTerminalSize(ac *client.AlpaconClient, sessionID string) error {
-	pathID, err := api.RequireID(sessionID, "Websh session")
+	pathID, err := api.RequireResponseID(sessionID, "Websh session")
 	if err != nil {
 		return err
 	}
@@ -347,7 +347,7 @@ func (wsClient *WebsocketClient) dial(websocketURL string) error {
 }
 
 func newConnection(ws *websocket.Conn) *connection {
-	return &connection{ws: ws, ended: make(chan struct{}), replay: &replayState{}}
+	return &connection{ws: ws, ended: make(chan struct{}), replay: &replayState{}, zone: time.Local}
 }
 
 // finish keeps the first ending. err is written before ended closes, so anyone
@@ -740,7 +740,7 @@ func (c *connection) readFromServer() {
 				if notice == nil {
 					notice = os.Stderr
 				}
-				_, _ = fmt.Fprintf(notice, "[Idle: this session disconnects at %s without input.]\r\n", closesAt.Local().Format("15:04:05"))
+				_, _ = fmt.Fprintf(notice, "[Idle: this session disconnects at %s without input.]\r\n", closesAt.In(c.zone).Format("15:04:05"))
 				continue
 			}
 			if legacy || origin.Type != "replay_origin" || origin.Epoch == "" {

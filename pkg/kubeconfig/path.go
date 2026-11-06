@@ -80,6 +80,29 @@ func Shadowed(path string) bool {
 	return false
 }
 
+// UniqueFiles drops every path that names a file an earlier one already names,
+// through another spelling or a symbolic link, keeping the order. Opening one
+// file twice would find the lock the first open took.
+func UniqueFiles(paths []string) []string {
+	seen := map[string]bool{}
+	var files []string
+	for _, path := range paths {
+		key, err := filepath.Abs(path)
+		if err != nil {
+			key = filepath.Clean(path)
+		}
+		if resolved, err := filepath.EvalSymlinks(key); err == nil {
+			key = resolved
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		files = append(files, path)
+	}
+	return files
+}
+
 // samePath compares two spellings of a path, relative ones included.
 func samePath(a, b string) bool {
 	absA, errA := filepath.Abs(a)

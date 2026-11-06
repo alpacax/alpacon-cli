@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/kubeconfig"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -255,7 +256,7 @@ func TestOpenKubeConfigLookupFailureOpensNoSession(t *testing.T) {
 
 	var lookupErr *clusterLookupError
 	require.ErrorAs(t, err, &lookupErr)
-	assert.True(t, isSurfaceOff(lookupErr.err), "a 404 on the cluster list reads as the surface off: %v", err)
+	assert.True(t, kubernetes.IsSurfaceOff(lookupErr.err), "a 404 on the cluster list reads as the surface off: %v", err)
 	assert.Zero(t, srv.creates())
 	assert.NoFileExists(t, path)
 }
@@ -378,7 +379,6 @@ func TestKubeSessionErrorHint(t *testing.T) {
 		code     string
 		expected string
 	}{
-		{name: "agent work session", code: utils.KubeSessionAgentModeNotSupported, expected: "requested by an AI agent"},
 		{name: "cluster not connected", code: utils.ClusterNotConnected, expected: "'alpacon kube describe prod-east'"},
 		{name: "channel open failed", code: utils.KubeSessionChannelOpenFailed, expected: "try again"},
 		{name: "no user name", code: utils.KubeSessionPrincipalNotSupported, expected: "log in as a user"},
@@ -417,11 +417,11 @@ func (e hintedKubeError) ErrorHint() string   { return e.hint }
 
 func TestKubeSessionErrorHint_DefersToTheServerHint(t *testing.T) {
 	t.Parallel()
-	hinted := hintedKubeError{code: utils.KubeSessionAgentModeNotSupported, hint: "Open the kube session from a work session you created."}
+	hinted := hintedKubeError{code: utils.ClusterNotConnected, hint: "Start the cluster's agent and try again."}
 	assert.Empty(t, kubeSessionErrorHint(hinted, "prod-east"))
 
-	plain := hintedKubeError{code: utils.KubeSessionAgentModeNotSupported}
-	assert.Contains(t, kubeSessionErrorHint(plain, "prod-east"), "requested by an AI agent")
+	plain := hintedKubeError{code: utils.ClusterNotConnected}
+	assert.Contains(t, kubeSessionErrorHint(plain, "prod-east"), "is not connected")
 }
 
 func TestCheckProxyURL(t *testing.T) {

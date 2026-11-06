@@ -245,12 +245,10 @@ func TestUpdateCommandHelperProcess(t *testing.T) {
 
 	args, ok := helperArgsAfter(os.Args, "update-helper")
 	if !ok {
-		os.Exit(2)
+		os.Exit(99)
 	}
-	RootCmd.SetArgs(args)
-	if err := RootCmd.Execute(); err != nil {
-		os.Exit(1)
-	}
+	os.Args = append([]string{"alpacon"}, args...)
+	Execute()
 	os.Exit(0)
 }
 

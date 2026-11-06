@@ -35,6 +35,7 @@ type CommandDetail struct {
 	CommandID     string `json:"command_id"`
 	Line          string `json:"line"`
 	ServerName    string `json:"server_name"`
+	RunAs         string `json:"runas"`
 	RiskLevel     string `json:"risk_level"`
 	RunsWithSudo  bool   `json:"runs_with_sudo"`
 	Purpose       string `json:"purpose"`
@@ -51,11 +52,14 @@ type RiskFactor struct {
 	Detail string `json:"detail"`
 }
 
-// SudoDetail is the sudo approval's detail payload. Tier2Reasoning and
-// DescriptionAligned reach deciders only; a null DescriptionAligned is no judgment.
+// SudoDetail is the sudo approval's detail payload. Purpose is that of the
+// command that started the sudo, null for a sudo typed in Websh. Tier2Reasoning
+// and DescriptionAligned reach deciders only; a null DescriptionAligned is no
+// judgment.
 type SudoDetail struct {
 	Command            string `json:"command"`
 	RunAs              string `json:"runas"`
+	Purpose            string `json:"purpose"`
 	ServerName         string `json:"server_name"`
 	RiskLevel          string `json:"risk_level"`
 	GrantStatus        string `json:"grant_status"`

@@ -20,8 +20,8 @@ var workSessionDescribeCmd = &cobra.Command{
 	Aliases: []string{"desc"},
 	Short:   "Show details of a work session",
 	Args:    cobra.ExactArgs(1),
-	Example: `  alpacon work-session describe ses-abc123
-  alpacon work-session desc ses-abc123`,
+	Example: `  alpacon work-session describe 550e8400-e29b-41d4-a716-446655440000
+  alpacon work-session desc 550e8400-e29b-41d4-a716-446655440000`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
@@ -40,11 +40,6 @@ var workSessionDescribeCmd = &cobra.Command{
 		session, err := wsapi.GetWorkSession(ac, args[0])
 		if err != nil {
 			utils.CliErrorEnvelopeWithExit(opDescribe, err, "Failed to retrieve work session: %s.", err)
-		}
-
-		serverNames := make([]string, len(session.Servers))
-		for i, s := range session.Servers {
-			serverNames[i] = s.Name
 		}
 
 		createdBy := ""
@@ -70,10 +65,11 @@ var workSessionDescribeCmd = &cobra.Command{
 			{"Status", session.Status},
 			{"Requester type", session.RequesterType},
 			{"Scopes", strings.Join(session.Scopes, ", ")},
-			{"Servers", strings.Join(serverNames, ", ")},
+			{"Servers", strings.Join(wsapi.ServerNames(session), ", ")},
+			{"Clusters", strings.Join(wsapi.ClusterNames(session), ", ")},
 			{"Created by", createdBy},
 			{"Assigned user", assignedUser},
-			{"Expires at", session.ExpiresAt.Local().Format("2006-01-02 15:04")},
+			{"Expires at", wsapi.FormatExpiresAt(session.ExpiresAt)},
 			{"Started at", startedAt},
 			{"Completed at", completedAt},
 			{"Added at", session.AddedAt.Local().Format("2006-01-02 15:04")},

@@ -41,13 +41,14 @@ attempt to argue the verdict down is reported in its own right and denied.
 Prefer stating it up front with 'alpacon exec --purpose': the assessor then
 judges on the first pass and no demand is issued at all.
 
-Exit code 2 means the JOB_ID is not a UUID or the PURPOSE is blank or too long.
+Exit code 2 means the argument count is wrong, the JOB_ID is not a UUID, or
+the PURPOSE is blank or too long.
 Exit code 1 covers every refusal from the server. A settled command and an answer
 from the wrong principal share one server error, so this cannot report which
 happened; read the command's state with 'alpacon exec logs JOB_ID' rather than
 re-submitting it.`,
 	Example: `  # Answer a demand reported by 'alpacon exec' (exit code 7)
-  alpacon exec purpose a1b2c3d4-5678-abcd-ef01-234567890abc \
+  alpacon exec purpose 550e8400-e29b-41d4-a716-446655440000 \
     'The host clock is 40s ahead, so the renewed cert reads as not-yet-valid.'
 
   # State it up front instead, and skip the demand entirely
@@ -58,7 +59,7 @@ re-submitting it.`,
 		jobID, purpose := args[0], args[1]
 
 		if !utils.IsUUID(jobID) {
-			utils.CliUsageErrorWithExit("invalid JOB_ID %q: must be a UUID (e.g. a1b2c3d4-5678-abcd-ef01-234567890abc)", jobID)
+			utils.CliUsageErrorWithExit("invalid JOB_ID %q: must be a UUID (e.g. 550e8400-e29b-41d4-a716-446655440000)", jobID)
 			return
 		}
 		// Same ceiling and wording as --purpose, counted the same way.

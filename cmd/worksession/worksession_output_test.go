@@ -485,6 +485,7 @@ func resetCreateCommandState(t *testing.T) {
 	purpose = ""
 	createScopes = nil
 	createServers = nil
+	createCluster = ""
 	expiresIn = ""
 	expiresAt = ""
 	requesterType = "user"
@@ -497,6 +498,7 @@ func resetCreateCommandState(t *testing.T) {
 		purpose = ""
 		createScopes = nil
 		createServers = nil
+		createCluster = ""
 		expiresIn = ""
 		expiresAt = ""
 		requesterType = "user"

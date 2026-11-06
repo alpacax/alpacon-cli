@@ -768,14 +768,13 @@ func TestOpenReadOnlyTerminal_LeavesNoGoroutineWhenSetupFails(t *testing.T) {
 	// SetWebsocketHeader sends an Origin, which the default CheckOrigin rejects
 	// as cross-origin against the httptest host.
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := testutil.NewWebSocketServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if !assert.NoError(t, err) {
 			return
 		}
 		_ = conn.Close() // the handler must not outlive the assertion below
 	}))
-	t.Cleanup(ts.Close)
 
 	pipeStdin(t) // a pipe is not a tty, so raw mode fails after the dial succeeds
 
@@ -837,7 +836,7 @@ func dialTestServer(t *testing.T, send ...string) (*websocket.Conn, <-chan strin
 
 	received := make(chan string, receivedBufferSize)
 	upgrader := websocket.Upgrader{}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := testutil.NewWebSocketServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if !assert.NoError(t, err) {
 			return
@@ -862,7 +861,6 @@ func dialTestServer(t *testing.T, send ...string) (*websocket.Conn, <-chan strin
 			}
 		}
 	}))
-	t.Cleanup(ts.Close)
 
 	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http"), nil)
 	require.NoError(t, err)
@@ -1105,8 +1103,7 @@ func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	})
 
-	ts := httptest.NewServer(mux)
-	t.Cleanup(ts.Close)
+	ts := testutil.NewWebSocketServer(t, mux)
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, UserAgent: "alpacon-cli/test"}
 	wsClient := newWebsocketClient(ac.SetWebsocketHeaderWithCapabilities(client.CapabilityWebsocketReconnect, client.CapabilityIdleWarning))
@@ -1166,7 +1163,7 @@ func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
 func TestServeConnections_IdleDetachDoesNotReconnect(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	var dials atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := testutil.NewWebSocketServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		dials.Add(1)
 		ws, err := upgrader.Upgrade(w, r, nil)
 		if !assert.NoError(t, err) {
@@ -1176,7 +1173,6 @@ func TestServeConnections_IdleDetachDoesNotReconnect(t *testing.T) {
 		assert.NoError(t, ws.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(sessionEndCloseCode, "idle_detached")))
 	}))
-	t.Cleanup(ts.Close)
 
 	wsClient := newWebsocketClient(nil)
 	var attempts int
@@ -1322,7 +1318,7 @@ func TestOpenTerminal_AdvertisesIdleWarningAndReconnectCapabilities(t *testing.T
 		t.Run(tt.name, func(t *testing.T) {
 			dialHeaders := make(chan http.Header, receivedBufferSize)
 			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ts := testutil.NewWebSocketServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				select {
 				case dialHeaders <- r.Header.Clone():
 				default:
@@ -1333,7 +1329,6 @@ func TestOpenTerminal_AdvertisesIdleWarningAndReconnectCapabilities(t *testing.T
 				}
 				_ = ws.Close() // the handler must not outlive the assertions below
 			}))
-			t.Cleanup(ts.Close)
 
 			pipeStdin(t) // a pipe is not a tty, so raw mode fails after the dial succeeds
 
@@ -1382,7 +1377,6 @@ func TestWebshSessionCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) 
 		{"InviteToSession", func(ac *client.AlpaconClient) error {
 			return InviteToSession(ac, traversal, []string{"alice@example.com"}, false)
 		}},
-		{"SendTerminalSize", func(ac *client.AlpaconClient) error { return SendTerminalSize(ac, traversal) }},
 		{"JoinWebshSession_traversing_channel", func(ac *client.AlpaconClient) error {
 			_, err := JoinWebshSession(ac, "https://example.com/join?channel=%2E%2E%2F%2E%2E%2Fetc%2Ftest", "pw")
 			return err
@@ -1400,6 +1394,17 @@ func TestWebshSessionCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) 
 			require.ErrorIs(t, err, utils.ErrInvalidID)
 		})
 	}
+}
+
+func TestSendTerminalSizeRefusesAnUnusableSessionIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	ts := testutil.NewNoRequestServer(t)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	err := SendTerminalSize(ac, "../../etc/test")
+
+	require.ErrorIs(t, err, api.ErrUnusableID)
+	assert.False(t, utils.IsUsageError(err), "err: %v", err)
 }
 
 func TestShareCreatedSession_RefusesASessionIDThatIsNotOneSegment(t *testing.T) {
@@ -1599,7 +1604,7 @@ func runReplaySession(t *testing.T, rounds ...replayRound) ([]url.Values, string
 	var upgrades atomic.Int32
 	requests := make(chan url.Values, len(rounds)+1)
 	upgrader := websocket.Upgrader{}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := testutil.NewWebSocketServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		requests <- query
 		index := int(upgrades.Add(1)) - 1
@@ -1655,7 +1660,6 @@ func runReplaySession(t *testing.T, rounds ...replayRound) ([]url.Values, string
 		}
 		_ = ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(code, ""))
 	}))
-	t.Cleanup(ts.Close)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "?token=keep&replay=1&replay_from=999"
 	wsClient := newWebsocketClient(nil)
@@ -1697,14 +1701,13 @@ func TestReplay_OnlyReconnectingEntryPointOptsIn(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			queries := make(chan url.Values, 1)
 			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ts := testutil.NewWebSocketServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				queries <- r.URL.Query()
 				ws, err := upgrader.Upgrade(w, r, nil)
 				if assert.NoError(t, err) {
 					_ = ws.Close()
 				}
 			}))
-			t.Cleanup(ts.Close)
 			pipeStdin(t)
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 			err := tt.open(ac, SessionResponse{ID: "sess-1", WebsocketURL: "ws" + strings.TrimPrefix(ts.URL, "http")})

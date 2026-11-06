@@ -150,7 +150,7 @@ func TestRunUse_FilesUnderClientWorkspaceWhenConfigSwitchedMidCommand(t *testing
 
 	before, err := config.LoadConfig()
 	require.NoError(t, err)
-	require.NoError(t, config.SwitchWorkspace(before, "https://ws-b.example.com", "ws-b", false))
+	require.NoError(t, config.SwitchWorkspace(before, "https://ws-b.example.com", "ws-b", false, nil))
 
 	_, err = RunUse(ac, "ses-a")
 	require.NoError(t, err)
@@ -159,4 +159,30 @@ func TestRunUse_FilesUnderClientWorkspaceWhenConfigSwitchedMidCommand(t *testing
 	require.NoError(t, err)
 	assert.Equal(t, "ses-a", cfg.ActiveWorkSessions["ws-a"])
 	assert.NotContains(t, cfg.ActiveWorkSessions, "ws-b")
+}
+
+func TestRunUse_RejectsClusterSession(t *testing.T) {
+	setupTmpConfig(t)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/api/work-sessions/sessions/ses-kube/") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":             "ses-kube",
+			"status":         "active",
+			"requester_type": "user",
+			"scopes":         []string{"kube"},
+			"clusters":       []map[string]string{{"id": "c-1", "name": "prod-east"}},
+		})
+	}))
+	defer ts.Close()
+
+	_, err := RunUse(newTestClient(ts), "ses-kube")
+
+	require.ErrorIs(t, err, ErrClusterSessionNotAttachable)
+	assert.Contains(t, err.Error(), "alpacon kube login prod-east --work-session ses-kube")
+	got, _ := config.GetActiveWorkSession()
+	assert.Empty(t, got, "config must not be updated for a cluster session")
 }

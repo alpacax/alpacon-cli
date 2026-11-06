@@ -46,6 +46,7 @@ type connection struct {
 	reconnected  bool
 	notice       io.Writer
 	idleWarnings map[time.Time]struct{}
+	zone         *time.Location // where idle-warning deadlines are shown
 }
 
 // reconnector is what an interactive session needs to survive a dropped

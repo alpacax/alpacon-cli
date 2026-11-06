@@ -48,7 +48,7 @@ func switchConfigToWorkspace(t *testing.T, name, session string) {
 	t.Helper()
 	before, err := config.LoadConfig()
 	require.NoError(t, err)
-	require.NoError(t, config.SwitchWorkspace(before, "https://"+name+".example.com", name, false))
+	require.NoError(t, config.SwitchWorkspace(before, "https://"+name+".example.com", name, false, nil))
 	require.NoError(t, config.SetActiveWorkSession(session))
 }
 

@@ -169,7 +169,7 @@ func TestGetOrCreateDeviceID_SurvivesConfigWrites(t *testing.T) {
 	}{
 		{"workspace switch", func(t *testing.T) {
 			t.Helper()
-			require.NoError(t, SwitchWorkspace(loadedConfig(t), "https://ws2.us1.alpacon.io", "ws2", false))
+			require.NoError(t, SwitchWorkspace(loadedConfig(t), "https://ws2.us1.alpacon.io", "ws2", false, nil))
 		}},
 		{"access token refresh", func(t *testing.T) {
 			t.Helper()

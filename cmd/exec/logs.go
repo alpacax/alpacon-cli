@@ -19,13 +19,13 @@ var logsCmd = &cobra.Command{
 
 If the command is still running, prints the current status and exits.
 Run the command again later to check for completion.`,
-	Example: `  alpacon exec logs a1b2c3d4-5678-abcd-ef01-234567890abc`,
+	Example: `  alpacon exec logs 550e8400-e29b-41d4-a716-446655440000`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		jobID := args[0]
 
 		if !utils.IsUUID(jobID) {
-			utils.CliUsageErrorWithExit("invalid JOB_ID %q: must be a UUID (e.g. a1b2c3d4-5678-abcd-ef01-234567890abc)", jobID)
+			utils.CliUsageErrorWithExit("invalid JOB_ID %q: must be a UUID (e.g. 550e8400-e29b-41d4-a716-446655440000)", jobID)
 			return
 		}
 
@@ -74,20 +74,18 @@ Run the command again later to check for completion.`,
 			os.Exit(utils.ExitCodePendingApproval)
 		}
 
-		// Exit 6 through the envelope, as exec and work-session create do: retrying only files
-		// another approval request.
-		if event.IsRejectedStatus(details.Status) {
-			rejected := &event.CommandRejectedError{CommandID: details.ID, Cause: details.RejectionCause}
+		// Exit 6 through the envelope, as exec does: a retry is refused again or
+		// files another approval request.
+		if details.IsRejected() {
+			rejected := details.Rejection()
 			// A script-body refusal has file-execution guidance of its own.
 			if rejected.Cause == event.RejectionCauseUseFileExecution {
 				accountFlags, accountNote := logsAccountFlags(details)
 				reportUseFileExecution(rejected, details.Server.Name, accountFlags, false, accountNote)
 				return
 			}
-			// The caller already supplied the job ID, so keep the outcome line focused on the refusal.
-			rejected.CommandID = ""
-			utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, "command", rejected,
-				"%s (status: %s)", rejected, details.Status)
+			rejected.CommandID = "" // the caller already named the job
+			reportCommandRejection(rejected, rejected)
 			return
 		}
 

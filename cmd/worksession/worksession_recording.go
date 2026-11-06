@@ -21,11 +21,12 @@ var workSessionRecordingCmd = &cobra.Command{
 	Long: `Show the recording of one Websh terminal in a work session.
 
 --index counts the session's terminals in timeline order, starting at 1. Only the
-chosen terminal's recording is downloaded. Tunnels are not terminals and are not counted.`,
+chosen terminal's recording is downloaded. Tunnels are not terminals and are not counted.
+The [N] beside each terminal in 'alpacon work-session timeline' is its --index.`,
 	Args: cobra.ExactArgs(1),
-	Example: `  alpacon work-session recording ses-abc123
-  alpacon work-session recording ses-abc123 --index 2
-  alpacon work-session rec ses-abc123`,
+	Example: `  alpacon work-session recording 550e8400-e29b-41d4-a716-446655440000
+  alpacon work-session recording 550e8400-e29b-41d4-a716-446655440000 --index 2
+  alpacon work-session rec 550e8400-e29b-41d4-a716-446655440000`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
@@ -58,8 +59,7 @@ chosen terminal's recording is downloaded. Tunnels are not terminals and are not
 			utils.CliErrorEnvelopeWithExit(opRecording, nil, "Terminal %d of %d in session %s has no recording; try another --index.", terminalIndex, len(terminals), sessionID)
 		}
 
-		target := &wsapi.TimelineItem{Type: "websh_record", Timestamp: &addedAt}
-		printRecordingHeader(os.Stdout, target, terminalIndex, len(terminals))
+		printRecordingHeader(os.Stdout, addedAt, terminalIndex, len(terminals))
 		printRecordingContent(os.Stdout, record)
 	},
 }
@@ -68,11 +68,11 @@ func init() {
 	workSessionRecordingCmd.Flags().IntVar(&terminalIndex, "index", 1, "Terminal to display (1-based, in timeline order)")
 }
 
-func printRecordingHeader(w io.Writer, target *wsapi.TimelineItem, idx, total int) {
+func printRecordingHeader(w io.Writer, addedAt string, idx, total int) {
 	header := fmt.Sprintf("Terminal %d/%d", idx, total)
 	// formatTimestamp hands back the server's string whenever it fails to parse, so
 	// this line is a sink for whatever was stored.
-	if ts := utils.SanitizeTerminalText(resolveTimestamp(target.Timestamp)); ts != "" {
+	if ts := utils.SanitizeTerminalText(formatTimestamp(addedAt)); ts != "" {
 		header += " — " + ts
 	}
 	_, _ = fmt.Fprintln(w, header)

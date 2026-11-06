@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -191,20 +192,22 @@ func TestWorkSessionCreate_BlankAccountRefused(t *testing.T) {
 	}
 }
 
-// newPendingCreateServer answers a work-session create with a session that
-// stays pending, on the create and on every poll.
-func newPendingCreateServer(t *testing.T) *httptest.Server {
+// newCreateServerAnswering answers a work-session create with a session in
+// createStatus and every poll of it with pollStatus.
+func newCreateServerAnswering(t *testing.T, createStatus, pollStatus string) *httptest.Server {
 	t.Helper()
-	const pending = `{"id":"ses-x","status":"pending","approval_request_id":"apr-1","expires_at":"2026-06-01T12:00:00Z"}`
+	session := func(status string) []byte {
+		return []byte(`{"id":"ses-x","status":"` + status + `","approval_request_id":"apr-1","expires_at":"2026-06-01T12:00:00Z"}`)
+	}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/":
-			_, _ = w.Write([]byte(pending))
+			_, _ = w.Write(session(createStatus))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/ses-x/":
-			_, _ = w.Write([]byte(pending))
+			_, _ = w.Write(session(pollStatus))
 		default:
 			http.NotFound(w, r)
 		}
@@ -240,7 +243,7 @@ func TestWorkSessionCreate_PendingFollowUpMatchesRequesterType(t *testing.T) {
 		for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 			t.Run(tt.name+"/"+outputFormat, func(t *testing.T) {
 				t.Parallel()
-				ts := newPendingCreateServer(t)
+				ts := newCreateServerAnswering(t, "pending", "pending")
 
 				stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, tt.env, outputFormat, ts.URL,
 					createArgs(tt.extra...)...)
@@ -255,9 +258,16 @@ func TestWorkSessionCreate_PendingFollowUpMatchesRequesterType(t *testing.T) {
 					require.NoError(t, json.Unmarshal([]byte(stdout), &envelope), "stdout: %s", stdout)
 					assert.Equal(t, utils.PendingApprovalStatus, envelope.Status)
 					require.NotEmpty(t, envelope.NextActions)
+					assert.Equal(t, utils.NextAction{
+						Command:     "alpacon work-session update ses-x --server <server,...>",
+						Description: "add servers to this session; include every server to keep (--server replaces the whole list); an added server may need approval",
+					}, envelope.NextActions[len(envelope.NextActions)-1])
 					raw, err := json.Marshal(envelope.NextActions)
 					require.NoError(t, err)
 					guidance = string(raw)
+				} else {
+					assert.Contains(t, stderr, "  alpacon work-session update ses-x --server <server,...>  # add servers to this session; include every server to keep (--server replaces the whole list); an added server may need approval\n")
+					assert.Less(t, strings.Index(stderr, "Approve it out of band"), strings.Index(stderr, "alpacon work-session update"))
 				}
 				assert.Contains(t, guidance, tt.want)
 				assert.NotContains(t, guidance, tt.notWant)
@@ -274,9 +284,9 @@ func TestAgentSessionScope_PassesValidateAgentScopes(t *testing.T) {
 		t.Run(operation, func(t *testing.T) {
 			t.Parallel()
 			scope := utils.AgentSessionScope(operation)
-			require.NoError(t, validateAgentScopes("agent", []string{scope}))
+			require.NoError(t, ValidateAgentScopes("agent", []string{scope}))
 			if utils.IsAgentForbiddenScope(operation) {
-				assert.Error(t, validateAgentScopes("agent", []string{operation}))
+				assert.Error(t, ValidateAgentScopes("agent", []string{operation}))
 			} else {
 				assert.Equal(t, operation, scope, "an allowed scope is recommended as is")
 			}

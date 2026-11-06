@@ -13,7 +13,7 @@ import (
 // the package-level KubeCmd; cmd/kube_gate_test.go covers the real tree.
 func newGateTree() (root, real *cobra.Command) {
 	root = &cobra.Command{Use: "alpacon", Run: func(*cobra.Command, []string) {}}
-	real = &cobra.Command{Use: "kube", Aliases: []string{"k8s", "clusters"}, Short: "Access Kubernetes clusters", Args: cobra.NoArgs}
+	real = &cobra.Command{Use: "kube", Aliases: []string{"k8s", "clusters"}, Short: "Access Kubernetes clusters"}
 	real.AddCommand(&cobra.Command{Use: "ls", Run: func(*cobra.Command, []string) {}})
 	real.AddCommand(&cobra.Command{Use: "describe CLUSTER", Run: func(*cobra.Command, []string) {}})
 	root.AddCommand(real)
@@ -88,4 +88,50 @@ func TestApplySurfaceGate_EnabledRootHelpListsKube(t *testing.T) {
 	require.NoError(t, root.Execute())
 
 	assert.Regexp(t, `(?m)^\s+kube\s`, out.String())
+}
+
+// A child the gate keeps is still found under the stand-in, so kubectl can
+// run it for a context an earlier login wrote.
+func TestApplySurfaceGate_DisabledKeepsAPassThroughChild(t *testing.T) {
+	t.Parallel()
+	root, real := newGateTree()
+	ran := false
+	keep := &cobra.Command{Use: "credentials", Hidden: true, Run: func(*cobra.Command, []string) { ran = true }}
+	real.AddCommand(keep)
+
+	applySurfaceGate(root, real, false, keep)
+
+	found, _, err := root.Find([]string{"kube", "credentials", "--cluster", "prod-east"})
+	require.NoError(t, err)
+	assert.Same(t, keep, found)
+	assert.NotSame(t, real, found.Parent())
+	root.SetArgs([]string{"kube", "credentials"})
+	require.NoError(t, root.Execute())
+	assert.True(t, ran, "the kept child runs instead of the not-enabled notice")
+}
+
+// Serial: it moves the package-level commands, and puts them back afterwards.
+func TestApplySurfaceGate_DisabledKeepsCredentialsAndLogout(t *testing.T) {
+	root := &cobra.Command{Use: "alpacon"}
+	root.AddCommand(KubeCmd)
+	t.Cleanup(func() {
+		for _, parent := range []*cobra.Command{kubeCredentialsCmd.Parent(), kubeLogoutCmd.Parent()} {
+			if parent != nil && parent != KubeCmd {
+				parent.RemoveCommand(kubeCredentialsCmd, kubeLogoutCmd)
+			}
+		}
+		KubeCmd.AddCommand(kubeCredentialsCmd, kubeLogoutCmd)
+		root.RemoveCommand(KubeCmd)
+	})
+
+	ApplySurfaceGate(root, false)
+
+	for path, want := range map[string]*cobra.Command{"credentials": kubeCredentialsCmd, "logout": kubeLogoutCmd} {
+		found, _, err := root.Find([]string{"kube", path})
+		require.NoError(t, err)
+		assert.Same(t, want, found)
+	}
+	found, _, err := root.Find([]string{"kube", "sessions"})
+	require.NoError(t, err)
+	assert.NotSame(t, kubeSessionsCmd, found, "sessions needs the workspace, so the stand-in answers it")
 }

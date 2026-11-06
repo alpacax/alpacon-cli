@@ -62,16 +62,12 @@ type commandOutputEnvelope struct {
 // for a test that never calls Start. Targets are set later by subscribeTo, because the
 // command is submitted only once the WebSocket is connected.
 func NewCommandOutputListener(ac *client.AlpaconClient) *CommandOutputListener {
-	return newCommandOutputListener(ac, commandOutputConnectTimeout)
-}
-
-func newCommandOutputListener(ac *client.AlpaconClient, connectTimeout time.Duration) *CommandOutputListener {
 	l := &CommandOutputListener{
 		ac:       ac,
 		chunks:   make(chan ChunkEvent, commandOutputChunkBuffer),
 		finished: make(chan struct{}, 1),
 	}
-	l.wsListener = newProvisionedWSListener(ac, l.provisionSession, connectTimeout)
+	l.wsListener = newProvisionedWSListener(ac, l.provisionSession, commandOutputConnectTimeout)
 	l.handleFrame = l.handleMessage
 	l.onConnected = l.subscribe
 	return l

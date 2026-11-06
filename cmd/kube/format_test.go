@@ -2,9 +2,6 @@ package kube
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
-	"net/http"
 	"testing"
 	"time"
 
@@ -58,53 +55,19 @@ func TestFormatJSONValue(t *testing.T) {
 	}
 }
 
-// withLocalZone pins time.Local so expected cells are literals, not formatTime's own expression;
-// it reassigns a process-wide value, so its callers stay serial.
-func withLocalZone(t *testing.T) {
-	t.Helper()
-	orig := time.Local
-	time.Local = time.FixedZone("KST", 9*60*60)
-	t.Cleanup(func() { time.Local = orig })
-}
+var kst = time.FixedZone("KST", 9*60*60)
 
 func TestFormatTime(t *testing.T) {
-	withLocalZone(t)
+	t.Parallel()
 	ts := time.Date(2026, 9, 30, 8, 15, 42, 0, time.UTC)
 
-	assert.Empty(t, formatTime(nil))
-	assert.Empty(t, formatTime(&time.Time{}))
-	assert.Equal(t, "2026-09-30 17:15", formatTime(&ts))
-}
-
-type statusErr struct{ code int }
-
-func (e statusErr) Error() string       { return fmt.Sprintf("status %d", e.code) }
-func (e statusErr) HTTPStatusCode() int { return e.code }
-
-func TestIsSurfaceOff(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		err      error
-		expected bool
-	}{
-		{name: "not found", err: statusErr{http.StatusNotFound}, expected: true},
-		{name: "wrapped not found", err: fmt.Errorf("fetching page 1: %w", statusErr{http.StatusNotFound}), expected: true},
-		{name: "server error", err: statusErr{http.StatusInternalServerError}},
-		{name: "forbidden", err: statusErr{http.StatusForbidden}},
-		{name: "no status", err: errors.New("connection refused")},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.expected, isSurfaceOff(tt.err))
-		})
-	}
+	assert.Empty(t, formatTime(nil, kst))
+	assert.Empty(t, formatTime(&time.Time{}, kst))
+	assert.Equal(t, "2026-09-30 17:15", formatTime(&ts, kst))
 }
 
 func TestDescribeRows(t *testing.T) {
-	withLocalZone(t)
+	t.Parallel()
 	version := "v1.31.2"
 	nodes := 3
 	seen := time.Date(2026, 9, 30, 8, 15, 0, 0, time.UTC)
@@ -171,7 +134,8 @@ func TestDescribeRows(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, describeRows(&tt.cluster, tt.groups))
+			t.Parallel()
+			assert.Equal(t, tt.expected, describeRows(&tt.cluster, tt.groups, kst))
 		})
 	}
 }

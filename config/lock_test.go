@@ -177,12 +177,15 @@ func TestEveryWriterWaitsForTheLockAndLeavesTheFileAlone(t *testing.T) {
 		}},
 		{name: "logout", write: DeleteConfig},
 		{name: "switch", write: func(started Config) error {
-			return SwitchWorkspace(started, "https://ws2.us1.alpacon.io", "ws2", false)
+			return SwitchWorkspace(started, "https://ws2.us1.alpacon.io", "ws2", false, nil)
 		}},
 		{name: "revert", write: func(started Config) error { return RestoreWorkspace(started.WorkspaceURL, started) }},
 		{name: "workspace env", write: func(started Config) error { return SetWorkspaceEnv(started.WorkspaceURL, "frozen", true) }},
 		{name: "token refresh", write: func(started Config) error {
 			return SaveRefreshedAuth0Token(started.RefreshToken, "access-2", 3600)
+		}},
+		{name: "while logged in", write: func(started Config) error {
+			return WhileLoggedIn(started, func() error { return nil })
 		}},
 		{name: "signer token", write: func(started Config) error {
 			return SaveSignerToken(started, SignerTarget{URL: "https://alpacon.ai", Audience: "https://alpacon.ai/"}, "signer-2", 3600)

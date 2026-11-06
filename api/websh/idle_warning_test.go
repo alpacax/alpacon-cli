@@ -3,7 +3,6 @@ package websh
 import (
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -14,13 +13,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestReadFromServer_IdleWarningUsesStderrAndLocalTime(t *testing.T) {
-	local := time.Local
-	time.Local = time.FixedZone("test", 9*60*60)
-	t.Cleanup(func() { time.Local = local })
+func TestNewConnection_ShowsIdleWarningsInTheLocalZone(t *testing.T) {
+	t.Parallel()
+	assert.Same(t, time.Local, newConnection(nil).zone)
+}
+
+func TestReadFromServer_IdleWarningUsesStderrAndTheConnectionZone(t *testing.T) {
 	closesAt := time.Date(time.Now().Year()+1, time.January, 2, 6, 4, 5, 0, time.UTC)
 
-	_, stdout, stderr := readIdleFrames(t, idleWarningFrame(closesAt))
+	_, stdout, stderr := readIdleFramesWith(t, time.FixedZone("test", 9*60*60), nil, idleWarningFrame(closesAt))
 
 	assert.Empty(t, stdout)
 	assert.Equal(t, "[Idle: this session disconnects at 15:04:05 without input.]\r\n", stderr)
@@ -105,7 +106,7 @@ func TestReadFromServer_IdleWarningPrunesExpiredHistory(t *testing.T) {
 	next := retained.Add(time.Minute)
 	history := map[time.Time]struct{}{expired: {}, retained: {}}
 
-	conn, stdout, stderr := readIdleFramesWithHistory(t, history,
+	conn, stdout, stderr := readIdleFramesWith(t, time.Local, history,
 		idleWarningFrame(retained), idleWarningFrame(next),
 	)
 
@@ -123,13 +124,13 @@ func idleWarningFrame(closesAt time.Time) replayFrame {
 
 func readIdleFrames(t *testing.T, frames ...replayFrame) (*connection, string, string) {
 	t.Helper()
-	return readIdleFramesWithHistory(t, nil, frames...)
+	return readIdleFramesWith(t, time.Local, nil, frames...)
 }
 
-func readIdleFramesWithHistory(t *testing.T, history map[time.Time]struct{}, frames ...replayFrame) (*connection, string, string) {
+func readIdleFramesWith(t *testing.T, zone *time.Location, history map[time.Time]struct{}, frames ...replayFrame) (*connection, string, string) {
 	t.Helper()
 	upgrader := websocket.Upgrader{}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := testutil.NewWebSocketServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ws, err := upgrader.Upgrade(w, r, nil)
 		if !assert.NoError(t, err) {
 			return
@@ -142,11 +143,11 @@ func readIdleFramesWithHistory(t *testing.T, history map[time.Time]struct{}, fra
 		}
 		_ = ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 	}))
-	t.Cleanup(ts.Close)
 	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http"), nil)
 	require.NoError(t, err)
 	conn := newConnection(ws)
 	conn.idleWarnings = history
+	conn.zone = zone
 	t.Cleanup(conn.close)
 	stdout, stderr := testutil.CaptureOutput(t, func() {
 		awaitReturn(t, "warning reader did not finish", conn.readFromServer)

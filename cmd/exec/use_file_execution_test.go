@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -126,11 +127,24 @@ func newRejectedCommandServer(cause string) *httptest.Server {
 // newRejectedCommandServerAs is newRejectedCommandServer with the detail's
 // account; an empty username or groupname leaves the field out.
 func newRejectedCommandServerAs(cause, username, groupname string) *httptest.Server {
-	ts, _ := newRejectedCommandSequenceServer(cause, username, groupname, false, "")
+	return newRejectedCommandServerWith(username, groupname, rejectionFields(cause))
+}
+
+func rejectionFields(cause string) map[string]any {
+	if cause == "" {
+		return nil
+	}
+	return map[string]any{"rejection_cause": cause, "rejection_gate": "approval"}
+}
+
+func newRejectedCommandServerWith(username, groupname string, extra map[string]any) *httptest.Server {
+	ts, _ := newRejectedCommandSequenceServer(username, groupname, extra, false, "")
 	return ts
 }
 
-func newRejectedCommandSequenceServer(cause, username, groupname string, wait bool, grantStatus string) (*httptest.Server, *atomic.Int64) {
+// newRejectedCommandSequenceServer, with wait, answers the first two detail
+// reads as a sudo denial still pending approval and later ones with grantStatus.
+func newRejectedCommandSequenceServer(username, groupname string, extra map[string]any, wait bool, grantStatus string) (*httptest.Server, *atomic.Int64) {
 	const cmdID = rejectedCommandID
 	var reads atomic.Int64
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -166,9 +180,8 @@ func newRejectedCommandSequenceServer(cause, username, groupname string, wait bo
 			if groupname != "" {
 				detail["groupname"] = groupname
 			}
-			if cause != "" && (!wait || read > 2) {
-				detail["rejection_cause"] = cause
-				detail["rejection_gate"] = "approval"
+			if !wait || read > 2 {
+				maps.Copy(detail, extra)
 			}
 			_ = json.NewEncoder(w).Encode(detail)
 		default:
@@ -243,20 +256,19 @@ func TestExecUseFileExecutionRefusalPrintsGuidance(t *testing.T) {
 	})
 }
 
-// TestExecReviewerRejectionKeepsItsSentence pins that a rejection with no cause
-// still reads as a reviewer's refusal and gets no --file guidance.
-func TestExecReviewerRejectionKeepsItsSentence(t *testing.T) {
+func TestExecRejectionWithoutCauseStaysOffTheFileLane(t *testing.T) {
 	t.Parallel()
 	ts := newRejectedCommandServer("")
 	defer ts.Close()
 
 	_, stderr, exitCode := runExecHelper(t, ts.URL, "prod", "--", "uptime")
 	assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
-	assert.Contains(t, stderr, "rejected by a reviewer")
+	assert.Contains(t, stderr, "was rejected; the server did not record why")
 	assert.NotContains(t, stderr, "--file")
 }
 
-// Expiry and human rejection share exit 6 but carry distinct messages and JSON codes.
+// TestApprovalRejectionCauseMessages pins one message and error_code per cause on
+// every path, exit 6 throughout and no --file guidance.
 func TestApprovalRejectionCauseMessages(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -327,11 +339,13 @@ func TestApprovalRejectionCauseMessages(t *testing.T) {
 	}
 	causes := []struct {
 		name, cause, code, message string
+		// grantMessage replaces message where the sudo grant itself reads rejected.
+		grantMessage string
 	}{
-		{name: "expired", cause: event.RejectionCauseApprovalExpired, code: event.RejectionCauseApprovalExpired, message: "was not approved before the approval request expired"},
-		{name: "reviewer", cause: event.RejectionCauseApprovalRejected, code: event.RejectionCauseApprovalRejected, message: "was rejected by a reviewer"},
-		{name: "other", cause: "risk_denied", code: "risk_denied", message: "was refused (risk_denied)"},
-		{name: "older server", code: "not_approved", message: "was rejected by a reviewer"},
+		{name: "expired", cause: event.RejectionCauseApprovalExpired, code: event.RejectionCauseApprovalExpired, message: "its approval request expired with no decision"},
+		{name: "reviewer", cause: event.RejectionCauseApprovalRejected, code: event.RejectionCauseApprovalRejected, message: "an approver rejected it"},
+		{name: "other", cause: "risk_denied", code: "risk_denied", message: "the risk assessor refused it"},
+		{name: "older server", code: utils.ErrorCodeNotApproved, message: "the server did not record why", grantMessage: "was rejected by a reviewer"},
 	}
 	for _, cause := range causes {
 		t.Run(cause.name, func(t *testing.T) {
@@ -339,12 +353,16 @@ func TestApprovalRejectionCauseMessages(t *testing.T) {
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
-					ts, reads := newRejectedCommandSequenceServer(cause.cause, "root", "wheel", tc.wait, tc.grantStatus)
+					ts, reads := newRejectedCommandSequenceServer("root", "wheel", rejectionFields(cause.cause), tc.wait, tc.grantStatus)
 					defer ts.Close()
 
 					stderr, exitCode := tc.run(t, ts.URL, tc.format)
 					assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "stderr: %s", stderr)
-					assert.Contains(t, stderr, cause.message)
+					message := cause.message
+					if tc.grantStatus == "rejected" && cause.grantMessage != "" {
+						message = cause.grantMessage
+					}
+					assert.Contains(t, stderr, message)
 					if tc.wait {
 						assert.EqualValues(t, 3, reads.Load(), "submission read, pending poll, then terminal poll")
 					}
@@ -544,32 +562,21 @@ func TestReRunHintQuotesServer(t *testing.T) {
 	}
 }
 
-// TestReportCodedRefusalInvalidIDExitCode pins that an ErrInvalidID refusal
-// under --output json exits 2 with error_code usage_error, so the code and
-// the exit code agree, while table mode keeps the caller's exit code.
-func TestReportCodedRefusalInvalidIDExitCode(t *testing.T) {
+func TestReportCodedRefusalOfAnInvalidIDExitsTwoInEitherFormat(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		name     string
-		format   string
-		wantExit int
-	}{
-		{name: "json", format: utils.OutputFormatJSON, wantExit: utils.ExitCodeUsageError},
-		{name: "table", format: utils.OutputFormatTable, wantExit: utils.ExitCodeNotApproved},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, format := range []string{utils.OutputFormatJSON, utils.OutputFormatTable} {
+		t.Run(format, func(t *testing.T) {
 			t.Parallel()
 			helper := osexec.Command(os.Args[0], "-test.run=^TestReportCodedRefusalInvalidIDHelperProcess$")
-			helper.Env = append(os.Environ(), "GO_WANT_CODED_REFUSAL_INVALID_ID_HELPER="+tc.format)
+			helper.Env = append(os.Environ(), "GO_WANT_CODED_REFUSAL_INVALID_ID_HELPER="+format)
 			var stderr bytes.Buffer
 			helper.Stderr = &stderr
 
 			err := helper.Run()
 			var exitErr *osexec.ExitError
 			require.ErrorAs(t, err, &exitErr)
-			assert.Equal(t, tc.wantExit, exitErr.ExitCode())
-			if tc.format == utils.OutputFormatTable {
+			assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode())
+			if format == utils.OutputFormatTable {
 				assert.Contains(t, stderr.String(), "work session ID is unusable.")
 				return
 			}
@@ -592,8 +599,8 @@ func TestReportCodedRefusalInvalidIDHelperProcess(t *testing.T) {
 		return
 	}
 	utils.OutputFormat = format
-	err := fmt.Errorf("work session ID: %w", utils.ErrInvalidID)
-	reportCodedRefusalWithExit(utils.ExitCodeNotApproved, "command", err, "work session ID is unusable", "", nil)
+	_, err := api.RequireID("../x", "work session")
+	reportCodedRefusal("command", err, "work session ID is unusable", "")
 }
 
 func TestReportCodedRefusalOfAUsageErrorExitsTwoOnlyInPlaceOfOne(t *testing.T) {
