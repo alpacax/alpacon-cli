@@ -72,6 +72,15 @@ func NewEnvelopeExitError(operation string, err error, msg string, args ...any) 
 	return newEnvelopeExitError(operation, err, msg, args)
 }
 
+// NewEnvelopeExitErrorWithCode is the failure CliErrorEnvelopeWithExitCode reports: the given exit and no
+// footer, or exit 2 when code is 1 and err or an argument is a usage error.
+func NewEnvelopeExitErrorWithCode(code int, operation string, err error, msg string, args ...any) error {
+	if code == ExitCodeGeneralError && (IsUsageError(err) || usageErrorIn(args)) {
+		return newUsageExitError(operation, msg, args)
+	}
+	return &ExitError{Code: code, envelope: true, operation: operation, cause: err, msg: msg, args: args}
+}
+
 // NewUsageEnvelopeExitError is the failure CliUsageErrorEnvelopeWithExit reports.
 func NewUsageEnvelopeExitError(operation, msg string, args ...any) error {
 	return newUsageExitError(operation, msg, args)

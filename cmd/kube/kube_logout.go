@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"slices"
@@ -28,12 +29,12 @@ const (
 	logoutInterruptMessage = "Interrupted; finishing what was started on this machine. Press Ctrl+C again to quit now."
 )
 
-var kubeLogoutKubeconfig string
-
-var kubeLogoutCmd = &cobra.Command{
-	Use:   "logout [CLUSTER]",
-	Short: "Log out of a cluster and close its kube session",
-	Long: `Remove the alpacon-CLUSTER context, cluster and user from your kubeconfig,
+func newKubeLogoutCmd() *cobra.Command {
+	var kubeconfigFlag string
+	cmd := &cobra.Command{
+		Use:   "logout [CLUSTER]",
+		Short: "Log out of a cluster and close its kube session",
+		Long: `Remove the alpacon-CLUSTER context, cluster and user from your kubeconfig,
 delete the token saved for the cluster, then ask the server to close the kube
 session. Without CLUSTER, the current context is logged out if alpacon wrote it.
 
@@ -47,11 +48,16 @@ Without --kubeconfig, every file kubectl reads is cleaned: each one in
 KUBECONFIG, else ~/.kube/config. A current-context that named the removed context
 is unset, and kubectl then uses the next file's current-context, if any. Pick
 another with 'kubectl config use-context NAME'.`,
-	Example: `  alpacon kube logout prod-east
+		Example: `  alpacon kube logout prod-east
   alpacon kube logout
   alpacon kube logout prod-east --kubeconfig ~/.kube/alpacon`,
-	Args: cobra.MaximumNArgs(1),
-	Run:  runKubeLogoutCommand,
+		Args: cobra.MaximumNArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return runKubeLogoutCommand(cmd.OutOrStdout(), args, kubeconfigFlag)
+		}),
+	}
+	cmd.Flags().StringVar(&kubeconfigFlag, "kubeconfig", "", "kubeconfig file to clean (default: every file kubectl reads)")
+	return cmd
 }
 
 var (
@@ -59,10 +65,6 @@ var (
 	// errLogoutInterrupted is a first Ctrl+C that arrived before any edit.
 	errLogoutInterrupted = errors.New("interrupted, so nothing was changed")
 )
-
-func init() {
-	kubeLogoutCmd.Flags().StringVar(&kubeLogoutKubeconfig, "kubeconfig", "", "kubeconfig file to clean (default: every file kubectl reads)")
-}
 
 // logoutNotice is a warning the command prints. It keeps the arguments apart so
 // an error among them still shows the hint a server refusal carries.
@@ -201,25 +203,25 @@ func (l *logoutLocks) release() {
 	}
 }
 
-func runKubeLogoutCommand(cmd *cobra.Command, args []string) {
-	paths, err := kubeconfig.SearchPaths(kubeLogoutKubeconfig)
+func runKubeLogoutCommand(stdout io.Writer, args []string, kubeconfigFlag string) error {
+	paths, err := kubeconfig.SearchPaths(kubeconfigFlag)
 	if err != nil {
-		utils.CliErrorEnvelopeWithExit(opKubeLogout, err, "Failed to find the kubeconfig: %s.", err)
+		return utils.NewEnvelopeExitError(opKubeLogout, err, "Failed to find the kubeconfig: %s.", err)
 	}
 	paths = kubeconfig.UniqueFiles(paths)
 
 	var cluster string
 	if len(args) == 1 {
 		if cluster = strings.TrimSpace(args[0]); cluster == "" {
-			utils.CliUsageErrorEnvelopeWithExit(opKubeLogout, "CLUSTER must name a cluster.")
+			return utils.NewUsageEnvelopeExitError(opKubeLogout, "CLUSTER must name a cluster.")
 		}
 	} else if cluster, err = clusterOfCurrentContext(paths); err != nil {
-		utils.CliErrorEnvelopeWithExit(opKubeLogout, err, "Cannot pick the cluster to log out of: %s.", err)
+		return utils.NewEnvelopeExitError(opKubeLogout, err, "Cannot pick the cluster to log out of: %s.", err)
 	}
 
 	store, err := defaultKubeSessionStore()
 	if err != nil {
-		utils.CliErrorEnvelopeWithExit(opKubeLogout, err, "Failed to find the home directory: %s.", err)
+		return utils.NewEnvelopeExitError(opKubeLogout, err, "Failed to find the home directory: %s.", err)
 	}
 	// Read without the network. Not being logged in leaves only the server's
 	// half undone: the context and the saved token still go.
@@ -231,7 +233,7 @@ func runKubeLogoutCommand(cmd *cobra.Command, args []string) {
 	result, logoutErr := kubeLogout(kubeLogoutInput{
 		cluster:      cluster,
 		paths:        paths,
-		explicit:     kubeLogoutKubeconfig != "",
+		explicit:     kubeconfigFlag != "",
 		store:        store,
 		workspaceURL: workspaceURL,
 		closer:       closeSavedSession,
@@ -240,18 +242,19 @@ func runKubeLogoutCommand(cmd *cobra.Command, args []string) {
 		utils.CliWarning(w.format, w.args...)
 	}
 	if logoutErr == nil {
-		printKubeLogoutResult(result, true)
-		return
+		return printKubeLogoutResult(stdout, result, true)
 	}
 	// What was done before the failure is still reported: the files edited and
 	// the sessions closed are gone either way.
 	if result.Found {
-		printKubeLogoutResult(result, false)
+		if err := printKubeLogoutResult(stdout, result, false); err != nil {
+			return err
+		}
 	}
 	if expectedLogoutFailure(logoutErr) {
-		utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeGeneralError, opKubeLogout, logoutErr, "Logout of %s did not finish: %s.", cluster, logoutErr)
+		return utils.NewEnvelopeExitErrorWithCode(utils.ExitCodeGeneralError, opKubeLogout, logoutErr, "Logout of %s did not finish: %s.", cluster, logoutErr)
 	}
-	utils.CliErrorEnvelopeWithExit(opKubeLogout, logoutErr, "Logout of %s did not finish: %s.", cluster, logoutErr)
+	return utils.NewEnvelopeExitError(opKubeLogout, logoutErr, "Logout of %s did not finish: %s.", cluster, logoutErr)
 }
 
 // expectedLogoutFailure is a refusal the user can act on, which leaves out the
@@ -303,7 +306,7 @@ func clusterOfCurrentContext(paths []string) (string, error) {
 }
 
 // quitLogout is what a second Ctrl+C runs: every lock goes first, since the
-// exit skips the deferred releases.
+// exit from the watcher's goroutine skips the deferred releases.
 func quitLogout(locks *logoutLocks, localDone *atomic.Bool, exit func(msg string)) func() {
 	return func() {
 		locks.release()
@@ -667,18 +670,18 @@ func closeLoggedOutSession(result *kubeLogoutResult, in kubeLogoutInput, record 
 
 // printKubeLogoutResult reports the result; complete is false when the logout
 // failed partway and an error follows.
-func printKubeLogoutResult(result *kubeLogoutResult, complete bool) {
+func printKubeLogoutResult(stdout io.Writer, result *kubeLogoutResult, complete bool) error {
 	if utils.OutputFormat == utils.OutputFormatJSON {
-		if err := utils.PrintJSONValue(os.Stdout, result); err != nil {
-			utils.CliErrorWithExit("Failed to print the result: %s.", err)
+		if err := utils.PrintJSONValue(stdout, result); err != nil {
+			return utils.NewExitError("Failed to print the result: %s.", err)
 		}
-		return
+		return nil
 	}
 	if !result.Found {
 		for _, line := range notFoundLines(result) {
 			utils.CliInfo("%s", line)
 		}
-		return
+		return nil
 	}
 	if complete {
 		utils.CliSuccess("Logged out of %s.", result.Cluster)
@@ -694,6 +697,7 @@ func printKubeLogoutResult(result *kubeLogoutResult, complete bool) {
 	if result.currentUnset {
 		utils.CliInfo("current-context is now unset; pick one with 'kubectl config use-context NAME'.")
 	}
+	return nil
 }
 
 // notFoundLines is what a logout that removed nothing says.

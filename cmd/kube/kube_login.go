@@ -3,6 +3,7 @@ package kube
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -42,12 +43,12 @@ type kubeLoginFlagValues struct {
 	proxyPort    int
 }
 
-var kubeLoginFlags kubeLoginFlagValues
-
-var kubeLoginCmd = &cobra.Command{
-	Use:   "login CLUSTER",
-	Short: "Log in to a cluster for kubectl",
-	Long: `Open a kube session on a cluster and write a context named alpacon-CLUSTER
+func newKubeLoginCmd(newClient clientFactory) *cobra.Command {
+	var flags kubeLoginFlagValues
+	cmd := &cobra.Command{
+		Use:   "login CLUSTER",
+		Short: "Log in to a cluster for kubectl",
+		Long: `Open a kube session on a cluster and write a context named alpacon-CLUSTER
 into your kubeconfig, then make it the current context so kubectl, k9s, and
 other clients use it right away.
 
@@ -71,31 +72,32 @@ The kubeconfig file is the one 'kubectl config' itself writes: --kubeconfig,
 else the first existing file in KUBECONFIG (the last one listed when none
 exists), else ~/.kube/config. Use --proxy-port to send kubectl through
 'alpacon kube proxy' on that local port.`,
-	Example: `  alpacon kube login prod-east
+		Example: `  alpacon kube login prod-east
   alpacon kube login prod-east --purpose "debug crashlooping api pods" --scope kube,kube_exec --duration 2h
   alpacon kube login prod-east --work-session 3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47
   alpacon kube login prod-east --kubeconfig ~/.kube/alpacon --proxy-port 18443`,
-	// Counted in runKubeLogin, so a wrong count is a usage error (exit 2)
-	// like the flags, not Cobra's own exit 1.
-	Args: cobra.ArbitraryArgs,
-	Run:  runKubeLogin,
-}
-
-func init() {
-	kubeLoginCmd.Flags().StringVar(&kubeLoginFlags.workSession, "work-session", "", "WorkSession ID to open the kube session under (default: one of yours that targets the cluster, or a new one)")
-	kubeLoginCmd.Flags().StringVar(&kubeLoginFlags.purpose, "purpose", "", "What you're doing and why, for a new WorkSession, as in 'work-session create' (required in non-interactive mode when one is created)")
+		// Counted in runKubeLogin, so a wrong count is a usage error (exit 2)
+		// like the flags, not Cobra's own exit 1.
+		Args: cobra.ArbitraryArgs,
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return runKubeLogin(cmd, args, flags, newClient)
+		}),
+	}
+	cmd.Flags().StringVar(&flags.workSession, "work-session", "", "WorkSession ID to open the kube session under (default: one of yours that targets the cluster, or a new one)")
+	cmd.Flags().StringVar(&flags.purpose, "purpose", "", "What you're doing and why, for a new WorkSession, as in 'work-session create' (required in non-interactive mode when one is created)")
 	// --intent was the flag's first name; it still reaches --purpose.
-	kubeLoginCmd.Flags().SetNormalizeFunc(func(_ *pflag.FlagSet, name string) pflag.NormalizedName {
+	cmd.Flags().SetNormalizeFunc(func(_ *pflag.FlagSet, name string) pflag.NormalizedName {
 		if name == "intent" {
 			name = "purpose"
 		}
 		return pflag.NormalizedName(name)
 	})
-	kubeLoginCmd.Flags().StringSliceVar(&kubeLoginFlags.scopes, "scope", nil, "Scopes for a new WorkSession: kube, or kube,kube_exec to also exec, attach and port-forward into pods (kube_exec is refused for an AI agent)")
-	kubeLoginCmd.Flags().StringVar(&kubeLoginFlags.duration, "duration", "", "Lifetime of a new WorkSession, counted from activation (e.g. 30m, 2h)")
-	kubeLoginCmd.Flags().StringVar(&kubeLoginFlags.waitApproval, "wait-approval", "", "How long to wait for a WorkSession pending approval (default 5m)")
-	kubeLoginCmd.Flags().StringVar(&kubeLoginFlags.kubeconfig, "kubeconfig", "", "kubeconfig file to write (default: the file kubectl writes)")
-	kubeLoginCmd.Flags().IntVar(&kubeLoginFlags.proxyPort, "proxy-port", 0, "route kubectl through 'alpacon kube proxy' on this local port")
+	cmd.Flags().StringSliceVar(&flags.scopes, "scope", nil, "Scopes for a new WorkSession: kube, or kube,kube_exec to also exec, attach and port-forward into pods (kube_exec is refused for an AI agent)")
+	cmd.Flags().StringVar(&flags.duration, "duration", "", "Lifetime of a new WorkSession, counted from activation (e.g. 30m, 2h)")
+	cmd.Flags().StringVar(&flags.waitApproval, "wait-approval", "", "How long to wait for a WorkSession pending approval (default 5m)")
+	cmd.Flags().StringVar(&flags.kubeconfig, "kubeconfig", "", "kubeconfig file to write (default: the file kubectl writes)")
+	cmd.Flags().IntVar(&flags.proxyPort, "proxy-port", 0, "route kubectl through 'alpacon kube proxy' on this local port")
+	return cmd
 }
 
 type kubeLoginInput struct {
@@ -174,40 +176,40 @@ func readKubeLoginInput(cluster string, flags kubeLoginFlagValues, changed func(
 	return in, nil
 }
 
-func runKubeLogin(cmd *cobra.Command, args []string) {
+func runKubeLogin(cmd *cobra.Command, args []string, flags kubeLoginFlagValues, newClient clientFactory) error {
 	if len(args) != 1 {
-		utils.CliUsageErrorEnvelopeWithExit(opKubeLogin, "kube login takes one CLUSTER argument, not %d; see 'alpacon kube login --help'.", len(args))
+		return utils.NewUsageEnvelopeExitError(opKubeLogin, "kube login takes one CLUSTER argument, not %d; see 'alpacon kube login --help'.", len(args))
 	}
-	in, err := readKubeLoginInput(args[0], kubeLoginFlags, cmd.Flags().Changed, os.Getenv(worksession.WorkSessionEnvVar), aiagent.FromEnvironment())
+	in, err := readKubeLoginInput(args[0], flags, cmd.Flags().Changed, os.Getenv(worksession.WorkSessionEnvVar), aiagent.FromEnvironment())
 	if err != nil {
-		utils.CliUsageErrorEnvelopeWithExit(opKubeLogin, "%s.", err)
+		return utils.NewUsageEnvelopeExitError(opKubeLogin, "%s.", err)
 	}
 
-	ac, err := client.NewAlpaconAPIClient()
+	ac, err := newClient()
 	if err != nil {
-		utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		return utils.NewEnvelopeExitError(opKubeLogin, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 	// A kube session is opened only by a login with a person behind it; a
 	// token is refused, so it must not first create a WorkSession and an
 	// approval request nothing can use.
 	if ac.AccessToken() == "" {
-		utils.CliErrorEnvelopeWithExit(opKubeLogin, nil, "Tokens issued by Alpacon (service or personal API token) cannot open a kube session; it needs %s.", utils.LoginWithoutTokenHint)
+		return utils.NewEnvelopeExitError(opKubeLogin, nil, "Tokens issued by Alpacon (service or personal API token) cannot open a kube session; it needs %s.", utils.LoginWithoutTokenHint)
 	}
 	// The login the session is saved for. A logout or another login during
 	// the approval wait replaces it, and then nothing is saved: a token a
 	// logout should have removed must not appear after it.
 	login, err := config.LoadConfig()
 	if err != nil {
-		utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Failed to read the login: %s.", err)
+		return utils.NewEnvelopeExitError(opKubeLogin, err, "Failed to read the login: %s.", err)
 	}
 
-	path, err := kubeconfig.ResolvePath(kubeLoginFlags.kubeconfig)
+	path, err := kubeconfig.ResolvePath(flags.kubeconfig)
 	if err != nil {
-		utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Failed to find the kubeconfig: %s.", err)
+		return utils.NewEnvelopeExitError(opKubeLogin, err, "Failed to find the kubeconfig: %s.", err)
 	}
-	if kubeLoginFlags.kubeconfig != "" {
+	if flags.kubeconfig != "" {
 		if in.kubeconfig, err = filepath.Abs(path); err != nil {
-			utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Failed to find the kubeconfig: %s.", err)
+			return utils.NewEnvelopeExitError(opKubeLogin, err, "Failed to find the kubeconfig: %s.", err)
 		}
 	}
 	// Probed before any WorkSession exists, so a locked, malformed or
@@ -216,21 +218,21 @@ func runKubeLogin(cmd *cobra.Command, args []string) {
 	// which can take minutes kubectl should not spend locked out.
 	probe, err := kubeconfig.Open(path)
 	if err != nil {
-		utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Failed to open the kubeconfig: %s.", err)
+		return utils.NewEnvelopeExitError(opKubeLogin, err, "Failed to open the kubeconfig: %s.", err)
 	}
 	_ = probe.Close()
 
 	clusterID, err := kubernetes.GetClusterIDByName(ac, in.cluster)
 	if err != nil {
 		if kubernetes.IsSurfaceOff(err) {
-			utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "%s", kubernetes.SurfaceNotEnabledMessage)
+			return utils.NewEnvelopeExitError(opKubeLogin, err, "%s", kubernetes.SurfaceNotEnabledMessage)
 		}
-		utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Failed to find the cluster: %s.", err)
+		return utils.NewEnvelopeExitError(opKubeLogin, err, "Failed to find the cluster: %s.", err)
 	}
 
 	store, err := defaultKubeSessionStore()
 	if err != nil {
-		utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Failed to find the home directory: %s.", err)
+		return utils.NewEnvelopeExitError(opKubeLogin, err, "Failed to find the home directory: %s.", err)
 	}
 	// Held until the process ends, approval wait included, so a second login
 	// to the cluster cannot create a second WorkSession beside this one. The
@@ -238,7 +240,7 @@ func runKubeLogin(cmd *cobra.Command, args []string) {
 	key := recordKey{workspaceURL: ac.BaseURL, cluster: in.cluster}
 	storeLock, err := store.lock(key)
 	if err != nil {
-		utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Cannot log in to %s: %s.", in.cluster, err)
+		return utils.NewEnvelopeExitError(opKubeLogin, err, "Cannot log in to %s: %s.", in.cluster, err)
 	}
 	defer func() { _ = storeLock.Release() }()
 	previous, err := store.read(key)
@@ -247,11 +249,14 @@ func runKubeLogin(cmd *cobra.Command, args []string) {
 		previous = nil
 	}
 
-	choice := chooseWorkSession(ac, in, clusterID, previous)
+	choice, err := chooseWorkSession(ac, in, clusterID, previous)
+	if err != nil {
+		return err
+	}
 
 	held, err := holdKubeconfig(path, func(msg string) { utils.CliErrorEnvelopeWithExit(opKubeLogin, nil, "%s", msg) })
 	if err != nil {
-		utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Failed to open the kubeconfig: %s.", err)
+		return utils.NewEnvelopeExitError(opKubeLogin, err, "Failed to open the kubeconfig: %s.", err)
 	}
 	defer held.done()
 
@@ -289,27 +294,32 @@ func runKubeLogin(cmd *cobra.Command, args []string) {
 		},
 	}
 	result, err := openKubeSession(ac, held.editor, opts, clusterID, writer)
-	held.done()
 	if err != nil {
-		exitKubeLoginError(err, in.cluster, choice.id)
+		return kubeLoginError(err, in.cluster, choice.id)
 	}
+	// Closing the previous session below can take closeTimeout, which kubectl
+	// should not spend locked out of the file.
+	held.done()
 
-	printKubeLoginResult(kubeLoginResult{
+	if err := printKubeLoginResult(cmd.OutOrStdout(), kubeLoginResult{
 		kubeConfigResult:   *result,
 		WorkSessionCreated: choice.created,
 		Scopes:             choice.scopes,
-	}, ac.Insecure, time.Now())
+	}, ac.Insecure, time.Now()); err != nil {
+		return err
+	}
 
 	// Last, so the round trip is not part of what the user waits on: the
 	// previous login's kube session is no longer reachable from kubectl.
 	closePreviousSession(ac, previous, result.KubeSessionID)
+	return nil
 }
 
-// exitKubeLoginError reports a failure to open or write the kube session.
-// Every exit under --output json is an envelope, the gate refusal included.
-func exitKubeLoginError(err error, clusterName, workSessionID string) {
-	exitKubeSessionError(err, clusterName, workSessionID, func(err error, format string, args ...any) {
-		utils.CliErrorEnvelopeWithExit(opKubeLogin, err, format, args...)
+// kubeLoginError is the failure to open or write the kube session. Every
+// failure under --output json is an envelope, the gate refusal included.
+func kubeLoginError(err error, clusterName, workSessionID string) error {
+	return kubeSessionError(err, clusterName, workSessionID, func(err error, format string, args ...any) error {
+		return utils.NewEnvelopeExitError(opKubeLogin, err, format, args...)
 	})
 }
 
@@ -408,8 +418,8 @@ func pickClusterSession(sessions []wsapi.WorkSession, want sessionWant, now time
 }
 
 // chooseWorkSession settles the WorkSession, waiting out an approval if one
-// is pending. It exits on a refusal, with the code the refusal carries.
-func chooseWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clusterID string, previous *kubeSessionRecord) workSessionChoice {
+// is pending. A refusal fails with the code it carries.
+func chooseWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clusterID string, previous *kubeSessionRecord) (workSessionChoice, error) {
 	want := sessionWant{clusterID: clusterID, requesterType: in.requesterType, scopes: in.scopes}
 	now := time.Now()
 
@@ -420,15 +430,15 @@ func chooseWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clusterID st
 	if in.workSession != "" {
 		ws, err := wsapi.GetWorkSession(ac, in.workSession)
 		if errors.Is(err, utils.ErrInvalidID) {
-			utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Invalid --work-session: %s.", err)
+			return workSessionChoice{}, utils.NewEnvelopeExitError(opKubeLogin, err, "Invalid --work-session: %s.", err)
 		}
 		if err != nil {
-			return workSessionChoice{id: in.workSession}
+			return workSessionChoice{id: in.workSession}, nil
 		}
 		if want.waitable(ws, now) {
-			return chosen(waitForWorkSession(ac, in, ws), false)
+			return chosen(waitForWorkSession(ac, in, ws), false), nil
 		}
-		return chosen(ws, false)
+		return chosen(ws, false), nil
 	}
 
 	// ALPACON_WORK_SESSION usually names the server session exec and websh
@@ -438,9 +448,9 @@ func chooseWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clusterID st
 		switch {
 		case err == nil && want.usable(ws, now):
 			utils.CliInfo("Using WorkSession %s from %s.", utils.SanitizeTerminalText(ws.ID), worksession.WorkSessionEnvVar)
-			return chosen(ws, false)
+			return chosen(ws, false), nil
 		case err == nil && want.waitable(ws, now):
-			return chosen(waitForWorkSession(ac, in, ws), false)
+			return chosen(waitForWorkSession(ac, in, ws), false), nil
 		default:
 			utils.CliInfo("%s names a WorkSession that does not serve %s; looking for one that does.", worksession.WorkSessionEnvVar, utils.SanitizeTerminalText(in.cluster))
 		}
@@ -452,16 +462,16 @@ func chooseWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clusterID st
 	if previous != nil && previous.WorkSessionID != "" {
 		if ws, err := wsapi.GetWorkSession(ac, previous.WorkSessionID); err == nil && want.usable(ws, now) {
 			utils.CliInfo("Using WorkSession %s.", utils.SanitizeTerminalText(ws.ID))
-			return chosen(ws, false)
+			return chosen(ws, false), nil
 		}
 	}
 
 	if ws, wait := findClusterSession(ac, want, now); ws != nil {
 		if !wait {
 			utils.CliInfo("Using WorkSession %s.", utils.SanitizeTerminalText(ws.ID))
-			return chosen(ws, false)
+			return chosen(ws, false), nil
 		}
-		return chosen(waitForWorkSession(ac, in, ws), false)
+		return chosen(waitForWorkSession(ac, in, ws), false), nil
 	}
 
 	return createClusterWorkSession(ac, in, clusterID)
@@ -494,12 +504,12 @@ func findClusterSession(ac *client.AlpaconClient, want sessionWant, now time.Tim
 
 // createClusterWorkSession files a WorkSession that targets the cluster alone
 // and waits for it to activate.
-func createClusterWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clusterID string) workSessionChoice {
+func createClusterWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clusterID string) (workSessionChoice, error) {
 	interactive := utils.IsInteractiveShell()
 	purpose := in.purpose
 	if purpose == "" {
 		if !interactive {
-			utils.CliUsageErrorEnvelopeWithExit(opKubeLogin, "No WorkSession for %s was found to reuse. Non-interactive mode requires --purpose, --scope and --duration to create one, or --work-session to name one.", in.cluster)
+			return workSessionChoice{}, utils.NewUsageEnvelopeExitError(opKubeLogin, "No WorkSession for %s was found to reuse. Non-interactive mode requires --purpose, --scope and --duration to create one, or --work-session to name one.", in.cluster)
 		}
 		purpose = utils.PromptForRequiredInput("Purpose (what you're doing and why): ")
 	}
@@ -510,14 +520,14 @@ func createClusterWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clust
 	}
 	if scopes == nil {
 		if !interactive {
-			utils.CliUsageErrorEnvelopeWithExit(opKubeLogin, "Non-interactive mode requires --scope (kube or kube,kube_exec) to create a WorkSession.")
+			return workSessionChoice{}, utils.NewUsageEnvelopeExitError(opKubeLogin, "Non-interactive mode requires --scope (kube or kube,kube_exec) to create a WorkSession.")
 		}
 		scopes = promptKubeScopes()
 	}
 	duration := in.duration
 	if duration == 0 {
 		if !interactive {
-			utils.CliUsageErrorEnvelopeWithExit(opKubeLogin, "Non-interactive mode requires --duration (e.g. 2h) to create a WorkSession.")
+			return workSessionChoice{}, utils.NewUsageEnvelopeExitError(opKubeLogin, "Non-interactive mode requires --duration (e.g. 2h) to create a WorkSession.")
 		}
 		duration = promptDuration()
 	}
@@ -530,18 +540,20 @@ func createClusterWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clust
 		Duration:      wsapi.FormatDuration(duration),
 	})
 	if err != nil {
-		utils.HandleWorkSessionError(err, utils.OperationKube, in.cluster, config.ResolveAuthMethod(), "")
-		if hint := worksession.TargetErrorHint(err); hint != "" {
-			utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Failed to create a WorkSession: %s.", hint)
+		if gateErr := utils.WorkSessionExitError(err, utils.OperationKube, in.cluster, config.ResolveAuthMethod(), ""); gateErr != nil {
+			return workSessionChoice{}, gateErr
 		}
-		utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Failed to create a WorkSession: %s.", err)
+		if hint := worksession.TargetErrorHint(err); hint != "" {
+			return workSessionChoice{}, utils.NewEnvelopeExitError(opKubeLogin, err, "Failed to create a WorkSession: %s.", hint)
+		}
+		return workSessionChoice{}, utils.NewEnvelopeExitError(opKubeLogin, err, "Failed to create a WorkSession: %s.", err)
 	}
 	utils.CliInfo("WorkSession %s created for %s (status: %s).", utils.SanitizeTerminalText(session.ID), utils.SanitizeTerminalText(in.cluster), utils.SanitizeTerminalText(session.Status))
 
 	if session.Status == wsapi.StatusActive {
-		return chosen(session, true)
+		return chosen(session, true), nil
 	}
-	return chosen(waitForWorkSession(ac, in, session), true)
+	return chosen(waitForWorkSession(ac, in, session), true), nil
 }
 
 // waitForWorkSession waits for ws to activate, saying first how to come back
@@ -615,18 +627,19 @@ type kubeLoginResult struct {
 	Scopes             []string `json:"scopes,omitempty"`
 }
 
-func printKubeLoginResult(result kubeLoginResult, insecure bool, now time.Time) {
+func printKubeLoginResult(stdout io.Writer, result kubeLoginResult, insecure bool, now time.Time) error {
 	printKubeConfigWarnings(&result.kubeConfigResult, insecure)
 
 	if utils.OutputFormat == utils.OutputFormatJSON {
-		if err := utils.PrintJSONValue(os.Stdout, result); err != nil {
-			utils.CliErrorWithExit("Failed to print the result: %s.", err)
+		if err := utils.PrintJSONValue(stdout, result); err != nil {
+			return utils.NewExitError("Failed to print the result: %s.", err)
 		}
-		return
+		return nil
 	}
 
 	utils.CliSuccess("Context %q ready (session expires %s)", result.Context, formatExpiry(result.TokenExpiresAt, now))
 	printKubeConfigNext(&result.kubeConfigResult)
+	return nil
 }
 
 // formatExpiry shows the time alone for an expiry later today, and the date
