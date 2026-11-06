@@ -1,8 +1,6 @@
 package utils
 
 import (
-	"fmt"
-	"os"
 	"time"
 )
 
@@ -63,11 +61,7 @@ func retryAfterSeconds(d time.Duration) int {
 // CliErrorEnvelopeWithExit reports a failure and exits 1, or 2 when err or an argument is a usage error;
 // json mode carries err's code.
 func CliErrorEnvelopeWithExit(operation string, err error, format string, args ...any) {
-	ExitIfUsageError(ExitCodeGeneralError, operation, err, format, args...)
-	ExitWithFailureJSON(Failure{ExitCode: ExitCodeGeneralError, Operation: operation, Err: err, Message: fmt.Sprintf(format, args...), NextActions: RefusalNextActions(refusalGuidance(err, args))})
-	printCliError(refusalGuidance(err, args), format, args...)
-	reportCLIError()
-	os.Exit(ExitCodeGeneralError)
+	exitWithError(newEnvelopeExitError(ExitCodeGeneralError, true, operation, err, format, args))
 }
 
 // refusalGuidance is the error whose server hints an envelope helper shows:
@@ -84,10 +78,7 @@ func refusalGuidance(err error, args []any) error {
 // CliErrorEnvelopeWithExitCode is CliErrorEnvelopeWithExit with a caller-chosen exit
 // code, for refusals a script branches on (e.g. ExitCodeNotApproved).
 func CliErrorEnvelopeWithExitCode(code int, operation string, err error, format string, args ...any) {
-	ExitIfUsageError(code, operation, err, format, args...)
-	ExitWithFailureJSON(Failure{ExitCode: code, Operation: operation, Err: err, Message: fmt.Sprintf(format, args...), NextActions: RefusalNextActions(refusalGuidance(err, args))})
-	printCliError(refusalGuidance(err, args), format, args...)
-	os.Exit(code)
+	exitWithError(newEnvelopeExitError(code, false, operation, err, format, args))
 }
 
 // ExitIfUsageError is the one place a report that would exit 1 exits 2 instead: when err, or an error

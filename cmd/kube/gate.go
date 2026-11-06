@@ -1,15 +1,17 @@
 package kube
 
 import (
+	"slices"
+
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-// exitNotEnabled ends the command with exit 1. The refusal is expected, not a
-// CLI fault, so it leaves out the "report an issue" footer CliErrorWithExit adds.
-func exitNotEnabled() {
-	utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, kubernetes.SurfaceNotEnabledMessage)
+// errNotEnabled ends the command with exit 1. The refusal is expected, not a
+// CLI fault, so it leaves out the "report an issue" footer NewExitError adds.
+func errNotEnabled() error {
+	return utils.NewExitErrorWithCode(utils.ExitCodeGeneralError, kubernetes.SurfaceNotEnabledMessage)
 }
 
 // ApplySurfaceGate replaces KubeCmd under root with a hidden stand-in when the workspace has not
@@ -25,11 +27,14 @@ func exitNotEnabled() {
 // current workspace's answer says nothing about it. kube logout stays for the same reason: it cleans up
 // such a context and its saved token, and needs the server only for a best-effort close.
 func ApplySurfaceGate(root *cobra.Command, enabled bool) {
-	applySurfaceGate(root, KubeCmd, enabled, kubeCredentialsCmd, kubeLogoutCmd)
+	applySurfaceGate(root, KubeCmd, enabled, gatePassThrough...)
 }
 
-// applySurfaceGate moves keep, children of real, under the stand-in.
-func applySurfaceGate(root, real *cobra.Command, enabled bool, keep ...*cobra.Command) {
+// gatePassThrough names the children of kube the stand-in keeps.
+var gatePassThrough = []string{"credentials", "logout"}
+
+// applySurfaceGate moves the children of real named keep under the stand-in.
+func applySurfaceGate(root, real *cobra.Command, enabled bool, keep ...string) {
 	if enabled {
 		return
 	}
@@ -38,7 +43,10 @@ func applySurfaceGate(root, real *cobra.Command, enabled bool, keep ...*cobra.Co
 	help := root.HelpFunc()
 	root.RemoveCommand(real)
 	disabled := newDisabledKubeCmd(real)
-	for _, child := range keep {
+	for _, child := range real.Commands() {
+		if !slices.Contains(keep, child.Name()) {
+			continue
+		}
 		real.RemoveCommand(child)
 		child.SetHelpFunc(help)
 		disabled.AddCommand(child)
@@ -58,13 +66,14 @@ func newDisabledKubeCmd(real *cobra.Command) *cobra.Command {
 		DisableFlagParsing: true,
 		Args:               cobra.ArbitraryArgs,
 		ValidArgsFunction:  cobra.NoFileCompletions,
-		Run: func(cmd *cobra.Command, args []string) {
-			exitNotEnabled()
-		},
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return errNotEnabled()
+		}),
 	}
-	// 'alpacon help kube' reaches the command through Find and calls its help.
+	// 'alpacon help kube' reaches the command through Find and calls its help,
+	// which has no error to return, so it exits in place.
 	disabled.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		exitNotEnabled()
+		utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, kubernetes.SurfaceNotEnabledMessage)
 	})
 	return disabled
 }

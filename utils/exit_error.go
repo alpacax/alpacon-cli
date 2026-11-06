@@ -15,9 +15,12 @@ type ExitError struct {
 	Code      int
 	usage     bool
 	footer    bool
+	envelope  bool  // built by an envelope constructor: the json envelope classifies cause, not the arguments
+	cause     error // the error the envelope classifies; nil keeps a code out of it
 	operation string
 	msg       string
 	args      []any
+	report    func(w io.Writer) // prints a failure the message cannot carry, in either output format
 }
 
 func (e *ExitError) Error() string {
@@ -30,6 +33,9 @@ func (e *ExitError) Error() string {
 // Unwrap returns the errors among the message's arguments, so a caller can still inspect the cause.
 func (e *ExitError) Unwrap() []error {
 	var causes []error
+	if e.cause != nil {
+		causes = append(causes, e.cause)
+	}
 	for _, arg := range e.args {
 		if err, ok := arg.(error); ok && err != nil {
 			causes = append(causes, err)
@@ -52,6 +58,29 @@ func NewExitErrorWithCode(code int, msg string, args ...any) error {
 // NewUsageExitError is the failure CliUsageErrorWithExit reports: exit 2 with error_code usage_error.
 func NewUsageExitError(msg string, args ...any) error {
 	return newUsageExitError("", msg, args)
+}
+
+// NewEnvelopeExitError is the failure CliErrorEnvelopeWithExit reports: exit 1 with the footer, or 2
+// when err or an argument is a usage error. The json envelope names operation and classifies err.
+func NewEnvelopeExitError(operation string, err error, msg string, args ...any) error {
+	return newEnvelopeExitError(ExitCodeGeneralError, true, operation, err, msg, args)
+}
+
+// NewEnvelopeExitErrorWithCode is the failure CliErrorEnvelopeWithExitCode reports: the given exit and no footer.
+func NewEnvelopeExitErrorWithCode(code int, operation string, err error, msg string, args ...any) error {
+	return newEnvelopeExitError(code, false, operation, err, msg, args)
+}
+
+// NewUsageEnvelopeExitError is the failure CliUsageErrorEnvelopeWithExit reports.
+func NewUsageEnvelopeExitError(operation string, msg string, args ...any) error {
+	return newUsageExitError(operation, msg, args)
+}
+
+func newEnvelopeExitError(code int, footer bool, operation string, err error, msg string, args []any) *ExitError {
+	if code == ExitCodeGeneralError && (IsUsageError(err) || usageErrorIn(args)) {
+		return newUsageExitError(operation, msg, args)
+	}
+	return &ExitError{Code: code, footer: footer, envelope: true, cause: err, operation: operation, msg: msg, args: args}
 }
 
 func newExitError(code int, footer bool, msg string, args []any) *ExitError {
@@ -79,18 +108,29 @@ func FprintExitError(w io.Writer, e *ExitError) {
 // printExitError takes two writers because the envelope starts on a fresh line only when it is
 // handed os.Stderr itself.
 func printExitError(text, envelope io.Writer, e *ExitError) {
+	if e.report != nil {
+		e.report(envelope)
+		return
+	}
 	if e.msg == "" {
 		return
 	}
+	guidance := refusalErrorIn(e.args)
+	if e.envelope {
+		guidance = refusalGuidance(e.cause, e.args)
+	}
 	if OutputFormat == OutputFormatJSON {
 		failure := envelopeFailure(e.Code, "", e.msg, e.args)
+		if e.envelope {
+			failure = Failure{ExitCode: e.Code, Operation: e.operation, Err: e.cause, Message: failure.Message, NextActions: RefusalNextActions(guidance)}
+		}
 		if e.usage {
 			failure = Failure{ExitCode: e.Code, ErrorCode: ErrorCodeUsage, Operation: e.operation, Message: failure.Message}
 		}
 		PrintJSONError(envelope, failure.envelope())
 		return
 	}
-	printCliErrorTo(text, refusalErrorIn(e.args), e.msg, e.args...)
+	printCliErrorTo(text, guidance, e.msg, e.args...)
 	if e.footer {
 		printIssueFooter(text)
 	}

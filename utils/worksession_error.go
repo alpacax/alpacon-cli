@@ -2,7 +2,7 @@ package utils
 
 import (
 	"fmt"
-	"os"
+	"io"
 	"slices"
 	"strings"
 
@@ -77,20 +77,29 @@ func isWorkSessionCode(code string) bool {
 // HandleWorkSessionError prints a WorkSession gate diagnostic and exits(3); no-op for other errors.
 // target is what the operation names: a cluster for OperationKube, a server otherwise.
 func HandleWorkSessionError(err error, operation, target, authMethod, activeWS string) {
+	if e := WorkSessionExitError(err, operation, target, authMethod, activeWS); e != nil {
+		exitWithError(e)
+	}
+}
+
+// WorkSessionExitError is the failure HandleWorkSessionError reports, or nil when err is no
+// WorkSession gate refusal.
+func WorkSessionExitError(err error, operation, target, authMethod, activeWS string) *ExitError {
 	if err == nil {
-		return
+		return nil
 	}
 	code, _ := ParseErrorResponse(err)
 	if !isWorkSessionCode(code) {
-		return
+		return nil
 	}
 	hint := RefusalHint(err)
-	if OutputFormat == OutputFormatJSON {
-		PrintJSONError(os.Stderr, buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS, hint))
-	} else {
-		fmt.Fprintln(os.Stderr, buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS, hint))
-	}
-	os.Exit(ExitCodeWorkSessionDenied)
+	return &ExitError{Code: ExitCodeWorkSessionDenied, cause: err, report: func(w io.Writer) {
+		if OutputFormat == OutputFormatJSON {
+			PrintJSONError(w, buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS, hint))
+			return
+		}
+		_, _ = fmt.Fprintln(w, buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS, hint))
+	}}
 }
 
 func buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS, hint string) string {
