@@ -291,6 +291,21 @@ func TestIsRejectedReadsTheStatusAndACompletedCommandsCause(t *testing.T) {
 	}
 }
 
+func TestAReasonThatSanitizesToNothingKeepsTheAskTheApproverStep(t *testing.T) {
+	t.Parallel()
+	for name, note := range map[string]string{"whitespace only": `  \n `, "escape only": `\u001b[2K`} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			body := `,"rejection_cause":"approval_rejected","rejection_gate":"approval","rejection_note":"` + note + `"`
+
+			rejected := rejectedDetails(t, body).Rejection()
+
+			assert.Equal(t, []utils.NextAction{causeTexts[RejectionCauseApprovalRejected].next}, rejected.NextActions())
+			assert.Contains(t, rejected.ErrorFields(), "rejection_note")
+		})
+	}
+}
+
 func TestAnApproverReasonTakesThePlaceOfAskTheApprover(t *testing.T) {
 	t.Parallel()
 	body := `,"rejection_cause":"approval_rejected","rejection_gate":"approval","rejection_note":"Add a guard\non line 23.\u001b[2K"`

@@ -392,6 +392,8 @@ func TestDescribeLeavesOutAnEmptyReason(t *testing.T) {
 	for _, body := range []string{
 		`{"id":"apr-3","status":"rejected","rejection_note":""}`,
 		`{"id":"apr-3","status":"rejected"}`,
+		`{"id":"apr-3","status":"rejected","rejection_note":"  \n "}`,
+		`{"id":"apr-3","status":"rejected","rejection_note":"\u001b[2K"}`,
 	} {
 		rows := rowMap(describeRows(decodeFixture(t, body), nil))
 		assert.NotContains(t, rows, "Rejection reason", body)

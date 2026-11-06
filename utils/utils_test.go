@@ -836,6 +836,11 @@ func TestSanitizeTerminalOneLine(t *testing.T) {
 			want:  "rotate the key now",
 		},
 		{
+			name:  "folds the double space an escape between spaces leaves behind",
+			input: "rotate the key \x1b[2K now",
+			want:  "rotate the key now",
+		},
+		{
 			name:  "returns empty for whitespace only",
 			input: " \t\n ",
 			want:  "",

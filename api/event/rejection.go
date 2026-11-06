@@ -193,8 +193,8 @@ func (e *CommandRejectedError) NextActions() []utils.NextAction {
 	if e.Cause == RejectionCauseUseFileExecution || (e.Cause == "" && (e.SudoGrant || e.Expired)) {
 		return nil
 	}
-	if e.Cause == RejectionCauseApprovalRejected && e.Note != "" {
-		return []utils.NextAction{{Description: `The approver wrote: "` + utils.SanitizeTerminalOneLine(e.Note) + `"`}}
+	if note := utils.SanitizeTerminalOneLine(e.Note); e.Cause == RejectionCauseApprovalRejected && note != "" {
+		return []utils.NextAction{{Description: `The approver wrote: "` + note + `"`}}
 	}
 	return []utils.NextAction{e.text().next}
 }

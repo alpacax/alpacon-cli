@@ -581,9 +581,9 @@ func SanitizeTerminalText(s string) string {
 	return StripControlChars(StripFormatAndANSI(s))
 }
 
-// SanitizeTerminalOneLine fits free text a person wrote, such as an approver's
-// reason, onto one terminal line: line breaks, tabs and runs of space become one
-// space. Whitespace is folded before sanitizing, since SanitizeTerminalText drops
+// SanitizeTerminalOneLine fits free text, such as an approver's reason or an
+// agent's tunnel failure, onto one terminal line: line breaks, tabs and runs of
+// space become one space. Whitespace is folded before sanitizing, since SanitizeTerminalText drops
 // \t, \r and \n and would run the words on either side together.
 func SanitizeTerminalOneLine(s string) string {
 	return strings.Join(strings.Fields(SanitizeTerminalText(strings.Join(strings.Fields(s), " "))), " ")
