@@ -15,7 +15,9 @@ type ExitError struct {
 	Code      int
 	usage     bool
 	footer    bool
+	envelope  bool // built by NewEnvelopeExitError: json mode classifies cause under operation
 	operation string
+	cause     error
 	msg       string
 	args      []any
 }
@@ -30,6 +32,9 @@ func (e *ExitError) Error() string {
 // Unwrap returns the errors among the message's arguments, so a caller can still inspect the cause.
 func (e *ExitError) Unwrap() []error {
 	var causes []error
+	if e.cause != nil {
+		causes = append(causes, e.cause)
+	}
 	for _, arg := range e.args {
 		if err, ok := arg.(error); ok && err != nil {
 			causes = append(causes, err)
@@ -52,6 +57,24 @@ func NewExitErrorWithCode(code int, msg string, args ...any) error {
 // NewUsageExitError is the failure CliUsageErrorWithExit reports: exit 2 with error_code usage_error.
 func NewUsageExitError(msg string, args ...any) error {
 	return newUsageExitError("", msg, args)
+}
+
+// NewEnvelopeExitError is the failure CliErrorEnvelopeWithExit reports: exit 1 with the footer, or 2
+// when err or an argument is a usage error; json mode classifies err under operation.
+func NewEnvelopeExitError(operation string, err error, msg string, args ...any) error {
+	return newEnvelopeExitError(operation, err, msg, args)
+}
+
+// NewUsageEnvelopeExitError is the failure CliUsageErrorEnvelopeWithExit reports.
+func NewUsageEnvelopeExitError(operation, msg string, args ...any) error {
+	return newUsageExitError(operation, msg, args)
+}
+
+func newEnvelopeExitError(operation string, err error, msg string, args []any) *ExitError {
+	if IsUsageError(err) || usageErrorIn(args) {
+		return newUsageExitError(operation, msg, args)
+	}
+	return &ExitError{Code: ExitCodeGeneralError, footer: true, envelope: true, operation: operation, cause: err, msg: msg, args: args}
 }
 
 func newExitError(code int, footer bool, msg string, args []any) *ExitError {
@@ -84,13 +107,16 @@ func printExitError(text, envelope io.Writer, e *ExitError) {
 	}
 	if OutputFormat == OutputFormatJSON {
 		failure := envelopeFailure(e.Code, "", e.msg, e.args)
-		if e.usage {
+		switch {
+		case e.usage:
 			failure = Failure{ExitCode: e.Code, ErrorCode: ErrorCodeUsage, Operation: e.operation, Message: failure.Message}
+		case e.envelope:
+			failure = Failure{ExitCode: e.Code, Operation: e.operation, Err: e.cause, Message: failure.Message, NextActions: RefusalNextActions(refusalGuidance(e.cause, e.args))}
 		}
 		PrintJSONError(envelope, failure.envelope())
 		return
 	}
-	printCliErrorTo(text, refusalErrorIn(e.args), e.msg, e.args...)
+	printCliErrorTo(text, refusalGuidance(e.cause, e.args), e.msg, e.args...)
 	if e.footer {
 		printIssueFooter(text)
 	}
