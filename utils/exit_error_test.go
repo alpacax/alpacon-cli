@@ -84,3 +84,80 @@ func TestExitError_UnwrapsTheCauseAmongItsArguments(t *testing.T) {
 	require.ErrorIs(t, err, cause)
 	assert.EqualError(t, err, "lookup failed: boom")
 }
+
+func TestWorkSessionExitError_PrintsTheGateDiagnosticAndExits3(t *testing.T) {
+	t.Parallel()
+	refusal := errors.New(`{"code": "work_session_required"}`)
+
+	err := WorkSessionExitError(refusal, OperationWebsh, "my-server", "Browser login", "")
+
+	require.ErrorIs(t, err, refusal)
+	exitErr, ok := errors.AsType[*ExitError](err)
+	require.True(t, ok, "want an ExitError, got %v", err)
+	assert.Equal(t, ExitCodeWorkSessionDenied, exitErr.Code)
+	var stderr bytes.Buffer
+	FprintExitError(&stderr, exitErr)
+	assert.Equal(t, buildWorkSessionDiagnostic(WorkSessionRequired, OperationWebsh, "my-server", "Browser login", "", "")+"\n", stderr.String())
+}
+
+func TestWorkSessionExitError_IsNilForAnyOtherError(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{name: "nil", err: nil},
+		{name: "other code", err: errors.New(`{"code": "auth_mfa_required"}`)},
+		{name: "no code", err: errors.New("connection refused")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := WorkSessionExitError(tc.err, OperationWebsh, "my-server", "Browser login", "")
+
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestNewParseExitError_PointsToTheCommandsHelp(t *testing.T) {
+	t.Parallel()
+	cmd := &cobra.Command{Use: "websh"}
+
+	err := NewParseExitError(cmd, "", "unknown flag: --bogus")
+
+	exitErr, ok := errors.AsType[*ExitError](err)
+	require.True(t, ok, "want an ExitError, got %v", err)
+	assert.Equal(t, ExitCodeUsageError, exitErr.Code)
+	assert.Equal(t, "unknown flag: --bogus\nRun 'websh --help' for usage.", exitErr.Error())
+}
+
+func TestCheckPositiveInt_RefusesZeroAndBelowAsAUsageError(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		value    int
+		wantCode int
+	}{
+		{name: "positive", value: 1},
+		{name: "zero", value: 0, wantCode: ExitCodeUsageError},
+		{name: "negative", value: -3, wantCode: ExitCodeUsageError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := CheckPositiveInt("tail", tc.value)
+
+			if tc.wantCode == 0 {
+				assert.NoError(t, err)
+				return
+			}
+			exitErr, ok := errors.AsType[*ExitError](err)
+			require.True(t, ok, "want an ExitError, got %v", err)
+			assert.Equal(t, tc.wantCode, exitErr.Code)
+			assert.Equal(t, "--tail must be a positive integer.", exitErr.Error())
+		})
+	}
+}

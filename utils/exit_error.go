@@ -18,6 +18,7 @@ type ExitError struct {
 	operation string
 	msg       string
 	args      []any
+	print     func(text, envelope io.Writer) // replaces the error line for a failure with its own layout
 }
 
 func (e *ExitError) Error() string {
@@ -80,6 +81,10 @@ func FprintExitError(w io.Writer, e *ExitError) {
 // handed os.Stderr itself.
 func printExitError(text, envelope io.Writer, e *ExitError) {
 	if e.msg == "" {
+		return
+	}
+	if e.print != nil {
+		e.print(text, envelope)
 		return
 	}
 	if OutputFormat == OutputFormatJSON {
