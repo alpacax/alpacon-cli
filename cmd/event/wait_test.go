@@ -2,12 +2,12 @@ package event
 
 import (
 	"bytes"
-	"encoding/json"
-	"os"
-	"os/exec"
+	"errors"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -52,44 +52,56 @@ func TestValidateEventTargetReturnsTrimmedID(t *testing.T) {
 	assert.Equal(t, "session-id", target)
 }
 
-func TestRunWaitAndWatch_RefuseAnInvalidTargetAsAUsageError(t *testing.T) {
-	for _, command := range []string{opWait, opWatch} {
-		t.Run(command, func(t *testing.T) {
-			helper := exec.Command(os.Args[0], "-test.run=^TestEventTargetHelperProcess$")
-			helper.Env = append(os.Environ(), "GO_WANT_EVENT_TARGET_HELPER="+command, "HOME="+t.TempDir())
-			var stderr bytes.Buffer
-			helper.Stderr = &stderr
-
-			err := helper.Run()
-
-			var exitErr *exec.ExitError
-			require.ErrorAs(t, err, &exitErr)
-			assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode(), "stderr: %s", stderr.String())
-			var envelope struct {
-				ErrorCode string `json:"error_code"`
-				Message   string `json:"message"`
+func TestWaitAndWatch_RefuseWhatTheyCannotRun(t *testing.T) {
+	t.Parallel()
+	newCommands := map[string]func(func() (*client.AlpaconClient, error)) *cobra.Command{opWait: newWaitCommand, opWatch: newWatchCommand}
+	cases := []struct {
+		name       string
+		command    string
+		args       []string
+		wantCode   int
+		wantLine   string
+		connects   bool // the client factory succeeds
+		wantClient bool
+	}{
+		{name: "wait invalid target", command: opWait, args: []string{"--type", "command", "--target", "../x"}, wantCode: utils.ExitCodeUsageError, wantLine: "invalid target ID"},
+		{name: "watch invalid target", command: opWatch, args: []string{"--type", "command", "--target", "../x"}, wantCode: utils.ExitCodeUsageError, wantLine: "invalid target ID"},
+		{name: "wait without a type", command: opWait, wantCode: utils.ExitCodeUsageError, wantLine: "--type is required."},
+		{name: "watch without a type", command: opWatch, wantCode: utils.ExitCodeUsageError, wantLine: "--type is required."},
+		{name: "wait with a blank until", command: opWait, args: []string{"--type", "work_session", "--until", " , "}, wantCode: utils.ExitCodeUsageError, wantLine: "--until needs at least one sub type."},
+		{name: "wait with a zero timeout", command: opWait, args: []string{"--type", "work_session", "--timeout", "0s"}, wantCode: utils.ExitCodeUsageError, wantLine: "--timeout must be positive."},
+		{name: "wait for an unknown type without until", command: opWait, args: []string{"--type", "notification"}, wantCode: utils.ExitCodeUsageError, wantLine: "--until is required for notification", connects: true, wantClient: true},
+		{name: "wait without a client", command: opWait, args: []string{"--type", "work_session"}, wantCode: utils.ExitCodeGeneralError, wantLine: "Connection to Alpacon API failed: no client. Consider re-logging.", wantClient: true},
+		{name: "watch without a client", command: opWatch, args: []string{"--type", "work_session"}, wantCode: utils.ExitCodeGeneralError, wantLine: "Connection to Alpacon API failed: no client. Consider re-logging.", wantClient: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			clientCalled := false
+			newClient := func() (*client.AlpaconClient, error) {
+				clientCalled = true
+				if tc.connects {
+					return &client.AlpaconClient{}, nil
+				}
+				return nil, errors.New("no client")
 			}
-			require.NoError(t, json.Unmarshal(stderr.Bytes(), &envelope), "stderr: %s", stderr.String())
-			assert.Equal(t, utils.ErrorCodeUsage, envelope.ErrorCode)
-			assert.Contains(t, envelope.Message, "invalid target ID")
+			cmd := newCommands[tc.command](newClient)
+			cmd.SetArgs(tc.args)
+			var stdout, stderr bytes.Buffer
+			cmd.SetOut(&stdout)
+			cmd.SetErr(&stderr)
+
+			err := cmd.Execute()
+
+			exitErr, ok := errors.AsType[*utils.ExitError](err)
+			require.True(t, ok, "want an ExitError, got %v", err)
+			assert.Equal(t, tc.wantCode, exitErr.Code)
+			assert.Equal(t, tc.wantClient, clientCalled)
+			assert.Empty(t, stdout.String())
+			assert.Empty(t, stderr.String(), "cobra must leave the failure to cmd.Execute")
+			var printed bytes.Buffer
+			utils.FprintExitError(&printed, exitErr)
+			assert.Contains(t, printed.String(), tc.wantLine)
 		})
 	}
-}
-
-// A valid --type and an empty HOME make any path past the target check fail
-// differently: a missing type exits 2 too, while a missing login exits 1.
-func TestEventTargetHelperProcess(t *testing.T) {
-	command := os.Getenv("GO_WANT_EVENT_TARGET_HELPER")
-	if command == "" {
-		return
-	}
-	utils.OutputFormat = utils.OutputFormatJSON
-	cmd, run := waitCmd, runWait
-	if command == opWatch {
-		cmd, run = watchCmd, runWatch
-	}
-	_ = cmd.Flags().Set("type", "command")
-	_ = cmd.Flags().Set("target", "../x")
-	run(cmd, nil)
-	os.Exit(0)
 }
