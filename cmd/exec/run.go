@@ -860,6 +860,11 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 			utils.PrintRefusalHints(os.Stderr, clientTimeout)
 			os.Exit(1)
 		}
+		var pollFailure *event.CommandPollError
+		if errors.As(err, &pollFailure) {
+			reportCommandPollFailure(err, pollFailure)
+			return
+		}
 		var rejected *event.CommandRejectedError
 		if errors.As(err, &rejected) {
 			// Final for this command line: a retry is refused again or files another approval request.
@@ -872,6 +877,21 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 		}
 		utils.CliErrorWithExit("%s", err)
 	}
+}
+
+// reportCommandPollFailure points at the job rather than a retry, which could run the
+// command twice. A server hint prints beside the action, since it cannot replace it.
+func reportCommandPollFailure(err error, failure *event.CommandPollError) {
+	message := strings.TrimRight(utils.SanitizeTerminalText(failure.Error()), ".")
+	logs := utils.NextAction{
+		Command:     fmt.Sprintf("alpacon exec logs %s", failure.CommandID),
+		Description: "check the command before running it again",
+	}
+	utils.ExitWithFailureJSON(utils.Failure{ExitCode: 1, Operation: "command", Err: err, Message: message + ".", NextActions: []utils.NextAction{logs}})
+	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
+	fmt.Fprint(os.Stderr, denialHintLine(logs.PlainText()+"\n"))
+	utils.PrintRefusalHints(os.Stderr, err)
+	os.Exit(1)
 }
 
 func reportCommandRejection(err error, rejected *event.CommandRejectedError) {
@@ -921,8 +941,8 @@ func codedRefusalHint(err error, local string) string {
 }
 
 // propagateCommandError reports errors RunCommandWithRetry must return unchanged (never
-// MFA-retried or wrapped): phased errors, a status-hold PendingApprovalError and an
-// AwaitingPurposeError.
+// MFA-retried or wrapped): phased errors, a status-hold PendingApprovalError, an
+// AwaitingPurposeError and a CommandPollError.
 func propagateCommandError(err error) (error, bool) {
 	if phased, ok := asPhasedError(err); ok {
 		return phased, true
@@ -936,6 +956,10 @@ func propagateCommandError(err error) (error, bool) {
 	var purposeDemand *event.AwaitingPurposeError
 	if errors.As(err, &purposeDemand) {
 		return purposeDemand, true
+	}
+	var pollFailure *event.CommandPollError
+	if errors.As(err, &pollFailure) {
+		return pollFailure, true
 	}
 	return nil, false
 }
