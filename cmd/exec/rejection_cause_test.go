@@ -121,7 +121,12 @@ func TestRejectedCommandReportsCauseGateAndNextStep(t *testing.T) {
 					assert.Equal(t, wantExit, envelope.ExitCode)
 					assert.Equal(t, tc.wantCode, envelope.ErrorCode)
 					assert.Equal(t, surface.subject+" "+tc.wantMessage+".", envelope.Message)
-					assert.Equal(t, tc.wantServer, envelope.Server)
+					assert.Equal(t, map[string]any{
+						"console_url":     "",
+						"work_session_id": "ses-1",
+						"rejection_cause": tc.wantServer["rejection_cause"],
+						"rejection_gate":  tc.wantServer["rejection_gate"],
+					}, envelope.Server)
 					assert.Equal(t, []utils.NextAction{tc.wantNext}, envelope.NextActions)
 				})
 			}
@@ -171,7 +176,7 @@ func TestRejectedCommandFromOlderServerSaysTheCauseWasNotRecorded(t *testing.T) 
 				assert.Equal(t, utils.ExitCodeNotApproved, envelope.ExitCode)
 				assert.Equal(t, utils.ErrorCodeNotApproved, envelope.ErrorCode)
 				assert.Equal(t, surface.subject+" "+wantMessage, envelope.Message)
-				assert.Nil(t, envelope.Server)
+				assert.Equal(t, map[string]any{"console_url": "", "work_session_id": "ses-1"}, envelope.Server)
 				assert.Equal(t, []utils.NextAction{wantNext}, envelope.NextActions)
 			})
 		}

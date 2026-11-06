@@ -9,6 +9,7 @@ type AlpaconClient struct {
 	HTTPClient    *http.Client
 	BaseURL       string
 	WorkspaceName string // the workspace BaseURL points at; config can be rewritten mid-flight
+	BaseDomain    string // loaded with BaseURL, so console links use the same workspace identity
 	Token         string
 	accessToken   string
 	Privileges    string

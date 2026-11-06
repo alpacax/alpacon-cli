@@ -190,13 +190,13 @@ func TestRejectionErrorFields(t *testing.T) {
 		body string
 		want map[string]any
 	}{
-		{name: "cause and gate", body: `,"rejection_cause":"risk_denied","rejection_gate":"risk"`, want: map[string]any{"rejection_cause": "risk_denied", "rejection_gate": "risk"}},
-		{name: "signature cause has a null gate", body: `,"rejection_cause":"unsigned_file","rejection_gate":null`, want: map[string]any{"rejection_cause": "unsigned_file", "rejection_gate": nil}},
-		{name: "cause only", body: `,"rejection_cause":"risk_denied"`, want: map[string]any{"rejection_cause": "risk_denied", "rejection_gate": nil}},
-		{name: "gate only", body: `,"rejection_gate":"risk"`, want: map[string]any{"rejection_cause": nil, "rejection_gate": "risk"}},
-		{name: "null cause with a gate", body: `,"rejection_cause":null,"rejection_gate":"risk"`, want: map[string]any{"rejection_cause": nil, "rejection_gate": "risk"}},
-		{name: "both null", body: `,"rejection_cause":null,"rejection_gate":null`, want: map[string]any{"rejection_cause": nil, "rejection_gate": nil}},
-		{name: "older server sends neither", body: ``, want: nil},
+		{name: "cause and gate", body: `,"rejection_cause":"risk_denied","rejection_gate":"risk"`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": "risk_denied", "rejection_gate": "risk"}},
+		{name: "signature cause has a null gate", body: `,"rejection_cause":"unsigned_file","rejection_gate":null`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": "unsigned_file", "rejection_gate": nil}},
+		{name: "cause only", body: `,"rejection_cause":"risk_denied"`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": "risk_denied", "rejection_gate": nil}},
+		{name: "gate only", body: `,"rejection_gate":"risk"`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": nil, "rejection_gate": "risk"}},
+		{name: "null cause with a gate", body: `,"rejection_cause":null,"rejection_gate":"risk"`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": nil, "rejection_gate": "risk"}},
+		{name: "both null", body: `,"rejection_cause":null,"rejection_gate":null`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": nil, "rejection_gate": nil}},
+		{name: "older server sends neither", body: ``, want: map[string]any{"console_url": "", "work_session_id": ""}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -259,7 +259,7 @@ func TestSudoGrantRefusalKeepsTheReviewerWording(t *testing.T) {
 
 			assert.Equal(t, tc.wantError, msg)
 			assert.Nil(t, tc.rejected.NextActions())
-			assert.Nil(t, tc.rejected.ErrorFields())
+			assert.Equal(t, map[string]any{"console_url": "", "work_session_id": ""}, tc.rejected.ErrorFields())
 		})
 	}
 }

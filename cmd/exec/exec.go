@@ -304,6 +304,10 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 			}))
 		}
 		if err != nil {
+			signalArgs := parsed
+			signalArgs.WorkSessionID = workSessionID
+			err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), alpaconClient)
+			utils.SignalRefusal(err)
 			utils.HandleWorkSessionError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID)
 			if HandleFileExecRefusal(err, parsed.Server) {
 				return

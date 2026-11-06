@@ -112,6 +112,11 @@ func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {
 // among their own arguments, so every call site that formats a server error
 // into its message prints the server's hint without naming it.
 func printCliError(err error, msg string, args ...any) {
+	if err != nil {
+		SignalPaused(err)
+	} else {
+		signalErrorsIn(args)
+	}
 	_, _ = fmt.Fprintf(TrackedStderr(), "%s: %s\n", Red("Error"), cliMessage(msg, args...))
 	printRefusalNextActions(TrackedStderr(), err)
 }

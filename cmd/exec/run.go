@@ -14,6 +14,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
@@ -534,7 +535,7 @@ func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalOutcome, 
 // fresh approval request on every tick.
 func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
 	return runWithApprovalWait(ac, func() error {
-		return runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+		return utils.WithSignalFields(runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, purpose, out), localsignal.Fields{Argv0: localsignal.Argv0(command), Server: serverName, Account: username, Session: workSessionID})
 	}, waitTimeout, out)
 }
 
@@ -544,7 +545,7 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 // are the same layers the generic lane runs through.
 func RunFileExecWithApprovalWait(ac *client.AlpaconClient, serverName string, file event.FileExecution, username, groupname, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
 	return runWithApprovalWait(ac, func() error {
-		return runWithPresenceStepUp(ac, serverName, func() error {
+		err := runWithPresenceStepUp(ac, serverName, func() error {
 			// One stream for the attempt and its MFA retries; see RunCommandWithRetry.
 			stream := event.NewCommandStream(ac)
 			defer stream.Close()
@@ -552,13 +553,24 @@ func RunFileExecWithApprovalWait(ac *client.AlpaconClient, serverName string, fi
 				return stream.RunFileCommand(serverName, file, username, groupname, workSessionID, purpose, out)
 			})
 		})
+		return utils.WithSignalFields(err, localsignal.Fields{Argv0: localsignal.Argv0(file.Path), Server: serverName, Account: username, Session: workSessionID})
 	}, waitTimeout, out)
 }
 
 // runWithApprovalWait is RunExecWithApprovalWait over a commandRun: run is the
 // first attempt and, once a reviewer grants the request, the re-run.
-func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout time.Duration, out io.Writer) error {
+func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout time.Duration, out io.Writer) (result error) {
 	err := run()
+	err = utils.WithSignalFields(err, utils.SignalFields(err), ac)
+	announced := false
+	defer func() {
+		fields := utils.SignalFields(err)
+		result = utils.WithSignalFields(result, fields, ac)
+		utils.SignalRefusal(result)
+		if announced {
+			result = utils.MarkApprovalSignaled(result)
+		}
+	}()
 
 	// Status-hold: the server parked this job at awaiting_approval (it never ran).
 	// With --wait, resubscribe to the same job and stream once approved instead of
@@ -568,6 +580,8 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 		if waitTimeout <= 0 {
 			return err
 		}
+		utils.SignalApprovalPending(err, utils.SignalFields(err))
+		announced = true
 		spinner := utils.NewSpinner("Waiting for approval in the Alpacon console (output streams once approved)...")
 		spinner.Start()
 		defer spinner.Stop()
@@ -585,6 +599,8 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 		// Nothing to poll: fall back to reporting the denial as it stands.
 		return err
 	}
+	utils.SignalApprovalPending(err, utils.SignalFields(err))
+	announced = true
 	cmdID := denialErr.CommandID
 
 	spinner := utils.NewSpinner(approvalWaitMessage)
@@ -768,6 +784,7 @@ func HandlePendingApproval(err error, parsed RemoteExecArgs) bool {
 	// Status-hold: held job runs automatically once approved, so point at exec logs.
 	var pendingErr *event.PendingApprovalError
 	if errors.As(err, &pendingErr) {
+		utils.SignalApprovalPending(err, commandSignalFields(err, parsed))
 		var extra []utils.NextAction
 		if action, ok := fileSuggestionAction(parsed, pendingErr.FileSuggestion); ok {
 			extra = append(extra, action)
@@ -786,6 +803,7 @@ func HandlePendingApproval(err error, parsed RemoteExecArgs) bool {
 	if !ok {
 		return false
 	}
+	utils.SignalApprovalPending(err, commandSignalFields(err, parsed))
 	// This exits before HandleCommandResult, so a self-service way out (re-declaring a stale
 	// session intent) would otherwise never reach the user.
 	if hint, _ := pendingSudoDenial(output); hint != "" {
@@ -904,6 +922,7 @@ func reportCodedRefusal(operation string, err error, message, hint string) {
 func reportCodedRefusalWithExit(code int, operation string, err error, message, hint string, actions []utils.NextAction) {
 	utils.ExitIfUsageError(code, operation, err, "%s.", message)
 	utils.ExitWithFailureJSON(utils.Failure{ExitCode: code, Operation: operation, Err: err, Message: message + ".", NextActions: actions})
+	utils.SignalPaused(err)
 	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
 	if hint := codedRefusalHint(err, hint); hint != "" {
 		fmt.Fprint(os.Stderr, hint)
@@ -1031,4 +1050,24 @@ func execUserRequiredExamples(invokedAs Invocation) string {
 		return "  alpacon websh -u USERNAME SERVER 'COMMAND'\n  alpacon websh USERNAME@SERVER 'COMMAND'\n"
 	}
 	return "  alpacon exec -u USERNAME SERVER -- COMMAND\n  alpacon exec USERNAME@SERVER -- COMMAND\n"
+}
+
+func commandSignalFields(err error, parsed RemoteExecArgs) localsignal.Fields {
+	fields := utils.SignalFields(err)
+	if fields.Argv0 == "" {
+		fields.Argv0 = localsignal.Argv0(parsed.Command)
+		if parsed.File != nil {
+			fields.Argv0 = localsignal.Argv0(parsed.File.Path)
+		}
+	}
+	if fields.Server == "" {
+		fields.Server = parsed.Server
+	}
+	if fields.Account == "" {
+		fields.Account = parsed.Username
+	}
+	if fields.Session == "" {
+		fields.Session = parsed.WorkSessionID
+	}
+	return fields
 }

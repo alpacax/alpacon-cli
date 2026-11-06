@@ -173,6 +173,10 @@ func uploadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, file even
 	if err == nil {
 		return
 	}
+	signalArgs := parsed
+	signalArgs.WorkSessionID = workSessionID
+	err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), ac)
+	utils.SignalRefusal(err)
 	utils.HandleWorkSessionError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID)
 	var hint string
 	// The agent answers "PATH already exists." for an existing file.
@@ -192,6 +196,10 @@ func downloadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, workSes
 	label := parsed.Server + ":" + parsed.File.Path
 	content, msg, err := fetchServerScript(ac, parsed, label, workSessionID)
 	if err != nil {
+		signalArgs := parsed
+		signalArgs.WorkSessionID = workSessionID
+		err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), ac)
+		utils.SignalRefusal(err)
 		utils.HandleWorkSessionError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID)
 		// reportCodedRefusal writes raw and appends its own period; drop one the
 		// agent's message ends with.

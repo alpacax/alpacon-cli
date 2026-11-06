@@ -18,6 +18,7 @@ import (
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/alpacax/alpacon-cli/pkg/httpclient"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
@@ -92,6 +93,7 @@ var axisDisplayNames = map[string]string{
 var refreshAccessToken = (*AlpaconClient).refreshLocked
 
 type apiError struct {
+	origin  localsignal.ConsoleOrigin
 	message string
 	code    string
 	source  string
@@ -143,6 +145,7 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 		HTTPClient:    httpClient,
 		BaseURL:       validConfig.WorkspaceURL,
 		WorkspaceName: validConfig.WorkspaceIdentity(),
+		BaseDomain:    validConfig.BaseDomain,
 		Token:         validConfig.Token,
 		UserAgent:     utils.GetUserAgent(),
 		Insecure:      validConfig.Insecure,
@@ -619,6 +622,7 @@ func (ac *AlpaconClient) withRefusalNextFor(err error) error {
 	if ac.dropsRefusalNext {
 		ae.next = ""
 	}
+	ae.origin = ac.LocalSignalOrigin()
 	ae.nextUnderAPIToken = ac.AccessToken() == "" && ac.Token != ""
 	return err
 }
@@ -1309,7 +1313,7 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 		}
 		// A refusal's string "hint" reaches the output sanitized through ErrorHint; rendering it
 		// here would print it a second time, raw.
-		if field == "hint" && utils.IsRefusalStatus(statusCode) {
+		if (field == "hint" || field == "console_url") && utils.IsRefusalStatus(statusCode) {
 			if _, isString := parsed[field].(string); isString {
 				continue
 			}
@@ -1356,7 +1360,7 @@ func isEnvelopeOnly(parsed map[string]any, statusCode int) bool {
 			if _, ok := value.(string); !ok {
 				return false
 			}
-		case "hint":
+		case "hint", "console_url":
 			if !utils.IsRefusalStatus(statusCode) {
 				return false
 			}

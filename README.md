@@ -506,6 +506,20 @@ Run `alpacon --help` for the full list, or `alpacon <command> --help` for detail
 
 ## When a command is denied
 
+When a command or file transfer receives a 403 gate refusal, or a submitted command is later rejected, the CLI prints a red banner on a color terminal, or the same plain-text box on redirected stderr, before its error. Plan, rate, token scope, role, MFA, authentication, and validation refusals do not produce denial signals:
+
+```text
+==== ALPACON: COMMAND DENIED ====
+sudo on my-server as alice was refused by the risk gate and did not run. Session ses-1.
+================================
+```
+
+Pending command, sudo, and Work Session approvals show an `ALPACON: APPROVAL PENDING` banner when the CLI starts waiting or reports pending. A `session_paused` refusal shows `ALPACON: SESSION PAUSED`. A denial alone does not mean the session paused. With `--output json`, the banner goes to the controlling terminal (`/dev/tty` or `CONOUT$`) when available; stdout, stderr, and exit codes keep their existing contracts. Without a controlling terminal, the JSON run has no banner.
+
+The CLI also attempts a desktop notification on macOS, Linux (`notify-send` when installed), and Windows. Its title is `Alpacon: command denied`, `Alpacon: approval pending`, or `Alpacon: session paused`. The banner and notification include only the command's first word with its path removed, server, OS account, gate, and Work Session identifier when known; command arguments are omitted. The executable word is omitted if it contains quotes or backslashes. Account names must match `^[a-z_][a-z0-9_.-]{0,31}\$?$`; the server-returned username takes precedence over a command argument. When the server supplies `console_url`, the banner shows it on its own line and the Windows notification opens it when clicked. Notification failures cannot change the result; each attempt has a two-second timeout, which the CLI waits for before exiting.
+
+Desktop notifications are always attempted within the rate limit, including in CI and over SSH; when the desktop cannot show one, delivery fails silently. The only exception is Windows service session 0, reported by the OS. Text-mode banners still print: on the controlling terminal when stderr is a terminal, and on stderr otherwise, including when an agent runs with non-terminal stdio. JSON mode uses the controlling terminal independently of notification delivery. There is no local-signal opt-out. The banner prints for every event. Only the desktop notification is limited, to one per workspace, Work Session and kind every 60 seconds (workspace and kind alone without a session); repeats are folded into the next notification as `+N more.`, and the shared state is stored in `~/.alpacon/state/signals.json` across CLI invocations. A limiter step that does not finish within 500 ms, or a state file that is not a regular file, emits the notification without updating the state.
+
 Under interactive auth (browser login), `websh`, `exec`, `cp`, `edit`, and `tunnel` require an active work session. Without one, the command is refused with a diagnostic and exit code `3`:
 
 ```

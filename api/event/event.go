@@ -13,6 +13,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
@@ -630,6 +631,7 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 		printStandingGrant(details)
 		// Output is already streamed; errorFromDetails keeps it on the error for
 		// inspection, such as the sudo-denial hint, not for reprinting.
+		SignalPendingSudoApproval(ac, details)
 		return errorFromDetails(cmdID, details)
 	}
 
@@ -658,7 +660,10 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 				// One more read, best effort, so the timed-out wait carries the
 				// same file suggestion a run without --wait prints.
 				if details, err := getCommandByPathID(ac, cmdID); err == nil {
+					pending.Username = details.Username
 					pending.FileSuggestion = details.FileExecutionSuggestion
+					pending.ConsoleURL = details.ConsoleURL
+					pending.WorkSessionID = details.WorkSessionID()
 				}
 				return pending
 			}
@@ -781,7 +786,7 @@ func errorFromDetails(id api.PathID, d EventDetails) error {
 		return &AwaitingPurposeError{CommandID: id.String(), ExpiresAt: d.PurposeExpiresAt}
 	}
 	if IsAwaitingApprovalStatus(d.Status) {
-		return &PendingApprovalError{CommandID: id.String(), FileSuggestion: d.FileExecutionSuggestion}
+		return &PendingApprovalError{Username: d.Username, CommandID: id.String(), FileSuggestion: d.FileExecutionSuggestion, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID()}
 	}
 	if d.IsRejected() {
 		rejected := d.Rejection()
@@ -813,11 +818,21 @@ func errorFromDetails(id api.PathID, d EventDetails) error {
 			if d.ErrorPhase != nil {
 				phase = *d.ErrorPhase
 			}
-			return &RemoteCommandError{Output: d.Result, ExitCode: exitCode, ErrorPhase: phase, CommandID: id.String()}
+			return &RemoteCommandError{Username: d.Username, Output: d.Result, ExitCode: exitCode, ErrorPhase: phase, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID(), CommandID: id.String()}
 		}
 		return nil
 	default:
 		return fmt.Errorf("unexpected command status: %s (command may still be running)", d.Status)
+	}
+}
+
+// SignalPendingSudoApproval signals a successful command whose sudo grant awaits approval.
+func SignalPendingSudoApproval(ac *client.AlpaconClient, details EventDetails) {
+	if errorFromDetails(api.PathID{}, details) == nil && details.SudoGrantStatus != nil && *details.SudoGrantStatus == "pending_approval" {
+		utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{
+			Command: true, Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name,
+			Account: details.Username, Session: details.WorkSessionID(), ConsoleURL: details.ConsoleURL,
+		}, ac)
 	}
 }
 
@@ -850,6 +865,7 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID api.PathID, out io
 	// The command's own failure carries the remote exit code the caller
 	// propagates, so it outranks an unreadable output. The warning above names a
 	// lost stream, not a lost output, so it cannot stand in for this error.
+	SignalPendingSudoApproval(ac, details)
 	if err := errorFromDetails(cmdID, details); err != nil {
 		return err
 	}

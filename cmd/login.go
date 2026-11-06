@@ -13,13 +13,14 @@ import (
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cloud"
 	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
 const (
-	defaultBaseDomain = "alpacon.io"
+	defaultBaseDomain = cloud.DefaultBaseDomain
 
 	whoamiVerified = "verified"
 	whoamiFallback = "fallback"

@@ -10,8 +10,11 @@ import (
 // CommandRejectedError is a type so the CLI can exit with ExitCode: a retry is
 // refused again or files another approval request.
 type CommandRejectedError struct {
-	CommandID string
-	Expired   bool
+	Username      string
+	ConsoleURL    string
+	WorkSessionID string
+	CommandID     string
+	Expired       bool
 	// Cause is the server's rejection_cause, such as approval_rejected.
 	Cause string
 	// Gate is the server's rejection_gate; null for the account and signature causes, so empty.
@@ -28,7 +31,7 @@ type CommandRejectedError struct {
 const RejectionCauseUseFileExecution = "use_file_execution"
 
 const (
-	RejectionCauseApprovalExpired  = "approval_expired"
+	RejectionCauseApprovalExpired  = utils.ApprovalExpired
 	RejectionCauseApprovalRejected = "approval_rejected"
 	// RejectionCauseSignatureInvalid comes with status completed, since the agent
 	// refuses the file after delivery, and IsRejected still counts it a rejection.
@@ -115,10 +118,13 @@ func (e *CommandRejectedError) ExitCode() int {
 // Rejection is the error for a rejected command detail.
 func (d EventDetails) Rejection() *CommandRejectedError {
 	return &CommandRejectedError{
-		CommandID: d.ID,
-		Cause:     d.RejectionCause.Value,
-		Gate:      d.RejectionGate.Value,
-		Reported:  d.Reported(),
+		Username:      d.Username,
+		ConsoleURL:    d.ConsoleURL,
+		WorkSessionID: d.WorkSessionID(),
+		CommandID:     d.ID,
+		Cause:         d.RejectionCause.Value,
+		Gate:          d.RejectionGate.Value,
+		Reported:      d.Reported(),
 	}
 }
 
@@ -190,16 +196,18 @@ func (e *CommandRejectedError) NextActions() []utils.NextAction {
 	return []utils.NextAction{e.text().next}
 }
 
-// ErrorFields is the envelope's server object: both keys, null where the server
-// sent null; nil for an older server.
+// ErrorFields keeps the command context even when the server reports no rejection
+// fields; reported rejection fields preserve null values.
 func (e *CommandRejectedError) ErrorFields() map[string]any {
-	if !e.Reported {
-		return nil
+	fields := map[string]any{
+		"console_url":     e.ConsoleURL,
+		"work_session_id": e.WorkSessionID,
 	}
-	return map[string]any{
-		"rejection_cause": nullIfEmpty(e.Cause),
-		"rejection_gate":  nullIfEmpty(e.Gate),
+	if e.Reported {
+		fields["rejection_cause"] = nullIfEmpty(e.Cause)
+		fields["rejection_gate"] = nullIfEmpty(e.Gate)
 	}
+	return fields
 }
 
 func nullIfEmpty(s string) any {

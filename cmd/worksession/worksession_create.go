@@ -15,6 +15,7 @@ import (
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -268,6 +269,10 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 			}
 			utils.CliErrorEnvelopeWithExit(opCreate, err, "Failed to create work session: %s.", err)
 		}
+		approvalSignaled := session.Status == wsapi.StatusPending
+		if approvalSignaled {
+			utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: session.ID, ConsoleURL: session.ConsoleURL}, ac)
+		}
 		afterApproval := afterApprovalAction(sessionRequesterType, session.ID, account)
 		if clusterName != "" {
 			afterApproval = KubeLoginAction(clusterName, session.ID)
@@ -337,7 +342,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 		}
 
 		// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
-		finalSession, err := WaitForApproval(ac, session.ID, useAfterCreate, ApprovalPollInterval, waitTimeout)
+		finalSession, err := waitForApproval(ac, session.ID, useAfterCreate, ApprovalPollInterval, waitTimeout, approvalSignaled)
 		if err != nil {
 			ExitOnWaitError(opCreate, session, afterApproval, err, createUpdateNextActions(clusterName, session)...)
 		}
@@ -465,6 +470,7 @@ type terminalWaitErrorCtx struct {
 }
 
 func printTerminalWaitErrorJSON(operation string, terminal *terminalWaitError, err error) {
+	utils.SignalPaused(err)
 	utils.PrintJSONError(os.Stderr, utils.JSONErrorEnvelope[terminalWaitErrorCtx]{
 		OK:          false,
 		ExitCode:    utils.ExitCodeNotApproved,
@@ -489,6 +495,7 @@ func terminalWaitNextActions(sessionID string) []utils.NextAction {
 // printTerminalWaitError writes the refusal and its follow-ups to stderr itself rather than through
 // CliError, which appends the report-a-bug pointer: a reviewer saying no is not a bug.
 func printTerminalWaitError(terminal *terminalWaitError, err error) {
+	utils.SignalPaused(err)
 	var sb strings.Builder
 	// The message carries a server-issued session id, so it takes the sanitizer
 	// CliError would otherwise have applied on the way out.
@@ -700,6 +707,10 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 // other transient failures end it at MaxConsecutivePollFailures; 429s are bounded by the throttle
 // budget and the deadline instead.
 func WaitForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration) (*wsapi.WorkSession, error) {
+	return waitForApproval(ac, id, untilActive, interval, timeout, false)
+}
+
+func waitForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration, signaled bool) (*wsapi.WorkSession, error) {
 	start := time.Now()
 	deadline := start.Add(timeout)
 	// lastRefusal is the refusal (a 429 in practice) the latest poll got, if it
@@ -755,6 +766,10 @@ func WaitForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 				return nil, timedOut()
 			}
 			continue
+		}
+		if s.Status == wsapi.StatusPending && !signaled {
+			utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: id, ConsoleURL: s.ConsoleURL}, ac)
+			signaled = true
 		}
 		failures = 0
 		throttles = 0
