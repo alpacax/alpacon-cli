@@ -36,9 +36,8 @@ member's tier within a group (owner, manager, member), a different axis from a
 workspace RBAC role.
 
 Changing a role binding requires a workspace superuser and recent multi-factor
-authentication. On self-hosted workspaces an API token is accepted and skips the
-MFA step. On Alpacon Cloud workspaces an API token is refused on these commands,
-reads included, so run 'alpacon login' first.
+authentication. An API token is refused on these commands, reads included, so
+run 'alpacon login' first.
 
 'history' is the one exception. It reads the audit log, which sits outside the
 gate that refuses tokens elsewhere and asks instead for a token carrying the
