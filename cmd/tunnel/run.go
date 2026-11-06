@@ -23,20 +23,22 @@ const (
 	shellOneLinerHint        = "(for shell-style one-liner, use: -- sh -c \"<command>\")"
 )
 
-func executeTunnelRunWithInvocation(ac *client.AlpaconClient, serverName string, localCommand []string) (int, error) {
-	runtime, err := tunnelruntime.Start(tunnelFlags.toStartOptions(ac, serverName))
+func executeTunnelRunWithInvocation(ac *client.AlpaconClient, flags tunnelFlagValues, serverName string, localCommand []string) (int, error) {
+	runtime, err := tunnelruntime.Start(flags.toStartOptions(ac, serverName))
 	if err != nil {
 		err = handleTunnelStartError(ac, err, serverName, func() error {
-			runtime, err = tunnelruntime.Start(tunnelFlags.toStartOptions(ac, serverName))
+			runtime, err = tunnelruntime.Start(flags.toStartOptions(ac, serverName))
 			return err
 		})
 		if err != nil {
 			return 1, err
 		}
 	}
-	if err := runtime.CheckReady(); err != nil {
+	defer func() { // Close is idempotent; monitorLocalCommand has usually closed it already
 		runtime.Close(nil)
 		<-runtime.Done()
+	}()
+	if err := runtime.CheckReady(); err != nil {
 		return 1, fmt.Errorf("failed to establish tunnel connection: %w", err)
 	}
 
@@ -52,8 +54,6 @@ func executeTunnelRunWithInvocation(ac *client.AlpaconClient, serverName string,
 	localCmd.Stderr = utils.StderrForChild()
 
 	if err := localCmd.Start(); err != nil {
-		runtime.Close(nil)
-		<-runtime.Done()
 		return 1, fmt.Errorf("failed to start local command %q: %w", commandName, err)
 	}
 
