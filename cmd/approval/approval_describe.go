@@ -202,7 +202,7 @@ func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 	}
 	if s := meta.Sudo; s != nil {
 		add("Sudo command", s.Command)
-		add("  Run as", s.RunAs)
+		add("Run as", s.RunAs)
 		add("Purpose", s.Purpose)
 		add("Server", s.ServerName)
 		add("Risk level", s.RiskLevel)
