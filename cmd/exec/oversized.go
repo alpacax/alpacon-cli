@@ -25,6 +25,12 @@ func lineTooLongGuidance(parsed RemoteExecArgs) (message, hint string, action ut
 	if parsed.Detach {
 		flags = append(flags, "--detach")
 	}
+	if parsed.Wait {
+		flags = append(flags, "--wait")
+	}
+	if parsed.WaitApprovalRaw != "" {
+		flags = append(flags, "--wait-approval "+argvQuote(parsed.WaitApprovalRaw))
+	}
 	action = uploadScriptAction(append(flags, "--interpreter "+inlineLineInterpreter), parsed.Server)
 	action.Description = "save the command to a local file, then write it to the server and run it in one step with " + inlineLineInterpreter + ", the shell a command line runs in, adding --overwrite to replace a file already at that path"
 

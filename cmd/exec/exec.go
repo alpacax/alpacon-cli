@@ -70,8 +70,8 @@ ceiling (1 to 366 days, default 90).
 The server refuses a command line over its length limit. exec then exits 1 and
 names the --upload --file command to run instead, with /bin/sh, the shell a
 command line runs in. Nothing is written to the server until you run it. -u, -g,
---work-session, --purpose and --detach carry over. --env does not: set the
-variables inside the script. A file is capped at 64 KB and must be valid UTF-8.
+--work-session, --purpose, --detach, --wait and --wait-approval carry over.
+--env does not: set the variables inside the script. A file is capped at 64 KB and must be valid UTF-8.
 
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.

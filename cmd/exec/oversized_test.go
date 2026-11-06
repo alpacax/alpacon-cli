@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
@@ -223,6 +224,41 @@ func TestLineTooLongGuidance(t *testing.T) {
 	}
 }
 
+// The guidance is pasted or replayed, so it must parse back to the same wait the user asked for.
+func TestLineTooLongGuidanceKeepsTheApprovalWait(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		args        []string
+		wantFlags   string
+		wantWait    bool
+		wantTimeout time.Duration
+	}{
+		{name: "no wait", args: nil, wantFlags: ""},
+		{name: "wait alone", args: []string{"--wait"}, wantFlags: "--wait ", wantWait: true, wantTimeout: utils.DefaultApprovalWaitTimeout},
+		{name: "wait-approval as typed", args: []string{"--wait-approval", "30m"}, wantFlags: "--wait-approval 30m ", wantTimeout: 30 * time.Minute},
+		{name: "wait-approval with equals", args: []string{"--wait-approval=1h30m"}, wantFlags: "--wait-approval 1h30m ", wantTimeout: 90 * time.Minute},
+		{name: "wait-approval padded with spaces", args: []string{"--wait-approval", " 45s "}, wantFlags: "--wait-approval 45s ", wantTimeout: 45 * time.Second},
+		{name: "both flags", args: []string{"--wait", "--wait-approval", "30m"}, wantFlags: "--wait --wait-approval 30m ", wantWait: true, wantTimeout: 30 * time.Minute},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			parsed := ParseRemoteExecArgs(append(tc.args, "prod", "--", "echo", "hi"))
+			require.Empty(t, parsed.Err)
+
+			_, _, action := lineTooLongGuidance(parsed)
+
+			assert.Equal(t, "alpacon exec "+tc.wantFlags+"--interpreter /bin/sh "+uploadCommandTail, action.Command)
+			replayed := ParseRemoteExecArgs(strings.Fields(strings.TrimPrefix(action.Command, "alpacon exec ")))
+			require.Empty(t, replayed.Err)
+			require.NotNil(t, replayed.File)
+			assert.Equal(t, tc.wantWait, replayed.Wait)
+			assert.Equal(t, tc.wantTimeout, replayed.WaitTimeout())
+		})
+	}
+}
+
 func TestExecAcceptedLineSendsNoGuidance(t *testing.T) {
 	t.Parallel()
 	s := &lengthRefusalServer{}
@@ -248,6 +284,11 @@ func TestExecLineTooLongExits1WithTheFileLaneCommand(t *testing.T) {
 			name: "streaming lane",
 			args: []string{"-u", "deploy", "--purpose", "rollout", "prod"},
 			want: "alpacon exec -u deploy --purpose rollout --interpreter /bin/sh " + uploadCommandTail,
+		},
+		{
+			name: "streaming lane with an approval wait",
+			args: []string{"--wait-approval", "30m", "prod"},
+			want: "alpacon exec --wait-approval 30m --interpreter /bin/sh " + uploadCommandTail,
 		},
 		{
 			name: "detach lane",
