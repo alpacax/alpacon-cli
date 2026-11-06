@@ -604,6 +604,18 @@ func SanitizeTerminalBlock(s string) (clean string, altered bool) {
 	return clean, clean != normalized
 }
 
+func SanitizeTerminalBlockKeepingTabs(s string) string {
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		segments := strings.Split(StripFormatAndANSI(line), "\t")
+		for j, segment := range segments {
+			segments[j] = StripControlChars(segment)
+		}
+		lines[i] = strings.Join(segments, "\t")
+	}
+	return strings.Join(lines, "\n")
+}
+
 // ProcessEditedData facilitates user modifications to original data,
 // formats it, supports editing via a temp file, compares the edited data against the original,
 // and parses it into JSON. If no changes are made, the update is aborted and an error is returned.
@@ -719,6 +731,30 @@ func SplitAndTrim(s, sep string) []string {
 func RequirePositiveInt(flagName string, value int) {
 	if value <= 0 {
 		CliUsageErrorWithExit("--%s must be a positive integer.", flagName)
+	}
+}
+
+func RejectUnknownSubcommand(notes ...string) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		err := cobra.NoArgs(cmd, args)
+		if err == nil {
+			return nil
+		}
+		if cmd.SuggestionsMinimumDistance <= 0 {
+			cmd.SuggestionsMinimumDistance = 2
+		}
+		var message strings.Builder
+		message.WriteString(err.Error())
+		for _, note := range notes {
+			message.WriteString("\n" + note)
+		}
+		if names := cmd.SuggestionsFor(args[0]); len(names) > 0 {
+			message.WriteString("\n\nDid you mean this?\n")
+			for _, name := range names {
+				message.WriteString("\t" + name + "\n")
+			}
+		}
+		return errors.New(message.String())
 	}
 }
 

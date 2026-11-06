@@ -7,6 +7,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const approvalGuidance = "Approval and rejection happen in the Alpacon console (web) or Slack."
+
 // Operation identifiers carried in JSON outputs: success "operation" and error context.operation.
 const (
 	opActivate  = "activate"
@@ -67,8 +69,9 @@ Error codes returned when a session check fails:
   work_session_not_usable         session is no longer usable
 
 Run 'alpacon whoami' to check your WorkSession requirement and active session.`,
+	Args: utils.RejectUnknownSubcommand(approvalGuidance),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return utils.RequireSubcommand(cmd, "Approval and rejection happen in the Alpacon console (web) or Slack.")
+		return utils.RequireSubcommand(cmd, approvalGuidance)
 	},
 }
 
