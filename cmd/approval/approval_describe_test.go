@@ -204,7 +204,7 @@ func TestContextRows(t *testing.T) {
 			body: `{"metadata":{"sudo":{"command":"apt update","runas":"root","purpose":"patch openssl","server_name":"my-server"}}}`,
 			want: []describeRow{
 				{"Sudo command", "apt update"},
-				{"  Run as", "root"},
+				{"Run as", "root"},
 				{"Purpose", "patch openssl"},
 				{"Server", "my-server"},
 			},
@@ -214,7 +214,7 @@ func TestContextRows(t *testing.T) {
 			body: `{"metadata":{"sudo":{"command":"apt update","runas":"root","purpose":null}}}`,
 			want: []describeRow{
 				{"Sudo command", "apt update"},
-				{"  Run as", "root"},
+				{"Run as", "root"},
 			},
 		},
 		{
@@ -222,7 +222,7 @@ func TestContextRows(t *testing.T) {
 			body: `{"metadata":{"sudo":{"command":"apt update","runas":"root"}}}`,
 			want: []describeRow{
 				{"Sudo command", "apt update"},
-				{"  Run as", "root"},
+				{"Run as", "root"},
 			},
 		},
 		{
