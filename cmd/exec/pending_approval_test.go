@@ -414,6 +414,18 @@ func TestExecRejectedMidWaitExits6(t *testing.T) {
 // its result, so the result poll runs into its client timeout with that
 // refusal last seen. Any other refusal would end the poll at once.
 func newResultPollRefusalServer(hint string) *httptest.Server {
+	return newResultPollServer(func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		body := map[string]any{"code": utils.APIRateLimited, "gate": "rate"}
+		if hint != "" {
+			body["hint"] = hint
+		}
+		_ = json.NewEncoder(w).Encode(body)
+	})
+}
+
+// newResultPollServer accepts the command and answers every read of its result with result.
+func newResultPollServer(result func(http.ResponseWriter)) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -422,12 +434,7 @@ func newResultPollRefusalServer(hint string) *httptest.Server {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
 			_, _ = fmt.Fprintf(w, `[{"id":"cmd-1"}]`)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
-			w.WriteHeader(http.StatusTooManyRequests)
-			body := map[string]any{"code": utils.APIRateLimited, "gate": "rate"}
-			if hint != "" {
-				body["hint"] = hint
-			}
-			_ = json.NewEncoder(w).Encode(body)
+			result(w)
 		default:
 			http.NotFound(w, r)
 		}
@@ -464,6 +471,27 @@ func TestExecResultPollTimeoutStaysATimeout(t *testing.T) {
 			assert.NotContains(t, stderr, "Hint:")
 		})
 	}
+}
+
+// A poll that stops on a failed read leaves the command behind, so the report must
+// not read as if it never ran: running it again could run it twice.
+func TestExecResultPollFailureSaysTheCommandWasNotCancelled(t *testing.T) {
+	t.Parallel()
+	ts := newResultPollServer(func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"detail":"Not found."}`))
+	})
+	defer ts.Close()
+
+	_, stderr, exitCode := runHelperProcess(t, ts.URL,
+		"TestExecCommandWorkSessionGateHelperProcess", execWorkSessionHelperMarker,
+		[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1"},
+		[]string{"prod", "--", "uptime"})
+
+	assert.Equal(t, 1, exitCode, "stderr: %s", stderr)
+	assert.Contains(t, stderr, "command cmd-1 was submitted and not cancelled")
+	assert.Contains(t, stderr, "alpacon exec logs cmd-1")
+	assert.NotContains(t, stderr, "failed to execute command")
 }
 
 func TestExecLogsApprovalLookupFallback(t *testing.T) {
