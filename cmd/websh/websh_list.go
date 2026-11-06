@@ -2,40 +2,37 @@ package websh
 
 import (
 	"github.com/alpacax/alpacon-cli/api/websh"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var webshListCmd = &cobra.Command{
-	Use:     "ls",
-	Aliases: []string{"list"},
-	Short:   "List active Websh sessions",
-	Example: `  alpacon websh ls
+func newListCommand(newClient clientFactory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List active Websh sessions",
+		Example: `  alpacon websh ls
   alpacon websh ls --tail 50`,
-	Run: func(cmd *cobra.Command, args []string) {
-		tail, _ := cmd.Flags().GetInt("tail")
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			tail, _ := cmd.Flags().GetInt("tail")
+			if err := utils.CheckPositiveInt("tail", tail); err != nil {
+				return err
+			}
 
-		runWebshList(tail)
-	},
-}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-func init() {
-	webshListCmd.Flags().IntP("tail", "t", 25, "Number of sessions to show, newest first")
-}
+			sessionList, err := websh.GetSessionList(alpaconClient, tail)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve websh sessions: %s.", err)
+			}
 
-func runWebshList(tail int) {
-	utils.RequirePositiveInt("tail", tail)
-
-	alpaconClient, err := client.NewAlpaconAPIClient()
-	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.PrintTable(sessionList)
+			return nil
+		}),
 	}
-
-	sessionList, err := websh.GetSessionList(alpaconClient, tail)
-	if err != nil {
-		utils.CliErrorWithExit("Failed to retrieve websh sessions: %s.", err)
-	}
-
-	utils.PrintTable(sessionList)
+	cmd.Flags().IntP("tail", "t", 25, "Number of sessions to show, newest first")
+	return cmd
 }
