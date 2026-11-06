@@ -55,6 +55,9 @@ func TestFprintExitError_PrintsTheFailureItsConstructorNames(t *testing.T) {
 		{name: "empty message still prints the error line", err: NewExitError(""), wantCode: ExitCodeGeneralError, wantLine: ": \n", wantFooter: true},
 		{name: "usage cause promotes exit one to two", err: NewExitError("%s", usageCause), wantCode: ExitCodeUsageError, wantLine: "bad flag\n"},
 		{name: "silent prints nothing", err: NewSilentExitError(ExitCodeGeneralError), wantCode: ExitCodeGeneralError},
+		{name: "envelope error keeps the footer", err: NewEnvelopeExitError("wait", errors.New("boom"), "subscribe failed."), wantCode: ExitCodeGeneralError, wantLine: "subscribe failed.\n", wantFooter: true},
+		{name: "envelope usage cause promotes exit one to two", err: NewEnvelopeExitError("wait", usageCause, "bad target."), wantCode: ExitCodeUsageError, wantLine: "bad target.\n"},
+		{name: "envelope usage error", err: NewUsageEnvelopeExitError("wait", "--type is required."), wantCode: ExitCodeUsageError, wantLine: "--type is required.\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -253,6 +256,41 @@ func TestCheckPositiveInt_RefusesZeroAndBelowAsAUsageError(t *testing.T) {
 			require.True(t, ok, "want an ExitError, got %v", err)
 			assert.Equal(t, tc.wantCode, exitErr.Code)
 			assert.Equal(t, "--tail must be a positive integer.", exitErr.Error())
+		})
+	}
+}
+
+func TestExitError_UnwrapsAnEnvelopeCauseKeptOutOfTheMessage(t *testing.T) {
+	t.Parallel()
+	cause := errors.New("boom")
+
+	err := NewEnvelopeExitError("wait", cause, "%s.", "boom")
+
+	require.ErrorIs(t, err, cause)
+	assert.EqualError(t, err, "boom.")
+}
+
+// Serial: it sets the process-wide OutputFormat.
+func TestFprintExitError_EnvelopeClassifiesItsCauseUnderItsOperation(t *testing.T) {
+	saved := OutputFormat
+	OutputFormat = OutputFormatJSON
+	t.Cleanup(func() { OutputFormat = saved })
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "cause outside the message", err: NewEnvelopeExitError("wait", ErrNotLoggedIn, "%s.", "not logged in"), want: `{"ok":false,"exit_code":1,"error_code":"not_logged_in","message":"not logged in.","context":{"operation":"wait"}}`},
+		{name: "usage error", err: NewUsageEnvelopeExitError("watch", "--type is required."), want: `{"ok":false,"exit_code":2,"error_code":"usage_error","message":"--type is required.","context":{"operation":"watch"}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			exitErr, _ := errors.AsType[*ExitError](tc.err)
+
+			FprintExitError(&out, exitErr)
+
+			assert.JSONEq(t, tc.want, out.String())
 		})
 	}
 }
