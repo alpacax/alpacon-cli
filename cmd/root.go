@@ -85,6 +85,10 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 func Execute() {
 	kube.ApplySurfaceGate(RootCmd, kubernetesSurfaceEnabled())
 	if err := RootCmd.Execute(); err != nil {
+		if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+			utils.PrintExitError(exitErr)
+			os.Exit(exitErr.Code)
+		}
 		utils.CliErrorWithExit("While executing the command: %s", err)
 	}
 }

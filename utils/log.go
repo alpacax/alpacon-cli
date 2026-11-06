@@ -17,7 +17,11 @@ const (
 )
 
 func reportCLIError() {
-	_, _ = fmt.Fprintln(TrackedStderr(), "For issues, check the latest version or report on", gitIssueURL)
+	printIssueFooter(TrackedStderr())
+}
+
+func printIssueFooter(w io.Writer) {
+	_, _ = fmt.Fprintln(w, "For issues, check the latest version or report on", gitIssueURL)
 }
 
 // cliMessage sanitizes the rendered message because the server's error detail reaches every Cli*
@@ -48,25 +52,14 @@ func CliError(msg string, args ...any) {
 // CliErrorWithExit handles all error messages in the CLI and exits 1, or 2 when an argument is a usage
 // error. Under --output json it prints one envelope instead, classified from the first error in args, and no footer.
 func CliErrorWithExit(msg string, args ...any) {
-	ExitIfUsageError(ExitCodeGeneralError, "", nil, msg, args...)
-	if OutputFormat == OutputFormatJSON {
-		exitWithEnvelope(1, "", msg, args)
-	}
-	printCliError(refusalErrorIn(args), msg, args...)
-	reportCLIError()
-	os.Exit(1)
+	exitWithError(newExitError(ExitCodeGeneralError, true, msg, args))
 }
 
 // CliErrorWithExitCode prints an error message to stderr and exits with the given code.
 // Unlike CliErrorWithExit it omits the "report an issue" footer—use it for expected,
 // machine-distinguishable refusals (e.g. a busy server) that scripts branch on by exit code.
 func CliErrorWithExitCode(code int, msg string, args ...any) {
-	ExitIfUsageError(code, "", nil, msg, args...)
-	if OutputFormat == OutputFormatJSON {
-		exitWithEnvelope(code, "", msg, args)
-	}
-	printCliError(refusalErrorIn(args), msg, args...)
-	os.Exit(code)
+	exitWithError(newExitError(code, false, msg, args))
 }
 
 // CliErrorWithCode names the json error_code (an ErrorCode* constant); table mode follows the
@@ -88,6 +81,11 @@ func CliUsageErrorWithExit(msg string, args ...any) {
 }
 
 func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {
+	ExitWithFailureJSON(envelopeFailure(exitCode, errorCode, msg, args))
+}
+
+// envelopeFailure classifies the envelope from the first error in args.
+func envelopeFailure(exitCode int, errorCode, msg string, args []any) Failure {
 	var cause error
 	for _, arg := range args {
 		if e, ok := arg.(error); ok && e != nil {
@@ -95,7 +93,7 @@ func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {
 			break
 		}
 	}
-	ExitWithFailureJSON(Failure{ExitCode: exitCode, ErrorCode: errorCode, Err: cause, Message: fmt.Sprintf(msg, args...)})
+	return Failure{ExitCode: exitCode, ErrorCode: errorCode, Err: cause, Message: fmt.Sprintf(msg, args...)}
 }
 
 // printCliError writes the red Error line and, under it, the server's guidance
@@ -103,8 +101,12 @@ func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {
 // among their own arguments, so every call site that formats a server error
 // into its message prints the server's hint without naming it.
 func printCliError(err error, msg string, args ...any) {
-	_, _ = fmt.Fprintf(TrackedStderr(), "%s: %s\n", Red("Error"), cliMessage(msg, args...))
-	printRefusalNextActions(TrackedStderr(), err)
+	printCliErrorTo(TrackedStderr(), err, msg, args...)
+}
+
+func printCliErrorTo(w io.Writer, err error, msg string, args ...any) {
+	_, _ = fmt.Fprintf(w, "%s: %s\n", Red("Error"), cliMessage(msg, args...))
+	printRefusalNextActions(w, err)
 }
 
 // DebugEnabled reports whether diagnostic output is turned on.
