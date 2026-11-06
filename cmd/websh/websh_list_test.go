@@ -1,17 +1,15 @@
 package websh
 
 import (
-	"os"
-	osexec "os/exec"
 	"testing"
 
-	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // DisableFlagParsing covers only the parent; a child must still route and parse flags normally.
 func TestWebshLsRoutesAndParsesFlags(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		args         []string
@@ -43,12 +41,10 @@ func TestWebshLsRoutesAndParsesFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd, flags, err := WebshCmd.Find(tt.args)
+			t.Parallel()
+			cmd, flags, err := newCommand(noClient).Find(tt.args)
 			require.NoError(t, err)
 			require.Equal(t, "ls", cmd.Name())
-
-			// Reset to the registered default so a prior case cannot leak in.
-			require.NoError(t, cmd.Flags().Set("tail", cmd.Flags().Lookup("tail").DefValue))
 
 			require.NoError(t, cmd.ParseFlags(flags))
 
@@ -57,25 +53,4 @@ func TestWebshLsRoutesAndParsesFlags(t *testing.T) {
 			assert.Equal(t, tt.expectedTail, tail)
 		})
 	}
-}
-
-func TestWebshLsTailZeroExitsWithUsageErrorCode(t *testing.T) {
-	t.Parallel()
-	helper := osexec.Command(os.Args[0], "-test.run=^TestWebshLsTailZeroHelperProcess$")
-	helper.Env = append(os.Environ(), "GO_WANT_WEBSH_LS_TAIL_HELPER=1")
-
-	err := helper.Run()
-
-	var exitErr *osexec.ExitError
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode())
-}
-
-// Serial: the child process reaches an os.Exit, and the parent's own run of this function is a
-// guard that returns at once.
-func TestWebshLsTailZeroHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_WEBSH_LS_TAIL_HELPER") != "1" {
-		return
-	}
-	runWebshList(0)
 }

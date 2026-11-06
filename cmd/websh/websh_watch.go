@@ -4,47 +4,48 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/alpacax/alpacon-cli/api/websh"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var webshWatchCmd = &cobra.Command{
-	Use:     "watch SESSION_ID",
-	Short:   "Watch a Websh session (staff/superuser only)",
-	Example: `  alpacon websh watch 550e8400-e29b-41d4-a716-446655440000`,
-	Args:    cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		sessionID := args[0]
+func newWatchCommand(newClient clientFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:     "watch SESSION_ID",
+		Short:   "Watch a Websh session (staff/superuser only)",
+		Example: `  alpacon websh watch 550e8400-e29b-41d4-a716-446655440000`,
+		Args:    cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			sessionID := args[0]
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		detailBytes, err := websh.GetSessionDetail(alpaconClient, sessionID)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve session info: %s.", err)
-		}
-		var detail websh.SessionDetailResponse
-		if err = json.Unmarshal(detailBytes, &detail); err != nil {
-			utils.CliErrorWithExit("Failed to parse session info: %s.", err)
-		}
+			detailBytes, err := websh.GetSessionDetail(alpaconClient, sessionID)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve session info: %s.", err)
+			}
+			var detail websh.SessionDetailResponse
+			if err = json.Unmarshal(detailBytes, &detail); err != nil {
+				return utils.NewExitError("Failed to parse session info: %s.", err)
+			}
 
-		printWatchHeader(os.Stderr, detail)
+			printWatchHeader(cmd.ErrOrStderr(), detail)
 
-		session, err := websh.ConnectToSession(alpaconClient, sessionID)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to watch websh session: %s.", utils.InteractiveOnly(err, "watch a Websh session"))
-		}
+			session, err := websh.ConnectToSession(alpaconClient, sessionID)
+			if err != nil {
+				return utils.NewExitError("Failed to watch websh session: %s.", utils.InteractiveOnly(err, "watch a Websh session"))
+			}
 
-		if err = websh.OpenReadOnlyTerminal(alpaconClient, session); err != nil {
-			utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "Websh watch session ended with error: %s.", err)
-		}
-	},
+			if err = websh.OpenReadOnlyTerminal(alpaconClient, session); err != nil {
+				return utils.NewExitErrorWithCode(utils.ExitCodeGeneralError, "Websh watch session ended with error: %s.", err)
+			}
+			return nil
+		}),
+	}
 }
 
 // printWatchHeader sanitizes every name: the header is the only sign of whose session is on

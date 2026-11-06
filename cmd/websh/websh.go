@@ -125,10 +125,16 @@ func buildRemoteExecArgs(parsed WebshArgs, username, serverName string) execCmd.
 	}
 }
 
-var WebshCmd = &cobra.Command{
-	Use:   "websh [flags] [USER@]SERVER [COMMAND...]", // [flags] stays first: words after SERVER go to the remote command
-	Short: "Open a Websh terminal or run a command",
-	Long: `Open a Websh terminal for interacting with a server or execute a command directly on the server.
+// clientFactory builds the API client a command talks to; tests hand in one over a stub transport.
+type clientFactory func() (*client.AlpaconClient, error)
+
+var WebshCmd = newCommand(client.NewAlpaconAPIClient)
+
+func newCommand(newClient clientFactory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "websh [flags] [USER@]SERVER [COMMAND...]", // [flags] stays first: words after SERVER go to the remote command
+		Short: "Open a Websh terminal or run a command",
+		Long: `Open a Websh terminal for interacting with a server or execute a command directly on the server.
 Supports SSH-like user@host syntax for specifying the username inline.
 For executing commands, it is highly recommended to wrap the entire command string in quotes
 to ensure it is interpreted correctly on the remote server.
@@ -164,7 +170,7 @@ Requires an active WorkSession when using Browser login (Auth0). Token auth (API
 token or Service token) bypasses this requirement for 'websh SERVER COMMAND',
 but cannot open an interactive terminal or watch, join, or invite to a session—those
 need 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device).`,
-	Example: `  # Open a websh terminal
+		Example: `  # Open a websh terminal
   alpacon websh my-server
 
   # Open as root using SSH-like syntax
@@ -218,126 +224,137 @@ Flags:
 
 Note: All flags must be placed before the server name.
       Everything after the server name is treated as the remote command.`,
-	// Positional args after the server name (e.g. "ls -la") must reach the remote command, so flags
-	// are parsed by hand in Run.
-	DisableFlagParsing: true,
-	Run: func(cmd *cobra.Command, args []string) {
-		parsed, err := ParseWebshArgs(args)
-		if errors.Is(err, errHelpRequested) {
-			_ = cmd.Help()
-			return
-		}
-		if err != nil {
-			utils.CliParseErrorWithExit(cmd, parsed.OutputFormat, err.Error())
-		}
-		if parsed.OutputFormat != "" {
-			if err := utils.SetOutputFormat(parsed.OutputFormat); err != nil {
-				utils.CliUsageErrorWithExit("%s", err)
-			}
-		}
-
-		username := parsed.Username
-		groupname := parsed.Groupname
-		serverName := parsed.ServerName
-		commandArgs := parsed.CommandArgs
-		share := parsed.Share
-		readOnly := parsed.ReadOnly
-		env := parsed.Env
-
-		if serverName == "" {
-			utils.CliUsageErrorWithExit("Server name is required.")
-		}
-
-		if share && len(commandArgs) > 0 {
-			utils.CliUsageErrorWithExit("The --share flag cannot be used with remote commands. Use --share for interactive sessions only.")
-		}
-
-		if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
-			sshTarget := utils.ParseSSHTarget(serverName)
-			if username == "" && sshTarget.User != "" {
-				username = sshTarget.User
-			}
-			serverName = sshTarget.Host
-		}
-
-		// Command mode is an alias for exec: delegate to the shared runner so the
-		// pending-approval exit code, sudo-denial hints, and JSON buffering match
-		// exec. Wait is left false—websh has no --wait, so the blocking wait never runs.
-		if len(commandArgs) > 0 {
-			execCmd.RunRemoteExec(buildRemoteExecArgs(parsed, username, serverName))
-			return
-		}
-
-		// Interactive websh has no channel for env: CreateWebshSession takes none.
-		// Warn rather than silently drop, since the help frames --env as the secrets channel.
-		if len(env) > 0 {
-			utils.CliWarning("--env has no effect on an interactive websh session; it applies only when running a command")
-		}
-
-		authMethod := config.ResolveAuthMethod()
-
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		workSessionID := worksession.ResolveOrExit(alpaconClient, parsed.WorkSessionID)
-
-		session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
-
-		if err != nil {
-			err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(alpaconClient, func() error {
-				session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
-				return err
-			}))
-
-			if err != nil {
-				utils.HandleWorkSessionError(err, utils.OperationWebsh, serverName, authMethod, workSessionID)
-				utils.CliErrorWithExit("Failed to create websh session for '%s' server: %s.", serverName, utils.InteractiveOnly(err, "open an interactive Websh terminal"))
-			}
-		}
-		// Start the sudo MFA listener in the background so it does not delay the terminal; a sudo
-		// typed before it is ready lets the approval request expire, and the user can retry.
-		listenerDone := make(chan *event.SudoListener, 1)
-		go func() {
-			listenerDone <- setupSudoListener(alpaconClient, serverName, session.ID)
-		}()
-		defer func() {
-			select {
-			case sl := <-listenerDone:
-				if sl != nil {
-					sl.Stop()
-				}
-			case <-time.After(3 * time.Second):
-				// Don't block exit if listener setup is stuck
-			}
-		}()
-
-		if err = websh.OpenNewTerminal(alpaconClient, session); err != nil {
-			// A session the client could not get back to says so on its own terms:
-			// wrapping it in "ended with error" would read as the shell having
-			// failed, when what failed is the connection to it.
-			switch {
-			case errors.Is(err, websh.ErrReconnectFailed):
-				utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "Could not reconnect to the session.")
-			case errors.Is(err, websh.ErrSessionGone):
-				utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "The session is no longer open.")
-			default:
-				utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "Websh session ended with error: %s.", err)
-			}
-		}
-	},
+		// Positional args after the server name (e.g. "ls -la") must reach the remote command, so flags
+		// are parsed by hand in runWebsh.
+		DisableFlagParsing: true,
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return runWebsh(cmd, args, newClient)
+		}),
+	}
+	cmd.AddCommand(
+		newJoinCommand(newClient),
+		newListCommand(newClient),
+		newDescribeCommand(newClient),
+		newCloseCommand(newClient),
+		newForceCloseCommand(newClient),
+		newInviteCommand(newClient),
+		newWatchCommand(newClient),
+		newRecordsCommand(newClient),
+	)
+	return cmd
 }
 
-func init() {
-	WebshCmd.AddCommand(webshJoinCmd)
-	WebshCmd.AddCommand(webshListCmd)
-	WebshCmd.AddCommand(webshDescribeCmd)
-	WebshCmd.AddCommand(webshCloseCmd)
-	WebshCmd.AddCommand(webshForceCloseCmd)
-	WebshCmd.AddCommand(webshInviteCmd)
-	WebshCmd.AddCommand(webshWatchCmd)
-	WebshCmd.AddCommand(webshRecordsCmd)
+func runWebsh(cmd *cobra.Command, args []string, newClient clientFactory) error {
+	parsed, err := ParseWebshArgs(args)
+	if errors.Is(err, errHelpRequested) {
+		_ = cmd.Help()
+		return nil
+	}
+	if err != nil {
+		return utils.NewParseExitError(cmd, parsed.OutputFormat, err.Error())
+	}
+	if parsed.OutputFormat != "" {
+		if err := utils.SetOutputFormat(parsed.OutputFormat); err != nil {
+			return utils.NewUsageExitError("%s", err)
+		}
+	}
+
+	username := parsed.Username
+	groupname := parsed.Groupname
+	serverName := parsed.ServerName
+	commandArgs := parsed.CommandArgs
+	share := parsed.Share
+	readOnly := parsed.ReadOnly
+	env := parsed.Env
+
+	if serverName == "" {
+		return utils.NewUsageExitError("Server name is required.")
+	}
+
+	if share && len(commandArgs) > 0 {
+		return utils.NewUsageExitError("The --share flag cannot be used with remote commands. Use --share for interactive sessions only.")
+	}
+
+	if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
+		sshTarget := utils.ParseSSHTarget(serverName)
+		if username == "" && sshTarget.User != "" {
+			username = sshTarget.User
+		}
+		serverName = sshTarget.Host
+	}
+
+	// Command mode is an alias for exec: delegate to the shared runner so the
+	// pending-approval exit code, sudo-denial hints, and JSON buffering match
+	// exec. Wait is left false—websh has no --wait, so the blocking wait never runs.
+	if len(commandArgs) > 0 {
+		execCmd.RunRemoteExec(buildRemoteExecArgs(parsed, username, serverName))
+		return nil
+	}
+
+	// Interactive websh has no channel for env: CreateWebshSession takes none.
+	// Warn rather than silently drop, since the help frames --env as the secrets channel.
+	if len(env) > 0 {
+		utils.CliWarning("--env has no effect on an interactive websh session; it applies only when running a command")
+	}
+
+	authMethod := config.ResolveAuthMethod()
+
+	alpaconClient, err := newClient()
+	if err != nil {
+		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+	}
+
+	workSessionID, err := worksession.Resolve(alpaconClient, parsed.WorkSessionID)
+	if err != nil {
+		return utils.NewExitError("%s", err)
+	}
+
+	session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
+
+	if err != nil {
+		err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(alpaconClient, func() error {
+			session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
+			return err
+		}))
+
+		if err != nil {
+			if gateErr := utils.WorkSessionExitError(err, utils.OperationWebsh, serverName, authMethod, workSessionID); gateErr != nil {
+				return gateErr
+			}
+			return utils.NewExitError("Failed to create websh session for '%s' server: %s.", serverName, utils.InteractiveOnly(err, "open an interactive Websh terminal"))
+		}
+	}
+	// Start the sudo MFA listener in the background so it does not delay the terminal; a sudo
+	// typed before it is ready lets the approval request expire, and the user can retry.
+	listenerDone := make(chan *event.SudoListener, 1)
+	go func() {
+		listenerDone <- setupSudoListener(alpaconClient, serverName, session.ID)
+	}()
+	defer func() {
+		select {
+		case sl := <-listenerDone:
+			if sl != nil {
+				sl.Stop()
+			}
+		case <-time.After(3 * time.Second):
+			// Don't block exit if listener setup is stuck
+		}
+	}()
+
+	if err = websh.OpenNewTerminal(alpaconClient, session); err != nil {
+		// A session the client could not get back to says so on its own terms:
+		// wrapping it in "ended with error" would read as the shell having
+		// failed, when what failed is the connection to it.
+		switch {
+		case errors.Is(err, websh.ErrReconnectFailed):
+			return utils.NewExitErrorWithCode(utils.ExitCodeGeneralError, "Could not reconnect to the session.")
+		case errors.Is(err, websh.ErrSessionGone):
+			return utils.NewExitErrorWithCode(utils.ExitCodeGeneralError, "The session is no longer open.")
+		default:
+			return utils.NewExitErrorWithCode(utils.ExitCodeGeneralError, "Websh session ended with error: %s.", err)
+		}
+	}
+	return nil
 }
 
 // isFlag reports whether arg is one of names, alone or as name=value.

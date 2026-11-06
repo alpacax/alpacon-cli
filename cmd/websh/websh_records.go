@@ -4,56 +4,65 @@ import (
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/websh"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var webshRecordsCmd = &cobra.Command{
-	Use:     "records SESSION_ID",
-	Aliases: []string{"rec"},
-	Short:   "Retrieve or search records within a Websh session",
-	Long: `Retrieve masked terminal records for a Websh session, optionally
+func newRecordsCommand(newClient clientFactory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "records SESSION_ID",
+		Aliases: []string{"rec"},
+		Short:   "Retrieve or search records within a Websh session",
+		Long: `Retrieve masked terminal records for a Websh session, optionally
 filtering by command text. Available on paid plans only.
 
 Use --query to search records by command text (fuzzy match).`,
-	Example: `  alpacon websh records 550e8400-e29b-41d4-a716-446655440000
+		Example: `  alpacon websh records 550e8400-e29b-41d4-a716-446655440000
   alpacon websh records 550e8400-e29b-41d4-a716-446655440000 --query docker
   alpacon websh rec 550e8400-e29b-41d4-a716-446655440000 -q "sudo reboot" -n 50`,
-	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		sessionID := args[0]
-		query, _ := cmd.Flags().GetString("query")
-		limit, _ := cmd.Flags().GetInt("limit")
-		utils.RequirePositiveInt("limit", limit)
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			sessionID := args[0]
+			query, _ := cmd.Flags().GetString("query")
+			limit, _ := cmd.Flags().GetInt("limit")
+			if err := utils.CheckPositiveInt("limit", limit); err != nil {
+				return err
+			}
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		records, err := websh.GetSessionRecords(alpaconClient, sessionID, query, limit)
-		if err != nil && len(records) == 0 {
-			utils.CliErrorWithExit("Failed to retrieve Websh session records: %s.", err)
-		}
+			records, err := websh.GetSessionRecords(alpaconClient, sessionID, query, limit)
+			if err != nil && len(records) == 0 {
+				return utils.NewExitError("Failed to retrieve Websh session records: %s.", err)
+			}
 
-		// JSON keeps records verbatim; table sanitizes so terminal control chars don't break the layout.
-		rows := records
-		if utils.OutputFormat != utils.OutputFormatJSON {
-			rows = make([]websh.SessionRecord, len(records))
-			for i, r := range records {
-				rows[i] = websh.SessionRecord{
-					AddedAt: r.AddedAt,
-					Record:  sanitizeRecord(r.Record, 80),
+			// JSON keeps records verbatim; table sanitizes so terminal control chars don't break the layout.
+			rows := records
+			if utils.OutputFormat != utils.OutputFormatJSON {
+				rows = make([]websh.SessionRecord, len(records))
+				for i, r := range records {
+					rows[i] = websh.SessionRecord{
+						AddedAt: r.AddedAt,
+						Record:  sanitizeRecord(r.Record, 80),
+					}
 				}
 			}
-		}
 
-		if err != nil {
-			utils.PartialTableWithExit(rows, "Showing only the %d records read before the request failed: %s.", len(rows), err)
-		}
-		utils.PrintTable(rows)
-	},
+			if err != nil {
+				utils.CliWarning("Showing only the %d records read before the request failed: %s.", len(rows), err)
+				utils.PrintTable(rows)
+				return &utils.ExitError{Code: utils.ExitCodeGeneralError}
+			}
+			utils.PrintTable(rows)
+			return nil
+		}),
+	}
+	cmd.Flags().StringP("query", "q", "", "Search records by command text (fuzzy match)")
+	cmd.Flags().IntP("limit", "n", 100, "Maximum number of records to fetch")
+	return cmd
 }
 
 func sanitizeRecord(record string, width int) string {
@@ -70,9 +79,4 @@ func sanitizeRecord(record string, width int) string {
 	}, record)
 	record = strings.Join(strings.Fields(record), " ")
 	return utils.TruncateString(record, width)
-}
-
-func init() {
-	webshRecordsCmd.Flags().StringP("query", "q", "", "Search records by command text (fuzzy match)")
-	webshRecordsCmd.Flags().IntP("limit", "n", 100, "Maximum number of records to fetch")
 }
