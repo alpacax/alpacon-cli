@@ -7,8 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -18,7 +16,6 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
-	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,6 +33,39 @@ func apiTestClient(fn apiRoundTripFunc) *client.AlpaconClient {
 
 func apiTestResponse(status int, contentType, body string) *http.Response {
 	return &http.Response{Status: strings.TrimSpace(strings.Join([]string{strconv.Itoa(status), http.StatusText(status)}, " ")), StatusCode: status, Proto: "HTTP/1.1", Header: http.Header{"Content-Type": []string{contentType}, "X-Trace": []string{"trace-1"}}, Body: io.NopCloser(strings.NewReader(body))}
+}
+
+func apiTestClientFactory(fn apiRoundTripFunc) func() (*client.AlpaconClient, error) {
+	return func() (*client.AlpaconClient, error) { return apiTestClient(fn), nil }
+}
+
+// executeAPI runs the api command in process and prints its ExitError the way cmd.Execute does.
+func executeAPI(newClient func() (*client.AlpaconClient, error), stdin string, args ...string) (stdout, stderr string, err error) {
+	var outBuf, errBuf bytes.Buffer
+	command := newCommand(newClient)
+	command.SetArgs(args)
+	command.SetIn(strings.NewReader(stdin))
+	command.SetOut(&outBuf)
+	command.SetErr(&errBuf)
+	err = command.Execute()
+	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+		utils.FprintExitError(&errBuf, exitErr)
+	}
+	return outBuf.String(), errBuf.String(), err
+}
+
+// noClient stands in for a factory a usage error must never reach.
+func noClient() (*client.AlpaconClient, error) { return nil, errors.New("no client in this test") }
+
+// exitCodeOf is the exit cmd.Execute would take for err: 0 for nil.
+func exitCodeOf(t *testing.T, err error) int {
+	t.Helper()
+	if err == nil {
+		return 0
+	}
+	exitErr, ok := errors.AsType[*utils.ExitError](err)
+	require.True(t, ok, "want a utils.ExitError, got %v", err)
+	return exitErr.Code
 }
 
 // runAPITest chains prepareRequest and runAPI the way the command's Run does.
@@ -367,6 +397,7 @@ func TestRunAPI_FormatsJSONOnlyOnTerminalAndLeavesPipedOutputByteForByte(t *test
 }
 
 func TestAPICommand_SilentPrintsNoBodyButStillReportsStatusOnError(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		status     int
@@ -378,23 +409,14 @@ func TestAPICommand_SilentPrintsNoBodyButStillReportsStatusOnError(t *testing.T)
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			previousClient, previousExit := newAPIClient, exitAPI
-			t.Cleanup(func() { newAPIClient, exitAPI = previousClient, previousExit })
-			newAPIClient = func() (*client.AlpaconClient, error) {
-				return apiTestClient(func(r *http.Request) (*http.Response, error) {
-					return apiTestResponse(tc.status, "application/json", `{"detail":"body"}`), nil
-				}), nil
-			}
-			exitCode := 0
-			exitAPI = func(code int) { exitCode = code }
-			command := newCommand()
-			command.SetArgs([]string{"--silent", "/x"})
-			var executeErr error
+			t.Parallel()
+			newClient := apiTestClientFactory(func(r *http.Request) (*http.Response, error) {
+				return apiTestResponse(tc.status, "application/json", `{"detail":"body"}`), nil
+			})
 
-			stdout, stderr := testutil.CaptureOutput(t, func() { executeErr = command.Execute() })
+			stdout, stderr, err := executeAPI(newClient, "", "--silent", "/x")
 
-			require.NoError(t, executeErr)
-			assert.Equal(t, tc.wantCode, exitCode)
+			assert.Equal(t, tc.wantCode, exitCodeOf(t, err))
 			assert.Empty(t, stdout)
 			assert.Equal(t, tc.wantStderr, stderr)
 		})
@@ -563,28 +585,20 @@ func TestRunAPI_ResponseOutput(t *testing.T) {
 }
 
 func TestAPICommand_HTTPErrorPrintsExactLineAndExitsOne(t *testing.T) {
-	previousClient, previousExit := newAPIClient, exitAPI
-	t.Cleanup(func() { newAPIClient, exitAPI = previousClient, previousExit })
-	newAPIClient = func() (*client.AlpaconClient, error) {
-		return apiTestClient(func(r *http.Request) (*http.Response, error) {
-			return apiTestResponse(http.StatusNotFound, "application/json", `{"detail":"missing"}`), nil
-		}), nil
-	}
-	exitCode := 0
-	exitAPI = func(code int) { exitCode = code }
-	command := newCommand()
-	command.SetArgs([]string{"/x"})
-	var executeErr error
+	t.Parallel()
+	newClient := apiTestClientFactory(func(r *http.Request) (*http.Response, error) {
+		return apiTestResponse(http.StatusNotFound, "application/json", `{"detail":"missing"}`), nil
+	})
 
-	stdout, stderr := testutil.CaptureOutput(t, func() { executeErr = command.Execute() })
+	stdout, stderr, err := executeAPI(newClient, "", "/x")
 
-	require.NoError(t, executeErr)
-	assert.Equal(t, 1, exitCode)
+	assert.Equal(t, 1, exitCodeOf(t, err))
 	assert.JSONEq(t, `{"detail":"missing"}`, stdout)
 	assert.Equal(t, fmt.Sprintf("HTTP %d\n", http.StatusNotFound), stderr)
 }
 
 func TestAPICommand_RedirectLinePrintsOnlyForRedirectWithLocation(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		status   int
@@ -600,86 +614,131 @@ func TestAPICommand_RedirectLinePrintsOnlyForRedirectWithLocation(t *testing.T) 
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			previousClient, previousExit := newAPIClient, exitAPI
-			t.Cleanup(func() { newAPIClient, exitAPI = previousClient, previousExit })
-			newAPIClient = func() (*client.AlpaconClient, error) {
-				return apiTestClient(func(r *http.Request) (*http.Response, error) {
-					response := apiTestResponse(tc.status, "text/plain", "")
-					if tc.location != "" {
-						response.Header.Set("Location", tc.location)
-					}
-					return response, nil
-				}), nil
-			}
-			exitCode := 0
-			exitAPI = func(code int) { exitCode = code }
-			command := newCommand()
-			command.SetArgs([]string{"/x"})
-			var executeErr error
+			t.Parallel()
+			newClient := apiTestClientFactory(func(r *http.Request) (*http.Response, error) {
+				response := apiTestResponse(tc.status, "text/plain", "")
+				if tc.location != "" {
+					response.Header.Set("Location", tc.location)
+				}
+				return response, nil
+			})
 
-			_, stderr := testutil.CaptureOutput(t, func() { executeErr = command.Execute() })
+			_, stderr, err := executeAPI(newClient, "", "/x")
 
-			require.NoError(t, executeErr)
-			assert.Equal(t, 1, exitCode)
+			assert.Equal(t, 1, exitCodeOf(t, err))
 			assert.Equal(t, tc.want, stderr)
 		})
 	}
 }
 
-func TestAPICommand_MalformedHeaderExitsTwo(t *testing.T) {
-	if os.Getenv("ALPACON_API_USAGE_CHILD") == "1" {
-		newAPIClient = func() (*client.AlpaconClient, error) {
-			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				_, _ = io.WriteString(os.Stderr, "REQUEST_SENT\n")
-				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
-			}), nil
-		}
-		command := newCommand()
-		command.SetArgs([]string{"-H", "X-Test: bad\x1bvalue", "/x"})
-		if err := command.Execute(); err != nil {
-			_, _ = io.WriteString(os.Stderr, err.Error())
-			os.Exit(5)
-		}
-		os.Exit(0)
+func TestAPICommand_FlagErrorKeepsCobraErrorLineAndUsage(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{name: "unknown flag", args: []string{"--bogus", "/x"}, wantStderr: "Error: unknown flag: --bogus\n"},
+		{name: "flag without a value", args: []string{"/x", "-X"}, wantStderr: "Error: flag needs an argument: 'X' in -X\n"},
 	}
-	child := exec.Command(os.Args[0], "-test.run=^TestAPICommand_MalformedHeaderExitsTwo$")
-	child.Env = append(os.Environ(), "ALPACON_API_USAGE_CHILD=1")
-	output, err := child.CombinedOutput()
-	var exitErr *exec.ExitError
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var exitErr *utils.ExitError
 
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, 2, exitErr.ExitCode())
-	assert.Contains(t, string(output), "invalid header")
-	assert.NotContains(t, string(output), "REQUEST_SENT")
+			stdout, stderr, err := executeAPI(noClient, "", tc.args...)
+
+			require.Error(t, err)
+			assert.NotErrorAs(t, err, &exitErr)
+			assert.Equal(t, tc.wantStderr, stderr)
+			assert.Contains(t, stdout, "Usage:\n  api ENDPOINT [flags]")
+		})
+	}
 }
 
-func TestAPICommand_InvalidMethodExitsTwoWithoutBuildingClient(t *testing.T) {
-	if os.Getenv("ALPACON_API_USAGE_CHILD") == "1" {
-		newAPIClient = func() (*client.AlpaconClient, error) {
-			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				_, _ = io.WriteString(os.Stderr, "REQUEST_SENT\n")
-				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
-			}), nil
-		}
-		command := newCommand()
-		command.SetArgs([]string{"-X", "GET /x", "/x"})
-		if err := command.Execute(); err != nil {
-			_, _ = io.WriteString(os.Stderr, err.Error())
-			os.Exit(5)
-		}
-		os.Exit(0)
+func TestAPICommand_FlagsReachTheRequest(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		args       []string
+		stdin      string
+		wantMethod string
+		wantQuery  string
+		wantBody   string
+		wantHeader string
+	}{
+		{name: "method and raw field", args: []string{"-X", "PUT", "-f", "count=2", "/x"}, wantMethod: "PUT", wantBody: `{"count":"2"}`},
+		{name: "typed field posts", args: []string{"-F", "count=2", "/x"}, wantMethod: "POST", wantBody: `{"count":2}`},
+		{name: "field on get goes to query", args: []string{"-X", "GET", "-f", "q=one", "/x"}, wantMethod: "GET", wantQuery: "q=one"},
+		{name: "header", args: []string{"-H", "X-Test: yes", "/x"}, wantMethod: "GET", wantHeader: "yes"},
+		{name: "input from stdin", args: []string{"--input", "-", "/x"}, stdin: "hello", wantMethod: "POST", wantBody: "hello"},
 	}
-	child := exec.Command(os.Args[0], "-test.run=^TestAPICommand_InvalidMethodExitsTwoWithoutBuildingClient$")
-	child.Env = append(os.Environ(), "ALPACON_API_USAGE_CHILD=1")
-	output, err := child.CombinedOutput()
-	var exitErr *exec.ExitError
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var gotMethod, gotQuery, gotBody, gotHeader string
+			newClient := apiTestClientFactory(func(r *http.Request) (*http.Response, error) {
+				gotMethod, gotQuery, gotHeader = r.Method, r.URL.RawQuery, r.Header.Get("X-Test")
+				if r.Body != nil {
+					body, err := io.ReadAll(r.Body)
+					if err != nil {
+						return nil, err
+					}
+					gotBody = string(body)
+				}
+				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
+			})
 
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, 2, exitErr.ExitCode())
-	assert.NotContains(t, string(output), "REQUEST_SENT")
+			_, _, err := executeAPI(newClient, tc.stdin, tc.args...)
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantMethod, gotMethod)
+			assert.Equal(t, tc.wantQuery, gotQuery)
+			assert.Equal(t, tc.wantBody, gotBody)
+			assert.Equal(t, tc.wantHeader, gotHeader)
+		})
+	}
+}
+
+func TestAPICommand_UsageErrorsExitTwoBeforeBuildingClient(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		args       []string
+		stdin      string
+		wantStderr string
+	}{
+		{name: "no endpoint", args: []string{}, wantStderr: "expected one ENDPOINT"},
+		{name: "malformed header", args: []string{"-H", "X-Test: bad\x1bvalue", "/x"}, wantStderr: "invalid header"},
+		{name: "method with a space", args: []string{"-X", "GET /x", "/x"}, wantStderr: "invalid method"},
+		{name: "absolute endpoint", args: []string{"http://evil.example/x"}, wantStderr: "endpoint must be a path on the current workspace"},
+		{name: "field without equals", args: []string{"-f", "noequals", "/x"}, wantStderr: "noequals"},
+		{name: "missing field file", args: []string{"-F", "a=@/nonexistent-file-for-test", "/x"}, wantStderr: "nonexistent-file-for-test"},
+		{name: "missing input file", args: []string{"--input", "/nonexistent-input-for-test", "/x"}, wantStderr: "nonexistent-input-for-test"},
+		{name: "content length override", args: []string{"-H", "Content-Length: 4", "--input", "-", "/x"}, stdin: "hello", wantStderr: "Content-Length"},
+		{name: "two stdin fields", args: []string{"-F", "a=@-", "-F", "b=@-", "/x"}, wantStderr: "only one field can be read from standard input"},
+		{name: "stdin field with stdin input", args: []string{"-F", "a=@-", "--input", "-", "/x"}, wantStderr: "only one field can be read from standard input"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			clientBuilt := false
+			newClient := func() (*client.AlpaconClient, error) {
+				clientBuilt = true
+				return noClient()
+			}
+
+			_, stderr, err := executeAPI(newClient, tc.stdin, tc.args...)
+
+			assert.Equal(t, utils.ExitCodeUsageError, exitCodeOf(t, err))
+			assert.Contains(t, stderr, tc.wantStderr)
+			assert.False(t, clientBuilt, "a usage error must stop before the client is built")
+		})
+	}
 }
 
 func TestAPICommand_MalformedHeaderDoesNotLeakValue(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		header string
@@ -692,220 +751,17 @@ func TestAPICommand_MalformedHeaderDoesNotLeakValue(t *testing.T) {
 		{"authorization no colon", "Authorization Bearer secret-marker"},
 		{"other invalid name", "X Bad: secret-marker"},
 	}
-	if index, err := strconv.Atoi(os.Getenv("ALPACON_API_HEADER_CASE")); err == nil {
-		newAPIClient = func() (*client.AlpaconClient, error) {
-			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				_, _ = io.WriteString(os.Stderr, "REQUEST_SENT\n")
-				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
-			}), nil
-		}
-		command := newCommand()
-		command.SetArgs([]string{"-H", cases[index].header, "/x"})
-		if execErr := command.Execute(); execErr != nil {
-			_, _ = io.WriteString(os.Stderr, execErr.Error())
-			os.Exit(5)
-		}
-		os.Exit(0)
-	}
-	for index, tc := range cases {
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			child := exec.Command(os.Args[0], "-test.run=^TestAPICommand_MalformedHeaderDoesNotLeakValue$")
-			child.Env = append(os.Environ(), "ALPACON_API_HEADER_CASE="+strconv.Itoa(index))
-			output, err := child.CombinedOutput()
-			var exitErr *exec.ExitError
+			t.Parallel()
 
-			require.ErrorAs(t, err, &exitErr)
-			assert.Equal(t, 2, exitErr.ExitCode())
-			assert.Contains(t, string(output), "invalid header")
-			assert.NotContains(t, string(output), "secret-marker")
-			assert.NotContains(t, string(output), "REQUEST_SENT")
+			stdout, stderr, err := executeAPI(noClient, "", "-H", tc.header, "/x")
+
+			assert.Equal(t, utils.ExitCodeUsageError, exitCodeOf(t, err))
+			assert.Contains(t, stderr, "invalid header")
+			assert.NotContains(t, stdout+stderr, "secret-marker")
 		})
 	}
-}
-
-func TestAPICommand_MalformedEndpointExitsTwoWithoutClient(t *testing.T) {
-	if os.Getenv("ALPACON_API_USAGE_CHILD") == "1" {
-		newAPIClient = func() (*client.AlpaconClient, error) {
-			_, _ = io.WriteString(os.Stderr, "CLIENT_CONSTRUCTED\n")
-			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
-			}), nil
-		}
-		command := newCommand()
-		command.SetArgs([]string{"http://evil.example/x"})
-		if err := command.Execute(); err != nil {
-			_, _ = io.WriteString(os.Stderr, err.Error())
-			os.Exit(5)
-		}
-		os.Exit(0)
-	}
-	child := exec.Command(os.Args[0], "-test.run=^TestAPICommand_MalformedEndpointExitsTwoWithoutClient$")
-	child.Env = append(os.Environ(), "ALPACON_API_USAGE_CHILD=1")
-	output, err := child.CombinedOutput()
-	var exitErr *exec.ExitError
-
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, 2, exitErr.ExitCode())
-	assert.NotContains(t, string(output), "CLIENT_CONSTRUCTED")
-}
-
-func TestAPICommand_MalformedFieldExitsTwoWithoutClient(t *testing.T) {
-	if os.Getenv("ALPACON_API_USAGE_CHILD") == "1" {
-		newAPIClient = func() (*client.AlpaconClient, error) {
-			_, _ = io.WriteString(os.Stderr, "CLIENT_CONSTRUCTED\n")
-			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
-			}), nil
-		}
-		command := newCommand()
-		command.SetArgs([]string{"-f", "noequals", "/x"})
-		if err := command.Execute(); err != nil {
-			_, _ = io.WriteString(os.Stderr, err.Error())
-			os.Exit(5)
-		}
-		os.Exit(0)
-	}
-	child := exec.Command(os.Args[0], "-test.run=^TestAPICommand_MalformedFieldExitsTwoWithoutClient$")
-	child.Env = append(os.Environ(), "ALPACON_API_USAGE_CHILD=1")
-	output, err := child.CombinedOutput()
-	var exitErr *exec.ExitError
-
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, 2, exitErr.ExitCode())
-	assert.NotContains(t, string(output), "CLIENT_CONSTRUCTED")
-}
-
-func TestAPICommand_MissingFieldFileExitsTwoWithoutClient(t *testing.T) {
-	if os.Getenv("ALPACON_API_USAGE_CHILD") == "1" {
-		newAPIClient = func() (*client.AlpaconClient, error) {
-			_, _ = io.WriteString(os.Stderr, "CLIENT_CONSTRUCTED\n")
-			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
-			}), nil
-		}
-		command := newCommand()
-		command.SetArgs([]string{"-F", "a=@/nonexistent-file-for-test", "/x"})
-		if err := command.Execute(); err != nil {
-			_, _ = io.WriteString(os.Stderr, err.Error())
-			os.Exit(5)
-		}
-		os.Exit(0)
-	}
-	child := exec.Command(os.Args[0], "-test.run=^TestAPICommand_MissingFieldFileExitsTwoWithoutClient$")
-	child.Env = append(os.Environ(), "ALPACON_API_USAGE_CHILD=1")
-	output, err := child.CombinedOutput()
-	var exitErr *exec.ExitError
-
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, 2, exitErr.ExitCode())
-	assert.NotContains(t, string(output), "CLIENT_CONSTRUCTED")
-}
-
-func TestAPICommand_MissingInputFileExitsTwoWithoutClient(t *testing.T) {
-	if os.Getenv("ALPACON_API_USAGE_CHILD") == "1" {
-		newAPIClient = func() (*client.AlpaconClient, error) {
-			_, _ = io.WriteString(os.Stderr, "CLIENT_CONSTRUCTED\n")
-			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
-			}), nil
-		}
-		command := newCommand()
-		command.SetArgs([]string{"--input", "/nonexistent-input-for-test", "/x"})
-		if err := command.Execute(); err != nil {
-			_, _ = io.WriteString(os.Stderr, err.Error())
-			os.Exit(5)
-		}
-		os.Exit(0)
-	}
-	child := exec.Command(os.Args[0], "-test.run=^TestAPICommand_MissingInputFileExitsTwoWithoutClient$")
-	child.Env = append(os.Environ(), "ALPACON_API_USAGE_CHILD=1")
-	output, err := child.CombinedOutput()
-	var exitErr *exec.ExitError
-
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, 2, exitErr.ExitCode())
-	assert.NotContains(t, string(output), "CLIENT_CONSTRUCTED")
-}
-
-func TestAPICommand_BadContentLengthExitsTwoWithoutClient(t *testing.T) {
-	if os.Getenv("ALPACON_API_USAGE_CHILD") == "1" {
-		newAPIClient = func() (*client.AlpaconClient, error) {
-			_, _ = io.WriteString(os.Stderr, "CLIENT_CONSTRUCTED\n")
-			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
-			}), nil
-		}
-		command := newCommand()
-		command.SetArgs([]string{"-H", "Content-Length: 4", "--input", "-", "/x"})
-		if err := command.Execute(); err != nil {
-			_, _ = io.WriteString(os.Stderr, err.Error())
-			os.Exit(5)
-		}
-		os.Exit(0)
-	}
-	child := exec.Command(os.Args[0], "-test.run=^TestAPICommand_BadContentLengthExitsTwoWithoutClient$")
-	child.Env = append(os.Environ(), "ALPACON_API_USAGE_CHILD=1")
-	child.Stdin = strings.NewReader("hello")
-	output, err := child.CombinedOutput()
-	var exitErr *exec.ExitError
-
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, 2, exitErr.ExitCode())
-	assert.NotContains(t, string(output), "CLIENT_CONSTRUCTED")
-}
-
-func TestAPICommand_RejectsTwoStdinFields(t *testing.T) {
-	if os.Getenv("ALPACON_API_USAGE_CHILD") == "1" {
-		newAPIClient = func() (*client.AlpaconClient, error) {
-			_, _ = io.WriteString(os.Stderr, "CLIENT_CONSTRUCTED\n")
-			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
-			}), nil
-		}
-		command := newCommand()
-		command.SetArgs([]string{"-F", "a=@-", "-F", "b=@-", "/x"})
-		if err := command.Execute(); err != nil {
-			_, _ = io.WriteString(os.Stderr, err.Error())
-			os.Exit(5)
-		}
-		os.Exit(0)
-	}
-	child := exec.Command(os.Args[0], "-test.run=^TestAPICommand_RejectsTwoStdinFields$")
-	child.Env = append(os.Environ(), "ALPACON_API_USAGE_CHILD=1")
-	output, err := child.CombinedOutput()
-	var exitErr *exec.ExitError
-
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, 2, exitErr.ExitCode())
-	assert.Contains(t, string(output), "only one field can be read from standard input")
-	assert.NotContains(t, string(output), "CLIENT_CONSTRUCTED")
-}
-
-func TestAPICommand_RejectsStdinFieldWithStdinInput(t *testing.T) {
-	if os.Getenv("ALPACON_API_USAGE_CHILD") == "1" {
-		newAPIClient = func() (*client.AlpaconClient, error) {
-			_, _ = io.WriteString(os.Stderr, "CLIENT_CONSTRUCTED\n")
-			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
-			}), nil
-		}
-		command := newCommand()
-		command.SetArgs([]string{"-F", "a=@-", "--input", "-", "/x"})
-		if err := command.Execute(); err != nil {
-			_, _ = io.WriteString(os.Stderr, err.Error())
-			os.Exit(5)
-		}
-		os.Exit(0)
-	}
-	child := exec.Command(os.Args[0], "-test.run=^TestAPICommand_RejectsStdinFieldWithStdinInput$")
-	child.Env = append(os.Environ(), "ALPACON_API_USAGE_CHILD=1")
-	output, err := child.CombinedOutput()
-	var exitErr *exec.ExitError
-
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, 2, exitErr.ExitCode())
-	assert.Contains(t, string(output), "only one field can be read from standard input")
-	assert.NotContains(t, string(output), "CLIENT_CONSTRUCTED")
 }
 
 // mfaTestServer points HOME at a temp dir holding a refresh token, so its caller must stay serial.
