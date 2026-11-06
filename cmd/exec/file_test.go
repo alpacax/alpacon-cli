@@ -210,14 +210,9 @@ func TestParseRemoteExecArgs_FileErrors(t *testing.T) {
 			expectedErr: "--interpreter requires --file",
 		},
 		{
-			name:        "reuse days below the floor on a command line",
-			args:        []string{"--reuse-days", "0", "prod-web", "uptime"},
-			expectedErr: "--reuse-days must be 1 to 366 days: 0",
-		},
-		{
-			name:        "reuse days above the ceiling on a command line",
-			args:        []string{"--reuse-days=367", "prod-web", "uptime"},
-			expectedErr: "--reuse-days must be 1 to 366 days: 367",
+			name:        "reuse days without file",
+			args:        []string{"--reuse-days", "30", "prod-web", "uptime"},
+			expectedErr: "--reuse-days requires --file; only a verified file execution can propose a reuse duration",
 		},
 		{
 			name:        "reuse days below the floor",
@@ -317,27 +312,6 @@ func TestParseRemoteExecArgs_GenericLaneHasNoFile(t *testing.T) {
 	result := ParseRemoteExecArgs([]string{"prod-web", "--", "bash", "/opt/deploy.sh"})
 	assert.Nil(t, result.File)
 	assert.Equal(t, "bash /opt/deploy.sh", result.Command)
-}
-
-// TestParseRemoteExecArgs_ReuseDaysOnACommandLine pins that --reuse-days on a command line is kept
-// beside the command for an oversized switch, and stays in File on the file lane.
-func TestParseRemoteExecArgs_ReuseDaysOnACommandLine(t *testing.T) {
-	t.Parallel()
-
-	t.Run("generic lane stores it beside the command", func(t *testing.T) {
-		t.Parallel()
-		got := ParseRemoteExecArgs([]string{"--reuse-days", "30", "prod-web", "uptime"})
-		assert.Empty(t, got.Err)
-		assert.Equal(t, RemoteExecArgs{Server: "prod-web", Command: "uptime", ReuseDays: 30, Env: map[string]string{}}, got)
-	})
-	t.Run("file lane keeps it in File only", func(t *testing.T) {
-		t.Parallel()
-		got := ParseRemoteExecArgs([]string{"--reuse-days", "30", "--file", "/opt/deploy.sh", "prod-web"})
-		require.Empty(t, got.Err)
-		require.NotNil(t, got.File)
-		assert.Zero(t, got.ReuseDays)
-		assert.Equal(t, 30, got.File.ReuseDays)
-	})
 }
 
 // TestLoadFileExecution covers the local read: defaults for --file-from and
@@ -595,17 +569,6 @@ func TestFileExecRefusalStripsControlBytesFromServerName(t *testing.T) {
 	require.True(t, ok)
 	assert.Contains(t, message, "the agent on 'prodforged' ")
 	assert.Contains(t, hint, "  alpacon exec prodforged -- /bin/bash /path/to/script.sh\n")
-}
-
-func TestReRunHint_CommandFileReadsTheServerCopy(t *testing.T) {
-	t.Parallel()
-	path := commandFilePath("root", "echo hi")
-	hint := reRunHint(RemoteExecArgs{
-		Username: "root",
-		Server:   "prod",
-		File:     &FileExecArgs{Path: path, Upload: true, Overwrite: true, ReuseDays: 7, FromCommand: true},
-	})
-	assert.Equal(t, "alpacon exec -u root --file "+path+" --from-server --reuse-days 7 prod", hint.Command)
 }
 
 // TestReRunHint_File pins the re-run a pending approval prints on the file

@@ -1,30 +1,13 @@
 package exec
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"errors"
-	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
-	"github.com/alpacax/alpacon-cli/api/auth"
-	"github.com/alpacax/alpacon-cli/api/event"
-	"github.com/alpacax/alpacon-cli/api/iam"
-	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-const inlineLineInterpreter = "/bin/sh" // what the agent hands an inline line to, so the rerun means the same
-
-// fileLaneRefusal holds why an oversized command line cannot take the file lane and the command to
-// run instead.
-type fileLaneRefusal struct {
-	message string
-	action  utils.NextAction
-}
+const inlineLineInterpreter = "/bin/sh" // what the agent hands an inline line to, so the file means the same
 
 // isLineTooLong reports whether err is a 400 whose field_errors.line has a max_length entry; the
 // same code on another field, or only at the top level, is some other refusal.
@@ -32,76 +15,40 @@ func isLineTooLong(err error) bool {
 	return utils.HTTPStatusCode(err) == http.StatusBadRequest && utils.HasFieldErrorCode(err, "line", "max_length")
 }
 
-// commandFilePath hashes the run-as account with the content, so a rerun reuses one file and its
-// approval, and another account never meets a file under sticky /tmp it cannot overwrite.
-func commandFilePath(username, content string) string {
-	sum := sha256.Sum256([]byte(username + "\x00" + content))
-	return "/tmp/.alpacon-exec-" + hex.EncodeToString(sum[:])[:16] + ".sh"
-}
-
-// callerAccount names the login behind the client, for a run with no -u: another caller on the host
-// must not land on this caller's file.
-func callerAccount(ac *client.AlpaconClient) (string, error) {
-	var name string
-	if config.IsServiceToken(ac.Token) {
-		who, err := auth.GetWhoami(ac)
-		if err != nil {
-			return "", err
-		}
-		if who.Application != nil {
-			name = who.Application.Username
-		}
-	} else {
-		user, err := iam.GetCurrentUser(ac)
-		if err != nil {
-			return "", err
-		}
-		name = user.Username
+// lineTooLongGuidance words a length refusal and the file-lane command to run instead. Nothing is
+// written to the server on the user's behalf: an upload outlives a refusal and is not owner-only.
+func lineTooLongGuidance(parsed RemoteExecArgs) (message, hint string, action utils.NextAction) {
+	flags := runAsFlags(parsed)
+	if parsed.Purpose != "" {
+		flags = append(flags, "--purpose "+argvQuote(utils.SanitizeTerminalText(parsed.Purpose)))
 	}
-	if name == "" {
-		return "", errors.New("the server named no account for this login")
+	if parsed.Detach {
+		flags = append(flags, "--detach")
 	}
-	return name, nil
+	action = uploadScriptAction(append(flags, "--interpreter "+inlineLineInterpreter), parsed.Server)
+	action.Description = "save the command to a local file, then write it to the server and run it in one step with " + inlineLineInterpreter + ", the shell a command line runs in, adding --overwrite to replace a file already at that path"
+
+	message = "the server refused this command line for its length; run it as a verified file"
+	lead := "save the command to a local file, then run:"
+	if reason := fileLaneObstacle(parsed); reason != "" {
+		message = "the server refused this command line for its length, and it cannot run as a verified file as it stands: " + reason
+		lead = "once that is fixed, save the command to a local file and run:"
+	}
+	return message, denialHintLine(lead + "\n  " + action.Command + "\n"), action
 }
 
-func oversizedNotice(file event.FileExecution) string {
-	return fmt.Sprintf("Command line exceeds the server's limit; running it as a verified file at %s with %s (the file stays on the server)", file.Path, file.Interpreter)
-}
-
-// fileLaneForCommand turns a command refused for length into file-lane arguments with no Path yet,
-// or says why the file lane cannot take it: --env, content over 64 KB, or content that is not valid UTF-8.
-func fileLaneForCommand(parsed RemoteExecArgs) (RemoteExecArgs, *fileLaneRefusal) {
-	var reason string
+// fileLaneObstacle says what keeps the file lane from taking the command as it stands: --env,
+// content over 64 KB, or content that is not valid UTF-8.
+func fileLaneObstacle(parsed RemoteExecArgs) string {
 	if len(parsed.Env) > 0 {
-		reason = "--env values cannot ride the file lane; set the variables inside the script"
-	} else if _, msg := readScriptContent(strings.NewReader(parsed.Command), "the command line"); msg != "" {
-		reason = msg
+		return "--env values cannot ride the file lane; set the variables inside the script"
 	}
-	if reason != "" {
-		flags := runAsFlags(parsed)
-		if parsed.Purpose != "" {
-			flags = append(flags, "--purpose "+argvQuote(utils.SanitizeTerminalText(parsed.Purpose)))
-		}
-		if parsed.Detach {
-			flags = append(flags, "--detach")
-		}
-		if parsed.ReuseDays > 0 {
-			flags = append(flags, "--reuse-days "+strconv.Itoa(parsed.ReuseDays))
-		}
-		return RemoteExecArgs{}, &fileLaneRefusal{
-			message: "the server refused this command line for its length, and it cannot run as a verified file: " + reason,
-			action:  uploadScriptAction(flags, parsed.Server),
-		}
-	}
-	switched := parsed
-	switched.Command = ""
-	switched.ReuseDays = 0
-	switched.File = &FileExecArgs{
-		Interpreter: inlineLineInterpreter,
-		Upload:      true,
-		Overwrite:   true,
-		ReuseDays:   parsed.ReuseDays,
-		FromCommand: true,
-	}
-	return switched, nil
+	_, reason := readScriptContent(strings.NewReader(parsed.Command), "the command line")
+	return reason
+}
+
+// reportLineTooLong exits 1 with the length refusal and the file-lane command to run instead.
+func reportLineTooLong(err error, parsed RemoteExecArgs) {
+	message, hint, action := lineTooLongGuidance(parsed)
+	reportCodedRefusalWithExit(1, "command", err, message, hint, []utils.NextAction{action})
 }
