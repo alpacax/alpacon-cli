@@ -24,10 +24,6 @@ Tokens are used by Alpamon to self-register servers without manual intervention.
 		}
 
 		tokens, err := serverAPI.GetRegistrationTokenAttributes(alpaconClient)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the registration tokens: %s.", err)
-		}
-
-		utils.PrintTable(tokens)
+		utils.PrintListOrExit(tokens, err, "Failed to retrieve the registration tokens")
 	},
 }

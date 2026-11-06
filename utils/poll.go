@@ -122,11 +122,16 @@ func NextPollBackoff(tick time.Duration, attempt int, retryAfter time.Duration) 
 	if retryAfter > 0 {
 		return min(retryAfter, maxDelay)
 	}
-	delay := tick
+	return CappedBackoff(tick, attempt, maxDelay)
+}
+
+// CappedBackoff returns base doubled once per 0-based attempt, capped at limit.
+func CappedBackoff(base time.Duration, attempt int, limit time.Duration) time.Duration {
+	delay := min(base, limit)
 	for range attempt {
-		delay *= time.Duration(pollBackoffFactor)
-		if delay >= maxDelay {
-			return maxDelay
+		delay *= pollBackoffFactor
+		if delay >= limit {
+			return limit
 		}
 	}
 	return delay

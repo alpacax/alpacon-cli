@@ -55,9 +55,5 @@ func runList(tail int, serverName, userName string) {
 	}
 
 	eventList, err := event.GetEventList(alpaconClient, tail, serverName, userName)
-	if err != nil {
-		utils.CliErrorWithExit("Failed to retrieve the commands: %s.", err)
-	}
-
-	utils.PrintTable(eventList)
+	utils.PrintListOrExit(eventList, err, "Failed to retrieve the commands")
 }

@@ -32,9 +32,5 @@ func runFileAclList(_ *cobra.Command, args []string) {
 	}
 
 	acls, err := security.GetFileAclList(alpaconClient, tokenID)
-	if err != nil {
-		utils.CliErrorWithExit("Failed to retrieve file ACLs: %v.", err)
-	}
-
-	utils.PrintTable(acls)
+	utils.PrintListOrExit(acls, err, "Failed to retrieve file ACLs")
 }

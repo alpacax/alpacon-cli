@@ -93,10 +93,41 @@ func ErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHan
 			return HandleMFAError(ac, serverName)
 		},
 		OnUsernameRequired: func() error {
-			_, err := iam.HandleUsernameRequired()
-			return err
+			return handleUsernameRequired(ac)
 		},
 		RetryOperation: retry,
+	}
+}
+
+func handleUsernameRequired(ac *client.AlpaconClient) error {
+	if !utils.IsInteractiveShell() {
+		return errors.New("username is not set for your account; run 'alpacon username set <name>' to set it (lowercase letters, digits, '-', '_'; must start with a letter)")
+	}
+
+	utils.CliInfo("Username is required for your account.")
+	utils.CliInfo("You can also set it anytime with 'alpacon username set <name>'.")
+
+	for {
+		username := utils.PromptForRequiredInput("Please enter your username: ")
+
+		response, err := iam.SetUsername(ac, username)
+		if err == nil {
+			utils.CliSuccess(iam.UsernameSetSuccessFmt, response.Username)
+			return nil
+		}
+
+		warning, alreadySet, stopErr := iam.UsernameFailure(err)
+		switch {
+		case warning != "":
+			utils.CliWarning("%s", warning)
+			continue
+		case alreadySet:
+			// Username was set concurrently (e.g. another session); treat as success so the original command proceeds.
+			utils.CliInfo("Username is already set; continuing.")
+			return nil
+		default:
+			return stopErr
+		}
 	}
 }
 

@@ -25,10 +25,6 @@ var webhookListCmd = &cobra.Command{
 		}
 
 		webhookList, err := webhook.GetWebhookList(alpaconClient)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to get webhooks: %s.", err)
-		}
-
-		utils.PrintTable(webhookList)
+		utils.PrintListOrExit(webhookList, err, "Failed to get webhooks")
 	},
 }

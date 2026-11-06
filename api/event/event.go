@@ -52,7 +52,6 @@ var maxGapWidth = 100_000
 // var, not const, so tests can shorten them.
 var (
 	gapFillInitialInterval = 300 * time.Millisecond
-	gapFillBackoffFactor   = 2
 	gapFillMaxInterval     = 5 * time.Second
 	gapFillMaxNoProgress   = 11
 )
@@ -188,14 +187,7 @@ func (g *gapFillState) recoverSkipped(ac *client.AlpaconClient, cmdID api.PathID
 }
 
 func gapFillInterval(noProgress int) time.Duration {
-	d := gapFillInitialInterval
-	for i := 1; i < noProgress; i++ {
-		d *= time.Duration(gapFillBackoffFactor)
-		if d >= gapFillMaxInterval {
-			return gapFillMaxInterval
-		}
-	}
-	return d
+	return utils.CappedBackoff(gapFillInitialInterval, noProgress-1, gapFillMaxInterval)
 }
 
 // GetEventList returns the newest tail commands. The endpoint sorts -scheduled_at,

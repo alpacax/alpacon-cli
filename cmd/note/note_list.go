@@ -43,9 +43,5 @@ func runNoteList(tail int, serverName string, pinnedOnly bool) {
 	}
 
 	noteList, err := note.GetNoteList(alpaconClient, serverName, tail, pinnedOnly)
-	if err != nil {
-		utils.CliErrorWithExit("Failed to retrieve the notes: %s.", err)
-	}
-
-	utils.PrintTable(noteList)
+	utils.PrintListOrExit(noteList, err, "Failed to retrieve the notes")
 }

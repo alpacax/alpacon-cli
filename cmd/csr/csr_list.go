@@ -28,11 +28,7 @@ var csrListCmd = &cobra.Command{
 		}
 
 		csrList, err := cert.GetCSRList(alpaconClient, status)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the csr list: %s.", err)
-		}
-
-		utils.PrintTable(csrList)
+		utils.PrintListOrExit(csrList, err, "Failed to retrieve the csr list")
 	},
 }
 

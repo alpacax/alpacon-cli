@@ -2006,12 +2006,34 @@ func swapMaxGapWidth(n int) func() {
 	return func() { maxGapWidth = old }
 }
 
-func swapGapFillVars(initial time.Duration, factor int, max time.Duration, maxNoProgress int) func() {
-	oi, of, om, on := gapFillInitialInterval, gapFillBackoffFactor, gapFillMaxInterval, gapFillMaxNoProgress
-	gapFillInitialInterval, gapFillBackoffFactor, gapFillMaxInterval, gapFillMaxNoProgress = initial, factor, max, maxNoProgress
+func swapGapFillVars(initial, max time.Duration, maxNoProgress int) func() {
+	oi, om, on := gapFillInitialInterval, gapFillMaxInterval, gapFillMaxNoProgress
+	gapFillInitialInterval, gapFillMaxInterval, gapFillMaxNoProgress = initial, max, maxNoProgress
 	return func() {
-		gapFillInitialInterval, gapFillBackoffFactor, gapFillMaxInterval, gapFillMaxNoProgress = oi, of, om, on
+		gapFillInitialInterval, gapFillMaxInterval, gapFillMaxNoProgress = oi, om, on
 	}
+}
+
+func TestGapFillInterval_DoublesFromTheFirstNoProgressUpToTheCap(t *testing.T) {
+	var schedule []time.Duration
+	for noProgress := range gapFillMaxNoProgress + 1 {
+		schedule = append(schedule, gapFillInterval(noProgress))
+	}
+
+	assert.Equal(t, []time.Duration{
+		300 * time.Millisecond,
+		300 * time.Millisecond,
+		600 * time.Millisecond,
+		1200 * time.Millisecond,
+		2400 * time.Millisecond,
+		4800 * time.Millisecond,
+		5 * time.Second,
+		5 * time.Second,
+		5 * time.Second,
+		5 * time.Second,
+		5 * time.Second,
+		5 * time.Second,
+	}, schedule)
 }
 
 // While lastSeq is stuck, gapped chunks arriving within the backoff window must
@@ -2043,7 +2065,7 @@ func TestApplyChunk_GivesUpAndSkipsPermanentGap(t *testing.T) {
 	var fetches atomic.Int32
 	ac := holeServer(t, 20, map[int]bool{1: true}, &fetches)
 
-	defer swapGapFillVars(1*time.Millisecond, 2, 2*time.Millisecond, 3)()
+	defer swapGapFillVars(1*time.Millisecond, 2*time.Millisecond, 3)()
 	now := time.Unix(0, 0)
 	defer swapGapFillNow(func() time.Time { return now })()
 
@@ -2092,7 +2114,7 @@ func TestApplyChunk_FetchErrorBacksOffButNeverGivesUp(t *testing.T) {
 	t.Cleanup(ts.Close)
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	defer swapGapFillVars(1*time.Millisecond, 2, 2*time.Millisecond, 3)()
+	defer swapGapFillVars(1*time.Millisecond, 2*time.Millisecond, 3)()
 	now := time.Unix(0, 0)
 	defer swapGapFillNow(func() time.Time { return now })()
 

@@ -41,10 +41,9 @@ const (
 	// running on the server, so the client dials a new channel onto it instead of
 	// ending the shell. The budget bounds a server that keeps accepting a channel
 	// and dropping it: roughly 30s of waiting before the session is given up.
-	maxReconnectAttempts   = 5
-	reconnectBaseDelay     = 1 * time.Second
-	reconnectMaxDelay      = 15 * time.Second
-	reconnectBackoffFactor = 2
+	maxReconnectAttempts = 5
+	reconnectBaseDelay   = 1 * time.Second
+	reconnectMaxDelay    = 15 * time.Second
 )
 
 var (
@@ -442,14 +441,7 @@ func endsSession(err error) bool {
 // reconnectDelay returns the wait before the attempt after the given number of
 // failed ones: the base doubled once per failure, capped.
 func reconnectDelay(failures int, base time.Duration) time.Duration {
-	delay := min(base, reconnectMaxDelay)
-	for range failures {
-		delay *= reconnectBackoffFactor
-		if delay >= reconnectMaxDelay {
-			return reconnectMaxDelay
-		}
-	}
-	return delay
+	return utils.CappedBackoff(base, failures, reconnectMaxDelay)
 }
 
 // OpenReadOnlyTerminal opens a read-only terminal view for watching another user's session.

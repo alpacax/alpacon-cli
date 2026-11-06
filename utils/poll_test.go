@@ -57,6 +57,39 @@ func TestNextPollBackoff(t *testing.T) {
 	}
 }
 
+func TestCappedBackoff(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		base    time.Duration
+		attempt int
+		limit   time.Duration
+		want    time.Duration
+	}{
+		{name: "download retry before any doubling", base: 250 * time.Millisecond, attempt: 0, limit: time.Second, want: 250 * time.Millisecond},
+		{name: "download retry doubled once", base: 250 * time.Millisecond, attempt: 1, limit: time.Second, want: 500 * time.Millisecond},
+		{name: "download retry reaches the cap", base: 250 * time.Millisecond, attempt: 2, limit: time.Second, want: time.Second},
+		{name: "download retry far past the cap", base: 250 * time.Millisecond, attempt: 50, limit: time.Second, want: time.Second},
+		{name: "websh reconnect doubled past the cap", base: time.Second, attempt: 4, limit: 15 * time.Second, want: 15 * time.Second},
+		{name: "websh reconnect just under the cap", base: time.Second, attempt: 3, limit: 15 * time.Second, want: 8 * time.Second},
+		{name: "gap fill on its first no-progress attempt", base: 300 * time.Millisecond, attempt: 0, limit: 5 * time.Second, want: 300 * time.Millisecond},
+		{name: "gap fill one doubling under the cap", base: 300 * time.Millisecond, attempt: 4, limit: 5 * time.Second, want: 4800 * time.Millisecond},
+		{name: "gap fill doubled past the cap", base: 300 * time.Millisecond, attempt: 5, limit: 5 * time.Second, want: 5 * time.Second},
+		{name: "poll backoff reaches its sixty tick cap", base: time.Second, attempt: 6, limit: 60 * time.Second, want: 60 * time.Second},
+		{name: "a base already over the limit is capped", base: 5 * time.Second, attempt: 0, limit: time.Second, want: time.Second},
+		{name: "a base over the limit stays capped", base: 5 * time.Second, attempt: 3, limit: time.Second, want: time.Second},
+		{name: "a negative attempt keeps the base", base: 300 * time.Millisecond, attempt: -1, limit: 5 * time.Second, want: 300 * time.Millisecond},
+		{name: "a zero base stays zero", base: 0, attempt: 10, limit: 0, want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, CappedBackoff(tt.base, tt.attempt, tt.limit))
+		})
+	}
+}
+
 func TestThrottleBudget_ExtendsUntilTheDurationRunsOut(t *testing.T) {
 	t.Parallel()
 	budget := NewThrottleBudget(10 * time.Second)

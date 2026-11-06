@@ -26,10 +26,6 @@ var certListCmd = &cobra.Command{
 		}
 
 		certList, err := cert.GetCertificateList(alpaconClient)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the certificate list: %s.", err)
-		}
-
-		utils.PrintTable(certList)
+		utils.PrintListOrExit(certList, err, "Failed to retrieve the certificate list")
 	},
 }

@@ -33,9 +33,5 @@ func runWebshList(tail int) {
 	}
 
 	sessionList, err := websh.GetSessionList(alpaconClient, tail)
-	if err != nil {
-		utils.CliErrorWithExit("Failed to retrieve websh sessions: %s.", err)
-	}
-
-	utils.PrintTable(sessionList)
+	utils.PrintListOrExit(sessionList, err, "Failed to retrieve websh sessions")
 }

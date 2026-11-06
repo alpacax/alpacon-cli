@@ -54,11 +54,7 @@ requests you submitted.`,
 		}
 
 		requests, err := listRequests(ac, myRequests, statusFilter, typeFilter)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to list approval requests: %s.", err)
-		}
-
-		utils.PrintTable(requests)
+		utils.PrintListOrExit(requests, err, "Failed to list approval requests")
 	},
 }
 

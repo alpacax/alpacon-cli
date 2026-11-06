@@ -457,44 +457,12 @@ func GetUserMemberships(ac *client.AlpaconClient, userID string) ([]GroupMembers
 	return groups, nil
 }
 
-func HandleUsernameRequired() (*SetUsernameResponse, error) {
-	if !utils.IsInteractiveShell() {
-		return nil, errors.New("username is not set for your account; run 'alpacon username set <name>' to set it (lowercase letters, digits, '-', '_'; must start with a letter)")
-	}
-
-	utils.CliInfo("Username is required for your account.")
-	utils.CliInfo("You can also set it anytime with 'alpacon username set <name>'.")
-
-	for {
-		username := utils.PromptForRequiredInput("Please enter your username: ")
-
-		response, err := SetUsername(username)
-		if err == nil {
-			utils.CliSuccess(UsernameSetSuccessFmt, response.Username)
-			return response, nil
-		}
-
-		warning, alreadySet, stopErr := usernameFailure(err)
-		switch {
-		case warning != "":
-			utils.CliWarning("%s", warning)
-			continue
-		case alreadySet:
-			// Username was set concurrently (e.g. another session); treat as success so the original command proceeds.
-			utils.CliInfo("Username is already set; continuing.")
-			return nil, nil
-		default:
-			return nil, stopErr
-		}
-	}
-}
-
-// usernameFailure decides what the username prompt does with a failed
+// UsernameFailure decides what the username prompt does with a failed
 // SetUsername: ask again after a warning, carry on because the username is
 // already set, or stop with an error. A refusal carrying the server's hint
 // stops with that refusal kept in the chain, so the hint prints under it in
 // place of the local message.
-func usernameFailure(err error) (warning string, alreadySet bool, stop error) {
+func UsernameFailure(err error) (warning string, alreadySet bool, stop error) {
 	code, _ := utils.ParseErrorResponse(err)
 	msg, known := UsernameErrorMessage(code)
 	switch {
@@ -511,12 +479,7 @@ func usernameFailure(err error) (warning string, alreadySet bool, stop error) {
 	}
 }
 
-func SetUsername(username string) (*SetUsernameResponse, error) {
-	ac, err := client.NewAlpaconAPIClient()
-	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-	}
-
+func SetUsername(ac *client.AlpaconClient, username string) (*SetUsernameResponse, error) {
 	request := SetUsernameRequest{
 		Username: username,
 	}

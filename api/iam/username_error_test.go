@@ -1,8 +1,12 @@
 package iam
 
 import (
-	"os"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/alpacax/alpacon-cli/client"
 
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -47,26 +51,44 @@ func TestIsRetryableUsernameError(t *testing.T) {
 	assert.False(t, isRetryableUsernameError("unknown"))
 }
 
-func TestHandleUsernameRequired_NonTTY(t *testing.T) {
-	// Replace stdin with a pipe so IsInteractiveShell() reports non-TTY; otherwise
-	// running `go test` from a terminal would enter the prompt loop and hang.
-	orig := os.Stdin
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		os.Stdin = orig
-		_ = r.Close()
-		_ = w.Close()
-	})
-	os.Stdin = r
+func TestSetUsername_PostsTheNameThroughTheCallersClient(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body SetUsernameRequest
+		if r.Method != http.MethodPost || r.URL.Path != usernameURL || json.NewDecoder(r.Body).Decode(&body) != nil || body.Username != "alice" {
+			t.Errorf("unexpected request: %s %s %+v", r.Method, r.URL.Path, body)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": "u-1", "username": "alice"}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err = HandleUsernameRequired()
-	if assert.Error(t, err) {
-		assert.Contains(t, err.Error(), "alpacon username set")
-		assert.NotContains(t, err.Error(), "Please enter")
-	}
+	response, err := SetUsername(ac, "alice")
+
+	require.NoError(t, err)
+	assert.Equal(t, &SetUsernameResponse{ID: "u-1", Username: "alice"}, response)
+}
+
+func TestSetUsername_ReturnsTheRefusalInsteadOfExiting(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code": "user_username_in_use", "detail": "this username is already in use"}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	response, err := SetUsername(ac, "alice")
+
+	require.Error(t, err)
+	assert.Nil(t, response)
+	assert.Equal(t, http.StatusBadRequest, utils.HTTPStatusCode(err))
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, codeUsernameInUse, code)
 }
 
 // usernameRefusal is a coded refusal of the username update.
@@ -84,7 +106,7 @@ func TestUsernameFailure(t *testing.T) {
 	t.Run("a hinted refusal stops with the refusal kept", func(t *testing.T) {
 		t.Parallel()
 		refusal := usernameRefusal{code: codeUsernameApproval, hint: hint}
-		warning, alreadySet, stop := usernameFailure(refusal)
+		warning, alreadySet, stop := UsernameFailure(refusal)
 		assert.Empty(t, warning)
 		assert.False(t, alreadySet)
 		require.Error(t, stop)
@@ -97,14 +119,14 @@ func TestUsernameFailure(t *testing.T) {
 
 	t.Run("the same code without a hint keeps the local message", func(t *testing.T) {
 		t.Parallel()
-		_, _, stop := usernameFailure(usernameRefusal{code: codeUsernameApproval})
+		_, _, stop := UsernameFailure(usernameRefusal{code: codeUsernameApproval})
 		require.Error(t, stop)
 		assert.Equal(t, usernameErrors[codeUsernameApproval].message, stop.Error())
 	})
 
 	t.Run("a retryable code asks again", func(t *testing.T) {
 		t.Parallel()
-		warning, alreadySet, stop := usernameFailure(usernameRefusal{code: codeUsernameInUse})
+		warning, alreadySet, stop := UsernameFailure(usernameRefusal{code: codeUsernameInUse})
 		assert.Equal(t, usernameErrors[codeUsernameInUse].message, warning)
 		assert.False(t, alreadySet)
 		assert.NoError(t, stop)
@@ -112,7 +134,7 @@ func TestUsernameFailure(t *testing.T) {
 
 	t.Run("an already set username carries on", func(t *testing.T) {
 		t.Parallel()
-		warning, alreadySet, stop := usernameFailure(usernameRefusal{code: codeUsernameAlreadySet})
+		warning, alreadySet, stop := UsernameFailure(usernameRefusal{code: codeUsernameAlreadySet})
 		assert.Empty(t, warning)
 		assert.True(t, alreadySet)
 		assert.NoError(t, stop)
@@ -120,7 +142,7 @@ func TestUsernameFailure(t *testing.T) {
 
 	t.Run("an unmapped refusal keeps its chain", func(t *testing.T) {
 		t.Parallel()
-		_, _, stop := usernameFailure(usernameRefusal{code: "permission_denied", hint: hint})
+		_, _, stop := UsernameFailure(usernameRefusal{code: "permission_denied", hint: hint})
 		require.Error(t, stop)
 		assert.Equal(t, hint, utils.RefusalHint(stop))
 	})

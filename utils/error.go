@@ -117,11 +117,11 @@ const (
 	// falls outside the envelope an admin granted this token. The refusal is
 	// permanent for the same request: a retry submits the same thing. Widen the
 	// rules with 'alpacon token acl' instead. The server sends this on a 403 with no
-	// human detail, so authStatusCodeMessage in client/client.go renders the message.
+	// human detail, so authStatusCodeMessage in client/errors.go renders the message.
 	APITokenACLNotAllowed = "api_token_acl_not_allowed"
 
 	// CommandACLMoved rides a 405 on a command-ACL write once command ACLs live on
-	// the command pre-approval ledger; codeOnlyMessage in client/client.go renders it.
+	// the command pre-approval ledger; codeOnlyMessage in client/errors.go renders it.
 	CommandACLMoved = "command_acl_moved"
 
 	// AuthInteractiveChannelRequiresPresence rides a 403: a token gets no interactive channel
@@ -569,7 +569,7 @@ func InteractiveOnly(err error, action string) error {
 // ParseErrorGateAndMissing returns the "gate" and "missing" fields a coded
 // 402/403/405/429 carried, or ("", nil) if err carries none. Unlike
 // ParseErrorResponse this has no textual fallback: every producer of these
-// fields is a *apiError in client/client.go, which always implements
+// fields is a *apiError in client/errors.go, which always implements
 // gateGuidanceError, so there is no legacy string form to recover one from.
 func ParseErrorGateAndMissing(err error) (string, []string) {
 	for e := err; e != nil; e = errors.Unwrap(e) {

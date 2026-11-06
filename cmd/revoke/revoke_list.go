@@ -29,11 +29,7 @@ var revokeListCmd = &cobra.Command{
 		}
 
 		requestList, err := cert.GetRevokeRequestList(alpaconClient, status, certificate)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to get revoke requests: %s.", err)
-		}
-
-		utils.PrintTable(requestList)
+		utils.PrintListOrExit(requestList, err, "Failed to get revoke requests")
 	},
 }
 

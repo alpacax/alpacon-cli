@@ -32,9 +32,5 @@ func runCommandAclList(_ *cobra.Command, args []string) {
 	}
 
 	acls, err := security.GetCommandAclList(alpaconClient, tokenID)
-	if err != nil {
-		utils.CliErrorWithExit("Failed to retrieve command ACLs: %v.", err)
-	}
-
-	utils.PrintTable(acls)
+	utils.PrintListOrExit(acls, err, "Failed to retrieve command ACLs")
 }

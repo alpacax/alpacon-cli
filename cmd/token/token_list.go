@@ -26,10 +26,6 @@ var tokenListCmd = &cobra.Command{
 		}
 
 		tokenList, err := auth.GetAPITokenList(alpaconClient)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the api token list: %s.", err)
-		}
-
-		utils.PrintTable(tokenList)
+		utils.PrintListOrExit(tokenList, err, "Failed to retrieve the api token list")
 	},
 }

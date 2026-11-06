@@ -1705,33 +1705,6 @@ func TestFetchFromURLToFile_StopsDrainingAStalledErrorBody(t *testing.T) {
 	}
 }
 
-func TestBackoffDelay(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		attempt int
-		want    time.Duration
-	}{
-		{name: "no doubling yet", attempt: 0, want: 250 * time.Millisecond},
-		{name: "one double", attempt: 1, want: 500 * time.Millisecond},
-		{name: "reaches the cap", attempt: 2, want: time.Second},
-		{name: "past the cap", attempt: 3, want: time.Second},
-		{name: "far past the cap", attempt: 50, want: time.Second},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, backoffDelay(tt.attempt, 250*time.Millisecond, time.Second))
-		})
-	}
-}
-
-func TestBackoffDelay_CapsAnInitialAlreadyOverTheLimit(t *testing.T) {
-	t.Parallel()
-	assert.Equal(t, time.Second, backoffDelay(0, 5*time.Second, time.Second))
-	assert.Equal(t, time.Second, backoffDelay(3, 5*time.Second, time.Second))
-}
-
 func TestCompleteSingleUpload_RefusesAnUploadIDThatIsNotOneSegment(t *testing.T) {
 	t.Parallel()
 	ts := testutil.NewNoRequestServer(t)
