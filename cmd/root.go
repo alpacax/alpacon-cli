@@ -87,6 +87,7 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 func Execute() {
 	kube.ApplySurfaceGate(RootCmd, kubernetesSurfaceEnabled())
 	RootCmd.InitDefaultCompletionCmd()
+	rejectUnknownSubcommands(RootCmd)
 	markHookErrors(RootCmd)
 	keepWithOwnParser(RootCmd, os.Args[1:])
 	cmd, err := RootCmd.ExecuteC()
@@ -131,6 +132,16 @@ func knownFlag(c *cobra.Command, arg string) bool {
 		return c.Flags().Lookup(name) != nil
 	}
 	return len(arg) == 2 && c.Flags().ShorthandLookup(arg[1:]) != nil
+}
+
+// rejectUnknownSubcommands does below the root what Cobra does only at the root, for each group that leaves Args and flag parsing to Cobra.
+func rejectUnknownSubcommands(c *cobra.Command) {
+	if c.HasParent() && c.HasSubCommands() && c.Args == nil && !c.DisableFlagParsing {
+		c.Args = utils.RejectUnknownSubcommand()
+	}
+	for _, sub := range c.Commands() {
+		rejectUnknownSubcommands(sub)
+	}
 }
 
 // hookError marks an error a command's own hook returned; any other error is Cobra rejecting the command line.

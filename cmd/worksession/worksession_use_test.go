@@ -150,7 +150,7 @@ func TestRunUse_FilesUnderClientWorkspaceWhenConfigSwitchedMidCommand(t *testing
 
 	before, err := config.LoadConfig()
 	require.NoError(t, err)
-	require.NoError(t, config.SwitchWorkspace(before, "https://ws-b.example.com", "ws-b", false))
+	require.NoError(t, config.SwitchWorkspace(before, "https://ws-b.example.com", "ws-b", false, nil))
 
 	_, err = RunUse(ac, "ses-a")
 	require.NoError(t, err)

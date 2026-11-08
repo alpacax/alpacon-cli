@@ -1,11 +1,18 @@
 package workspace
 
 import (
+	"cmp"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
@@ -63,10 +70,17 @@ func TestCommitSwitch(t *testing.T) {
 		verifyErr         error
 		expectURL         string
 		expectSchemaName  string
+		renewed           *config.RenewedToken
 		expectSurface     bool
+		expectAccessToken string
 		expectErrContains string
 	}{
 		{name: "switch records the new answer", newSurface: true, expectURL: "https://next.us1.alpacon.io", expectSchemaName: "next", expectSurface: true},
+		{name: "switch saves the token renewed to find the workspace", renewed: &config.RenewedToken{AccessToken: "renewed-token", ExpiresIn: 3600},
+			expectURL: "https://next.us1.alpacon.io", expectSchemaName: "next", expectAccessToken: "renewed-token"},
+		{name: "failed connection keeps the renewed token", renewed: &config.RenewedToken{AccessToken: "renewed-token", ExpiresIn: 3600}, verifyErr: errUnreachable,
+			expectURL: "https://prev-slug.us1.alpacon.io", expectSchemaName: "prev", expectSurface: true, expectAccessToken: "renewed-token",
+			expectErrContains: `failed to connect to workspace "next": connection refused; reverted to "prev"`},
 		{name: "switch to a workspace without kubernetes", expectURL: "https://next.us1.alpacon.io", expectSchemaName: "next"},
 		{name: "failed connection restores the original answer", newSurface: false, verifyErr: errUnreachable,
 			expectURL: "https://prev-slug.us1.alpacon.io", expectSchemaName: "prev", expectSurface: true,
@@ -81,7 +95,7 @@ func TestCommitSwitch(t *testing.T) {
 			orig, err := config.LoadConfig()
 			require.NoError(t, err)
 
-			err = commitSwitch(orig, "https://next.us1.alpacon.io", "next", tt.newSurface, func() error { return tt.verifyErr })
+			err = commitSwitch(orig, "https://next.us1.alpacon.io", "next", tt.newSurface, tt.renewed, func() error { return tt.verifyErr })
 			if tt.expectErrContains != "" {
 				require.ErrorIs(t, err, tt.verifyErr)
 				assert.Contains(t, err.Error(), tt.expectErrContains)
@@ -94,7 +108,8 @@ func TestCommitSwitch(t *testing.T) {
 			assert.Equal(t, tt.expectURL, cfg.WorkspaceURL)
 			assert.Equal(t, tt.expectSchemaName, cfg.WorkspaceIdentity())
 			assert.Equal(t, tt.expectSurface, cfg.KubernetesSurface)
-			assert.Equal(t, "access-token", cfg.AccessToken)
+			expectAccessToken := cmp.Or(tt.expectAccessToken, "access-token")
+			assert.Equal(t, expectAccessToken, cfg.AccessToken)
 		})
 	}
 }
@@ -126,7 +141,7 @@ func TestCommitSwitch_FailedConnectionLeavesALoginMadeMeanwhile(t *testing.T) {
 				return errors.New("connection refused")
 			}
 
-			err = commitSwitch(orig, "https://next.us1.alpacon.io", "next", false, verify)
+			err = commitSwitch(orig, "https://next.us1.alpacon.io", "next", false, nil, verify)
 
 			require.ErrorIs(t, err, tt.wantErr)
 			require.ErrorContains(t, err, `failed to connect to "next": connection refused; left the config as another login or switch set it since`)
@@ -141,8 +156,168 @@ func TestCommitSwitch_ConfigWriteFailure(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	verified := false
-	err := commitSwitch(config.Config{}, "https://next.us1.alpacon.io", "next", true, func() error { verified = true; return nil })
+	err := commitSwitch(config.Config{}, "https://next.us1.alpacon.io", "next", true, nil, func() error { verified = true; return nil })
 
 	require.ErrorContains(t, err, "failed to update config")
 	assert.False(t, verified, "no connection check runs when the config could not be written")
+}
+
+func testJWT(t *testing.T, claims map[string]any) string {
+	t.Helper()
+	payload, err := json.Marshal(claims)
+	require.NoError(t, err)
+	return "e30." + base64.RawURLEncoding.EncodeToString(payload) + ".sig"
+}
+
+func workspacesToken(t *testing.T, names ...string) string {
+	t.Helper()
+	workspaces := make([]map[string]string, 0, len(names))
+	for _, name := range names {
+		workspaces = append(workspaces, map[string]string{"schema_name": name, "region": "us1"})
+	}
+	return testJWT(t, map[string]any{"https://alpacon.io/workspaces": workspaces})
+}
+
+func TestResolveSwitchTarget(t *testing.T) {
+	t.Parallel()
+	rejected := fmt.Errorf("%w: invalid_grant", errRefreshRejected)
+	unreachable := errors.New("connection refused")
+	const notFound = `workspace "next" not found in your account`
+	const signInAgain = notFound + ". Your workspace list reflects your last sign-in; run 'alpacon login' and retry"
+	tests := []struct {
+		name         string
+		accessToken  string
+		refreshToken string
+		renewedToken string
+		renewErr     error
+		expectRenews int
+		expectURL    string
+		expectErr    string
+		expectErrIs  []error
+		expectNotIs  error
+	}{
+		{name: "workspace in the token resolves without renewal", accessToken: workspacesToken(t, "prev", "next"), refreshToken: "refresh-token",
+			expectURL: "https://next.us1.alpacon.io"},
+		{name: "workspace created after sign-in resolves after one renewal", accessToken: workspacesToken(t, "prev"), refreshToken: "refresh-token",
+			renewedToken: workspacesToken(t, "prev", "next"), expectRenews: 1, expectURL: "https://next.us1.alpacon.io"},
+		{name: "workspace missing after renewal suggests the name or a login", accessToken: workspacesToken(t, "prev"), refreshToken: "refresh-token",
+			renewedToken: workspacesToken(t, "prev"), expectRenews: 1, expectErrIs: []error{workspace.ErrWorkspaceNotInToken},
+			expectErr: notFound + " after renewing the access token. Check the name, or if the workspace was just created, run 'alpacon login' and retry"},
+		{name: "unreadable renewed token asks for login without mentioning the name", accessToken: workspacesToken(t, "prev"), refreshToken: "refresh-token",
+			renewedToken: "not-a-jwt", expectRenews: 1, expectNotIs: workspace.ErrWorkspaceNotInToken,
+			expectErr: "could not read the renewed access token: failed to decode access token: invalid JWT format: expected 3 parts, got 1. Run 'alpacon login' and retry"},
+		{name: "renewed token without a workspaces claim asks for login", accessToken: workspacesToken(t, "prev"), refreshToken: "refresh-token",
+			renewedToken: testJWT(t, map[string]any{"sub": "alice"}), expectRenews: 1, expectNotIs: workspace.ErrWorkspaceNotInToken,
+			expectErr: "could not read the renewed access token: workspaces claim not found in token. Run 'alpacon login' and retry"},
+		{name: "rejected refresh token asks for login", accessToken: workspacesToken(t, "prev"), refreshToken: "refresh-token",
+			renewErr: rejected, expectRenews: 1, expectErrIs: []error{workspace.ErrWorkspaceNotInToken, errRefreshRejected},
+			expectErr: signInAgain + ": renewing the access token failed: refresh token refused: invalid_grant"},
+		{name: "transient renewal failure asks for a retry", accessToken: workspacesToken(t, "prev"), refreshToken: "refresh-token",
+			renewErr: unreachable, expectRenews: 1, expectErrIs: []error{workspace.ErrWorkspaceNotInToken, unreachable},
+			expectErr: notFound + ", and renewing the access token to look again failed. Please retry: connection refused"},
+		{name: "no refresh token asks for login without renewal", accessToken: workspacesToken(t, "prev"),
+			expectErrIs: []error{workspace.ErrWorkspaceNotInToken}, expectErr: signInAgain},
+		{name: "unreadable token fails without renewal", accessToken: "not-a-jwt", refreshToken: "refresh-token",
+			expectNotIs: workspace.ErrWorkspaceNotInToken, expectErr: "failed to decode access token: invalid JWT format: expected 3 parts, got 1"},
+		{name: "token without a workspaces claim fails without renewal", accessToken: testJWT(t, map[string]any{"sub": "alice"}), refreshToken: "refresh-token",
+			expectNotIs: workspace.ErrWorkspaceNotInToken, expectErr: "workspaces claim not found in token"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := config.Config{AccessToken: tt.accessToken, RefreshToken: tt.refreshToken, BaseDomain: "alpacon.io"}
+			renews := 0
+			var issued *config.RenewedToken
+			renew := func(got config.Config) (*config.RenewedToken, error) {
+				renews++
+				assert.Equal(t, cfg, got)
+				if tt.renewErr != nil {
+					return nil, tt.renewErr
+				}
+				issued = &config.RenewedToken{AccessToken: tt.renewedToken, ExpiresIn: 3600}
+				return issued, nil
+			}
+
+			newURL, newName, renewed, err := resolveSwitchTarget(cfg, "next", renew)
+
+			assert.Equal(t, tt.expectRenews, renews)
+			if tt.expectErr == "" {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectURL, newURL)
+				assert.Equal(t, "next", newName)
+				assert.Same(t, issued, renewed)
+				return
+			}
+			require.EqualError(t, err, tt.expectErr)
+			assert.Empty(t, newURL)
+			assert.Empty(t, newName)
+			assert.Nil(t, renewed)
+			if tt.expectNotIs != nil {
+				require.NotErrorIs(t, err, tt.expectNotIs)
+			}
+			for _, target := range tt.expectErrIs {
+				assert.ErrorIs(t, err, target)
+			}
+		})
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func authServer(t *testing.T, status int, tokenBody string) *http.Client {
+	t.Helper()
+	respond := func(status int, body string) *http.Response {
+		return &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}
+	}
+	return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet {
+			return respond(http.StatusOK, `{"auth0":{"method":"auth0","client_id":"cli","domain":"auth.example"}}`), nil
+		}
+		return respond(status, tokenBody), nil
+	})}
+}
+
+// Serial: each case sets HOME.
+func TestRenewWorkspaceClaimClassifiesTheServersAnswer(t *testing.T) {
+	const notFound = `workspace "next" not found in your account`
+	renewedBody, err := json.Marshal(map[string]any{"access_token": workspacesToken(t, "prev", "next"), "expires_in": 3600})
+	require.NoError(t, err)
+	tests := []struct {
+		name      string
+		status    int
+		body      string
+		expectURL string
+		expectErr string
+	}{
+		{name: "new token finds the workspace", status: http.StatusOK, body: string(renewedBody), expectURL: "https://next.us1.alpacon.io"},
+		{name: "rejected refresh token asks for login", status: http.StatusForbidden, body: `{"error":"invalid_grant","error_description":"Unknown or invalid refresh token."}`,
+			expectErr: notFound + ". Your workspace list reflects your last sign-in; run 'alpacon login' and retry: renewing the access token failed: refresh token refused: " +
+				"error response from authentication server: invalid_grant - Unknown or invalid refresh token."},
+		{name: "server failure asks for a retry", status: http.StatusServiceUnavailable, body: `{"error":"temporarily_unavailable","error_description":"Try later"}`,
+			expectErr: notFound + ", and renewing the access token to look again failed. Please retry: error response from authentication server: temporarily_unavailable - Try later"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			require.NoError(t, config.CreateConfig("https://prev.us1.alpacon.io", "prev", "", "", workspacesToken(t, "prev"), "refresh-token", "alpacon.io", 3600, false))
+			cfg, err := config.LoadConfig()
+			require.NoError(t, err)
+			httpClient := authServer(t, tt.status, tt.body)
+
+			newURL, _, _, err := resolveSwitchTarget(cfg, "next", func(cfg config.Config) (*config.RenewedToken, error) {
+				return renewWorkspaceClaim(cfg, httpClient)
+			})
+
+			if tt.expectErr != "" {
+				require.EqualError(t, err, tt.expectErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectURL, newURL)
+		})
+	}
 }

@@ -352,22 +352,13 @@ func writeAPIResponse(opts options, response *client.RawResponse, stdout io.Writ
 					output = formatted.Bytes()
 				}
 			}
-			output = []byte(sanitizeTerminalBodyKeepingTabs(string(output)))
+			output = []byte(utils.SanitizeTerminalBlockKeepingTabs(string(output)))
 		}
 		if _, err := stdout.Write(output); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// SanitizeTerminalBlock strips tabs, so each tab-separated segment is sanitized on its own.
-func sanitizeTerminalBodyKeepingTabs(body string) string {
-	segments := strings.Split(body, "\t")
-	for i, segment := range segments {
-		segments[i], _ = utils.SanitizeTerminalBlock(segment)
-	}
-	return strings.Join(segments, "\t")
 }
 
 func parseHeaders(raw []string) (http.Header, error) {

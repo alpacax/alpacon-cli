@@ -177,7 +177,7 @@ func TestEveryWriterWaitsForTheLockAndLeavesTheFileAlone(t *testing.T) {
 		}},
 		{name: "logout", write: DeleteConfig},
 		{name: "switch", write: func(started Config) error {
-			return SwitchWorkspace(started, "https://ws2.us1.alpacon.io", "ws2", false)
+			return SwitchWorkspace(started, "https://ws2.us1.alpacon.io", "ws2", false, nil)
 		}},
 		{name: "revert", write: func(started Config) error { return RestoreWorkspace(started.WorkspaceURL, started) }},
 		{name: "workspace env", write: func(started Config) error { return SetWorkspaceEnv(started.WorkspaceURL, "frozen", true) }},

@@ -26,8 +26,8 @@ The table shows the decision context the server sends for the request type:
 the command or sudo detail, its risk assessment, the work session and the
 requested changes. Use --output json to print the full raw response.`,
 	Args: cobra.ExactArgs(1),
-	Example: `  alpacon approval describe apr-abc123
-  alpacon approval desc apr-abc123`,
+	Example: `  alpacon approval describe 550e8400-e29b-41d4-a716-446655440000
+  alpacon approval desc 550e8400-e29b-41d4-a716-446655440000`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
@@ -87,6 +87,10 @@ func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecutio
 		{"Reviewed by", reviewedBy},
 		{"Reviewed at", reviewedAt},
 		{"Added at", req.AddedAt.Local().Format("2006-01-02 15:04")},
+	}
+	if note := utils.SanitizeTerminalOneLine(req.RejectionNote); note != "" {
+		// The approver's own words, stripped of terminal escapes like any server value.
+		rows = append(rows, describeRow{"Rejection reason", note})
 	}
 	rows = append(rows, contextRows(req.Metadata)...)
 	if fe != nil {
@@ -177,6 +181,11 @@ func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 	if c := meta.Command; c != nil {
 		add("Command", c.Line)
 		add("Server", c.ServerName)
+		// A file execution shows its own run-as account under File execution,
+		// and that is the one the console shows for it.
+		if c.FileExecution == nil {
+			add("Run as", c.RunAs)
+		}
 		add("Risk level", c.RiskLevel)
 		if c.RunsWithSudo {
 			add("Runs with sudo", "yes")
@@ -193,7 +202,8 @@ func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 	}
 	if s := meta.Sudo; s != nil {
 		add("Sudo command", s.Command)
-		add("  Run as", s.RunAs)
+		add("Run as", s.RunAs)
+		add("Purpose", s.Purpose)
 		add("Server", s.ServerName)
 		add("Risk level", s.RiskLevel)
 		add("Grant status", s.GrantStatus)

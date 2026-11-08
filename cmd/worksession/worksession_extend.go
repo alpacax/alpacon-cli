@@ -32,8 +32,8 @@ README) rather than waiting. Check back with
 'alpacon work-session describe SESSION_ID', or run 'extend' again with a new
 reason once the request settles.`,
 	Args: cobra.ExactArgs(1),
-	Example: `  alpacon work-session extend ses-abc123 --expires-in 2h --reason "customer escalation, still triaging"
-  alpacon work-session extend ses-abc123 --expires-at 2026-05-09T10:00:00Z --reason "customer escalation, still triaging"`,
+	Example: `  alpacon work-session extend 550e8400-e29b-41d4-a716-446655440000 --expires-in 2h --reason "customer escalation, still triaging"
+  alpacon work-session extend 550e8400-e29b-41d4-a716-446655440000 --expires-at 2026-05-09T10:00:00Z --reason "customer escalation, still triaging"`,
 	Run: func(cmd *cobra.Command, args []string) {
 		id := args[0]
 		expiresAtVal, err := parseExpiryFlag(extendExpiresIn, extendExpiresAt)

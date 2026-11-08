@@ -14,7 +14,7 @@ var revokeApproveCmd = &cobra.Command{
 	Approves a pending certificate revoke request, moving it forward in the
 	revocation process to eventually revoke the certificate.
 	`,
-	Example: `alpacon revoke approve REQUEST_ID`,
+	Example: `alpacon revoke approve 550e8400-e29b-41d4-a716-446655440000`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		requestId := args[0]

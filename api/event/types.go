@@ -76,6 +76,15 @@ type ClientTimeoutError struct {
 
 func (e *ClientTimeoutError) ErrorHint() string { return e.hint }
 
+// CommandPollError is returned when the poll of a submitted command ended on a
+// failed read. The command was not cancelled, so running it again may run it twice.
+type CommandPollError struct {
+	CommandID string
+	Err       error
+}
+
+func (e *CommandPollError) Unwrap() error { return e.Err }
+
 // PendingApprovalError is returned when the server parked a command at the
 // "awaiting_approval" status: a human must approve it out of band in the Alpacon
 // console before it runs. CommandID identifies the parked job so a --wait caller can
@@ -161,6 +170,10 @@ type EventDetails struct {
 	FileExecutionSuggestion *FileExecutionSuggestion `json:"file_execution_suggestion"`
 	ConsoleURL              string                   `json:"console_url,omitempty"`
 	CommandRejection
+	// RejectionNote is what the approver wrote when rejecting the hold: null unless a
+	// person rejected it, sent only to the requester and the approvers, and absent on
+	// an older server.
+	RejectionNote *string `json:"rejection_note"`
 	// The account the command ran as and the work session it ran under, so a
 	// re-run printed from the detail repeats them. WorkSession is null when the
 	// command ran under none.
@@ -286,6 +299,10 @@ func (e *RemoteCommandError) Error() string {
 
 func (*ClientTimeoutError) Error() string {
 	return "CLI timed out waiting for command result"
+}
+
+func (e *CommandPollError) Error() string {
+	return fmt.Sprintf("command %s was submitted and not cancelled, but its result could not be read: %v", e.CommandID, e.Err)
 }
 
 func (*PendingApprovalError) Error() string {

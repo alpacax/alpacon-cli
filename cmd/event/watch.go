@@ -32,8 +32,8 @@ disconnected are lost—the event channel has no history to replay—and both
 reconnects and failing reconnects are reported on stderr.
 
 Run 'alpacon work-session ls' or the Alpacon console to find a target ID.`,
-	Example: `  alpacon event watch --type work_session --target a1b2c3d4-5678-abcd-ef01-234567890abc
-  alpacon event watch --type work_session --target a1b2c3d4-5678-abcd-ef01-234567890abc --output json
+	Example: `  alpacon event watch --type work_session --target 550e8400-e29b-41d4-a716-446655440000
+  alpacon event watch --type work_session --target 550e8400-e29b-41d4-a716-446655440000 --output json
   alpacon event watch --type notification`,
 	Args: cobra.NoArgs,
 	Run:  runWatch,

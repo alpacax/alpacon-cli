@@ -38,10 +38,10 @@ server cannot count them) and the command that shows one:
 alpacon work-session recording SESSION_ID --index N. --no-records leaves the
 section out.`,
 	Args: cobra.ExactArgs(1),
-	Example: `  alpacon work-session timeline ses-abc123
-  alpacon work-session timeline ses-abc123 --no-records
-  alpacon work-session tl ses-abc123 --output json
-  alpacon work-session recording ses-abc123 --index 2`,
+	Example: `  alpacon work-session timeline 550e8400-e29b-41d4-a716-446655440000
+  alpacon work-session timeline 550e8400-e29b-41d4-a716-446655440000 --no-records
+  alpacon work-session tl 550e8400-e29b-41d4-a716-446655440000 --output json
+  alpacon work-session recording 550e8400-e29b-41d4-a716-446655440000 --index 2`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {

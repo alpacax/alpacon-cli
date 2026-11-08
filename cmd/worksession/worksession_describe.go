@@ -20,8 +20,8 @@ var workSessionDescribeCmd = &cobra.Command{
 	Aliases: []string{"desc"},
 	Short:   "Show details of a work session",
 	Args:    cobra.ExactArgs(1),
-	Example: `  alpacon work-session describe ses-abc123
-  alpacon work-session desc ses-abc123`,
+	Example: `  alpacon work-session describe 550e8400-e29b-41d4-a716-446655440000
+  alpacon work-session desc 550e8400-e29b-41d4-a716-446655440000`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {

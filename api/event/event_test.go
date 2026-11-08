@@ -532,6 +532,116 @@ func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 	assert.NotEmpty(t, delays(), "the loop must have waited on the fake clock before giving up")
 }
 
+func TestPollCommandExecution_StopsAfterMaxConsecutiveFailures(t *testing.T) {
+	t.Parallel()
+	var reqCount atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCount.Add(1)
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+	seams, _ := fakePollClock()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, 10*time.Millisecond, false, seams)
+
+	require.Error(t, err)
+	assert.Equal(t, int32(utils.MaxConsecutivePollFailures), reqCount.Load())
+	assert.Equal(t, http.StatusInternalServerError, utils.HTTPStatusCode(err))
+}
+
+// An MFA refusal comes back typed, so a caller that runs the step-up itself can
+// poll again after it.
+func TestPollCommandExecution_StopsOnNonTransientError(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		code   string
+	}{
+		{name: "not found", status: http.StatusNotFound, body: `{"detail": "Not found."}`},
+		{name: "mfa required", status: http.StatusForbidden, body: `{"code": "auth_mfa_required", "detail": "MFA required"}`, code: utils.AuthMFARequired},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var reqCount atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				reqCount.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer ts.Close()
+			seams, _ := fakePollClock()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, 10*time.Millisecond, false, seams)
+
+			require.Error(t, err)
+			assert.Equal(t, int32(1), reqCount.Load())
+			assert.Equal(t, tc.status, utils.HTTPStatusCode(err))
+			assert.Equal(t, tc.code, utils.StructuredErrorCode(err))
+		})
+	}
+}
+
+// Throttles keep their own backoff counter, so a 5xx after a throttled stretch
+// starts from the base tick, and they never count toward the failure cap.
+func TestPollCommandExecution_ThrottlesDoNotCountAsFailures(t *testing.T) {
+	t.Parallel()
+	const tick = 10 * time.Millisecond
+	reqCount := &atomic.Int32{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		n := reqCount.Add(1)
+		switch {
+		case n <= 3:
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"detail": "Request was throttled."}`))
+		case n <= 3+utils.MaxConsecutivePollFailures-1:
+			http.Error(w, "boom", http.StatusInternalServerError)
+		default:
+			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "completed"})
+		}
+	}))
+	defer ts.Close()
+	seams, delays := fakePollClock()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, tick, false, seams)
+
+	require.NoError(t, err)
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, []time.Duration{tick, tick, 2 * tick, 4 * tick, tick, 2 * tick, 4 * tick, 8 * tick}, delays())
+}
+
+// A throttle is no successful read, so it leaves a failure streak standing: a
+// reset here would let 500s and 429s alternate until the deadline.
+func TestPollCommandExecution_ThrottleKeepsTheFailureStreak(t *testing.T) {
+	t.Parallel()
+	reqCount := &atomic.Int32{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if reqCount.Add(1)%2 == 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"detail": "Request was throttled."}`))
+			return
+		}
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+	seams, _ := fakePollClock()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, 10*time.Millisecond, false, seams)
+
+	require.Error(t, err)
+	assert.Equal(t, http.StatusInternalServerError, utils.HTTPStatusCode(err))
+	assert.Equal(t, int32(2*utils.MaxConsecutivePollFailures-1), reqCount.Load())
+}
+
 // throttleServer replies 429 to the first throttled requests, then serves a
 // terminal status. The returned counter holds the requests it has seen.
 func throttleServer(t *testing.T, throttled int, retryAfter string) (*httptest.Server, *atomic.Int32) {
@@ -1158,6 +1268,61 @@ func TestStreamSubscribed_FinWithFailedReadWaitsForPoll(t *testing.T) {
 	})
 }
 
+// runStream runs streamSubscribed to its end and returns the listener it used.
+func runStream(t *testing.T, ac *client.AlpaconClient, out io.Writer) (*CommandOutputListener, error) {
+	t.Helper()
+	listener := NewCommandOutputListener(ac)
+	listener.Start()
+	t.Cleanup(listener.Stop)
+	require.True(t, listener.WaitConnected(commandOutputConnectTimeout), "listener should connect")
+	return listener, streamSubscribed(ac, listener, testPathID(t, "cmd-uuid"), "srv-uuid", out, 5*time.Minute, false)
+}
+
+// A run of 5xx on the result read ends no run while the stream can still deliver
+// the fin, so a short API outage costs a long command neither output nor exit code.
+func TestStreamSubscribed_FailedReadsPastTheCapKeepTheRun(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		stdoutBuf := &bytes.Buffer{}
+		ac := newStreamingServers(t, streamingServerConfig{
+			cmdID:       "cmd-uuid",
+			serverID:    "srv-uuid",
+			wsFinFor:    "cmd-uuid",
+			detailFails: utils.MaxConsecutivePollFailures + 2,
+			terminal:    EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
+		})
+
+		_, err := runStream(t, ac, stdoutBuf)
+
+		require.NoError(t, err)
+		assert.Equal(t, "done\n", stdoutBuf.String())
+	})
+}
+
+// A 404 will repeat on every poll, so it ends the run with the stream still open.
+func TestStreamSubscribed_NonTransientPollErrorEndsTheRun(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		ac := newStreamingServers(t, streamingServerConfig{
+			cmdID:        "cmd-uuid",
+			serverID:     "srv-uuid",
+			detailStatus: http.StatusNotFound,
+		})
+
+		listener, err := runStream(t, ac, &bytes.Buffer{})
+
+		var pollFailure *CommandPollError
+		require.ErrorAs(t, err, &pollFailure)
+		assert.Equal(t, "cmd-uuid", pollFailure.CommandID)
+		assert.Equal(t, http.StatusNotFound, utils.HTTPStatusCode(err))
+		select {
+		case <-listener.done:
+		default:
+			t.Error("the run must stop its listener")
+		}
+	})
+}
+
 // Resuming through an approval hold, the poll waits out the hold and the transient
 // "error" the approve→deliver window emits. The fin path reads the same command, so
 // it has to wait on the same statuses or it reports a run that has not started.
@@ -1575,6 +1740,8 @@ type streamingServerConfig struct {
 	onSubscribe func(eventType, targetID string)
 	onDetail    func() // every detail-endpoint request, failing ones included
 	detailFails int    // leading detail GETs answered 500, before the held/running sequence starts
+	// detailStatus, when set, answers every detail request with it.
+	detailStatus int
 	// Detail-endpoint responses in order: heldPolls "awaiting_approval", then
 	// runningPolls "running", then terminal. The approval-resume path spends the
 	// first one on its server-id lookup, so its poll loop sees one held fewer.
@@ -1713,6 +1880,11 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 		case r.URL.Path == "/api/events/commands/"+cfg.cmdID+"/" && r.Method == http.MethodGet:
 			if cfg.onDetail != nil {
 				cfg.onDetail()
+			}
+			if cfg.detailStatus != 0 {
+				w.WriteHeader(cfg.detailStatus)
+				_, _ = w.Write([]byte(`{"detail":"unavailable"}`))
+				return
 			}
 			mu.Lock()
 			failing := failCount < cfg.detailFails
@@ -2546,47 +2718,6 @@ func TestCommandStream_DoesNotRedialAListenerThatFailed(t *testing.T) {
 		assert.Equal(t, int32(2), submits.Load())
 		assert.Equal(t, sessionsAfterFirst, sessions.Load(), "the failed listener must not be dialed again")
 	})
-}
-
-// A caller that runs the MFA wait itself gets the typed refusal at once; the
-// default poll keeps treating it like any other failed GET.
-func TestPollCommandExecution_SurfacesMFARefusalOnlyWhenAsked(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name       string
-		surfaceMFA bool
-		wantCode   bool
-	}{
-		{name: "surfaced", surfaceMFA: true, wantCode: true},
-		{name: "retried until the deadline", surfaceMFA: false, wantCode: false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			var requests atomic.Int32
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requests.Add(1)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = w.Write([]byte(`{"code": "auth_mfa_required", "detail": "MFA required"}`))
-			}))
-			defer ts.Close()
-
-			seams, _ := fakePollClock()
-			seams.surfaceMFA = tc.surfaceMFA
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 10*time.Millisecond, false, seams)
-			require.Error(t, err)
-			if tc.wantCode {
-				assert.Equal(t, utils.AuthMFARequired, utils.StructuredErrorCode(err))
-				assert.Equal(t, int32(1), requests.Load())
-				return
-			}
-			assert.Greater(t, requests.Load(), int32(1))
-			var clientTimeout *ClientTimeoutError
-			require.ErrorAs(t, err, &clientTimeout)
-		})
-	}
 }
 
 func TestCommandCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {

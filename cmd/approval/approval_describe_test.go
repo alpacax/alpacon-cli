@@ -174,11 +174,55 @@ func TestContextRows(t *testing.T) {
 			want: []describeRow{{"Command", "ls"}},
 		},
 		{
+			name: "command request shows the run-as account",
+			body: `{"metadata":{"command":{"line":"ls","server_name":"my-server","runas":"deploy","risk_level":"low"}}}`,
+			want: []describeRow{
+				{"Command", "ls"},
+				{"Server", "my-server"},
+				{"Run as", "deploy"},
+				{"Risk level", "low"},
+			},
+		},
+		{
+			name: "command request with null runas leaves out the row",
+			body: `{"metadata":{"command":{"line":"ls","server_name":"my-server","runas":null}}}`,
+			want: []describeRow{
+				{"Command", "ls"},
+				{"Server", "my-server"},
+			},
+		},
+		{
+			name: "file execution leaves the run-as account to its own block",
+			body: `{"metadata":{"command":{"line":"sh /tmp/a.sh","server_name":"my-server","runas":"deploy","file_execution":{"sha256":"abc","path":"/tmp/a.sh","interpreter":"/bin/sh","args":[],"runas":"deploy"}}}}`,
+			want: []describeRow{
+				{"Command", "sh /tmp/a.sh"},
+				{"Server", "my-server"},
+			},
+		},
+		{
+			name: "sudo request shows the purpose after the run-as account",
+			body: `{"metadata":{"sudo":{"command":"apt update","runas":"root","purpose":"patch openssl","server_name":"my-server"}}}`,
+			want: []describeRow{
+				{"Sudo command", "apt update"},
+				{"Run as", "root"},
+				{"Purpose", "patch openssl"},
+				{"Server", "my-server"},
+			},
+		},
+		{
+			name: "sudo request with null purpose leaves out the row",
+			body: `{"metadata":{"sudo":{"command":"apt update","runas":"root","purpose":null}}}`,
+			want: []describeRow{
+				{"Sudo command", "apt update"},
+				{"Run as", "root"},
+			},
+		},
+		{
 			name: "sudo request shows the run-as account",
 			body: `{"metadata":{"sudo":{"command":"apt update","runas":"root"}}}`,
 			want: []describeRow{
 				{"Sudo command", "apt update"},
-				{"  Run as", "root"},
+				{"Run as", "root"},
 			},
 		},
 		{
@@ -299,6 +343,20 @@ func TestDescribeRowsPutContextBetweenBaseAndFileExecution(t *testing.T) {
 	}, fields)
 }
 
+func TestDescribeRowsShowFileExecutionRunAsOnce(t *testing.T) {
+	t.Parallel()
+	req := decodeFixture(t, `{"id":"apr-1","request_type":"command_exec","added_at":"2030-01-01T00:00:00Z","metadata":{"command":{"line":"sh /tmp/a.sh","runas":"deploy","file_execution":{"sha256":"abc","path":"/tmp/a.sh","interpreter":"/bin/sh","args":[],"runas":"deploy"}}}}`)
+
+	var runAs []describeRow
+	for _, r := range describeRows(req, fileExecutionOf(req)) {
+		if strings.TrimSpace(r.Field) == "Run as" {
+			runAs = append(runAs, r)
+		}
+	}
+
+	assert.Equal(t, []describeRow{{"  Run as", "deploy"}}, runAs)
+}
+
 func TestApprovalDescribeJSONPreservesSudoRunAs(t *testing.T) {
 	const response = `{"id":"apr-abc","metadata":{"sudo":{"command":"apt update","runas":"root"}}}`
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -318,4 +376,26 @@ func TestApprovalDescribeJSONPreservesSudoRunAs(t *testing.T) {
 		approvalDescribeCmd.Run(approvalDescribeCmd, []string{"apr-abc"})
 	})
 	assert.JSONEq(t, response, stdout)
+}
+
+func TestDescribeShowsTheApproverReasonOnOneLine(t *testing.T) {
+	t.Parallel()
+	req := decodeFixture(t, `{"id":"apr-2","request_type":"command_exec","status":"rejected","rejection_note":"Add a guard\non line 23.\u001b[2K"}`)
+
+	rows := rowMap(describeRows(req, nil))
+
+	assert.Equal(t, "Add a guard on line 23.", rows["Rejection reason"])
+}
+
+func TestDescribeLeavesOutAnEmptyReason(t *testing.T) {
+	t.Parallel()
+	for _, body := range []string{
+		`{"id":"apr-3","status":"rejected","rejection_note":""}`,
+		`{"id":"apr-3","status":"rejected"}`,
+		`{"id":"apr-3","status":"rejected","rejection_note":"  \n "}`,
+		`{"id":"apr-3","status":"rejected","rejection_note":"\u001b[2K"}`,
+	} {
+		rows := rowMap(describeRows(decodeFixture(t, body), nil))
+		assert.NotContains(t, rows, "Rejection reason", body)
+	}
 }

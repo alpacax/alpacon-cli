@@ -197,7 +197,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
   # Submit a command asynchronously and retrieve the result later
   alpacon exec --detach web-server -- apt-get update
-  alpacon exec logs <JOB_ID>
+  alpacon exec logs 550e8400-e29b-41d4-a716-446655440000
 
   # Block up to 30 minutes for a reviewer to approve a sudo command
   alpacon exec --wait-approval 30m root@prod-docker -- systemctl restart nginx
