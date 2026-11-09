@@ -67,10 +67,12 @@ type RemoteExecArgs struct {
 	InvokedAs    Invocation
 	Env          map[string]string
 	WaitApproval time.Duration
-	Detach       bool
-	Wait         bool
-	ShowHelp     bool
-	Err          string
+	// WaitApprovalRaw is --wait-approval as typed, trimmed, so a hint repeats the user's own value.
+	WaitApprovalRaw string
+	Detach          bool
+	Wait            bool
+	ShowHelp        bool
+	Err             string
 	// File is set by --file and selects the verified file lane, in which case Command is empty and
 	// the words after -- are the script's arguments. Nil on the generic lane.
 	File *FileExecArgs
@@ -95,7 +97,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	var (
 		username, groupname, workSessionID, outputFormat, server string
 		purpose                                                  string
-		filePath, fileFrom, interpreter                          string
+		filePath, fileFrom, interpreter, waitApprovalRaw         string
 		reuseDays                                                int
 		commandParts                                             []string
 		detach                                                   bool
@@ -250,7 +252,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if err != nil {
 				return fail(err.Error())
 			}
-			waitApproval = d
+			waitApproval, waitApprovalRaw = d, strings.TrimSpace(raw)
 		case strings.HasPrefix(arg, "-"):
 			return fail("unknown flag: " + arg)
 		default:
@@ -312,16 +314,17 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	}
 
 	parsed := RemoteExecArgs{
-		Username:      username,
-		Groupname:     groupname,
-		WorkSessionID: workSessionID,
-		OutputFormat:  outputFormat,
-		Server:        server,
-		Purpose:       purpose,
-		Env:           env,
-		WaitApproval:  waitApproval,
-		Detach:        detach,
-		Wait:          wait,
+		Username:        username,
+		Groupname:       groupname,
+		WorkSessionID:   workSessionID,
+		OutputFormat:    outputFormat,
+		Server:          server,
+		Purpose:         purpose,
+		Env:             env,
+		WaitApproval:    waitApproval,
+		WaitApprovalRaw: waitApprovalRaw,
+		Detach:          detach,
+		Wait:            wait,
 	}
 	if filePath != "" {
 		parsed.File = &FileExecArgs{

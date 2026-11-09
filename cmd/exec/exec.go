@@ -67,6 +67,12 @@ re-queues review. The approver decides whether to grant reuse, and a grant
 always expires: after the days --reuse-days proposed, or at the workspace
 ceiling (1 to 366 days, default 90).
 
+The server refuses a command line over its length limit. exec then exits 1 and
+names the --upload --file command to run instead, with /bin/sh, the shell a
+command line runs in. Nothing is written to the server until you run it. -u, -g,
+--work-session, --purpose, --detach, --wait and --wait-approval carry over.
+--env does not: set the variables inside the script. A file is capped at 64 KB and must be valid UTF-8.
+
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
   -g, --groupname [GROUP_NAME]  Specify the group name for command execution.
@@ -308,6 +314,9 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 			signalArgs.WorkSessionID = workSessionID
 			err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), alpaconClient)
 			utils.SignalRefusal(err)
+			if file == nil && isLineTooLong(err) {
+				reportLineTooLong(err, parsed)
+			}
 			utils.HandleWorkSessionError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID)
 			if HandleFileExecRefusal(err, parsed.Server) {
 				return
@@ -349,6 +358,9 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 		err = RunFileExecWithApprovalWait(alpaconClient, parsed.Server, *file, parsed.Username, parsed.Groupname, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
 	} else {
 		err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
+	}
+	if file == nil && isLineTooLong(err) {
+		reportLineTooLong(err, parsed)
 	}
 	utils.HandleWorkSessionError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID)
 	// A purpose demand has no approval request yet, so it is reported before the pending-approval
