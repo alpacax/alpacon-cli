@@ -190,13 +190,13 @@ func TestRejectionErrorFields(t *testing.T) {
 		body string
 		want map[string]any
 	}{
-		{name: "cause and gate", body: `,"rejection_cause":"risk_denied","rejection_gate":"risk"`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": "risk_denied", "rejection_gate": "risk"}},
-		{name: "signature cause has a null gate", body: `,"rejection_cause":"unsigned_file","rejection_gate":null`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": "unsigned_file", "rejection_gate": nil}},
-		{name: "cause only", body: `,"rejection_cause":"risk_denied"`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": "risk_denied", "rejection_gate": nil}},
-		{name: "gate only", body: `,"rejection_gate":"risk"`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": nil, "rejection_gate": "risk"}},
-		{name: "null cause with a gate", body: `,"rejection_cause":null,"rejection_gate":"risk"`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": nil, "rejection_gate": "risk"}},
-		{name: "both null", body: `,"rejection_cause":null,"rejection_gate":null`, want: map[string]any{"console_url": "", "work_session_id": "", "rejection_cause": nil, "rejection_gate": nil}},
-		{name: "older server sends neither", body: ``, want: map[string]any{"console_url": "", "work_session_id": ""}},
+		{name: "cause and gate", body: `,"rejection_cause":"risk_denied","rejection_gate":"risk"`, want: map[string]any{"rejection_cause": "risk_denied", "rejection_gate": "risk"}},
+		{name: "signature cause has a null gate", body: `,"rejection_cause":"unsigned_file","rejection_gate":null`, want: map[string]any{"rejection_cause": "unsigned_file", "rejection_gate": nil}},
+		{name: "cause only", body: `,"rejection_cause":"risk_denied"`, want: map[string]any{"rejection_cause": "risk_denied", "rejection_gate": nil}},
+		{name: "gate only", body: `,"rejection_gate":"risk"`, want: map[string]any{"rejection_cause": nil, "rejection_gate": "risk"}},
+		{name: "null cause with a gate", body: `,"rejection_cause":null,"rejection_gate":"risk"`, want: map[string]any{"rejection_cause": nil, "rejection_gate": "risk"}},
+		{name: "both null", body: `,"rejection_cause":null,"rejection_gate":null`, want: map[string]any{"rejection_cause": nil, "rejection_gate": nil}},
+		{name: "older server sends neither", body: ``, want: nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -259,7 +259,7 @@ func TestSudoGrantRefusalKeepsTheReviewerWording(t *testing.T) {
 
 			assert.Equal(t, tc.wantError, msg)
 			assert.Nil(t, tc.rejected.NextActions())
-			assert.Equal(t, map[string]any{"console_url": "", "work_session_id": ""}, tc.rejected.ErrorFields())
+			assert.Nil(t, tc.rejected.ErrorFields())
 		})
 	}
 }
@@ -354,6 +354,38 @@ func TestDeniedCommandIsATerminalRefusal(t *testing.T) {
 			assert.Equal(t, utils.ExitCodeNotApproved, refusal.ExitCode())
 			assert.Contains(t, err.Error(), "did not run")
 			assert.NotContains(t, err.Error(), "may still be running")
+		})
+	}
+}
+
+func TestCommandErrorContextFields(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, consoleURL, workSessionID string
+		want                            map[string]any
+	}{
+		{name: "neither"},
+		{name: "console only", consoleURL: "https://console.example/commands/1", want: map[string]any{"console_url": "https://console.example/commands/1"}},
+		{name: "work session only", workSessionID: "550e8400-e29b-41d4-a716-446655440000", want: map[string]any{"work_session_id": "550e8400-e29b-41d4-a716-446655440000"}},
+		{name: "both", consoleURL: "https://console.example/commands/1", workSessionID: "550e8400-e29b-41d4-a716-446655440000", want: map[string]any{"console_url": "https://console.example/commands/1", "work_session_id": "550e8400-e29b-41d4-a716-446655440000"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			errors := []struct {
+				name   string
+				fields interface{ ErrorFields() map[string]any }
+			}{
+				{"rejected", &CommandRejectedError{ConsoleURL: tc.consoleURL, WorkSessionID: tc.workSessionID}},
+				{"pending approval", &PendingApprovalError{ConsoleURL: tc.consoleURL, WorkSessionID: tc.workSessionID}},
+				{"remote command", &RemoteCommandError{ConsoleURL: tc.consoleURL, WorkSessionID: tc.workSessionID}},
+			}
+			for _, err := range errors {
+				t.Run(err.name, func(t *testing.T) {
+					t.Parallel()
+					assert.Equal(t, tc.want, err.fields.ErrorFields())
+				})
+			}
 		})
 	}
 }

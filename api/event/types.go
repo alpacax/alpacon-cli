@@ -402,7 +402,17 @@ func (e *CommandRejectedError) RejectedCommand() bool {
 }
 func (e *CommandRejectedError) ErrorGate() string { return e.Gate }
 func (e *PendingApprovalError) ErrorFields() map[string]any {
-	return map[string]any{"console_url": e.ConsoleURL, "work_session_id": e.WorkSessionID}
+	if e.ConsoleURL == "" && e.WorkSessionID == "" {
+		return nil
+	}
+	fields := make(map[string]any)
+	if e.ConsoleURL != "" {
+		fields["console_url"] = e.ConsoleURL
+	}
+	if e.WorkSessionID != "" {
+		fields["work_session_id"] = e.WorkSessionID
+	}
+	return fields
 }
 func (d EventDetails) WorkSessionID() string {
 	if d.WorkSession != nil {
@@ -412,7 +422,17 @@ func (d EventDetails) WorkSessionID() string {
 }
 
 func (e *RemoteCommandError) ErrorFields() map[string]any {
-	return map[string]any{"console_url": e.ConsoleURL, "work_session_id": e.WorkSessionID}
+	if e.ConsoleURL == "" && e.WorkSessionID == "" {
+		return nil
+	}
+	fields := make(map[string]any)
+	if e.ConsoleURL != "" {
+		fields["console_url"] = e.ConsoleURL
+	}
+	if e.WorkSessionID != "" {
+		fields["work_session_id"] = e.WorkSessionID
+	}
+	return fields
 }
 
 func (e *CommandRejectedError) LocalSignalAccount() string { return e.Username }

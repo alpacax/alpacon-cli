@@ -260,9 +260,12 @@ func (e *CommandRejectedError) NextActions() []utils.NextAction {
 // ErrorFields keeps command context and the refusal fields the server sent.
 // Denied results can hold the only recorded reason; reported fields preserve nulls.
 func (e *CommandRejectedError) ErrorFields() map[string]any {
-	fields := map[string]any{
-		"console_url":     e.ConsoleURL,
-		"work_session_id": e.WorkSessionID,
+	fields := make(map[string]any)
+	if e.ConsoleURL != "" {
+		fields["console_url"] = e.ConsoleURL
+	}
+	if e.WorkSessionID != "" {
+		fields["work_session_id"] = e.WorkSessionID
 	}
 	if e.DenialCode.Sent {
 		fields["denial_code"] = nullIfEmpty(e.DenialCode.Value)
@@ -276,6 +279,9 @@ func (e *CommandRejectedError) ErrorFields() map[string]any {
 	}
 	if e.Note != "" {
 		fields["rejection_note"] = e.Note
+	}
+	if len(fields) == 0 {
+		return nil
 	}
 	return fields
 }
