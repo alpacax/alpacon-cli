@@ -275,7 +275,7 @@ func TestIsRejectedReadsTheStatusAndACompletedCommandsCause(t *testing.T) {
 		{"agent refused the signature after delivery", `{"status":"completed","success":false,"rejection_cause":"signature_invalid","rejection_gate":null}`, true},
 		{"completed with a null cause", `{"status":"completed","success":false,"rejection_cause":null}`, false},
 		{"completed with another cause keeps its result", `{"status":"completed","success":true,"rejection_cause":"unsigned_file"}`, false},
-		{"denied with a cause stays denied", `{"status":"denied","rejection_cause":"account_bound_to_other_person"}`, false},
+		{"denied with a cause is a refusal", `{"status":"denied","rejection_cause":"account_bound_to_other_person"}`, true},
 		{"running", `{"status":"running"}`, false},
 	}
 	for _, tc := range cases {
@@ -330,6 +330,30 @@ func TestNoReasonKeepsTheAskTheApproverStep(t *testing.T) {
 
 			assert.Equal(t, []utils.NextAction{causeTexts[RejectionCauseApprovalRejected].next}, rejected.NextActions())
 			assert.NotContains(t, rejected.ErrorFields(), "rejection_note")
+		})
+	}
+}
+
+func TestDeniedCommandIsATerminalRefusal(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, body string }{
+		{"known denial code", `{"status":"denied","denial_code":"account_not_resolved","result":"The execution account could not be resolved."}`},
+		{"unknown denial code", `{"status":"denied","denial_code":"future_reason"}`},
+		{"no reason", `{"status":"denied"}`},
+		{"null denial code with rejection cause", `{"status":"denied","denial_code":null,"rejection_cause":"signature_invalid"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var details EventDetails
+			require.NoError(t, json.Unmarshal([]byte(tc.body), &details))
+
+			err := errorFromDetails(testPathID(t, "cmd-1"), details)
+
+			var refusal *CommandRejectedError
+			require.ErrorAs(t, err, &refusal)
+			assert.Equal(t, utils.ExitCodeNotApproved, refusal.ExitCode())
+			assert.Contains(t, err.Error(), "did not run")
+			assert.NotContains(t, err.Error(), "may still be running")
 		})
 	}
 }

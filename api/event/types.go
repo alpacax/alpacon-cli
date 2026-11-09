@@ -133,6 +133,7 @@ type EventAttributes struct {
 	Operator              string           `json:"operator"`
 	RequestedAt           string           `json:"requested_at" table:"Requested At"`
 	ApprovedFileExecution *json.RawMessage `json:"approved_file_execution,omitempty" table:"-"`
+	DenialCode            types.SentString `json:"denial_code,omitzero" table:"-"`
 	CommandRejection      `table:"-"`
 }
 
@@ -145,6 +146,7 @@ type EventDetails struct {
 	ErrorPhase            *string             `json:"error_phase"`
 	Result                string              `json:"result"`
 	Status                string              `json:"status"`
+	DenialCode            types.SentString    `json:"denial_code,omitzero"`
 	Cancellable           bool                `json:"cancellable"`
 	ResponseDelay         float64             `json:"response_delay"`
 	ElapsedTime           float64             `json:"elapsed_time"`
@@ -373,6 +375,12 @@ func IsCompletedStatus(status string) bool {
 // command refused before it ran.
 func IsRejectedStatus(status string) bool {
 	return status == "rejected"
+}
+
+// IsDeniedStatus reports whether status is the server's terminal state for a
+// submitted command it refused to run, with the reason in denial_code.
+func IsDeniedStatus(status string) bool {
+	return status == "denied"
 }
 
 // IsStatusOnlyFailure reports the terminal failures whose whole outcome is a

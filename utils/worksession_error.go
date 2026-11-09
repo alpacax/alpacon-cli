@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -74,10 +75,20 @@ func isWorkSessionCode(code string) bool {
 	return ok
 }
 
+// deniedCommand is a command the server refused after it was submitted; its code is
+// the command's own outcome, so a name shared with a gate code is not a gate refusal.
+type deniedCommand interface {
+	SubmittedCommandDenied() bool
+}
+
 // HandleWorkSessionError prints a WorkSession gate diagnostic and exits(3); no-op for other errors.
 // target is what the operation names: a cluster for OperationKube, a server otherwise.
 func HandleWorkSessionError(err error, operation, target, authMethod, activeWS string) {
 	if err == nil {
+		return
+	}
+	var denied deniedCommand
+	if errors.As(err, &denied) && denied.SubmittedCommandDenied() {
 		return
 	}
 	code, _ := ParseErrorResponse(err)
