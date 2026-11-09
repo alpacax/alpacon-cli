@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -75,6 +77,42 @@ func TestParseEntryFile_NullUsername(t *testing.T) {
 	require.ErrorContains(t, err, "entry 1: username must be a string, not null")
 	assert.Nil(t, entries)
 	assert.True(t, utils.IsUsageError(err), "a null username must be a usage error: %v", err)
+}
+
+func TestParseEntryFile_NonStringAccountFields(t *testing.T) {
+	for _, tt := range []struct {
+		name, field string
+		value       any
+	}{
+		{name: "numeric username", field: "username", value: 42},
+		{name: "object username", field: "username", value: map[string]any{}},
+		{name: "numeric groupname", field: "groupname", value: 42},
+		{name: "object groupname", field: "groupname", value: map[string]any{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			data := fileOf(t, fileItem(nil), fileItem(map[string]any{tt.field: tt.value}))
+			entries, err := parseEntryFile(data)
+			require.ErrorContains(t, err, "entry 1: "+tt.field+":")
+			assert.Nil(t, entries)
+			assert.True(t, utils.IsUsageError(err), "a non-string %s must be a usage error: %v", tt.field, err)
+
+			file := t.TempDir() + "/entries.json"
+			require.NoError(t, os.WriteFile(file, data, 0600))
+			flags, err := json.Marshal([]string{"--file", file})
+			require.NoError(t, err)
+			child := exec.Command(os.Args[0], "-test.run=^TestEntryAddApplicationAccountHelper$")
+			child.Env = append(os.Environ(), "ALPACON_ACCOUNT_HELPER="+string(flags))
+			_, err = child.Output()
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode())
+			var envelope utils.JSONErrorEnvelope[map[string]any]
+			require.NoError(t, json.Unmarshal(exitErr.Stderr, &envelope))
+			assert.Equal(t, utils.ErrorCodeUsage, envelope.ErrorCode)
+			assert.Equal(t, utils.ExitCodeUsageError, envelope.ExitCode)
+			assert.Contains(t, envelope.Message, "entry 1: "+tt.field+":")
+		})
+	}
 }
 
 func TestParseEntryFile_Refusals(t *testing.T) {

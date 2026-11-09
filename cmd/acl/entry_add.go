@@ -268,7 +268,7 @@ type fileEntry struct {
 	PrincipalID    string          `json:"principal_id"`
 	CommandPattern string          `json:"command_pattern"`
 	Username       json.RawMessage `json:"username"`
-	Groupname      string          `json:"groupname"`
+	Groupname      json.RawMessage `json:"groupname"`
 	ServerIDs      *[]string       `json:"server_ids"`
 	ExpiresAt      string          `json:"expires_at"`
 	Enabled        *bool           `json:"enabled"`
@@ -327,15 +327,21 @@ func parseEntryFile(data []byte) ([]entryDraft, error) {
 				return nil, utils.MarkUsageError(fmt.Errorf("entry %d: username must be a string, not null", i))
 			}
 			if err := json.Unmarshal(item.Username, &username); err != nil {
-				return nil, fmt.Errorf("entry %d: username: %w", i, err)
+				return nil, utils.MarkUsageError(fmt.Errorf("entry %d: username: %w", i, err))
 			}
 			username = strings.TrimSpace(username)
+		}
+		groupname := ""
+		if item.Groupname != nil {
+			if err := json.Unmarshal(item.Groupname, &groupname); err != nil {
+				return nil, utils.MarkUsageError(fmt.Errorf("entry %d: groupname: %w", i, err))
+			}
 		}
 		entries = append(entries, entryDraft{EntryRequest: acl.EntryRequest{
 			PrincipalID:    item.PrincipalID,
 			CommandPattern: item.CommandPattern,
 			Username:       username,
-			Groupname:      item.Groupname,
+			Groupname:      groupname,
 			ServerIDs:      *item.ServerIDs,
 			ExpiresAt:      item.ExpiresAt,
 			Enabled:        item.Enabled == nil || *item.Enabled,
