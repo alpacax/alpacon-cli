@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
+	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
@@ -1813,6 +1814,74 @@ func noDownloadRequestClient(t *testing.T) *client.AlpaconClient {
 	}))
 	t.Cleanup(ts.Close)
 	return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+}
+
+func TestCompleteDownloads_DoNotFetchARefusedCommand(t *testing.T) {
+	t.Parallel()
+	statuses := []string{"rejected", "denied"}
+	for _, status := range statuses {
+		t.Run("single "+status, func(t *testing.T) {
+			t.Parallel()
+			ac := commandOutcomeClient(t, status, nil)
+			fetched := false
+
+			var err error
+			synctest.Test(t, func(t *testing.T) {
+				_, err = completeSingleDownloadWith(ac, "server-1", []byte(`{"id":"download-1","command":"cmd-1","download_url":"https://files.example/a"}`), func(string) (int64, error) {
+					fetched = true
+					return 0, nil
+				})
+			})
+
+			var rejected *event.CommandRejectedError
+			require.ErrorAs(t, err, &rejected)
+			assert.False(t, fetched, "a refused command must not fetch the file")
+		})
+		t.Run("bulk "+status, func(t *testing.T) {
+			t.Parallel()
+			var fetched atomic.Bool
+			ac := commandOutcomeClient(t, status, func() { fetched.Store(true) })
+
+			dest := t.TempDir()
+
+			var err error
+			synctest.Test(t, func(t *testing.T) {
+				err = completeBulkDownload(ac, "server-1", []byte(`{"id":"download-1","command":"cmd-1","download_url":"`+ac.BaseURL+`/download"}`), []string{"/a", "/b"}, dest)
+			})
+
+			var rejected *event.CommandRejectedError
+			require.ErrorAs(t, err, &rejected)
+			assert.False(t, fetched.Load(), "a refused command must not fetch the archive")
+		})
+	}
+}
+
+func commandOutcomeClient(t *testing.T, status string, fetched func()) *client.AlpaconClient {
+	t.Helper()
+	zipBody := createTestZip(t, map[string]string{"a": "content"})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/events/commands/cmd-1/":
+			outcome := map[string]any{"id": "cmd-1", "status": status, "result": "account denied"}
+			if status == "denied" {
+				outcome["denial_code"] = "account_not_resolved"
+			} else {
+				outcome["rejection_cause"] = "risk_denied"
+			}
+			_ = json.NewEncoder(w).Encode(outcome)
+		case "/download":
+			if fetched != nil {
+				fetched()
+			}
+			w.Header().Set("Content-Type", "application/zip")
+			_, _ = w.Write(zipBody)
+		default:
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true), Message: "completed"})
+		}
+	})
+	// In memory, so the poll's first tick runs on the synctest clock.
+	return &client.AlpaconClient{HTTPClient: testutil.HandlerClient(handler), BaseURL: testutil.StubBaseURL}
 }
 
 func TestCompleteDownload_RefusesAServerIDThatIsNotOneSegment(t *testing.T) {

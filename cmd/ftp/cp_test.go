@@ -1,19 +1,65 @@
 package ftp
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"testing"
 	"testing/synctest"
 
+	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestReportDownloadRejectionExitsSixInEitherFormat(t *testing.T) {
+	t.Parallel()
+	for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+		t.Run(format, func(t *testing.T) {
+			t.Parallel()
+			helper := exec.Command(os.Args[0], "-test.run=^TestReportDownloadRejectionHelperProcess$")
+			helper.Env = append(os.Environ(), "GO_WANT_DOWNLOAD_REJECTION_HELPER="+format)
+			var stderr bytes.Buffer
+			helper.Stderr = &stderr
+
+			err := helper.Run()
+
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, utils.ExitCodeNotApproved, exitErr.ExitCode())
+			if format == utils.OutputFormatTable {
+				assert.Contains(t, stderr.String(), "Failed to download from '[prod:/a]': command was rejected")
+				return
+			}
+			var envelope utils.JSONErrorEnvelope[map[string]any]
+			require.NoError(t, json.Unmarshal(stderr.Bytes(), &envelope), "stderr: %s", stderr.String())
+			assert.Equal(t, utils.ExitCodeNotApproved, envelope.ExitCode)
+			assert.Equal(t, "account_bound_to_other_person", envelope.ErrorCode)
+			assert.Equal(t, "Failed to download from '[prod:/a]': command was rejected: the account it would run as was linked to another person before it was delivered (rejection_cause: account_bound_to_other_person)", envelope.Message)
+			assert.Equal(t, "download", envelope.Context["operation"])
+			assert.Equal(t, map[string]any{"rejection_cause": "account_bound_to_other_person", "rejection_gate": nil}, envelope.Server)
+		})
+	}
+}
+
+func TestReportDownloadRejectionHelperProcess(t *testing.T) {
+	format := os.Getenv("GO_WANT_DOWNLOAD_REJECTION_HELPER")
+	if format == "" {
+		return
+	}
+	utils.OutputFormat = format
+	rejected := &event.CommandRejectedError{Cause: "account_bound_to_other_person", Reported: true}
+	reportDownloadRejection(fmt.Errorf("download command: %w", rejected), "[prod:/a]")
+	os.Exit(99)
+}
 
 func TestIsRemotePath(t *testing.T) {
 	t.Parallel()
@@ -550,6 +596,44 @@ func TestDownloadObject_FetchRefusalWithAHintSkipsTheChecklist(t *testing.T) {
 			assert.Equal(t, "my-server", serverName)
 			assert.Contains(t, err.Error(), "download failed")
 			assert.Equal(t, tt.hint, utils.RefusalHint(err))
+		})
+	}
+}
+
+func TestDownloadObject_DeniedCommandSkipsTheChecklists(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, result string }{
+		{"permission wording", "permission denied by policy"},
+		{"missing file wording", "file not found for this account"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			detail := fmt.Sprintf(`{"id": "cmd-1", "status": "denied", "denial_code": "future_reason", "result": %q}`, tc.result)
+			ac := &client.AlpaconClient{
+				BaseURL:       testutil.StubBaseURL,
+				WorkspaceName: "my-workspace",
+				HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
+					switch {
+					case r.URL.Path == "/api/servers/servers/":
+						return http.StatusOK, `{"count": 1, "results": [{"id": "srv-id", "name": "my-server"}]}`
+					case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/downloads/":
+						return http.StatusCreated, `{"id": "t-1", "command": "cmd-1", "download_url": "http://stub.invalid/blob"}`
+					case r.URL.Path == "/api/events/commands/cmd-1/":
+						return http.StatusOK, detail
+					default:
+						return http.StatusOK, `{}`
+					}
+				}),
+			}
+
+			var err error
+			synctest.Test(t, func(t *testing.T) {
+				_, err = downloadObject(ac, []string{"my-server:/home/alice/a.txt"}, t.TempDir(), "", "", false, "")
+			})
+
+			var rejected *event.CommandRejectedError
+			require.ErrorAs(t, err, &rejected)
+			assert.Equal(t, utils.ExitCodeNotApproved, rejected.ExitCode())
 		})
 	}
 }

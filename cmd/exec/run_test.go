@@ -541,6 +541,27 @@ func TestIsPollFailure(t *testing.T) {
 	}
 }
 
+func TestRunWithApprovalWait_DeniedCommandDoesNotResubmit(t *testing.T) {
+	t.Parallel()
+	var details event.EventDetails
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"id":"cmd-1",
+		"status":"denied",
+		"denial_code":"account_not_resolved",
+		"result":"Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED)."
+	}`), &details))
+	runs := 0
+
+	err := runWithApprovalWait(nil, func() error {
+		runs++
+		return details.Rejection()
+	}, time.Minute, io.Discard)
+
+	var denied *event.CommandRejectedError
+	require.ErrorAs(t, err, &denied)
+	assert.Equal(t, 1, runs, "a terminal denial must not wait or submit the command again")
+}
+
 func TestRunExecWithApprovalWait_TransientPollFailureKeepsWaiting(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")

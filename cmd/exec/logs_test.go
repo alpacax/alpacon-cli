@@ -165,9 +165,9 @@ func TestLogsCommandOutcome(t *testing.T) {
 		},
 		{
 			name:               "unrecognised terminal status with nil Success exits 1",
-			details:            event.EventDetails{ID: "job-1", Status: "denied"},
+			details:            event.EventDetails{ID: "job-1", Status: "future_status"},
 			wantStdoutLine:     "",
-			wantStderrContains: []string{"unrecognised status", "denied"},
+			wantStderrContains: []string{"unrecognised status", "future_status"},
 			wantExitCode:       1,
 		},
 	}
@@ -226,8 +226,8 @@ func TestLogsCommandOutcomeSanitizesServerText(t *testing.T) {
 		},
 		{
 			name:       "unrecognised status renders sanitized",
-			details:    event.EventDetails{ID: "job-1", Status: "denied\x1b[2K\u202eapproved"},
-			wantStderr: utils.Red("Error") + ": command ended with unrecognised status: deniedapproved\n",
+			details:    event.EventDetails{ID: "job-1", Status: "future\x1b[2K\u202estatus"},
+			wantStderr: utils.Red("Error") + ": command ended with unrecognised status: futurestatus\n",
 		},
 	}
 

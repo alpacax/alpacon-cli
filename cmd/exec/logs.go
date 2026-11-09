@@ -79,7 +79,7 @@ Run the command again later to check for completion.`,
 		if details.IsRejected() {
 			rejected := details.Rejection()
 			// A script-body refusal has file-execution guidance of its own.
-			if rejected.Cause == event.RejectionCauseUseFileExecution {
+			if rejected.WantsFileExecution() {
 				accountFlags, accountNote := logsAccountFlags(details)
 				reportUseFileExecution(rejected, details.Server.Name, accountFlags, false, accountNote)
 				return
