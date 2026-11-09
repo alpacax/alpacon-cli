@@ -12,8 +12,9 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api"
-	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -41,7 +42,6 @@ func TestGetServerList_PaginationBug(t *testing.T) {
 					ID:       fmt.Sprintf("id-%d", i),
 					Name:     fmt.Sprintf("server-%d", i),
 					RemoteIP: "10.0.0.1",
-					Owner:    types.UserSummary{Name: "admin"},
 				})
 			}
 		case "2":
@@ -50,7 +50,6 @@ func TestGetServerList_PaginationBug(t *testing.T) {
 					ID:       fmt.Sprintf("id-p2-%d", i),
 					Name:     fmt.Sprintf("server-p2-%d", i),
 					RemoteIP: "10.0.0.2",
-					Owner:    types.UserSummary{Name: "admin"},
 				})
 			}
 		}
@@ -742,4 +741,41 @@ func TestGetServerNames_WalksEveryPage(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"a": "web-01", "b": "web-02"}, names)
 	assert.Equal(t, 2, requests)
+}
+
+func TestGetServerListOutputsRowsWithoutOwner(t *testing.T) {
+	oldFormat := utils.OutputFormat
+	t.Cleanup(func() { utils.OutputFormat = oldFormat })
+	tests := []struct {
+		name        string
+		ownerSuffix string
+	}{
+		{name: "owner omitted"},
+		{name: "legacy owner ignored", ownerSuffix: `,"owner":{"name":"legacy-user"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"count":1,"results":[{"name":"my-server","remote_ip":"192.0.2.1","os_name":"Linux","os_version":"1","is_connected":true` + tt.ownerSuffix + `}]}`))
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			rows, err := GetServerList(ac)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+				t.Run(format, func(t *testing.T) {
+					utils.OutputFormat = format
+					output := testutil.CaptureStdout(t, func() { utils.PrintTable(rows) })
+					assert.NotContains(t, strings.ToLower(output), "owner")
+					assert.NotContains(t, output, "legacy-user")
+					assert.Contains(t, output, "my-server")
+					if format == utils.OutputFormatJSON {
+						assert.JSONEq(t, `[{"name":"my-server","ip":"192.0.2.1","os":"Linux 1","connected":true}]`, output)
+					}
+				})
+			}
+		})
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -166,9 +167,6 @@ func TestGetAuthorityList_Pagination(t *testing.T) {
 				results = append(results, AuthorityResponse{
 					ID:   fmt.Sprintf("auth-%d", i),
 					Name: fmt.Sprintf("authority-%d", i),
-					Owner: types.UserSummary{
-						Name: "admin",
-					},
 				})
 			}
 		case "2":
@@ -176,9 +174,6 @@ func TestGetAuthorityList_Pagination(t *testing.T) {
 				results = append(results, AuthorityResponse{
 					ID:   fmt.Sprintf("auth-p2-%d", i),
 					Name: fmt.Sprintf("authority-p2-%d", i),
-					Owner: types.UserSummary{
-						Name: "admin",
-					},
 				})
 			}
 		}
@@ -809,4 +804,53 @@ func TestGetRevokeRequestList_ListsDecidedRequests(t *testing.T) {
 		{"req-denied", "denied", "my-ca", "Alice"},
 		{"req-open", "requested", "my-ca", "Alice"},
 	}, got)
+}
+
+func TestGetAuthorityListOutputsRowsWithoutOwner(t *testing.T) {
+	oldFormat := utils.OutputFormat
+	t.Cleanup(func() { utils.OutputFormat = oldFormat })
+	tests := []struct {
+		name        string
+		ownerSuffix string
+	}{
+		{name: "owner omitted"},
+		{name: "legacy owner ignored", ownerSuffix: `,"owner":{"name":"legacy-user"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"ca-1","name":"Root CA","organization":"Example","domain":"example.com","root_valid_days":3650,"default_valid_days":365,"max_valid_days":730,"agent":{"name":"my-server"},"signed_at":"2026-01-01T00:00:00Z"` + tt.ownerSuffix + `}]}`))
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			rows, err := GetAuthorityList(ac)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+				t.Run(format, func(t *testing.T) {
+					utils.OutputFormat = format
+					output := testutil.CaptureStdout(t, func() { utils.PrintTable(rows) })
+					assert.NotContains(t, strings.ToLower(output), "owner")
+					assert.NotContains(t, output, "legacy-user")
+					assert.Contains(t, output, "my-server")
+					if format == utils.OutputFormatJSON {
+						var decoded []map[string]any
+						require.NoError(t, json.Unmarshal([]byte(output), &decoded))
+						require.Len(t, decoded, 1)
+						assert.Len(t, decoded[0], 9)
+						assert.Equal(t, "ca-1", decoded[0]["id"])
+						assert.Equal(t, "Root CA", decoded[0]["name"])
+						assert.Equal(t, "Example", decoded[0]["organization"])
+						assert.Equal(t, "example.com", decoded[0]["domain"])
+						assert.InDelta(t, 3650, decoded[0]["root_valid_days"], 0)
+						assert.InDelta(t, 365, decoded[0]["default_valid_days"], 0)
+						assert.InDelta(t, 730, decoded[0]["max_valid_days"], 0)
+						assert.Equal(t, "my-server", decoded[0]["server"])
+						assert.NotEmpty(t, decoded[0]["signed_at"])
+					}
+				})
+			}
+		})
+	}
 }
