@@ -3,10 +3,15 @@ package exec
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"testing/synctest"
+	"time"
 
+	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -125,4 +130,101 @@ func TestExecPendingApproval_BadStatusPathIsDropped(t *testing.T) {
 			assert.Equal(t, append([]utils.NextAction{reRunAction, consoleAction}, heldActions[:2]...), got.NextActions)
 		})
 	}
+}
+
+// After a cancel the detail reads held: null while the grant is still
+// pending_approval; only sudo_grant_status ends the wait, and the cleared hold
+// is not reported as still open.
+func TestRunExecWithApprovalWait_NullHeldAfterCancelDoesNotEndTheWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+		denial.Held = &utils.HeldRequest{ApprovalRequest: heldRequestUUID, StatusPath: heldStatusPath}
+		submits := 0
+		runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+			submits++
+			return denial
+		}
+		polls := 0
+		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+			polls++
+			status, requestID := "pending_approval", heldRequestUUID
+			return event.EventDetails{SudoGrantStatus: &status, SudoApprovalRequestID: &requestID}, nil
+		}
+
+		err := RunExecWithApprovalWait(nil, "srv", "sudo reboot", "", "", nil, "", "", 80*time.Millisecond, io.Discard)
+
+		var remoteErr *event.RemoteCommandError
+		require.ErrorAs(t, err, &remoteErr)
+		assert.Equal(t, 1, submits)
+		assert.Greater(t, polls, 1)
+		assert.Equal(t, heldRequestUUID, remoteErr.ApprovalRequestID)
+		assert.Nil(t, remoteErr.Held)
+		assert.NotNil(t, denial.Held, "the caller's denial is copied, not changed")
+	})
+}
+
+func TestRunExecWithApprovalWait_TimeoutCarriesTheLatestHeld(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+		runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+			return denial
+		}
+		held := &utils.HeldRequest{ApprovalRequest: heldRequestUUID, StatusPath: heldStatusPath}
+		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+			status := "pending_approval"
+			return event.EventDetails{SudoGrantStatus: &status, Held: held}, nil
+		}
+
+		err := RunExecWithApprovalWait(nil, "srv", "sudo reboot", "", "", nil, "", "", 80*time.Millisecond, io.Discard)
+
+		var remoteErr *event.RemoteCommandError
+		require.ErrorAs(t, err, &remoteErr)
+		assert.Same(t, held, remoteErr.Held)
+	})
+}
+
+// An approval that lands after the hold's deadline cannot be redeemed: the
+// re-run is denied again, and the warning says a new approval is needed.
+func TestRunExecWithApprovalWait_LateApprovalSaysANewApprovalIsNeeded(t *testing.T) {
+	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+		return denial
+	}
+	past := time.Date(2001, 11, 6, 17, 20, 0, 0, time.UTC)
+	polls := 0
+	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+		polls++
+		if polls == 1 {
+			status := "pending_approval"
+			return event.EventDetails{SudoGrantStatus: &status, Held: &utils.HeldRequest{ApprovalRequest: heldRequestUUID, ExpiresAt: &past, StatusPath: heldStatusPath}}, nil
+		}
+		status := "authorized"
+		return event.EventDetails{SudoGrantStatus: &status}, nil
+	}
+
+	stderr := captureStderr(t, func() {
+		_ = RunExecWithApprovalWait(nil, "srv", "sudo reboot", "", "", nil, "", "", time.Minute, io.Discard)
+	})
+
+	assert.Contains(t, stderr, "granted after its deadline (2001-11-06T17:20:00Z)")
+	assert.Contains(t, stderr, "needs a new approval")
+}
+
+func TestRunExecWithApprovalWait_ApprovalWithNoDeadlineKeepsTheReusedGrantWarning(t *testing.T) {
+	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+	denial.Held = &utils.HeldRequest{ApprovalRequest: heldRequestUUID, StatusPath: heldStatusPath}
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+		return denial
+	}
+	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+		status := "authorized"
+		return event.EventDetails{SudoGrantStatus: &status}, nil
+	}
+
+	stderr := captureStderr(t, func() {
+		_ = RunExecWithApprovalWait(nil, "srv", "sudo reboot", "", "", nil, "", "", time.Minute, io.Discard)
+	})
+
+	assert.Contains(t, stderr, "the grant appears already used or expired")
+	assert.NotContains(t, stderr, "deadline")
 }

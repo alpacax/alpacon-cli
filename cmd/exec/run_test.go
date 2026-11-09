@@ -751,14 +751,14 @@ func TestPollApprovalOnceLegacyExpiry(t *testing.T) {
 				}, nil
 			}
 
-			outcome, requestID, rejected, err := pollApprovalOnce(nil, "cmd-1")
+			read, err := pollApprovalOnce(nil, "cmd-1")
 			require.NoError(t, err)
-			assert.Equal(t, tc.want, outcome)
-			assert.Equal(t, "apr-1", requestID)
-			assert.Equal(t, tc.cause, rejected.Cause)
-			assert.Equal(t, "cmd-1", rejected.CommandID)
-			assert.True(t, rejected.SudoGrant)
-			assert.True(t, rejected.Expired)
+			assert.Equal(t, tc.want, read.outcome)
+			assert.Equal(t, "apr-1", read.requestID)
+			assert.Equal(t, tc.cause, read.rejected.Cause)
+			assert.Equal(t, "cmd-1", read.rejected.CommandID)
+			assert.True(t, read.rejected.SudoGrant)
+			assert.True(t, read.rejected.Expired)
 		})
 	}
 }
@@ -784,11 +784,11 @@ func TestPollApprovalOnceSettlesACompletedSignatureRefusal(t *testing.T) {
 				}, nil
 			}
 
-			outcome, _, rejected, err := pollApprovalOnce(nil, "cmd-1")
+			read, err := pollApprovalOnce(nil, "cmd-1")
 
 			require.NoError(t, err)
-			assert.Equal(t, tc.want, outcome)
-			assert.Equal(t, tc.cause, rejected.Cause)
+			assert.Equal(t, tc.want, read.outcome)
+			assert.Equal(t, tc.cause, read.rejected.Cause)
 		})
 	}
 }
