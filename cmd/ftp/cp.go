@@ -1,11 +1,13 @@
 package ftp
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/ftp"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
@@ -130,6 +132,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 				if err != nil {
 					utils.HandleWorkSessionError(err, utils.OperationWebFTP, serverName, authMethod, workSessionID)
 					wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
+					reportDownloadRejection(err, wrappedSrc)
 					utils.CliErrorWithExit("Failed to download from '%s': %s", wrappedSrc, err)
 					return
 				}
@@ -144,6 +147,14 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 				"Note: Remote paths must be in format 'servername:/path' (e.g., myserver:/tmp/file.txt)")
 		}
 	},
+}
+
+// reportDownloadRejection exits on a refused transfer command and returns on any other error.
+func reportDownloadRejection(err error, source string) {
+	var rejected *event.CommandRejectedError
+	if errors.As(err, &rejected) {
+		utils.CliErrorEnvelopeWithExitCode(rejected.ExitCode(), "download", err, "Failed to download from '%s': %s", source, rejected)
+	}
 }
 
 func init() {
@@ -296,6 +307,10 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 	srcDisplay := strings.Join(sources, ", ")
 
 	err = ftp.DownloadFile(client, sources, dest, username, groupname, recursive, workSessionID)
+	var rejected *event.CommandRejectedError
+	if errors.As(err, &rejected) {
+		return serverName, err // its reason is server text the checklists below would misread
+	}
 	if err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "no such file or directory") || strings.Contains(errStr, "file not found") {
