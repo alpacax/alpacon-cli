@@ -279,7 +279,7 @@ func workSessionNextActions(code, operation, target, activeWS string) []NextActi
 			{Command: "alpacon work-session current", Description: "pending/approved: wait until active; completed/revoked/cancelled: create or reuse below"},
 		}, createOrReuse...)
 	case WorkSessionExpired:
-		return []NextAction{{Command: workSessionExtendCommand(activeWS)}, {Command: createCmd}, agentCreate}
+		return []NextAction{{Command: createCmd}, agentCreate}
 	case WorkSessionAssigneeMismatch:
 		// The session belongs to another principal; agents cannot `use`, so take the agent-aware
 		// path.
@@ -299,13 +299,6 @@ func workSessionFlag(activeWS string) string {
 		return ""
 	}
 	return " --work-session " + activeWS
-}
-
-func workSessionExtendCommand(activeWS string) string {
-	if activeWS != "" {
-		return fmt.Sprintf("alpacon work-session extend %s", activeWS)
-	}
-	return "alpacon work-session extend <ID>"
 }
 
 // kubeWorkSessionNextActions suggests a session that targets the cluster with
@@ -345,7 +338,7 @@ func kubeWorkSessionNextActions(code, clusterName, activeWS string) []NextAction
 		}
 		return []NextAction{wait, reuse, login, agentCreate}
 	case WorkSessionExpired:
-		return []NextAction{{Command: workSessionExtendCommand(activeWS)}, login, agentCreate}
+		return []NextAction{login, agentCreate}
 	default: // required, not_usable, assignee_mismatch, and the scope, cluster, server and account codes
 		return []NextAction{reuse, login, agentCreate}
 	}
