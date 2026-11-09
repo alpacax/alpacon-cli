@@ -33,7 +33,11 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 		{name: "other username", username: "root", wantExit: 2}, {name: "wildcard username", username: "*"},
 		{name: "other group", groupname: "root", wantExit: 2}, {name: "wildcard group", groupname: "*"},
 		{name: "wildcard accounts", username: "*", groupname: "*"},
-		{name: "batch default", file: true}, {name: "batch other username", username: "root", file: true, wantExit: 2},
+		{name: "batch default", file: true},
+		{name: "batch explicit empty username", usernameGiven: true, file: true},
+		{name: "batch wildcard username", username: "*", file: true},
+		{name: "batch confirmed", username: "deploy", groupname: "deploy", file: true},
+		{name: "batch other username", username: "root", file: true, wantExit: 2},
 		{name: "batch other group", groupname: "root", file: true, wantExit: 2},
 		{name: "batch wildcard accounts", username: "*", groupname: "*", file: true},
 		{name: "null application", nullApplication: true, wantExit: 1},
@@ -92,7 +96,11 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 			flags := []string{"--token", "deploy-bot", "--command", "uptime"}
 			if tt.file {
 				file := t.TempDir() + "/entries.json"
-				require.NoError(t, os.WriteFile(file, fileOf(t, fileItem(map[string]any{"username": tt.username, "groupname": tt.groupname})), 0600))
+				var username any = tt.username
+				if tt.username == "" && !tt.usernameGiven {
+					username = nil
+				}
+				require.NoError(t, os.WriteFile(file, fileOf(t, fileItem(map[string]any{"username": username, "groupname": tt.groupname})), 0600))
 				flags = []string{"--file", file}
 			} else {
 				if tt.username != "" || tt.usernameGiven {
@@ -123,24 +131,61 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 			assert.Equal(t, tt.wantExit, envelope.ExitCode)
 			if tt.wantExit == 2 {
 				assert.Equal(t, utils.ServiceTokenAccountNotOwn, envelope.ErrorCode)
-				field := "username"
+				field, noun := "Username", "account"
 				if tt.groupname != "" {
-					field = "groupname"
+					field, noun = "Groupname", "group"
 				}
-				assert.Equal(t, fmt.Sprintf("entry 0: %s: the account must be the token's application account %q (code: service_token_account_not_own)", field, "deploy"), envelope.Message)
+				prefix := ""
+				if tt.file {
+					prefix, field = "Entry 0: ", strings.ToLower(field)
+				}
+				assert.Equal(t, fmt.Sprintf("%s%s: the %s must be empty, * or %q (code: service_token_account_not_own).", prefix, field, noun, "deploy"), envelope.Message)
 			} else {
 				assert.True(t, strings.HasSuffix(envelope.Message, "."), "session error must end in a period: %q", envelope.Message)
-				assert.Contains(t, envelope.Message, "Entry 0:")
+				assert.NotContains(t, envelope.Message, "Entry 0:")
 				if tt.nullApplication {
 					assert.Contains(t, envelope.Message, "did not return the service token's application username")
 				} else {
 					assert.Equal(t, "auth_permission_denied", envelope.ErrorCode)
-					assert.Contains(t, envelope.Message, "failed to find service token")
+					assert.Contains(t, envelope.Message, "Failed to find service token")
 				}
 			}
 			assert.Equal(t, int32(0), signerRequests.Load())
 		})
 	}
+}
+
+func TestBindApplicationAccounts_ReturnsAccountRefusal(t *testing.T) {
+	t.Parallel()
+	workspace := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":%q,"application":{"username":"deploy"}}`, fileTokenID)
+	}))
+	t.Cleanup(workspace.Close)
+	session := &ledgerSession{workspace: &client.AlpaconClient{HTTPClient: workspace.Client(), BaseURL: workspace.URL}, workspaceURL: workspace.URL}
+	for _, field := range []string{"username", "groupname"} {
+		t.Run(field, func(t *testing.T) {
+			t.Parallel()
+			entry := entryDraft{EntryRequest: acl.EntryRequest{PrincipalID: fileTokenID}}
+			if field == "username" {
+				entry.Username = "root"
+			} else {
+				entry.Groupname = "root"
+			}
+			err := session.bindApplicationAccounts([]entryDraft{entry}, false)
+			require.Error(t, err)
+			assert.Equal(t, utils.ServiceTokenAccountNotOwn, utils.StructuredErrorCode(err))
+			assert.Contains(t, err.Error(), field+":")
+		})
+	}
+}
+
+func TestEntryAdd_AccountHelp(t *testing.T) {
+	assert.Contains(t, strings.Join(strings.Fields(entryAddCmd.Long), " "), "any account bound to the application on that server")
+	assert.Contains(t, entryAddCmd.Flags().Lookup("username").Usage, "Omit to pin the entry to the application's own account")
+	assert.Contains(t, entryAddCmd.Flags().Lookup("groupname").Usage, "'' or * sets no group restriction")
+	assert.NotContains(t, entryAddCmd.Long, "same account")
+	assert.Contains(t, strings.Join(strings.Fields(entryListCmd.Long), " "), "blank when the application account cannot be resolved")
 }
 
 func TestEntryAddApplicationAccountHelper(t *testing.T) {
@@ -203,7 +248,7 @@ func TestLedgerEntryAttributes_ApplicationAccount(t *testing.T) {
 			require.NotNil(t, rows[0].AppliesToToken)
 			assert.Equal(t, tt.applies, *rows[0].AppliesToToken)
 			if tt.applies {
-				assert.Empty(t, rows[0].Applies)
+				assert.Equal(t, "yes", rows[0].Applies)
 			} else {
 				assert.Equal(t, "no", rows[0].Applies)
 			}

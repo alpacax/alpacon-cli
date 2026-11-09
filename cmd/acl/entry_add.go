@@ -22,18 +22,23 @@ var entryAddCmd = &cobra.Command{
 	Long: `Pre-approve a command pattern for a service token.
 
 Use * as a wildcard for arguments; a pattern without one pre-approves that exact
-command line. For a service token, the account is its application account;
-* or an empty value in --username or --groupname means the same account. Any
-other account is refused. Omit --username to use the application account.
+command line.
+
+For a service token, omitting --username pins the entry to the application's own
+account. In --username, '' or * matches any account bound to the application on
+that server; the application username matches only its own account. In
+--groupname, '' or * sets no group restriction; the application username matches
+its own group. Any other value is refused.
 Without --server the entry covers every server in the workspace, and the
 command signer warns about it.
 
 --file issues several entries at once from a JSON array whose items carry the
 ledger's own fields: principal_id (a service token ID), command_pattern,
 server_ids ([] covers every server), and optionally username, groupname,
-expires_at and enabled. The batch is all or nothing: one
-refused entry refuses the whole file. principal_type may be left out; it can
-only be service_token.
+expires_at and enabled. Only an absent username defaults to the application
+username; an explicit empty username is sent as given. The batch is all or
+nothing: one refused entry refuses the whole file. principal_type may be left
+out; it can only be service_token.
 
 Only a service token can be pre-approved commands: a personal API token has no
 command list on the ledger. Existing entries for personal API tokens are still
@@ -52,8 +57,8 @@ listed and can be revoked.`,
 func init() {
 	entryAddCmd.Flags().String("token", "", "Service token the entry pre-approves the command for (name or ID)")
 	entryAddCmd.Flags().StringP("command", "c", "", "Command pattern to pre-approve (supports * wildcard)")
-	entryAddCmd.Flags().String("username", "", "Application account, * or an empty value for the same account; any other account is refused (default: its application username)")
-	entryAddCmd.Flags().String("groupname", "", "Application account's own group, * or an empty value for the same group; any other group is refused")
+	entryAddCmd.Flags().String("username", "", "Omit to pin the entry to the application's own account; '' or * matches any account bound to the application on that server; the application username matches only its own account; any other value is refused")
+	entryAddCmd.Flags().String("groupname", "", "'' or * sets no group restriction; the application username matches its own group; any other value is refused")
 	entryAddCmd.Flags().StringSlice("server", nil, "Servers the entry covers, by name or ID (repeatable or comma-separated; default: every server)")
 	entryAddCmd.Flags().String("expires-at", "", "Expiry time in RFC 3339 (default: no expiry)")
 	entryAddCmd.Flags().Bool("disabled", false, "Issue the entry disabled")
@@ -63,7 +68,7 @@ func init() {
 func runEntryAdd(cmd *cobra.Command, args []string) {
 	file, _ := cmd.Flags().GetString("file")
 
-	var entries []acl.EntryRequest
+	var drafts []entryDraft
 	var flagged *flagEntry
 	if file != "" {
 		if flagged := entryFlagsSet(cmd); len(flagged) > 0 {
@@ -73,7 +78,7 @@ func runEntryAdd(cmd *cobra.Command, args []string) {
 		if err != nil {
 			utils.CliErrorWithExit("Failed to read %s: %s.", file, err)
 		}
-		if entries, err = parseEntryFile(data); err != nil {
+		if drafts, err = parseEntryFile(data); err != nil {
 			utils.CliErrorWithExit("Failed to read %s: %s.", file, err)
 		}
 	} else {
@@ -86,12 +91,21 @@ func runEntryAdd(cmd *cobra.Command, args []string) {
 			if err != nil {
 				return err
 			}
-			entries = []acl.EntryRequest{request}
+			drafts = []entryDraft{{EntryRequest: request, usernameOmitted: !cmd.Flags().Changed("username")}}
 		}
-		return s.bindApplicationAccounts(entries, flagged == nil || !cmd.Flags().Changed("username"))
+		return s.bindApplicationAccounts(drafts, file != "")
 	})
 	if err != nil {
+		var accountErr serviceTokenAccountError
+		if errors.As(err, &accountErr) {
+			utils.CliErrorWithCode(utils.ExitCodeUsageError, utils.ServiceTokenAccountNotOwn,
+				"%s", utils.Reword(err, sentence(upperFirst(err.Error()))))
+		}
 		utils.CliErrorWithExit("%s", utils.Reword(err, sentence(upperFirst(err.Error()))))
+	}
+	entries := make([]acl.EntryRequest, len(drafts))
+	for i, draft := range drafts {
+		entries[i] = draft.EntryRequest
 	}
 	issued, err := acl.IssueEntries(session.signer, session.workspaceID, entries)
 	if err != nil {
@@ -181,8 +195,19 @@ func (f *flagEntry) resolve(session *ledgerSession) (acl.EntryRequest, error) {
 	return request, nil
 }
 
+type entryDraft struct {
+	acl.EntryRequest
+	usernameOmitted bool
+}
+
+type serviceTokenAccountError struct{ message string }
+
+func (e serviceTokenAccountError) Error() string       { return e.message }
+func (e serviceTokenAccountError) ErrorCode() string   { return utils.ServiceTokenAccountNotOwn }
+func (e serviceTokenAccountError) ErrorSource() string { return "" }
+
 // bindApplicationAccounts confirms every principal and defaults omitted usernames before a signer write.
-func (s *ledgerSession) bindApplicationAccounts(entries []acl.EntryRequest, defaultUsername bool) error {
+func (s *ledgerSession) bindApplicationAccounts(entries []entryDraft, fileMode bool) error {
 	ac, err := s.workspaceAPI()
 	if err != nil {
 		return err
@@ -190,28 +215,30 @@ func (s *ledgerSession) bindApplicationAccounts(entries []acl.EntryRequest, defa
 	confirmed := map[string]auth.ServiceToken{}
 	for i := range entries {
 		entry := &entries[i]
+		prefix := ""
+		if fileMode {
+			prefix = fmt.Sprintf("entry %d: ", i)
+		}
 		token, ok := confirmed[entry.PrincipalID]
 		if !ok {
 			token, err = auth.ResolveServiceToken(ac, entry.PrincipalID)
 			if err != nil {
-				return fmt.Errorf("entry %d: failed to find service token: %w", i, err)
+				return fmt.Errorf("%sfailed to find service token: %w", prefix, err)
 			}
 			confirmed[entry.PrincipalID] = token
 		}
 		if token.Application == nil || token.Application.Username == "" {
-			return fmt.Errorf("entry %d: the workspace did not return the service token's application username", i)
+			return fmt.Errorf("%sthe workspace did not return the service token's application username", prefix)
 		}
 		username := token.Application.Username
 		if entry.Username != "" && entry.Username != "*" && entry.Username != username {
-			utils.CliErrorWithCode(utils.ExitCodeUsageError, utils.ServiceTokenAccountNotOwn,
-				"entry %d: username: the account must be the token's application account %q (code: service_token_account_not_own)", i, username)
+			return serviceTokenAccountError{fmt.Sprintf("%susername: the account must be empty, * or %q (code: service_token_account_not_own)", prefix, username)}
 		}
 		if entry.Groupname != "" && entry.Groupname != "*" && entry.Groupname != username {
-			utils.CliErrorWithCode(utils.ExitCodeUsageError, utils.ServiceTokenAccountNotOwn,
-				"entry %d: groupname: the account must be the token's application account %q (code: service_token_account_not_own)", i, username)
+			return serviceTokenAccountError{fmt.Sprintf("%sgroupname: the group must be empty, * or %q (code: service_token_account_not_own)", prefix, username)}
 		}
 		entry.PrincipalID = token.ID
-		if entry.Username == "" && defaultUsername {
+		if entry.usernameOmitted {
 			entry.Username = username
 		}
 	}
@@ -240,7 +267,7 @@ type fileEntry struct {
 	PrincipalType  string    `json:"principal_type"`
 	PrincipalID    string    `json:"principal_id"`
 	CommandPattern string    `json:"command_pattern"`
-	Username       string    `json:"username"`
+	Username       *string   `json:"username"`
 	Groupname      string    `json:"groupname"`
 	ServerIDs      *[]string `json:"server_ids"`
 	ExpiresAt      string    `json:"expires_at"`
@@ -252,7 +279,9 @@ type fileEntry struct {
 func (item *fileEntry) validate() error {
 	item.PrincipalID = strings.TrimSpace(item.PrincipalID)
 	item.CommandPattern = strings.TrimSpace(item.CommandPattern)
-	item.Username = strings.TrimSpace(item.Username)
+	if item.Username != nil {
+		*item.Username = strings.TrimSpace(*item.Username)
+	}
 	switch {
 	case item.PrincipalType != "" && item.PrincipalType != acl.PrincipalTypeServiceToken:
 		return fmt.Errorf("principal_type must be %q; a personal API token has no command list on the ledger", acl.PrincipalTypeServiceToken)
@@ -273,7 +302,7 @@ func (item *fileEntry) validate() error {
 
 // parseEntryFile reads an --file batch. Unknown fields are refused, so a
 // misspelled one is not silently dropped and the entry issued wider than meant.
-func parseEntryFile(data []byte) ([]acl.EntryRequest, error) {
+func parseEntryFile(data []byte) ([]entryDraft, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 
@@ -290,20 +319,24 @@ func parseEntryFile(data []byte) ([]acl.EntryRequest, error) {
 		return nil, errors.New("the file holds no entries")
 	}
 
-	entries := make([]acl.EntryRequest, 0, len(items))
+	entries := make([]entryDraft, 0, len(items))
 	for i, item := range items {
 		if err := item.validate(); err != nil {
 			return nil, fmt.Errorf("entry %d: %w", i, err)
 		}
-		entries = append(entries, acl.EntryRequest{
+		username := ""
+		if item.Username != nil {
+			username = *item.Username
+		}
+		entries = append(entries, entryDraft{EntryRequest: acl.EntryRequest{
 			PrincipalID:    item.PrincipalID,
 			CommandPattern: item.CommandPattern,
-			Username:       item.Username,
+			Username:       username,
 			Groupname:      item.Groupname,
 			ServerIDs:      *item.ServerIDs,
 			ExpiresAt:      item.ExpiresAt,
 			Enabled:        item.Enabled == nil || *item.Enabled,
-		})
+		}, usernameOmitted: item.Username == nil})
 	}
 	return entries, nil
 }

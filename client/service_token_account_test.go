@@ -31,7 +31,7 @@ func TestServiceTokenAccountRefusals(t *testing.T) {
 			_, err := ac.SendPostRequest("/api/test/", struct{}{})
 			require.Error(t, err)
 			if tt.code == utils.ApplicationSystemUserNotFound {
-				assert.Contains(t, err.Error(), "the token's application has no account it can use on that server")
+				assert.Equal(t, "The service token's application cannot run as that account on that server. Run as an account bound to the application, or as its own account, and check that it is provisioned there (code: application_system_user_not_found).", err.Error())
 			} else {
 				assert.Contains(t, err.Error(), "token's application account")
 			}

@@ -34,8 +34,9 @@ var entryListCmd = &cobra.Command{
 	Aliases: []string{"list"},
 	Short:   "List pre-approved commands",
 	Long: `List the workspace's active pre-approved commands, or one service token's
-with --token. Revoked entries are not listed. APPLIES is blank when the
-application account cannot be resolved.`,
+with --token. Revoked entries are not listed. APPLIES is yes when the entry
+applies, no when it does not, and blank when the application account cannot be
+resolved.`,
 	Example: `  alpacon acl entry ls
   alpacon acl entry ls --token deploy-bot
   alpacon acl entry ls --output json`,
@@ -73,7 +74,9 @@ func ledgerEntryAttributes(entries []acl.EntryResponse, tokenNames, serverNames,
 			applies := (entry.Username == "" || entry.Username == "*" || entry.Username == username) &&
 				(entry.Groupname == "" || entry.Groupname == "*" || entry.Groupname == username)
 			rows[i].AppliesToToken = &applies
-			if !applies {
+			if applies {
+				rows[i].Applies = "yes"
+			} else {
 				rows[i].Applies = "no"
 			}
 		}

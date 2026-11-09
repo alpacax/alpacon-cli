@@ -54,7 +54,7 @@ func TestCp_ApplicationAccountRefusal(t *testing.T) {
 			assert.True(t, submitted.Load(), "the upload creation must be refused")
 			assert.Empty(t, stdout.String())
 			assert.Contains(t, stderr.String(), "application_system_user_not_found")
-			assert.Contains(t, stderr.String(), "the token's application has no account it can use on that server: run as the application's own account and check that the account is provisioned there (code: application_system_user_not_found)")
+			assert.Contains(t, stderr.String(), "The service token's application cannot run as that account on that server. Run as an account bound to the application, or as its own account, and check that it is provisioned there (code: application_system_user_not_found).")
 			if format == utils.OutputFormatTable {
 				assert.NotContains(t, stderr.String(), "Invalid input.")
 			}

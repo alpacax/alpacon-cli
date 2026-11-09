@@ -35,7 +35,7 @@ func TestExec_ApplicationAccountRefusal(t *testing.T) {
 			assert.True(t, submitted.Load(), "the command submission must be refused")
 			assert.Empty(t, stdout)
 			assert.Contains(t, stderr, "application_system_user_not_found")
-			assert.Contains(t, stderr, "the token's application has no account it can use on that server: run as the application's own account and check that the account is provisioned there (code: application_system_user_not_found)")
+			assert.Contains(t, stderr, "The service token's application cannot run as that account on that server. Run as an account bound to the application, or as its own account, and check that it is provisioned there (code: application_system_user_not_found).")
 			if format == utils.OutputFormatTable {
 				assert.NotContains(t, stderr, "Invalid input.")
 			}

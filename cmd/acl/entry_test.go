@@ -51,10 +51,10 @@ func TestParseEntryFile(t *testing.T) {
 	entries, err := parseEntryFile(data)
 
 	require.NoError(t, err)
-	assert.Equal(t, []acl.EntryRequest{
-		{PrincipalID: fileTokenID, CommandPattern: "uptime", Username: "*", ServerIDs: []string{}, Enabled: true},
-		{PrincipalID: fileTokenID, CommandPattern: "df -h", Username: "root",
-			ServerIDs: []string{"6ba7b810-9dad-11d1-80b4-00c04fd430c8"}, ExpiresAt: "2099-01-15T10:00:00Z", Enabled: false},
+	assert.Equal(t, []entryDraft{
+		{EntryRequest: acl.EntryRequest{PrincipalID: fileTokenID, CommandPattern: "uptime", Username: "*", ServerIDs: []string{}, Enabled: true}},
+		{EntryRequest: acl.EntryRequest{PrincipalID: fileTokenID, CommandPattern: "df -h", Username: "root",
+			ServerIDs: []string{"6ba7b810-9dad-11d1-80b4-00c04fd430c8"}, ExpiresAt: "2099-01-15T10:00:00Z", Enabled: false}},
 	}, entries)
 }
 
@@ -198,4 +198,5 @@ func TestParseEntryFile_DefaultApplicationAccount(t *testing.T) {
 	entries, err := parseEntryFile(fileOf(t, fileItem(map[string]any{"username": nil})))
 	require.NoError(t, err)
 	assert.Empty(t, entries[0].Username)
+	assert.True(t, entries[0].usernameOmitted, "an absent username must default to the application account")
 }
