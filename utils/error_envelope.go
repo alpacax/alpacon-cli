@@ -66,7 +66,7 @@ func CliErrorEnvelopeWithExit(operation string, err error, format string, args .
 	ExitIfUsageError(ExitCodeGeneralError, operation, err, format, args...)
 	ExitWithFailureJSON(Failure{ExitCode: ExitCodeGeneralError, Operation: operation, Err: err, Message: fmt.Sprintf(format, args...), NextActions: RefusalNextActions(refusalGuidance(err, args))})
 	printCliError(refusalGuidance(err, args), format, args...)
-	reportCLIError()
+	reportCLIError(append([]any{err}, args...)...)
 	os.Exit(ExitCodeGeneralError)
 }
 

@@ -393,7 +393,7 @@ func TestCliErrorHelpersExitInSubprocess(t *testing.T) {
 			name: "a server answer coded usage_error stays exit 1 in table", mode: "exit-server-usage-code", format: OutputFormatTable, wantExit: ExitCodeGeneralError,
 			check: func(t *testing.T, stderr string) {
 				t.Helper()
-				assert.Contains(t, stderr, "For issues")
+				assert.NotContains(t, stderr, "For issues")
 			},
 		},
 		{

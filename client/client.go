@@ -1256,6 +1256,22 @@ func errorExtraFields(body []byte) map[string]any {
 	if decoder.Decode(&parsed) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 		return nil
 	}
+	// Keep environment values out of the JSON error's server fields as well.
+	if code := stringField(parsed, "code"); code == "command_dangerous_env" || code == "command_invalid_env" {
+		fields, _ := parsed["field_errors"].(map[string]any)
+		clean := make(map[string]any)
+		if message := stringField(parsed, "message"); message != "" {
+			clean["message"] = message
+		}
+		if messages := fieldErrorMessages(map[string]any{"non_field_errors": fields["non_field_errors"]}); len(messages) > 0 {
+			entries := make([]map[string]string, 0, len(messages))
+			for _, message := range messages {
+				entries = append(entries, map[string]string{"code": code, "message": message})
+			}
+			clean["field_errors"] = map[string]any{"non_field_errors": entries}
+		}
+		parsed = clean
+	}
 	if _, isEnvelopeCode := parsed["code"].(string); isEnvelopeCode {
 		delete(parsed, "code")
 	}
@@ -1281,6 +1297,20 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 	source = stringField(parsed, "source")
 	gate, missing = parseGateAndMissing(parsed)
 	axis = stringField(parsed, "axis")
+
+	// Environment refusals name keys and reasons in these messages. Do not render
+	// other validation fields, which may contain environment values.
+	if code == "command_dangerous_env" || code == "command_invalid_env" {
+		if message := strings.TrimSpace(stringField(parsed, "message")); message != "" {
+			return message, code, source, gate, axis, missing, true
+		}
+		if fields, ok := parsed["field_errors"].(map[string]any); ok {
+			if messages := fieldErrorMessages(map[string]any{"non_field_errors": fields["non_field_errors"]}); len(messages) > 0 {
+				return strings.Join(messages, "; "), code, source, gate, axis, missing, true
+			}
+		}
+		return codeOnlyMessage(code), code, source, gate, axis, missing, true
+	}
 
 	if detail := strings.TrimSpace(stringField(parsed, "detail")); detail != "" {
 		return detail, code, source, gate, axis, missing, true
