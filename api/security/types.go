@@ -15,12 +15,12 @@ type CommandAclRequest struct {
 
 type CommandAclResponse struct {
 	AppliesToToken *bool  `json:"applies_to_token,omitempty" table:"-"`
-	Applies        string `json:"-" table:"Applies"`
 	ID             string `json:"id"         table:"ID"`
 	TokenName      string `json:"token_name" table:"Token"`
 	Command        string `json:"command"    table:"Command"`
 	Username       string `json:"username"   table:"Username"`
 	Groupname      string `json:"groupname"  table:"Groupname"`
+	Applies        string `json:"-" table:"Applies"`
 }
 
 type ServerAclRequest struct {
@@ -62,11 +62,11 @@ type FileAclRequest struct {
 
 type FileAclResponse struct {
 	AppliesToToken *bool  `json:"applies_to_token,omitempty" table:"-"`
-	Applies        string `json:"-" table:"Applies"`
 	ID             string `json:"id"         table:"ID"`
 	TokenName      string `json:"token_name" table:"Token"`
 	Path           string `json:"path"       table:"Path"`
 	Action         string `json:"action"     table:"Action"`
 	Username       string `json:"username"   table:"Username"`
 	Groupname      string `json:"groupname"  table:"Groupname"`
+	Applies        string `json:"-" table:"Applies"`
 }

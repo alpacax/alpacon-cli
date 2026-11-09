@@ -42,12 +42,12 @@ type EntryResponse struct {
 
 type EntryAttributes struct {
 	AppliesToToken *bool  `json:"applies_to_token,omitempty" table:"-"`
-	Applies        string `json:"-" table:"Applies"`
 	ID             string `json:"id" table:"ID"`
 	Principal      string `json:"principal" table:"Service token"`
 	Command        string `json:"command_pattern" table:"Command"`
 	Username       string `json:"username" table:"User"`
 	Groupname      string `json:"groupname" table:"Group"`
+	Applies        string `json:"-" table:"Applies"`
 	Servers        string `json:"servers" table:"Servers"`
 	Enabled        bool   `json:"enabled" table:"Enabled"`
 	ExpiresAt      string `json:"expires_at" table:"Expires at"`

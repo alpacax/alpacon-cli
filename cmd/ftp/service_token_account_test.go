@@ -54,13 +54,14 @@ func TestCp_ApplicationAccountRefusal(t *testing.T) {
 			assert.True(t, submitted.Load(), "the upload creation must be refused")
 			assert.Empty(t, stdout.String())
 			assert.Contains(t, stderr.String(), "application_system_user_not_found")
-			assert.Contains(t, stderr.String(), "the account is not the token's application account")
+			assert.Contains(t, stderr.String(), "the token's application has no account it can use on that server: run as the application's own account and check that the account is provisioned there (code: application_system_user_not_found)")
 			if format == utils.OutputFormatTable {
 				assert.NotContains(t, stderr.String(), "Invalid input.")
 			}
 			if format == utils.OutputFormatJSON {
 				var envelope utils.JSONErrorEnvelope[map[string]any]
-				require.NoError(t, json.Unmarshal([]byte(strings.Split(strings.TrimSpace(stderr.String()), "\n")[1]), &envelope))
+				lines := strings.Split(strings.TrimSpace(stderr.String()), "\n")
+				require.NoError(t, json.Unmarshal([]byte(lines[len(lines)-1]), &envelope))
 				assert.Equal(t, utils.ApplicationSystemUserNotFound, envelope.ErrorCode)
 				assert.NotContains(t, envelope.Message, "Invalid input.")
 			}

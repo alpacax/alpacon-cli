@@ -30,7 +30,11 @@ func TestServiceTokenAccountRefusals(t *testing.T) {
 			ac := &AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 			_, err := ac.SendPostRequest("/api/test/", struct{}{})
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "token's application account")
+			if tt.code == utils.ApplicationSystemUserNotFound {
+				assert.Contains(t, err.Error(), "the token's application has no account it can use on that server")
+			} else {
+				assert.Contains(t, err.Error(), "token's application account")
+			}
 			assert.Contains(t, err.Error(), tt.code)
 			assert.NotContains(t, err.Error(), "Invalid input.")
 			if tt.field != "" {

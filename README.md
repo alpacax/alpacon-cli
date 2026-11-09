@@ -449,8 +449,10 @@ Running commands and transferring files with a personal API token is being retir
 ### Token ACLs
 Each API token gets three independent **deny-by-default** ACL types—`command` (which shell commands the token can run via websh/exec), `server` (which servers it can reach), and `file` (which file paths it can read/write via cp). A bare token can do nothing until at least one ACL of each relevant type is granted; this is how `damage containment` is enforced on the token-auth path (`work session` plays the same role on the interactive-auth path).
 
+For a service token, the account is always the token's application account, so `--username` and `--groupname` only confirm it. Lists also show entries that cannot apply to the token, marked `no` in the APPLIES column (`applies_to_token: false` in JSON).
+
 ```bash
-$ alpacon token acl command add my-token --command="docker *" --username=root
+$ alpacon token acl command add my-token --command="docker *"
 $ alpacon token acl server  add my-token --servers web-01,web-02
 $ alpacon token acl file    add my-token --path "/home/deploy/*" --action upload
 $ alpacon token acl <type> ls     my-token
@@ -461,6 +463,8 @@ On servers that manage command ACLs on the command pre-approval ledger, `alpacon
 
 ### Pre-approved commands
 On workspaces that keep command ACLs on the command pre-approval ledger, `alpacon acl` manages the same entries the web console shows under Pre-approved commands: each one pre-approves a command pattern for a service token, run as one account, on chosen servers or on every server in the workspace. A personal API token has no command list on the ledger: `alpacon acl entry add` refuses one before sending anything, while entries an API token already holds can still be listed and revoked.
+
+For a service token, the account is always the token's application account, so `--username` and `--groupname` only confirm it. Lists also show entries that cannot apply to the token, marked `no` in the APPLIES column (`applies_to_token: false` in JSON).
 
 ```bash
 $ alpacon acl entry ls [--token deploy-bot]

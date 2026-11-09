@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -21,20 +22,31 @@ import (
 
 func TestEntryAdd_ApplicationAccount(t *testing.T) {
 	for _, tt := range []struct {
-		name, username, groupname string
-		file                      bool
-		wantExit                  int
+		name, username, groupname    string
+		file                         bool
+		nullApplication, lookupFails bool
+		wantExit                     int
 	}{
 		{name: "default"}, {name: "confirmed", username: "deploy", groupname: "deploy"},
 		{name: "other username", username: "root", wantExit: 2}, {name: "wildcard username", username: "*", wantExit: 2},
 		{name: "other group", groupname: "root", wantExit: 2}, {name: "wildcard group", groupname: "*", wantExit: 2},
 		{name: "batch default", file: true}, {name: "batch other username", username: "root", file: true, wantExit: 2},
 		{name: "batch other group", groupname: "root", file: true, wantExit: 2},
+		{name: "null application", nullApplication: true, wantExit: 1},
+		{name: "workspace lookup fails", lookupFails: true, wantExit: 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			workspace := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
+				if tt.lookupFails {
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = fmt.Fprint(w, `{"code":"auth_permission_denied","detail":"Not allowed."}`)
+					return
+				}
 				token := `{"id":"` + fileTokenID + `","name":"deploy-bot","application":{"username":"deploy"}}`
+				if tt.nullApplication {
+					token = `{"id":"` + fileTokenID + `","name":"deploy-bot","application":null}`
+				}
 				if r.URL.Path == "/api/auth/service-tokens/tokens/" {
 					_, _ = fmt.Fprintf(w, `{"count":1,"next":null,"results":[%s]}`, token)
 				} else {
@@ -96,8 +108,24 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 			assert.Equal(t, tt.wantExit, exitErr.ExitCode())
 			var envelope utils.JSONErrorEnvelope[map[string]any]
 			require.NoError(t, json.Unmarshal(stderr.Bytes(), &envelope))
-			assert.Equal(t, "usage_error", envelope.ErrorCode)
-			assert.Contains(t, envelope.Message, "service_token_account_not_own")
+			assert.Equal(t, tt.wantExit, envelope.ExitCode)
+			if tt.wantExit == 2 {
+				assert.Equal(t, utils.ServiceTokenAccountNotOwn, envelope.ErrorCode)
+				field := "username"
+				if tt.groupname != "" {
+					field = "groupname"
+				}
+				assert.Equal(t, fmt.Sprintf("entry 0: %s: the account must be the token's application account %q (code: service_token_account_not_own)", field, "deploy"), envelope.Message)
+			} else {
+				assert.True(t, strings.HasSuffix(envelope.Message, "."), "session error must end in a period: %q", envelope.Message)
+				assert.Contains(t, envelope.Message, "Entry 0:")
+				if tt.nullApplication {
+					assert.Contains(t, envelope.Message, "did not return the service token's application username")
+				} else {
+					assert.Equal(t, "auth_permission_denied", envelope.ErrorCode)
+					assert.Contains(t, envelope.Message, "failed to find service token")
+				}
+			}
 			assert.Equal(t, int32(0), signerRequests.Load())
 		})
 	}

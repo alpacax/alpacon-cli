@@ -34,7 +34,8 @@ var entryListCmd = &cobra.Command{
 	Aliases: []string{"list"},
 	Short:   "List pre-approved commands",
 	Long: `List the workspace's active pre-approved commands, or one service token's
-with --token. Revoked entries are not listed.`,
+with --token. Revoked entries are not listed. APPLIES is blank when the
+application account cannot be resolved.`,
 	Example: `  alpacon acl entry ls
   alpacon acl entry ls --token deploy-bot
   alpacon acl entry ls --output json`,

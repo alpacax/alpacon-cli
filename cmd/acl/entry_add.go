@@ -90,7 +90,7 @@ func runEntryAdd(cmd *cobra.Command, args []string) {
 		return s.bindApplicationAccounts(entries)
 	})
 	if err != nil {
-		utils.CliErrorWithExit("%s", err)
+		utils.CliErrorWithExit("%s", utils.Reword(err, sentence(upperFirst(err.Error()))))
 	}
 	issued, err := acl.IssueEntries(session.signer, session.workspaceID, entries)
 	if err != nil {
@@ -202,10 +202,12 @@ func (s *ledgerSession) bindApplicationAccounts(entries []acl.EntryRequest) erro
 		}
 		username := token.Application.Username
 		if entry.Username != "" && entry.Username != username {
-			return utils.MarkUsageError(fmt.Errorf("username: %s", utils.ServiceTokenAccountMessage("username")))
+			utils.CliErrorWithCode(utils.ExitCodeUsageError, utils.ServiceTokenAccountNotOwn,
+				"entry %d: username: the account must be the token's application account %q (code: service_token_account_not_own)", i, username)
 		}
 		if entry.Groupname != "" && entry.Groupname != username {
-			return utils.MarkUsageError(fmt.Errorf("groupname: %s", utils.ServiceTokenAccountMessage("groupname")))
+			utils.CliErrorWithCode(utils.ExitCodeUsageError, utils.ServiceTokenAccountNotOwn,
+				"entry %d: groupname: the account must be the token's application account %q (code: service_token_account_not_own)", i, username)
 		}
 		entry.PrincipalID, entry.Username = token.ID, username
 	}

@@ -90,19 +90,6 @@ func confirmServiceTokenID(ac *client.AlpaconClient, id string) (ServiceToken, e
 	return token, nil
 }
 
-// GetServiceTokenNames maps every service token's id to its name.
-func GetServiceTokenNames(ac *client.AlpaconClient) (map[string]string, error) {
-	tokens, err := GetServiceTokens(ac)
-	if err != nil {
-		return nil, err
-	}
-	names := make(map[string]string, len(tokens))
-	for _, token := range tokens {
-		names[token.ID] = token.Name
-	}
-	return names, nil
-}
-
 // GetServiceTokens lists the workspace's service tokens and their applications.
 func GetServiceTokens(ac *client.AlpaconClient) ([]ServiceToken, error) {
 	return api.FetchAllPages[ServiceToken](ac, serviceTokenURL, nil)
