@@ -822,7 +822,7 @@ func errorFromDetails(id api.PathID, d EventDetails) error {
 			if d.ErrorPhase != nil {
 				phase = *d.ErrorPhase
 			}
-			return &RemoteCommandError{Username: d.Username, Output: d.Result, ExitCode: exitCode, ErrorPhase: phase, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID(), CommandID: id.String()}
+			return &RemoteCommandError{Username: d.Username, Output: d.Result, ExitCode: exitCode, ErrorPhase: phase, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID(), CommandID: id.String(), Held: d.Held}
 		}
 		return nil
 	default:
