@@ -28,10 +28,12 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 		wantExit                     int
 	}{
 		{name: "default"}, {name: "confirmed", username: "deploy", groupname: "deploy"},
-		{name: "other username", username: "root", wantExit: 2}, {name: "wildcard username", username: "*", wantExit: 2},
-		{name: "other group", groupname: "root", wantExit: 2}, {name: "wildcard group", groupname: "*", wantExit: 2},
+		{name: "other username", username: "root", wantExit: 2}, {name: "wildcard username", username: "*"},
+		{name: "other group", groupname: "root", wantExit: 2}, {name: "wildcard group", groupname: "*"},
+		{name: "wildcard accounts", username: "*", groupname: "*"},
 		{name: "batch default", file: true}, {name: "batch other username", username: "root", file: true, wantExit: 2},
 		{name: "batch other group", groupname: "root", file: true, wantExit: 2},
+		{name: "batch wildcard accounts", username: "*", groupname: "*", file: true},
 		{name: "null application", nullApplication: true, wantExit: 1},
 		{name: "workspace lookup fails", lookupFails: true, wantExit: 1},
 	} {
@@ -56,6 +58,7 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 			}))
 			defer workspace.Close()
 			var signerRequests atomic.Int32
+			var signerWrites atomic.Int32
 			signer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				signerRequests.Add(1)
 				w.Header().Set("Content-Type", "application/json")
@@ -64,6 +67,7 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 					return
 				}
 				assert.Equal(t, "/api/acl/entries/bulk/", r.URL.Path)
+				signerWrites.Add(1)
 				var body struct {
 					Entries []acl.EntryRequest `json:"entries"`
 				}
@@ -72,7 +76,12 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 					return
 				}
 				if assert.Len(t, body.Entries, 1) {
-					assert.Equal(t, "deploy", body.Entries[0].Username)
+					username := tt.username
+					if username == "" {
+						username = "deploy"
+					}
+					assert.Equal(t, username, body.Entries[0].Username)
+					assert.Equal(t, tt.groupname, body.Entries[0].Groupname)
 					assert.Equal(t, fileTokenID, body.Entries[0].PrincipalID)
 				}
 				_, _ = fmt.Fprint(w, `[]`)
@@ -101,6 +110,7 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 			if tt.wantExit == 0 {
 				require.NoError(t, err, stderr.String())
 				assert.Equal(t, int32(2), signerRequests.Load())
+				assert.Equal(t, int32(1), signerWrites.Load())
 				return
 			}
 			var exitErr *exec.ExitError
@@ -160,7 +170,12 @@ func TestLedgerEntryAttributes_ApplicationAccount(t *testing.T) {
 		{"own group", acl.PrincipalTypeServiceToken, "deploy", "deploy", true, true},
 		{"other username", acl.PrincipalTypeServiceToken, "root", "", true, false},
 		{"other group", acl.PrincipalTypeServiceToken, "deploy", "root", true, false},
-		{"wildcard", acl.PrincipalTypeServiceToken, "*", "", true, false},
+		{"wildcard username", acl.PrincipalTypeServiceToken, "*", "", true, true},
+		{"wildcard group", acl.PrincipalTypeServiceToken, "deploy", "*", true, true},
+		{"wildcard accounts", acl.PrincipalTypeServiceToken, "*", "*", true, true},
+		{"wildcard username with own group", acl.PrincipalTypeServiceToken, "*", "deploy", true, true},
+		{"wildcard username with other group", acl.PrincipalTypeServiceToken, "*", "root", true, false},
+		{"other username with wildcard group", acl.PrincipalTypeServiceToken, "root", "*", true, false},
 		{"unknown account", acl.PrincipalTypeServiceToken, "deploy", "", false, false},
 		{"legacy principal", "api_token", "root", "", true, false},
 	} {
@@ -172,6 +187,8 @@ func TestLedgerEntryAttributes_ApplicationAccount(t *testing.T) {
 			}
 			rows := ledgerEntryAttributes([]acl.EntryResponse{{PrincipalID: fileTokenID, PrincipalType: tt.principal, Username: tt.username, Groupname: tt.groupname}}, nil, nil, accounts)
 			require.Len(t, rows, 1)
+			assert.Equal(t, tt.username, rows[0].Username)
+			assert.Equal(t, tt.groupname, rows[0].Groupname)
 			if !tt.known || tt.principal != "service_token" {
 				assert.Nil(t, rows[0].AppliesToToken)
 				assert.Empty(t, rows[0].Applies)

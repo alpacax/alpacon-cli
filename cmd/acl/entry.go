@@ -70,7 +70,8 @@ func ledgerEntryAttributes(entries []acl.EntryResponse, tokenNames, serverNames,
 	rows := acl.ToEntryAttributes(entries, tokenNames, serverNames)
 	for i, entry := range entries {
 		if username := tokenAccounts[entry.PrincipalID]; entry.PrincipalType == acl.PrincipalTypeServiceToken && username != "" {
-			applies := entry.Username == username && (entry.Groupname == "" || entry.Groupname == username)
+			applies := (entry.Username == username || entry.Username == "*") &&
+				(entry.Groupname == "" || entry.Groupname == "*" || entry.Groupname == username)
 			rows[i].AppliesToToken = &applies
 			if !applies {
 				rows[i].Applies = "no"
