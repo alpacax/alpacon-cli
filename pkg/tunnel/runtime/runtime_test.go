@@ -911,7 +911,7 @@ func TestDialTunnelReportsTheDialErrorWhenTheLookupHangs(t *testing.T) {
 	assert.Equal(t, int32(1), lookups.Load())
 }
 
-func TestStartNamesTheFailedCreateOnce(t *testing.T) {
+func TestStartAddsTunnelCreationErrorPrefixOnce(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
