@@ -161,8 +161,9 @@ func refusalNext(err error) (next string, underAPIToken bool) {
 // RefusalNextActions is the server's guidance for a refused request, shown
 // under the error line: each distinct hint as sent, then where to read the
 // request's state ("next"), then the Retry-After wait of a gated refusal other
-// than a plan limit. Nil when err carries none. Under an API token "next" is
-// text only, since a path the server names may refuse token authentication.
+// than a plan limit, then a held request's reference, deadline and status path.
+// Nil when err carries none. Under an API token "next" is text only, since a
+// path the server names may refuse token authentication.
 func RefusalNextActions(err error) []NextAction {
 	var actions []NextAction
 	for _, hint := range refusalHints(err) {
@@ -179,7 +180,7 @@ func RefusalNextActions(err error) []NextAction {
 	if wait := RetryAfter(err); wait > 0 && gate != "" && gate != GatePlan {
 		actions = append(actions, NextAction{Description: fmt.Sprintf("Retry after %ds", retryAfterSeconds(wait))})
 	}
-	return actions
+	return append(actions, heldNextActions(err)...)
 }
 
 // Reword returns an error that reads as message and keeps err in its chain,

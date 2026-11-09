@@ -760,9 +760,9 @@ func HandlePurposeDemand(err error) bool {
 // HandlePendingApproval reports a command left pending human approval and not waited on—a job the
 // server parked at awaiting_approval (PendingApprovalError) or a sudo denial with an approval
 // request in flight—and exits with ExitCodePendingApproval, or returns false when err is neither.
-// The approval request id is reported only when a --wait poll picked one up
-// (pendingWithRequestID). The sudo-denial path repeats the invoked command (reRunHint), and a held
-// command line the server reads as a script also gets its --file --from-server form
+// The approval request id is reported when a --wait poll picked one up (pendingWithRequestID)
+// or the detail's held named one, whose deadline and status path follow. The sudo-denial path
+// repeats the invoked command (reRunHint), and a held command line the server reads as a script also gets its --file --from-server form
 // (fileSuggestionAction).
 func HandlePendingApproval(err error, parsed RemoteExecArgs) bool {
 	// Status-hold: held job runs automatically once approved, so point at exec logs.
@@ -795,15 +795,27 @@ func HandlePendingApproval(err error, parsed RemoteExecArgs) bool {
 	var remoteErr *event.RemoteCommandError
 	if errors.As(err, &remoteErr) {
 		requestID = remoteErr.ApprovalRequestID
+		if requestID == "" {
+			requestID = heldRequestID(remoteErr.Held)
+		}
 	}
 	utils.PrintPendingApproval(
 		"Approval required—a human must approve this sudo command in the Alpacon console (web). "+
 			"Re-run after approval, or use --wait (or --wait-approval DURATION for a longer wait) to block until it is approved.",
 		requestID,
 		reRunHint(parsed),
+		utils.RefusalNextActions(err)...,
 	)
 	os.Exit(utils.ExitCodePendingApproval)
 	return true
+}
+
+// heldRequestID is the approval request a held object names, or "" for none.
+func heldRequestID(held *utils.HeldRequest) string {
+	if held == nil {
+		return ""
+	}
+	return held.ApprovalRequest
 }
 
 // RunCommandWithRetry executes a remote command with MFA/username-required error
