@@ -177,3 +177,149 @@ func TestRejectedCommandFromOlderServerSaysTheCauseWasNotRecorded(t *testing.T) 
 		}
 	}
 }
+
+func TestDeniedCommandReportsARefusalOnEveryExecSurface(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		extra      map[string]any
+		wantCode   string
+		wantReason string
+		wantServer map[string]any
+	}{
+		{
+			name: "known denial code",
+			extra: map[string]any{
+				"status":      "denied",
+				"denial_code": "account_not_resolved",
+				"result":      "The execution account could not be resolved.",
+			},
+			wantCode:   "account_not_resolved",
+			wantReason: "The execution account could not be resolved.",
+			wantServer: map[string]any{"denial_code": "account_not_resolved", "result": "The execution account could not be resolved."},
+		},
+		{
+			name: "unknown denial code",
+			extra: map[string]any{
+				"status":      "denied",
+				"denial_code": "new_denial_code",
+				"result":      "A newer server refused this command.",
+			},
+			wantCode:   "new_denial_code",
+			wantReason: "A newer server refused this command.",
+			wantServer: map[string]any{"denial_code": "new_denial_code", "result": "A newer server refused this command."},
+		},
+		{
+			name: "rejection cause fallback",
+			extra: map[string]any{
+				"status":          "denied",
+				"rejection_cause": "risk_denied",
+				"rejection_gate":  "risk",
+			},
+			wantCode:   "risk_denied",
+			wantReason: "(rejection_cause: risk_denied)",
+			wantServer: map[string]any{"rejection_cause": "risk_denied", "rejection_gate": "risk"},
+		},
+		{
+			name: "file execution cause stays a terminal denial",
+			extra: map[string]any{
+				"status":          "denied",
+				"rejection_cause": "use_file_execution",
+				"rejection_gate":  "approval",
+				"result":          "The command did not run.",
+			},
+			wantCode:   "use_file_execution",
+			wantReason: "The command did not run.",
+			wantServer: map[string]any{"rejection_cause": "use_file_execution", "rejection_gate": "approval", "result": "The command did not run."},
+		},
+		{
+			name: "signature cause stays a terminal denial",
+			extra: map[string]any{
+				"status":          "denied",
+				"rejection_cause": "signature_invalid",
+				"rejection_gate":  nil,
+				"result":          "The command did not run.",
+			},
+			wantCode:   "signature_invalid",
+			wantReason: "The command did not run.",
+			wantServer: map[string]any{"rejection_cause": "signature_invalid", "rejection_gate": nil, "result": "The command did not run."},
+		},
+		{
+			name:       "denial code named like a WorkSession gate code",
+			extra:      map[string]any{"status": "denied", "denial_code": "work_session_expired", "result": ""},
+			wantCode:   "work_session_expired",
+			wantReason: "(denial_code: work_session_expired)",
+			wantServer: map[string]any{"denial_code": "work_session_expired"},
+		},
+		{
+			name:       "missing reason",
+			extra:      map[string]any{"status": "denied", "result": ""},
+			wantCode:   utils.ErrorCodeNotApproved,
+			wantReason: "was denied; the command did not run",
+		},
+	}
+	surfaces := []struct {
+		name string
+		run  func(t *testing.T, url, format string) (string, string, int)
+	}{
+		{"exec", func(t *testing.T, url, format string) (string, string, int) {
+			t.Helper()
+			args := []string{"prod", "--", "uptime"}
+			if format == utils.OutputFormatJSON {
+				args = append([]string{"--output", "json"}, args...)
+			}
+			return runExecHelper(t, url, args...)
+		}},
+		{"exec logs", func(t *testing.T, url, format string) (string, string, int) {
+			t.Helper()
+			return runExecLogsHelper(t, url, format, rejectedCommandID)
+		}},
+	}
+	for _, surface := range surfaces {
+		for _, tc := range tests {
+			for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+				t.Run(surface.name+"/"+tc.name+"/"+format, func(t *testing.T) {
+					t.Parallel()
+					ts := newRejectedCommandServerWith("root", "wheel", tc.extra)
+					defer ts.Close()
+
+					stdout, stderr, exitCode := surface.run(t, ts.URL, format)
+
+					assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "stderr: %s", stderr)
+					assert.Empty(t, strings.TrimSuffix(stdout, "PASS\n"))
+					assert.Contains(t, stderr, "denied")
+					assert.Contains(t, stderr, "command did not run")
+					assert.NotContains(t, stderr, "may still be running")
+					assert.Contains(t, stderr, tc.wantReason)
+					if format == utils.OutputFormatTable {
+						return
+					}
+					envelope := lastEnvelope(t, stderr)
+					assert.False(t, envelope.OK)
+					assert.Equal(t, utils.ExitCodeNotApproved, envelope.ExitCode)
+					assert.Equal(t, tc.wantCode, envelope.ErrorCode)
+					for key, value := range tc.wantServer {
+						assert.Equal(t, value, envelope.Server[key], "server field %s", key)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestDeniedCommandSanitizesTheDisplayedResult(t *testing.T) {
+	t.Parallel()
+	ts := newRejectedCommandServerWith("root", "wheel", map[string]any{
+		"status":      "denied",
+		"denial_code": "account_not_resolved",
+		"result":      "account \x1b[31mroot\x1b[0m\u202e",
+	})
+	defer ts.Close()
+
+	_, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, rejectedCommandID)
+
+	assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "stderr: %s", stderr)
+	assert.Contains(t, stderr, "account root")
+	assert.NotContains(t, stderr, "\x1b")
+	assert.NotContains(t, stderr, "\u202e")
+}

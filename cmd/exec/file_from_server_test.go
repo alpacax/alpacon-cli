@@ -141,6 +141,8 @@ type fileDownloadServer struct {
 	steps           []string
 	downloadRequest map[string]any
 	commandBody     []byte
+	denialCode      string
+	denialResult    string
 }
 
 func (s *fileDownloadServer) record(step string) {
@@ -166,6 +168,12 @@ func newFileDownloadServer(s *fileDownloadServer, content []byte, failure string
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"id":"dl-1","command":"cmd-dl-1","download_url":"http://` + r.Host + `/s3/deploy.sh"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-dl-1/":
+			if s.denialCode != "" {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"id": "cmd-dl-1", "status": "denied", "denial_code": s.denialCode, "result": s.denialResult,
+				})
+				return
+			}
 			if failure != "" {
 				_ = json.NewEncoder(w).Encode(map[string]any{"id": "cmd-dl-1", "status": "failed", "result": failure})
 				return
@@ -269,6 +277,24 @@ func TestExecFileFromServerRefusalsNeverSubmit(t *testing.T) {
 			assert.NotContains(t, s.steps, "command-submit")
 		})
 	}
+}
+
+func TestExecFileFromServerDeniedExitsNotApproved(t *testing.T) {
+	t.Parallel()
+	var s fileDownloadServer
+	s.denialCode = "account_not_resolved"
+	s.denialResult = "The execution account could not be resolved."
+	ts := newFileDownloadServer(&s, nil, "")
+	defer ts.Close()
+
+	stdout, stderr, exitCode := runExecHelper(t, ts.URL, "--file", "/opt/deploy.sh", "--from-server", "prod")
+
+	assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "stderr: %s", stderr)
+	assert.Empty(t, strings.TrimSuffix(stdout, "PASS\n"))
+	assert.Contains(t, stderr, "The execution account could not be resolved.")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	assert.Equal(t, []string{"download-create"}, s.steps)
 }
 
 // newHeldScriptServer parks a command line at awaiting_approval; suggestion,
