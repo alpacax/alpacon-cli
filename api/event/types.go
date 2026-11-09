@@ -8,6 +8,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 // phaseDescriptions humanizes server-classified error_phase identifiers.
@@ -58,7 +59,12 @@ type RemoteCommandError struct {
 	// by the server response this error is built from.
 	CommandID         string
 	ApprovalRequestID string
+	// Held is the open approval the command detail named, or the one the wait
+	// read last; nil when there is none or the server predates the field.
+	Held *utils.HeldRequest
 }
+
+func (e *RemoteCommandError) ErrorHeld() *utils.HeldRequest { return e.Held }
 
 // ClientTimeoutError is returned when the CLI gave up polling for the command
 // result before the server reported a terminal status.
@@ -158,6 +164,9 @@ type EventDetails struct {
 	// distinguishable from a status the server deliberately left empty.
 	SudoApprovalRequestID *string `json:"sudo_approval_request_id"`
 	SudoGrantStatus       *string `json:"sudo_grant_status"`
+	// Held is the open approval deciding this command's sudo. Null, or absent on
+	// an older server, says nothing about whether a wait has ended.
+	Held *utils.HeldRequest `json:"held"`
 	// FileExecutionSuggestion is set on a held command line the server reads as
 	// a script on the target; absent otherwise and on older servers.
 	FileExecutionSuggestion *FileExecutionSuggestion `json:"file_execution_suggestion"`
