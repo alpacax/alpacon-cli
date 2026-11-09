@@ -662,7 +662,7 @@ func processEditedData(originalData []byte, edit func(path string) error) (any, 
 
 	var jsonData any
 	if err := json.Unmarshal(editedContent, &jsonData); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse edited JSON: %w", err)
 	}
 	return jsonData, nil
 }
@@ -683,7 +683,7 @@ func openInEditor(path string) error {
 func editInTempFile(data []byte, edit func(path string) error) ([]byte, error) {
 	tmpl, err := os.CreateTemp("", "example.*.json")
 	if err != nil {
-		return nil, errors.New("failed to create temp file for update")
+		return nil, fmt.Errorf("create temp file: %w", err)
 	}
 	return editTempFile(tmpl, data, edit)
 }
@@ -693,17 +693,21 @@ func editTempFile(tmpl editFile, data []byte, edit func(path string) error) ([]b
 
 	if _, err := tmpl.Write(data); err != nil {
 		_ = tmpl.Close()
-		return nil, err
+		return nil, fmt.Errorf("write temp file: %w", err)
 	}
 	if err := tmpl.Close(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("close temp file: %w", err)
 	}
 
 	if err := edit(tmpl.Name()); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("run editor: %w", err)
 	}
 
-	return os.ReadFile(tmpl.Name())
+	edited, err := os.ReadFile(tmpl.Name())
+	if err != nil {
+		return nil, fmt.Errorf("read edited file: %w", err)
+	}
+	return edited, nil
 }
 
 // SplitPath splits a "server:/path" target into its server name and remote path.
