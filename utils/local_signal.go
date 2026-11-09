@@ -184,12 +184,12 @@ func signalRefusal(err error, command bool) {
 				if !ok || status.HTTPStatusCode() != http.StatusForbidden {
 					return
 				}
-			}
-			if !commandDenial(code, fields.Gate) {
-				return
-			}
-			if fields.Gate == "" {
-				fields.Gate = "work_session"
+				if !commandDenial(code, fields.Gate) {
+					return
+				}
+				if fields.Gate == "" {
+					fields.Gate = "work_session"
+				}
 			}
 		}
 		fields = responseSignalFields(e, fields)

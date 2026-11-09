@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/alpacax/alpacon-cli/pkg/configdir"
 	"golang.org/x/term"
@@ -108,6 +109,9 @@ func (e *Emitter) Emit(kind Kind, fields Fields) {
 		return
 	}
 	link := consoleLink(fields.ConsoleURL, e.WorkspaceURL, e.BaseDomain)
+	if utf8.RuneCountInString(body)+1+utf8.RuneCountInString(link) > 256 {
+		link = ""
+	}
 	bannerBody := body
 	if link != "" {
 		bannerBody += "\n" + link

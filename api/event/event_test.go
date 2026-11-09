@@ -2847,10 +2847,13 @@ func TestRejectedCommandLocalSignal(t *testing.T) {
 		{"non-lapse cause overrides expired flag", CommandRejectedError{Gate: "approval", Expired: true, Cause: RejectionCauseApprovalRejected}, true},
 		{"expired cause", CommandRejectedError{Gate: "approval", Cause: RejectionCauseApprovalExpired}, false},
 		{"cancelled", CommandRejectedError{Gate: "approval", Cause: "approval_cancelled"}, false},
-		{"unknown gate", CommandRejectedError{Gate: "future_gate", Cause: RejectionCauseApprovalRejected}, false},
-		{"network gate", CommandRejectedError{Gate: "network", Cause: RejectionCauseApprovalRejected}, false},
-		{"plan gate", CommandRejectedError{Gate: "plan", Cause: RejectionCauseApprovalRejected}, false},
-		{"missing gate", CommandRejectedError{Cause: RejectionCauseApprovalRejected}, false},
+		{"unknown gate", CommandRejectedError{Gate: "future_gate", Cause: RejectionCauseApprovalRejected}, true},
+		{"network gate", CommandRejectedError{Gate: "network", Cause: RejectionCauseApprovalRejected}, true},
+		{"plan gate", CommandRejectedError{Gate: "plan", Cause: RejectionCauseApprovalRejected}, true},
+		{"without rejection metadata", *(&EventDetails{Status: "rejected"}).Rejection(), true},
+		{"signature_invalid", *(&EventDetails{Status: "completed", CommandRejection: CommandRejection{RejectionCause: types.SentString{Value: RejectionCauseSignatureInvalid, Sent: true}}}).Rejection(), true},
+		{"unsigned_file", *(&EventDetails{Status: "rejected", CommandRejection: CommandRejection{RejectionCause: types.SentString{Value: "unsigned_file", Sent: true}}}).Rejection(), true},
+		{"account_bound_to_other_person", *(&EventDetails{Status: "rejected", CommandRejection: CommandRejection{RejectionCause: types.SentString{Value: "account_bound_to_other_person", Sent: true}}}).Rejection(), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -2860,6 +2863,9 @@ func TestRejectedCommandLocalSignal(t *testing.T) {
 			state := filepath.Join(home, ".alpacon", "state", "signals.json")
 			if tc.want {
 				assert.Contains(t, stderr, "==== ALPACON: COMMAND DENIED ====")
+				if tc.rejection.Gate == "" {
+					assert.NotContains(t, stderr, "gate")
+				}
 				data, err := os.ReadFile(state)
 				require.NoError(t, err)
 				var signals map[string]any

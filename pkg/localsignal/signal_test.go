@@ -486,6 +486,10 @@ func TestConsoleURLValidation(t *testing.T) {
 				want = tc.link
 			}
 			assert.Equal(t, want, consoleLink(tc.link, tc.workspace, tc.base))
+			_, bannerBody := Format(ApprovalPending, Fields{}, 0)
+			if utf8.RuneCountInString(bannerBody+"\n"+want) > 256 {
+				want = ""
+			}
 			var output bytes.Buffer
 			e := New(&output, nil, nil)
 			e.WorkspaceURL, e.BaseDomain = tc.workspace, tc.base
@@ -499,7 +503,7 @@ func TestConsoleURLValidation(t *testing.T) {
 				}
 				assert.Equal(t, capText(wantBody, 256), body)
 				args := platformNotificationArguments(ctx, title, body, link)
-				if !tc.keep {
+				if want == "" {
 					for _, arg := range args {
 						assert.NotContains(t, arg, tc.link)
 						assert.NotContains(t, arg, base64.StdEncoding.EncodeToString([]byte(tc.link)))
@@ -508,7 +512,7 @@ func TestConsoleURLValidation(t *testing.T) {
 				return nil
 			})
 			e.Emit(ApprovalPending, Fields{ConsoleURL: tc.link})
-			if !tc.keep {
+			if want == "" {
 				assert.NotContains(t, output.String(), tc.link)
 			} else {
 				_, bannerBody := Format(ApprovalPending, Fields{}, 0)
@@ -619,6 +623,45 @@ func TestPendingCommandWithoutExecutable(t *testing.T) {
 			t.Parallel()
 			_, body := Format(ApprovalPending, Fields{Command: true, Argv0: Argv0(tc.line), Server: "my-server", Account: "deploy", Session: "ses-1"}, 0)
 			assert.Equal(t, "Command on my-server as deploy is waiting for approval. Session ses-1. Open the approval or wait for an approver.", body)
+		})
+	}
+}
+
+func TestConsoleLinkBannerBodyLimit(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		size int
+		keep bool
+	}{
+		{"fits exactly", 256, true},
+		{"exceeds by one", 257, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var output bytes.Buffer
+			e := New(&output, nil, nil)
+			e.WorkspaceURL = "https://console.example"
+			e.statePath = func() (string, error) { return "", errors.New("no state") }
+			e.headless = func() bool { return false }
+			fields := Fields{Argv0: "sudo", Server: "my-server"}
+			_, body := Format(Denied, fields, 0)
+			prefix := e.WorkspaceURL + "/"
+			fields.ConsoleURL = prefix + strings.Repeat("x", tc.size-utf8.RuneCountInString(body)-1-len(prefix))
+			wantLink := ""
+			if tc.keep {
+				wantLink = fields.ConsoleURL
+			}
+			e.notifier = notifyFunc(func(_ context.Context, _, _, link string) error {
+				assert.Equal(t, wantLink, link)
+				return nil
+			})
+			e.Emit(Denied, fields)
+			wantBody := body
+			if tc.keep {
+				wantBody += "\n" + fields.ConsoleURL
+			}
+			assert.Equal(t, "==== ALPACON: COMMAND DENIED ====\n"+wantBody+"\n================================\n", output.String())
 		})
 	}
 }

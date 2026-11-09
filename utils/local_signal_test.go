@@ -56,6 +56,7 @@ func TestSignalRefusalClassification(t *testing.T) {
 	}{
 		{"file ACL with token code", &signalRefusalStub{code: "api_token_acl_not_allowed", gate: "file_acl"}, localsignal.Denied, "ses-1"},
 		{"Work Session fallback", &signalRefusalStub{code: WorkSessionRequired}, localsignal.Denied, "ses-1"},
+		{"missing gate", &signalRefusalStub{}, "", ""},
 		{"unknown gate", &signalRefusalStub{gate: "future_gate"}, "", ""},
 		{"network gate", &signalRefusalStub{gate: "network"}, "", ""},
 		{"gate refusal", &signalRefusalStub{code: "refused", gate: "risk"}, localsignal.Denied, "ses-1"},
