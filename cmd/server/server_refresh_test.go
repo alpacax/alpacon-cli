@@ -55,6 +55,8 @@ func TestRefreshServer_RetriesOnlyAnMFARefusal(t *testing.T) {
 					var body map[string]any
 					if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["action"] != "update_information" {
 						t.Errorf("unexpected action body: %v (%v)", body, err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
 					}
 					if posts.Add(1) == 1 {
 						w.WriteHeader(tt.firstStatus)
