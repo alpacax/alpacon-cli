@@ -90,7 +90,7 @@ func FetchAuthEnv(workspaceURL string, httpClient *http.Client) (*AuthEnvRespons
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode > http.StatusFound {
-		return nil, fmt.Errorf("response status: %s", resp.Status)
+		return nil, utils.WithHTTPStatus(fmt.Errorf("response status: %s", resp.Status), resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
