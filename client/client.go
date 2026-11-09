@@ -1260,15 +1260,20 @@ func errorExtraFields(body []byte) map[string]any {
 	if code := stringField(parsed, "code"); code == "command_dangerous_env" || code == "command_invalid_env" {
 		fields, _ := parsed["field_errors"].(map[string]any)
 		clean := make(map[string]any)
-		if message := stringField(parsed, "message"); message != "" {
+		if message := strings.TrimSpace(stringField(parsed, "message")); message != "" && message != "Invalid input." {
 			clean["message"] = message
 		}
 		if messages := fieldErrorMessages(map[string]any{"non_field_errors": fields["non_field_errors"]}); len(messages) > 0 {
 			entries := make([]map[string]string, 0, len(messages))
 			for _, message := range messages {
+				if message == "" || message == "Invalid input." {
+					continue
+				}
 				entries = append(entries, map[string]string{"code": code, "message": message})
 			}
-			clean["field_errors"] = map[string]any{"non_field_errors": entries}
+			if len(entries) > 0 {
+				clean["field_errors"] = map[string]any{"non_field_errors": entries}
+			}
 		}
 		parsed = clean
 	}
@@ -1301,12 +1306,20 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 	// Environment refusals name keys and reasons in these messages. Do not render
 	// other validation fields, which may contain environment values.
 	if code == "command_dangerous_env" || code == "command_invalid_env" {
-		if message := strings.TrimSpace(stringField(parsed, "message")); message != "" {
+		if message := strings.TrimSpace(stringField(parsed, "message")); message != "" && message != "Invalid input." {
 			return message, code, source, gate, axis, missing, true
 		}
 		if fields, ok := parsed["field_errors"].(map[string]any); ok {
 			if messages := fieldErrorMessages(map[string]any{"non_field_errors": fields["non_field_errors"]}); len(messages) > 0 {
-				return strings.Join(messages, "; "), code, source, gate, axis, missing, true
+				var meaningful []string
+				for _, message := range messages {
+					if message != "" && message != "Invalid input." {
+						meaningful = append(meaningful, message)
+					}
+				}
+				if len(meaningful) > 0 {
+					return strings.Join(meaningful, "; "), code, source, gate, axis, missing, true
+				}
 			}
 		}
 		return codeOnlyMessage(code), code, source, gate, axis, missing, true
@@ -1488,6 +1501,10 @@ func codeOnlyMessage(code string) string {
 // bare code would not; known is false for a code it has none for.
 func codeSentence(code string) (sentence string, known bool) {
 	switch code {
+	case "command_dangerous_env":
+		return "The server refused environment variables that can change which program runs. Remove them, or set them inside the command (env NAME=value cmd).", true
+	case "command_invalid_env":
+		return "The server refused the command's environment: names must use letters, digits and underscores, values must be strings of at most 4096 characters, and at most 64 variables are allowed.", true
 	case utils.APINotFound:
 		return "the requested resource was not found", true
 	case utils.APIRateLimited:
