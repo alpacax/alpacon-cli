@@ -42,7 +42,7 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 	}{
 		{WorkSessionRequired, "no WorkSession selected", "work-session ls", true, true},
 		{WorkSessionNotActive, "not active", "work-session current", true, true},
-		{WorkSessionExpired, "has expired", "work-session extend", true, false},
+		{WorkSessionExpired, "has expired", "work-session create", true, false},
 		{WorkSessionScopeNotAllowed, "does not include this scope", "work-session create", true, false},
 		{WorkSessionServerNotAllowed, "target server is not in this session", "work-session create", true, false},
 		{WorkSessionAssigneeMismatch, "assigned to another principal", "work-session use", true, true},
@@ -136,8 +136,6 @@ func TestBuildWorkSessionErrorEnvelope_WithActiveWS(t *testing.T) {
 
 	assert.NotNil(t, envelope.Context.CurrentWorksession)
 	assert.Equal(t, "abc-123-uuid", *envelope.Context.CurrentWorksession)
-	// Expired case: <ID> placeholder must be substituted with the known active UUID.
-	assert.Contains(t, nextActionCommands(envelope.NextActions), "alpacon work-session extend abc-123-uuid")
 	for _, action := range envelope.NextActions {
 		assert.NotContains(t, action.Command, "<ID>")
 	}
@@ -182,11 +180,41 @@ func nextActionCommands(actions []NextAction) []string {
 	return cmds
 }
 
-func TestBuildWorkSessionErrorEnvelope_ExpiredWithoutActiveWS(t *testing.T) {
+func TestWorkSessionExpiredSuggestsNewSessionNotExtend(t *testing.T) {
 	t.Parallel()
-	envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, "webftp", "srv-2", "Browser login", "", "")
+	const (
+		humanCreate = `alpacon work-session create --scope command --server srv-1 --expires-in 1h --purpose "<intent>" --use`
+		agentCreate = `alpacon work-session create --scope command --server srv-1 --expires-in 1h --purpose "<intent>" --requester-type agent`
+		kubeLogin   = "alpacon kube login prod-east"
+		kubeCreate  = `alpacon work-session create --scope kube --cluster prod-east --expires-in 1h --purpose "<intent>" --requester-type agent`
+	)
+	tests := []struct {
+		name      string
+		operation string
+		target    string
+		activeWS  string
+		want      []string
+	}{
+		{"exec_without_session", OperationCommand, "srv-1", "", []string{humanCreate, agentCreate}},
+		{"exec_with_session", OperationCommand, "srv-1", "abc-123-uuid", []string{humanCreate, agentCreate}},
+		{"kube_without_session", OperationKube, "prod-east", "", []string{kubeLogin, kubeCreate}},
+		{"kube_with_session", OperationKube, "prod-east", "abc-123-uuid", []string{kubeLogin, kubeCreate}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	assert.Contains(t, nextActionCommands(envelope.NextActions), "alpacon work-session extend <ID>")
+			text := buildWorkSessionDiagnostic(WorkSessionExpired, tt.operation, tt.target, "Browser login", tt.activeWS, "")
+			envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, tt.operation, tt.target, "Browser login", tt.activeWS, "")
+
+			assert.Equal(t, tt.want, diagnosticNextCommands(t, text))
+			assert.NotContains(t, text, "work-session extend")
+			assert.Equal(t, tt.want, nextActionCommands(envelope.NextActions))
+			body, err := json.Marshal(envelope)
+			require.NoError(t, err)
+			assert.NotContains(t, string(body), "work-session extend")
+		})
+	}
 }
 
 func TestBuildWorkSessionErrorEnvelope_RequiredKeepsPlaceholder(t *testing.T) {
@@ -231,8 +259,8 @@ func kubeWorkSessionCases() []struct {
 		{WorkSessionAssigneeMismatch, "", reuseOrCreate},
 		{WorkSessionNotActive, "", []string{"alpacon kube login prod-east --work-session <ID>", ls, login, agentCreate}},
 		{WorkSessionNotActive, "abc-123-uuid", []string{"alpacon kube login prod-east --work-session abc-123-uuid", ls, login, agentCreate}},
-		{WorkSessionExpired, "", []string{"alpacon work-session extend <ID>", login, agentCreate}},
-		{WorkSessionExpired, "abc-123-uuid", []string{"alpacon work-session extend abc-123-uuid", login, agentCreate}},
+		{WorkSessionExpired, "", []string{login, agentCreate}},
+		{WorkSessionExpired, "abc-123-uuid", []string{login, agentCreate}},
 		{WorkSessionScopeNotAllowed, "", reuseOrCreate},
 		{WorkSessionServerNotAllowed, "", reuseOrCreate},
 		{WorkSessionClusterNotAllowed, "", reuseOrCreate},

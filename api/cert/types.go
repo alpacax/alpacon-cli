@@ -36,7 +36,6 @@ type AuthorityRequest struct {
 	DefaultValidDays int    `json:"default_valid_days"`
 	MaxValidDays     int    `json:"max_valid_days"`
 	Agent            string `json:"agent"`
-	Owner            string `json:"owner"`
 	Install          bool   `json:"install"`
 }
 
@@ -49,7 +48,6 @@ type AuthorityCreateResponse struct {
 	DefaultValidDays int                 `json:"default_valid_days"`
 	MaxValidDays     int                 `json:"max_valid_days"`
 	Agent            types.ServerSummary `json:"agent"`
-	Owner            types.UserSummary   `json:"owner"`
 	Instruction      string              `json:"instruction"`
 	UpdatedAt        time.Time           `json:"updated_at"`
 }
@@ -63,7 +61,6 @@ type AuthorityResponse struct {
 	DefaultValidDays int                 `json:"default_valid_days"`
 	MaxValidDays     int                 `json:"max_valid_days"`
 	Agent            types.ServerSummary `json:"agent"`
-	Owner            types.UserSummary   `json:"owner"`
 	UpdatedAt        time.Time           `json:"updated_at"`
 	SignedAt         time.Time           `json:"signed_at"`
 	ExpiresAt        time.Time           `json:"expires_at"`
@@ -78,7 +75,6 @@ type AuthorityAttributes struct {
 	DefaultValidDays int    `json:"default_valid_days" table:"Default Valid Days"`
 	MaxValidDays     int    `json:"max_valid_days" table:"Max Valid Days"`
 	Server           string `json:"server"`
-	Owner            string `json:"owner"`
 	SignedAt         string `json:"signed_at" table:"Signed At"`
 }
 
@@ -96,16 +92,14 @@ type AuthorityDetails struct {
 	IsConnected      bool                `json:"is_connected"`
 	Status           string              `json:"status"`
 	Agent            types.ServerSummary `json:"agent"`
-	Owner            types.UserSummary   `json:"owner"`
 	UpdatedAt        time.Time           `json:"updated_at"`
 	SignedAt         time.Time           `json:"signed_at"`
 	ExpiresAt        time.Time           `json:"expires_at"`
 }
 
 type AuthoritySummary struct {
-	ID    string            `json:"id"`
-	Name  string            `json:"name"`
-	Owner types.UserSummary `json:"owner"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type SignRequestDetail struct {

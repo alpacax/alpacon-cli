@@ -893,6 +893,9 @@ func completeSingleDownloadWith(ac *client.AlpaconClient, serverID string, postB
 	}); err != nil {
 		return 0, err
 	}
+	if status.IsRejected() {
+		return 0, status.Rejection()
+	}
 
 	if status.Status == "stuck" || status.Status == "error" {
 		return 0, fmt.Errorf("command failed with status: %s", status.Status)
@@ -962,6 +965,9 @@ func completeBulkDownload(ac *client.AlpaconClient, serverID string, respBody []
 		return err
 	}); err != nil {
 		return err
+	}
+	if status.IsRejected() {
+		return status.Rejection()
 	}
 
 	if status.Status == "stuck" || status.Status == "error" {

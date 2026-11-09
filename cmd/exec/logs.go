@@ -95,7 +95,7 @@ Run the command again later to check for completion.`,
 			rejected := details.Rejection()
 			utils.SignalRefusal(utils.WithSignalFields(rejected, localsignal.Fields{Command: true, Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username}, alpaconClient))
 			// A script-body refusal has file-execution guidance of its own.
-			if rejected.Cause == event.RejectionCauseUseFileExecution {
+			if rejected.WantsFileExecution() {
 				accountFlags, accountNote := logsAccountFlags(details)
 				reportUseFileExecution(rejected, details.Server.Name, accountFlags, false, accountNote)
 				return

@@ -205,6 +205,11 @@ func downloadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, workSes
 		err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), ac)
 		utils.SignalRefusal(err)
 		utils.HandleWorkSessionError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID)
+		var rejected *event.CommandRejectedError
+		if errors.As(err, &rejected) {
+			reportCommandRejection(err, rejected)
+			return event.FileExecution{}
+		}
 		// reportCodedRefusal writes raw and appends its own period; drop one the
 		// agent's message ends with.
 		msg = strings.TrimSuffix(utils.SanitizeTerminalText(fmt.Sprintf("cannot read the script from '%s' on the server: %s", label, err)), ".")
@@ -456,7 +461,7 @@ func runAsFlags(parsed RemoteExecArgs) []string {
 // account flags the guidance repeats.
 func HandleUseFileExecutionRefusal(err error, parsed RemoteExecArgs) bool {
 	var rejected *event.CommandRejectedError
-	if !errors.As(err, &rejected) || rejected.Cause != event.RejectionCauseUseFileExecution {
+	if !errors.As(err, &rejected) || !rejected.WantsFileExecution() {
 		return false
 	}
 	reportUseFileExecution(rejected, parsed.Server, runAsFlags(parsed), len(parsed.Env) > 0, "")

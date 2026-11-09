@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/alpacax/alpacon-cli/api/event"
 	ftpapi "github.com/alpacax/alpacon-cli/api/ftp"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
@@ -90,6 +91,10 @@ redirections, or '&&' will not work.`,
 		if err != nil {
 			printPreservedTempPath(result)
 			utils.HandleWorkSessionError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID)
+			var rejected *event.CommandRejectedError
+			if errors.As(err, &rejected) {
+				utils.CliErrorEnvelopeWithExitCode(rejected.ExitCode(), "edit", err, "Failed to edit '%s:%s': %s", target.Server, target.RemotePath, rejected)
+			}
 			if refusedForWantOfForce(err, utils.IsInteractiveShell()) {
 				err = utils.MarkUsageError(err)
 			}

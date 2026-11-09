@@ -212,7 +212,13 @@ func GetEventList(ac *client.AlpaconClient, tail int, serverName string, userNam
 	for _, event := range events {
 		status := utils.BoolPointerToString(event.Success)
 		cell := status
-		if event.IsRejected() {
+		if IsDeniedStatus(event.Status) {
+			reason := event.Rejection().ErrorCode()
+			if reason == "" {
+				reason = "cause not recorded"
+			}
+			cell = "denied: " + utils.SanitizeTerminalText(reason)
+		} else if event.IsRejected() {
 			cell = event.Label()
 		}
 		eventList = append(eventList, EventAttributes{
@@ -225,6 +231,7 @@ func GetEventList(ac *client.AlpaconClient, tail int, serverName string, userNam
 			Operator:              event.RequestedBy.Name,
 			RequestedAt:           utils.TimeUtils(event.AddedAt),
 			ApprovedFileExecution: event.ApprovedFileExecution,
+			DenialCode:            event.DenialCode,
 			CommandRejection:      event.CommandRejection,
 		})
 	}
@@ -615,6 +622,10 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 
 	// Runs on whichever terminal signal arrives first, the fin event or the poll.
 	finish := func(details EventDetails) error {
+		if IsDeniedStatus(details.Status) {
+			listener.Stop()
+			return errorFromDetails(cmdID, details)
+		}
 		// select picks among ready cases at random, so delivered chunks may still be queued.
 		for delivered := true; delivered; {
 			select {
@@ -870,6 +881,9 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID api.PathID, out io
 	details, err := pollCommandExecution(ac, cmdID, execTimeout(), tick, waitApproval, pollSeams{})
 	if err != nil {
 		return commandPollError(cmdID, err)
+	}
+	if IsDeniedStatus(details.Status) {
+		return errorFromDetails(cmdID, details)
 	}
 	output, oerr := resolveCommandOutputByPathID(ac, cmdID, details.Result)
 	if output != "" {

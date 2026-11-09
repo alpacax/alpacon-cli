@@ -2054,7 +2054,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 		},
 		{
 			name:     "unrecognized status returns unexpected-status error",
-			terminal: EventDetails{Status: "denied"},
+			terminal: EventDetails{Status: "future_status"},
 			check: func(t *testing.T, err error) {
 				t.Helper()
 				require.Error(t, err)
@@ -2950,10 +2950,13 @@ func TestGetEventListShowsRejectionInStatusCell(t *testing.T) {
 		`{"id":"3","status":"rejected","success":null,"server":{"name":"prod"}}`,
 		`{"id":"4","status":"completed","success":true,"rejection_cause":null,"rejection_gate":null,"server":{"name":"prod"}}`,
 		`{"id":"5","status":"completed","success":false,"rejection_cause":"signature_invalid","rejection_gate":null,"server":{"name":"prod"}}`,
+		`{"id":"6","status":"denied","success":null,"denial_code":"account_not_resolved","server":{"name":"prod"}}`,
+		`{"id":"7","status":"denied","success":null,"rejection_cause":"risk_denied","server":{"name":"prod"}}`,
+		`{"id":"8","status":"denied","success":null,"server":{"name":"prod"}}`,
 	}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"count":5,"results":[` + strings.Join(rows, ",") + `]}`))
+		_, _ = w.Write([]byte(`{"count":8,"results":[` + strings.Join(rows, ",") + `]}`))
 	}))
 	defer ts.Close()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
@@ -2961,7 +2964,7 @@ func TestGetEventListShowsRejectionInStatusCell(t *testing.T) {
 	list, err := GetEventList(ac, 10, "", "")
 
 	require.NoError(t, err)
-	require.Len(t, list, 5)
+	require.Len(t, list, 8)
 	assert.Equal(t, "rejected: risk_denied, gate risk", list[0].StatusCell)
 	assert.Equal(t, "null", list[0].Status)
 	assert.Equal(t, types.SentString{Value: "risk_denied", Sent: true}, list[0].RejectionCause)
@@ -2974,6 +2977,10 @@ func TestGetEventListShowsRejectionInStatusCell(t *testing.T) {
 	assert.Equal(t, "true", list[3].Status)
 	assert.Equal(t, "rejected: signature_invalid", list[4].StatusCell)
 	assert.Equal(t, "false", list[4].Status)
+	assert.Equal(t, "denied: account_not_resolved", list[5].StatusCell)
+	assert.Equal(t, types.SentString{Value: "account_not_resolved", Sent: true}, list[5].DenialCode)
+	assert.Equal(t, "denied: risk_denied", list[6].StatusCell)
+	assert.Equal(t, "denied: cause not recorded", list[7].StatusCell)
 }
 
 func TestEventAttributesJSONKeepsStatusAndSentNulls(t *testing.T) {
@@ -2991,6 +2998,15 @@ func TestEventAttributesJSONKeepsStatusAndSentNulls(t *testing.T) {
 				CommandRejection: rejectionOf(types.SentString{Value: "risk_denied", Sent: true}, types.SentString{Value: "risk", Sent: true}),
 			},
 			want: `{"server":"","shell":"","command":"","result":"","status":"null","operator":"","requested_at":"","rejection_cause":"risk_denied","rejection_gate":"risk"}`,
+		},
+		{
+			name: "denied row keeps its denial code",
+			row: EventAttributes{
+				Status:     "null",
+				StatusCell: "denied: account_not_resolved",
+				DenialCode: types.SentString{Value: "account_not_resolved", Sent: true},
+			},
+			want: `{"server":"","shell":"","command":"","result":"","status":"null","operator":"","requested_at":"","denial_code":"account_not_resolved"}`,
 		},
 		{
 			name: "sent nulls stay null",
@@ -3039,4 +3055,29 @@ func TestEventAttributesTableKeepsItsColumns(t *testing.T) {
 	assert.Contains(t, out, "rejected: risk_denied, gate risk")
 	assert.NotContains(t, out, "null")
 	assert.NotContains(t, out, "REJECTION")
+}
+
+func TestDeniedCommandDoesNotPrintRefusalAsRemoteOutput(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		sessionStatus int
+	}{{"stream", 0}, {"poll fallback", http.StatusInternalServerError}} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var output bytes.Buffer
+				var submissions atomic.Int32
+				ac := newStreamingServers(t, streamingServerConfig{
+					cmdID: "cmd-1", serverID: "srv-1", sessionStatus: tc.sessionStatus,
+					terminal: EventDetails{Status: "denied", Result: "refused\x1b[2J\u202ehidden"},
+					submits:  &submissions,
+				})
+
+				err := runCommandStreamingWithWriter(ac, "srv", "whoami", "", "", nil, "", "", &output)
+
+				require.Error(t, err)
+				assert.Empty(t, output.String(), "a refusal reason belongs in the sanitized error, not raw command output")
+				assert.Equal(t, int32(1), submissions.Load(), "a refused command must not be resubmitted")
+			})
+		})
+	}
 }
