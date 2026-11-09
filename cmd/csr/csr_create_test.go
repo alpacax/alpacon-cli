@@ -142,8 +142,8 @@ func TestCreateSignRequestErrorText(t *testing.T) {
 			name: "invalid period with the CA default",
 			body: `{"code":"cert_invalid_period"}`,
 			want: "The CA's default validity exceeds its own maximum (Default and Max Valid Days in " +
-				"'alpacon authority ls'). Request a validity within the maximum, or ask the CA's owner to " +
-				"correct its settings.",
+				"'alpacon authority ls'). Request a validity within the maximum, or ask someone with permission " +
+				"to update the CA to correct its settings.",
 		},
 		{
 			name:      "another coded 400 falls back",
