@@ -43,6 +43,14 @@ var (
 	ansiEscapeRE = regexp.MustCompile(`\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|[PX^_][^\x1b]*\x1b\\|\[[\x30-\x3f]*[\x20-\x2f]*[@-~]|[\x20-\x2f]*[\x40-\x7e])`)
 )
 
+// ErrNoChanges indicates that the editor returned byte-identical data.
+var ErrNoChanges = errors.New("no changes made")
+
+type editFile interface {
+	io.WriteCloser
+	Name() string
+}
+
 // ShowLogo renders the Pacabot mascot with up to 3 lines of text, beside the art when the terminal
 // is wide enough and below it otherwise, so wrapped lines cannot break the half-block pixel art.
 //
@@ -624,66 +632,78 @@ func SanitizeTerminalBlockKeepingTabs(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-// ProcessEditedData facilitates user modifications to original data,
-// formats it, supports editing via a temp file, compares the edited data against the original,
-// and parses it into JSON. If no changes are made, the update is aborted and an error is returned.
+// ExitIfNoChanges prints the no-change notice and exits 0 when err is ErrNoChanges.
+func ExitIfNoChanges(err error) {
+	if errors.Is(err, ErrNoChanges) {
+		CliInfoWithExit("No changes made. Aborting update.")
+	}
+}
+
+// ProcessEditedData opens originalData as pretty JSON in the editor and returns the edited JSON,
+// or ErrNoChanges when the bytes are unchanged.
 func ProcessEditedData(originalData []byte) (any, error) {
+	return processEditedData(originalData, openInEditor)
+}
+
+func processEditedData(originalData []byte, edit func(path string) error) (any, error) {
 	prettyJSON, err := PrettyJSON(originalData)
 	if err != nil {
 		return nil, err
 	}
 
-	tmpFile, err := CreateAndEditTempFile(prettyJSON.Bytes())
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = os.Remove(tmpFile) }()
-
-	editedContent, err := os.ReadFile(tmpFile)
+	editedContent, err := editInTempFile(prettyJSON.Bytes(), edit)
 	if err != nil {
 		return nil, err
 	}
 
 	if bytes.Equal(prettyJSON.Bytes(), editedContent) {
-		CliInfoWithExit("No changes made. Aborting update.")
+		return nil, ErrNoChanges
 	}
 
 	var jsonData any
-	err = json.Unmarshal(editedContent, &jsonData)
-	if err != nil {
+	if err := json.Unmarshal(editedContent, &jsonData); err != nil {
 		return nil, err
 	}
-
 	return jsonData, nil
 }
 
-func CreateAndEditTempFile(data []byte) (string, error) {
-	tmpl, err := os.CreateTemp("", "example.*.json")
-	if err != nil {
-		return "", errors.New("failed to create temp file for update")
-	}
-	defer func() { _ = tmpl.Close() }()
-
-	if _, err = tmpl.Write(data); err != nil {
-		return "", err
-	}
-
-	if err = tmpl.Close(); err != nil {
-		return "", err
-	}
-
+// openInEditor runs $EDITOR, or vi when it is unset, on path.
+func openInEditor(path string) error {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = "vi"
 	}
-	cmd := exec.Command(editor, tmpl.Name())
+	cmd := exec.Command(editor, path)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
-	if err = cmd.Run(); err != nil {
-		return "", err
+	return cmd.Run()
+}
+
+// editInTempFile removes the temporary record on every return path.
+func editInTempFile(data []byte, edit func(path string) error) ([]byte, error) {
+	tmpl, err := os.CreateTemp("", "example.*.json")
+	if err != nil {
+		return nil, errors.New("failed to create temp file for update")
+	}
+	return editTempFile(tmpl, data, edit)
+}
+
+func editTempFile(tmpl editFile, data []byte, edit func(path string) error) ([]byte, error) {
+	defer func() { _ = os.Remove(tmpl.Name()) }()
+
+	if _, err := tmpl.Write(data); err != nil {
+		_ = tmpl.Close()
+		return nil, err
+	}
+	if err := tmpl.Close(); err != nil {
+		return nil, err
 	}
 
-	return tmpl.Name(), nil
+	if err := edit(tmpl.Name()); err != nil {
+		return nil, err
+	}
+
+	return os.ReadFile(tmpl.Name())
 }
 
 // SplitPath splits a "server:/path" target into its server name and remote path.

@@ -37,6 +37,7 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 
 		data, err := workspace.EditAuthentication(alpaconClient)
 		if err != nil {
+			utils.ExitIfNoChanges(err)
 			utils.CliErrorWithExit("Failed to prepare authentication update: %s.", err)
 		}
 

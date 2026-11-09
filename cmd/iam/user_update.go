@@ -35,6 +35,7 @@ one of them never exits 0, whether or not the rest of the edit was applied.`,
 
 		userID, edit, err := iam.PrepareUserUpdate(alpaconClient, userName)
 		if err != nil {
+			utils.ExitIfNoChanges(err)
 			utils.CliErrorWithExit("Failed to update the user info: %s.", err)
 		}
 

@@ -35,6 +35,7 @@ var authorityUpdateCmd = &cobra.Command{
 
 		authorityDetail, err := cert.UpdateAuthority(alpaconClient, authorityID)
 		if err != nil {
+			utils.ExitIfNoChanges(err)
 			utils.CliErrorWithExit("Failed to update the authority info: %s.", err)
 		}
 
