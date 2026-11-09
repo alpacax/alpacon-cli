@@ -703,3 +703,110 @@ func TestGetAuthorityIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 		})
 	}
 }
+
+// The list route names the approver and the denier by user ID; only the detail route expands them.
+func TestGetRevokeRequestList_ListsDecidedRequests(t *testing.T) {
+	t.Parallel()
+
+	const listPage = `
+	{
+	  "count": 3,
+	  "next": null,
+	  "results": [
+	    {
+	      "id": "req-approved",
+	      "certificate": "cert-1",
+	      "authority": {
+	        "id": "ca-1",
+	        "name": "my-ca"
+	      },
+	      "common_name": "a.example.com",
+	      "serial_number": "01",
+	      "reason": 0,
+	      "status": "revoked",
+	      "requested_reason": "",
+	      "requested_by": {
+	        "id": "user-1",
+	        "username": "alice",
+	        "name": "Alice"
+	      },
+	      "approved_by": "550e8400-e29b-41d4-a716-446655440000",
+	      "denied_by": null,
+	      "added_at": "2026-01-02T03:04:05Z",
+	      "error_message": "",
+	      "handled_at": "2026-01-02T03:05:00Z"
+	    },
+	    {
+	      "id": "req-denied",
+	      "certificate": "cert-2",
+	      "authority": {
+	        "id": "ca-1",
+	        "name": "my-ca"
+	      },
+	      "common_name": "b.example.com",
+	      "serial_number": "02",
+	      "reason": 0,
+	      "status": "denied",
+	      "requested_reason": "",
+	      "requested_by": {
+	        "id": "user-1",
+	        "username": "alice",
+	        "name": "Alice"
+	      },
+	      "approved_by": null,
+	      "denied_by": "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47",
+	      "added_at": "2026-01-02T03:04:05Z",
+	      "error_message": "",
+	      "handled_at": "2026-01-02T03:05:00Z"
+	    },
+	    {
+	      "id": "req-open",
+	      "certificate": "cert-3",
+	      "authority": {
+	        "id": "ca-1",
+	        "name": "my-ca"
+	      },
+	      "common_name": "c.example.com",
+	      "serial_number": "03",
+	      "reason": 0,
+	      "status": "requested",
+	      "requested_reason": "",
+	      "requested_by": {
+	        "id": "user-1",
+	        "username": "alice",
+	        "name": "Alice"
+	      },
+	      "approved_by": null,
+	      "denied_by": null,
+	      "added_at": "2026-01-02T03:04:05Z",
+	      "error_message": "",
+	      "handled_at": null
+	    }
+	  ]
+	}
+	`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(listPage))
+	}))
+	defer ts.Close()
+
+	requests, err := GetRevokeRequestList(newTestClient(ts), "", "")
+
+	require.NoError(t, err)
+	type row struct {
+		ID          string
+		Status      string
+		Authority   string
+		RequestedBy string
+	}
+	var got []row
+	for _, r := range requests {
+		got = append(got, row{r.ID, r.Status, r.Authority, r.RequestedBy})
+	}
+	assert.Equal(t, []row{
+		{"req-approved", "revoked", "my-ca", "Alice"},
+		{"req-denied", "denied", "my-ca", "Alice"},
+		{"req-open", "requested", "my-ca", "Alice"},
+	}, got)
+}
