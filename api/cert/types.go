@@ -174,20 +174,18 @@ type RevokeRequestCreate struct {
 }
 
 type RevokeRequestResponse struct {
-	ID              string             `json:"id"`
-	Certificate     string             `json:"certificate"`
-	Authority       AuthoritySummary   `json:"authority"`
-	CommonName      string             `json:"common_name"`
-	SerialNumber    string             `json:"serial_number"`
-	Reason          int                `json:"reason"`
-	Status          string             `json:"status"`
-	RequestedReason string             `json:"requested_reason"`
-	RequestedBy     types.UserSummary  `json:"requested_by"`
-	ApprovedBy      *types.UserSummary `json:"approved_by"`
-	DeniedBy        *types.UserSummary `json:"denied_by"`
-	AddedAt         time.Time          `json:"added_at"`
-	ErrorMessage    string             `json:"error_message"`
-	HandledAt       *time.Time         `json:"handled_at"`
+	ID              string            `json:"id"`
+	Certificate     string            `json:"certificate"`
+	Authority       AuthoritySummary  `json:"authority"`
+	CommonName      string            `json:"common_name"`
+	SerialNumber    string            `json:"serial_number"`
+	Reason          int               `json:"reason"`
+	Status          string            `json:"status"`
+	RequestedReason string            `json:"requested_reason"`
+	RequestedBy     types.UserSummary `json:"requested_by"`
+	AddedAt         time.Time         `json:"added_at"`
+	ErrorMessage    string            `json:"error_message"`
+	HandledAt       *time.Time        `json:"handled_at"`
 }
 
 type RevokeRequestAttributes struct {
