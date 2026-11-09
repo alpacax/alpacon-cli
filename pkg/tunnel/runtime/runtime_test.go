@@ -910,3 +910,24 @@ func TestDialTunnelReportsTheDialErrorWhenTheLookupHangs(t *testing.T) {
 	require.EqualError(t, err, "failed to connect to proxy server: websocket: bad handshake (status 503 Service Unavailable)")
 	assert.Equal(t, int32(1), lookups.Load())
 }
+
+func TestStartNamesTheFailedCreateOnce(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/" {
+			_, _ = w.Write([]byte(`{"count": 1, "results": [{"id": "a1b2c3d4-1234-5678-abcd-000000000000", "name": "my-db"}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"detail": "unavailable"}`))
+	}))
+	t.Cleanup(ts.Close)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	rt, err := Start(StartOptions{Client: ac, ServerName: "my-db", RemotePort: "5432"})
+
+	assert.Nil(t, rt)
+	require.EqualError(t, err, "failed to create tunnel session: unavailable")
+	assert.True(t, utils.IsSubmissionError(err), "a refused create must stay tagged for the MFA retry: %v", err)
+}
