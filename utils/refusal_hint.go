@@ -158,12 +158,8 @@ func refusalNext(err error) (next string, underAPIToken bool) {
 	return "", false
 }
 
-// RefusalNextActions is the server's guidance for a refused request, shown
-// under the error line: each distinct hint as sent, then where to read the
-// request's state ("next"), then the Retry-After wait of a gated refusal other
-// than a plan limit, then a held request's reference, deadline and status path.
-// Nil when err carries none. Under an API token "next" is text only, since a
-// path the server names may refuse token authentication.
+// RefusalNextActions returns server hints, status paths, retry delays and held approvals.
+// A refusal's "next" is text only under an API token because that path may reject it.
 func RefusalNextActions(err error) []NextAction {
 	var actions []NextAction
 	for _, hint := range refusalHints(err) {

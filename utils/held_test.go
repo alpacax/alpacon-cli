@@ -11,6 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	heldApprovalRequest = "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47"
+	heldStatusPath      = "/api/events/commands/550e8400-e29b-41d4-a716-446655440000/"
+)
+
 // heldError carries a held request the way a command detail's error does.
 type heldError struct {
 	held *HeldRequest
@@ -23,11 +28,6 @@ func (e *heldError) ErrorHeld() *HeldRequest { return e.held }
 type heldUnderAPIToken struct{ heldError }
 
 func (*heldUnderAPIToken) ErrorNextUnderAPIToken() bool { return true }
-
-const (
-	heldApprovalRequest = "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47"
-	heldStatusPath      = "/api/events/commands/550e8400-e29b-41d4-a716-446655440000/"
-)
 
 func heldAt(expiresAt *time.Time, statusPath string) *HeldRequest {
 	return &HeldRequest{ApprovalRequest: heldApprovalRequest, ExpiresAt: expiresAt, StatusPath: statusPath}
@@ -50,9 +50,9 @@ func TestRefusalNextActions_Held(t *testing.T) {
 			want: []NextAction{reference, {Description: "The approval must be decided by 2999-11-06T17:20:00+09:00"}, wait},
 		},
 		{
-			name: "a past deadline asks for a new approval",
+			name: "a past deadline asks for a new approval without waiting on the expired request",
 			err:  &heldError{held: heldAt(&past, heldStatusPath)},
-			want: []NextAction{reference, {Description: "The approval deadline (2001-11-06T17:20:00+09:00) has passed; an approval given now cannot be used, so re-run the command to request a new one"}, wait},
+			want: []NextAction{reference, {Description: "The approval deadline (2001-11-06T17:20:00+09:00) has passed; an approval given now cannot be used, so re-run the command to request a new one"}},
 		},
 		{
 			name: "no known deadline prints none",
