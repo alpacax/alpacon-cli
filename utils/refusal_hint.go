@@ -112,9 +112,15 @@ type tokenNextCarrier interface {
 	ErrorNextUnderAPIToken() bool
 }
 
-// selfRelativePath matches a path whose every segment is plain characters that
+// apiPathArgumentPattern matches a path whose every segment is plain characters that
 // no shell, terminal or URL parser reads differently, with no "." or ".." segment.
-var selfRelativePath = regexp.MustCompile(`^(/[A-Za-z0-9_~-][A-Za-z0-9_.~-]*)+/?$`)
+var apiPathArgumentPattern = regexp.MustCompile(`^(/[A-Za-z0-9_~-][A-Za-z0-9_.~-]*)+/?$`)
+
+// isSafeAPIPathArgument reports whether path is safe to hand to `alpacon api` as
+// one shell word: within MaxServerHintBytes and matching apiPathArgumentPattern.
+func isSafeAPIPathArgument(path string) bool {
+	return len(path) <= MaxServerHintBytes && apiPathArgumentPattern.MatchString(path)
+}
 
 // ParseRefusalNext returns the "next" string a 402/403/405/429 body carries,
 // or "" on any other status, where a field of that name is a request field.
@@ -143,7 +149,7 @@ func refusalNext(err error) (next string, underAPIToken bool) {
 		if next == "" {
 			continue
 		}
-		if len(next) > MaxServerHintBytes || !selfRelativePath.MatchString(next) {
+		if !isSafeAPIPathArgument(next) {
 			return "", false
 		}
 		tokenCarrier, ok := e.(tokenNextCarrier)
