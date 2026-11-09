@@ -106,7 +106,7 @@ with the saved target as the default. Non-interactive login requires a HOST or
 
 		envInfo, err := auth0.FetchAuthEnv(workspaceURL, httpClient)
 		if err != nil {
-			if strings.Contains(err.Error(), "404") {
+			if isWorkspaceNotFound(err) {
 				utils.CliErrorWithExit("Workspace not found. Please check your workspace name and region")
 			}
 			utils.CliErrorWithExit("Workspace '%s' is unreachable or returned an error: %v", workspaceURL, err)
@@ -468,6 +468,10 @@ func validateHostTarget(host string) error {
 
 func unsupportedHostTargetError() error {
 	return errors.New("URL credentials, paths, queries, and fragments are not supported, and the scheme must be http or https. For Alpacon Cloud use 'alpacon login --workspace <name> --region <region>'; for self-hosted pass only the host, with optional http/https scheme and port (e.g. 'alpacon login alpacon.example.com')")
+}
+
+func isWorkspaceNotFound(err error) bool {
+	return utils.HTTPStatusCode(err) == http.StatusNotFound
 }
 
 // formatHostURL normalizes a host argument into a full URL. Loopback hosts
