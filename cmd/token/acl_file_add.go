@@ -16,6 +16,11 @@ var aclFileAddCmd = &cobra.Command{
 Path supports wildcard matching (* = any characters).
 Action: upload, download, or * for both.
 
+For a service token, the account is always the token's application account.
+Omit --username to let the server fill it in; the flag only confirms that account.
+A non-empty --groupname must be that account's own group.
+
+For a personal API token:
 Username semantics: "" = token owner only, "*" = any user, exact name = match only.
 Groupname semantics: "" = no group restriction, "*" = any group, exact name = match only.`,
 	Example: `  alpacon token acl file add my-api-token --path "/home/deploy/*" --action upload
@@ -28,8 +33,8 @@ Groupname semantics: "" = no group restriction, "*" = any group, exact name = ma
 func init() {
 	aclFileAddCmd.Flags().String("path", "", "File path pattern (supports * wildcard)")
 	aclFileAddCmd.Flags().String("action", "", "Allowed action: upload, download, or *")
-	aclFileAddCmd.Flags().String("username", "", `Username restriction: "" = token owner only, "*" = any user`)
-	aclFileAddCmd.Flags().String("groupname", "", `Groupname restriction: "" = no restriction, "*" = any group`)
+	aclFileAddCmd.Flags().String("username", "", `Confirm the application account for a service token (default: the server fills it in); personal tokens: "" = owner, "*" = any user`)
+	aclFileAddCmd.Flags().String("groupname", "", `Group restriction (a service token may only name its application account's own group)`)
 	_ = aclFileAddCmd.MarkFlagRequired("path")
 	_ = aclFileAddCmd.MarkFlagRequired("action")
 }

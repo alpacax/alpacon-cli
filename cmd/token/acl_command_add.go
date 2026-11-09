@@ -17,6 +17,11 @@ via websh or exec (e.g., "whoami", "systemctl status *", "docker compose *").
 Use * as a wildcard to match any arguments. Without a wildcard, only the exact
 command string is matched.
 
+For a service token, the account is always the token's application account.
+Omit --username to let the server fill it in; the flag only confirms that account.
+A non-empty --groupname must be that account's own group.
+
+For a personal API token:
 Username semantics: "" = token owner only, "*" = any user, exact name = match only.
 Groupname semantics: "" = no group restriction, "*" = any group, exact name = match only.
 
@@ -33,8 +38,8 @@ personal API token has no command list on the ledger.`,
 
 func init() {
 	aclCommandAddCmd.Flags().StringP("command", "c", "", "Server-side shell command (supports * wildcard)")
-	aclCommandAddCmd.Flags().String("username", "", `Username restriction: "" = token owner only, "*" = any user`)
-	aclCommandAddCmd.Flags().String("groupname", "", `Groupname restriction: "" = no restriction, "*" = any group`)
+	aclCommandAddCmd.Flags().String("username", "", `Confirm the application account for a service token (default: the server fills it in); personal tokens: "" = owner, "*" = any user`)
+	aclCommandAddCmd.Flags().String("groupname", "", `Group restriction (a service token may only name its application account's own group)`)
 	_ = aclCommandAddCmd.MarkFlagRequired("command")
 }
 

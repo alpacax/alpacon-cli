@@ -17,7 +17,11 @@ func GetCommandAclList(ac *client.AlpaconClient, tokenID string) ([]CommandAclRe
 	params := map[string]string{
 		"token": tokenID,
 	}
-	return api.FetchAllPages[CommandAclResponse](ac, commandAclURL, params)
+	rows, err := api.FetchAllPages[CommandAclResponse](ac, commandAclURL, params)
+	for i := range rows {
+		rows[i].Applies = appliesMark(rows[i].AppliesToToken)
+	}
+	return rows, err
 }
 
 func AddCommandAcl(ac *client.AlpaconClient, request CommandAclRequest) error {
@@ -77,7 +81,11 @@ func DeleteServerAcl(ac *client.AlpaconClient, serverAclID string) error {
 
 func GetFileAclList(ac *client.AlpaconClient, tokenID string) ([]FileAclResponse, error) {
 	params := map[string]string{"token": tokenID}
-	return api.FetchAllPages[FileAclResponse](ac, fileAclURL, params)
+	rows, err := api.FetchAllPages[FileAclResponse](ac, fileAclURL, params)
+	for i := range rows {
+		rows[i].Applies = appliesMark(rows[i].AppliesToToken)
+	}
+	return rows, err
 }
 
 func AddFileAcl(ac *client.AlpaconClient, request FileAclRequest) error {
@@ -92,4 +100,11 @@ func DeleteFileAcl(ac *client.AlpaconClient, fileAclID string) error {
 	}
 	_, err = ac.SendDeleteRequest(api.IDURL(fileAclURL, pathID, "", nil))
 	return err
+}
+
+func appliesMark(applies *bool) string {
+	if applies != nil && !*applies {
+		return "no"
+	}
+	return ""
 }

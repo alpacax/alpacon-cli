@@ -1282,6 +1282,22 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 	gate, missing = parseGateAndMissing(parsed)
 	axis = stringField(parsed, "axis")
 
+	if statusCode == http.StatusBadRequest {
+		if code == utils.ApplicationSystemUserNotFound {
+			return codeOnlyMessage(code), code, source, gate, axis, missing, true
+		}
+		fieldErrors, _ := parsed["field_errors"].(map[string]any)
+		for _, field := range []string{"username", "groupname"} {
+			entries, _ := fieldErrors[field].([]any)
+			for _, entry := range entries {
+				item, _ := entry.(map[string]any)
+				if stringField(item, "code") == utils.ServiceTokenAccountNotOwn {
+					return strings.Join(fieldErrorMessages(fieldErrors), "; "), code, source, gate, axis, missing, true
+				}
+			}
+		}
+	}
+
 	if detail := strings.TrimSpace(stringField(parsed, "detail")); detail != "" {
 		return detail, code, source, gate, axis, missing, true
 	}
@@ -1433,6 +1449,9 @@ func fieldErrorMessages(raw any) []string {
 				continue
 			}
 			message := stringField(fields, "message")
+			if (path == "username" || path == "groupname") && stringField(fields, "code") == utils.ServiceTokenAccountNotOwn {
+				message = utils.ServiceTokenAccountMessage(path)
+			}
 			if message == "" {
 				continue
 			}
@@ -1458,6 +1477,8 @@ func codeOnlyMessage(code string) string {
 // bare code would not; known is false for a code it has none for.
 func codeSentence(code string) (sentence string, known bool) {
 	switch code {
+	case utils.ApplicationSystemUserNotFound:
+		return "the account is not the token's application account (code: " + code + ")", true
 	case utils.APINotFound:
 		return "the requested resource was not found", true
 	case utils.APIRateLimited:

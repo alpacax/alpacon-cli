@@ -20,8 +20,8 @@ var aclAddCmd = &cobra.Command{
 func init() {
 	aclAddCmd.Flags().StringP("token", "t", "", "Token name or ID")
 	aclAddCmd.Flags().StringP("command", "c", "", "Server-side shell command (supports * wildcard)")
-	aclAddCmd.Flags().String("username", "", "Username restriction")
-	aclAddCmd.Flags().String("groupname", "", "Groupname restriction")
+	aclAddCmd.Flags().String("username", "", "Confirm the application account for a service token (default: the server fills it in)")
+	aclAddCmd.Flags().String("groupname", "", "Group restriction (a service token may only name its application account's own group)")
 }
 
 func runLegacyAclAdd(cmd *cobra.Command, args []string) {

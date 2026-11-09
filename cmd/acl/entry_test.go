@@ -77,17 +77,14 @@ func TestParseEntryFile_Refusals(t *testing.T) {
 		{name: "misspelled field", data: string(fileOf(t, fileItem(map[string]any{"server_id": []string{"x"}}))), wantErr: "server_id"},
 		{name: "trailing data", data: valid + ` {"unexpected": true}`, wantErr: "continues after it"},
 		{name: "second array", data: `[] ` + valid, wantErr: "continues after it"},
-		{name: "explicit service token", data: string(fileOf(t, fileItem(map[string]any{"principal_type": "service_token", "username": ""}))), wantErr: "entry 0: username"},
 		{name: "personal API token", data: string(fileOf(t, fileItem(map[string]any{"principal_type": "api_token"}))), wantErr: "entry 0: principal_type"},
 		{name: "other principal type", data: string(fileOf(t, fileItem(map[string]any{"principal_type": "user"}))), wantErr: "entry 0: principal_type"},
 		{name: "principal id missing", data: string(fileOf(t, fileItem(map[string]any{"principal_id": nil}))), wantErr: "entry 0: principal_id"},
 		{name: "principal id not an id", data: string(fileOf(t, fileItem(map[string]any{"principal_id": "deploy-bot"}))), wantErr: "entry 0: principal_id"},
 		{name: "blank command", data: string(fileOf(t, fileItem(map[string]any{"command_pattern": "  "}))), wantErr: "entry 0: command_pattern"},
-		{name: "blank username", data: string(fileOf(t, fileItem(map[string]any{"username": " "}))), wantErr: "entry 0: username"},
 		{name: "server ids omitted", data: string(fileOf(t, fileItem(map[string]any{"server_ids": nil}))), wantErr: "entry 0: server_ids is required"},
 		{name: "server ids null", data: strings.Replace(valid, `"server_ids":[]`, `"server_ids":null`, 1), wantErr: "entry 0: server_ids is required"},
 		{name: "empty server id", data: string(fileOf(t, fileItem(map[string]any{"server_ids": []string{""}}))), wantErr: "entry 0: a server value is empty"},
-		{name: "second entry refused", data: string(fileOf(t, fileItem(nil), fileItem(map[string]any{"username": ""}))), wantErr: "entry 1: username"},
 		{name: "expiry in the past", data: string(fileOf(t, fileItem(map[string]any{"expires_at": "2001-01-01T00:00:00Z"}))), wantErr: "entry 0: --expires-at 2001-01-01T00:00:00Z is not in the future"},
 		{name: "unreadable expiry", data: string(fileOf(t, fileItem(map[string]any{"expires_at": "tomorrow"}))), wantErr: "entry 0: --expires-at must be an RFC 3339 time"},
 	}
@@ -194,4 +191,11 @@ func TestWorkspaceNames_FetchesOnlyWhatTheEntriesNeed(t *testing.T) {
 			assert.Equal(t, tt.wantPaths, paths)
 		})
 	}
+}
+
+func TestParseEntryFile_DefaultApplicationAccount(t *testing.T) {
+	t.Parallel()
+	entries, err := parseEntryFile(fileOf(t, fileItem(map[string]any{"username": nil})))
+	require.NoError(t, err)
+	assert.Empty(t, entries[0].Username)
 }

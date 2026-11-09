@@ -56,11 +56,25 @@ with --token. Revoked entries are not listed.`,
 			session.fail("list pre-approved commands", err)
 		}
 
-		tokenNames, serverNames := session.workspaceNames(entries)
-		utils.PrintTable(acl.ToEntryAttributes(entries, tokenNames, serverNames))
+		tokenNames, serverNames, tokenAccounts := session.workspaceNames(entries)
+		utils.PrintTable(ledgerEntryAttributes(entries, tokenNames, serverNames, tokenAccounts))
 	},
 }
 
 func init() {
 	entryListCmd.Flags().String("token", "", "List only this service token's entries (name or ID)")
+}
+
+func ledgerEntryAttributes(entries []acl.EntryResponse, tokenNames, serverNames, tokenAccounts map[string]string) []acl.EntryAttributes {
+	rows := acl.ToEntryAttributes(entries, tokenNames, serverNames)
+	for i, entry := range entries {
+		if username := tokenAccounts[entry.PrincipalID]; entry.PrincipalType == acl.PrincipalTypeServiceToken && username != "" {
+			applies := entry.Username == username && (entry.Groupname == "" || entry.Groupname == username)
+			rows[i].AppliesToToken = &applies
+			if !applies {
+				rows[i].Applies = "no"
+			}
+		}
+	}
+	return rows
 }

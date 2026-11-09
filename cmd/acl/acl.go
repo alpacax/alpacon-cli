@@ -104,24 +104,32 @@ func partitionServerRefs(refs []string) (ids []string, names []string, err error
 
 // workspaceNames maps the ids the listed entries reference to names, fetching
 // only what they need. Best effort: a failure leaves ids and logs under ALPACON_DEBUG.
-func (s *ledgerSession) workspaceNames(entries []acl.EntryResponse) (tokenNames, serverNames map[string]string) {
+func (s *ledgerSession) workspaceNames(entries []acl.EntryResponse) (tokenNames, serverNames, tokenAccounts map[string]string) {
 	needTokens, needServers := false, false
 	for _, entry := range entries {
 		needTokens = needTokens || entry.PrincipalType == acl.PrincipalTypeServiceToken
 		needServers = needServers || len(entry.ServerIDs) > 0
 	}
 	if !needTokens && !needServers {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	ac, err := s.workspaceAPI()
 	if err != nil {
 		utils.CliDebug("showing ids instead of names: %v", err)
-		return nil, nil
+		return nil, nil, nil
 	}
 	if needTokens {
-		if tokenNames, err = auth.GetServiceTokenNames(ac); err != nil {
-			utils.CliDebug("showing service token ids instead of names: %v", err)
+		tokens, tokenErr := auth.GetServiceTokens(ac)
+		if tokenErr != nil {
+			utils.CliDebug("showing service token ids instead of names: %v", tokenErr)
+		}
+		tokenNames, tokenAccounts = map[string]string{}, map[string]string{}
+		for _, token := range tokens {
+			tokenNames[token.ID] = token.Name
+			if token.Application != nil {
+				tokenAccounts[token.ID] = token.Application.Username
+			}
 		}
 	}
 	if needServers {
@@ -129,5 +137,5 @@ func (s *ledgerSession) workspaceNames(entries []acl.EntryResponse) (tokenNames,
 			utils.CliDebug("showing server ids instead of names: %v", err)
 		}
 	}
-	return tokenNames, serverNames
+	return tokenNames, serverNames, tokenAccounts
 }

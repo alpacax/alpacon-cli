@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/acl"
+	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -21,13 +22,14 @@ var entryAddCmd = &cobra.Command{
 	Long: `Pre-approve a command pattern for a service token.
 
 Use * as a wildcard for arguments; a pattern without one pre-approves that exact
-command line. --username is the account the command runs as, or "*" for any
-account. Without --server the entry covers every server in the workspace, and
-the command signer warns about it.
+command line. The account is always the token's application account. Omit
+--username to use it; the flag only confirms that account. A non-empty
+--groupname must be that account's own group. Without --server the entry covers
+every server in the workspace, and the command signer warns about it.
 
 --file issues several entries at once from a JSON array whose items carry the
 ledger's own fields: principal_id (a service token ID), command_pattern,
-username, server_ids ([] covers every server), and optionally groupname,
+server_ids ([] covers every server), and optionally username, groupname,
 expires_at and enabled. The batch is all or nothing: one
 refused entry refuses the whole file. principal_type may be left out; it can
 only be service_token.
@@ -36,7 +38,7 @@ Only a service token can be pre-approved commands: a personal API token has no
 command list on the ledger. Existing entries for personal API tokens are still
 listed and can be revoked.`,
 	Example: `  alpacon acl entry add --token deploy-bot --command "systemctl restart nginx" \
-    --username root --server web-01
+    --server web-01
 
   alpacon acl entry add --token deploy-bot --command "docker compose *" \
     --username deploy --server web-01,web-02 --expires-at 2027-01-15T10:00:00Z
@@ -49,8 +51,8 @@ listed and can be revoked.`,
 func init() {
 	entryAddCmd.Flags().String("token", "", "Service token the entry pre-approves the command for (name or ID)")
 	entryAddCmd.Flags().StringP("command", "c", "", "Command pattern to pre-approve (supports * wildcard)")
-	entryAddCmd.Flags().String("username", "", `Account the command runs as ("*" for any account)`)
-	entryAddCmd.Flags().String("groupname", "", "Group the command runs as (default: no restriction)")
+	entryAddCmd.Flags().String("username", "", "Confirm the token's application account (default: its application username)")
+	entryAddCmd.Flags().String("groupname", "", "Confirm the application account's own group (default: no restriction)")
 	entryAddCmd.Flags().StringSlice("server", nil, "Servers the entry covers, by name or ID (repeatable or comma-separated; default: every server)")
 	entryAddCmd.Flags().String("expires-at", "", "Expiry time in RFC 3339 (default: no expiry)")
 	entryAddCmd.Flags().Bool("disabled", false, "Issue the entry disabled")
@@ -77,11 +79,18 @@ func runEntryAdd(cmd *cobra.Command, args []string) {
 		flagged = entryFromFlags(cmd)
 	}
 
-	session := openLedger()
-	if flagged != nil {
-		entries = []acl.EntryRequest{flagged.resolve(session)}
-	} else {
-		session.confirmServiceTokens(entries)
+	session, err := newLedgerSessionWithCheck(func(s *ledgerSession) error {
+		if flagged != nil {
+			request, err := flagged.resolve(s)
+			if err != nil {
+				return err
+			}
+			entries = []acl.EntryRequest{request}
+		}
+		return s.bindApplicationAccounts(entries)
+	})
+	if err != nil {
+		utils.CliErrorWithExit("%s", err)
 	}
 	issued, err := acl.IssueEntries(session.signer, session.workspaceID, entries)
 	if err != nil {
@@ -124,7 +133,7 @@ func entryFromFlags(cmd *cobra.Command) *flagEntry {
 	disabled, _ := cmd.Flags().GetBool("disabled")
 
 	tokenRef, command, username = strings.TrimSpace(tokenRef), strings.TrimSpace(command), strings.TrimSpace(username)
-	for _, required := range []struct{ flag, value string }{{"token", tokenRef}, {"command", command}, {"username", username}} {
+	for _, required := range []struct{ flag, value string }{{"token", tokenRef}, {"command", command}} {
 		if required.value == "" {
 			utils.CliUsageErrorWithExit("--%s is required (or pass --file).", required.flag)
 		}
@@ -159,37 +168,48 @@ func validateServerRefs(given bool, refs []string) error {
 	return err
 }
 
-// resolve names the service token and servers by the ids the ledger stores,
-// looked up in the workspace the session was opened for.
-func (f *flagEntry) resolve(session *ledgerSession) acl.EntryRequest {
-	principalID, err := session.resolveServiceToken(f.tokenRef)
-	if err != nil {
-		utils.CliErrorWithExit("Failed to find service token %q: %s.", f.tokenRef, err)
-	}
+// resolve looks up the server scope in the session's workspace.
+func (f *flagEntry) resolve(session *ledgerSession) (acl.EntryRequest, error) {
 	serverIDs, err := session.resolveServerScope(f.serverRefs)
 	if err != nil {
-		utils.CliErrorWithExit("Failed to resolve the entry's servers: %s.", err)
+		return acl.EntryRequest{}, fmt.Errorf("failed to resolve the entry's servers: %w", err)
 	}
-
 	request := f.request
-	request.PrincipalID = principalID
+	request.PrincipalID = f.tokenRef
 	request.ServerIDs = serverIDs
-	return request
+	return request, nil
 }
 
-// confirmServiceTokens checks every --file principal_id against the session's
-// workspace before anything is issued, so none can be a personal API token's.
-func (s *ledgerSession) confirmServiceTokens(entries []acl.EntryRequest) {
-	confirmed := map[string]bool{}
-	for i, entry := range entries {
-		if confirmed[entry.PrincipalID] {
-			continue
-		}
-		if _, err := s.resolveServiceToken(entry.PrincipalID); err != nil {
-			utils.CliErrorWithExit("Entry %d: failed to find service token %s: %s.", i, entry.PrincipalID, err)
-		}
-		confirmed[entry.PrincipalID] = true
+// bindApplicationAccounts confirms every principal and pins its account before a signer write.
+func (s *ledgerSession) bindApplicationAccounts(entries []acl.EntryRequest) error {
+	ac, err := s.workspaceAPI()
+	if err != nil {
+		return err
 	}
+	confirmed := map[string]auth.ServiceToken{}
+	for i := range entries {
+		entry := &entries[i]
+		token, ok := confirmed[entry.PrincipalID]
+		if !ok {
+			token, err = auth.ResolveServiceToken(ac, entry.PrincipalID)
+			if err != nil {
+				return fmt.Errorf("entry %d: failed to find service token: %w", i, err)
+			}
+			confirmed[entry.PrincipalID] = token
+		}
+		if token.Application == nil || token.Application.Username == "" {
+			return fmt.Errorf("entry %d: the workspace did not return the service token's application username", i)
+		}
+		username := token.Application.Username
+		if entry.Username != "" && entry.Username != username {
+			return utils.MarkUsageError(fmt.Errorf("username: %s", utils.ServiceTokenAccountMessage("username")))
+		}
+		if entry.Groupname != "" && entry.Groupname != username {
+			return utils.MarkUsageError(fmt.Errorf("groupname: %s", utils.ServiceTokenAccountMessage("groupname")))
+		}
+		entry.PrincipalID, entry.Username = token.ID, username
+	}
+	return nil
 }
 
 // validateExpiry refuses an unreadable time and one not in the future, which
@@ -234,8 +254,6 @@ func (item *fileEntry) validate() error {
 		return errors.New("principal_id must be a service token ID")
 	case item.CommandPattern == "":
 		return errors.New("command_pattern is required")
-	case item.Username == "":
-		return errors.New(`username is required ("*" for any account)`)
 	case item.ServerIDs == nil:
 		return errors.New("server_ids is required; use [] to cover every server")
 	}
