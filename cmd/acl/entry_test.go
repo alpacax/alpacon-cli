@@ -10,6 +10,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/acl"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -62,6 +63,18 @@ func TestParseEntryFile_AllowsTrailingWhitespace(t *testing.T) {
 	t.Parallel()
 	_, err := parseEntryFile(append(fileOf(t, fileItem(nil)), "\n\n"...))
 	assert.NoError(t, err)
+}
+
+func TestParseEntryFile_NullUsername(t *testing.T) {
+	t.Parallel()
+	item := fileItem(nil)
+	item["username"] = nil
+
+	entries, err := parseEntryFile(fileOf(t, fileItem(nil), item))
+
+	require.ErrorContains(t, err, "entry 1: username must be a string, not null")
+	assert.Nil(t, entries)
+	assert.True(t, utils.IsUsageError(err), "a null username must be a usage error: %v", err)
 }
 
 func TestParseEntryFile_Refusals(t *testing.T) {

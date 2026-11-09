@@ -449,8 +449,6 @@ Running commands and transferring files with a personal API token is being retir
 ### Token ACLs
 Each API token gets three independent **deny-by-default** ACL types—`command` (which shell commands the token can run via websh/exec), `server` (which servers it can reach), and `file` (which file paths it can read/write via cp). A bare token can do nothing until at least one ACL of each relevant type is granted; this is how `damage containment` is enforced on the token-auth path (`work session` plays the same role on the interactive-auth path).
 
-For a service token, omitting `--username` pins the entry to the application's own account. In `--username`, `''` or `*` matches any account bound to the application on that server; the application username matches only its own account. In `--groupname`, `''` or `*` sets no group restriction; the application username matches its own group. Any other value is refused. Lists also show entries that cannot apply to the token, marked `no` in the APPLIES column (`applies_to_token: false` in JSON).
-
 ```bash
 $ alpacon token acl command add my-token --command="docker *"
 $ alpacon token acl server  add my-token --servers web-01,web-02

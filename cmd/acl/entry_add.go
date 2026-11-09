@@ -264,14 +264,14 @@ func validateExpiry(expiresAt string) error {
 // fileEntry is one item of an --file batch. principal_type is read only to
 // refuse anything but a service token; an omitted enabled issues it enabled.
 type fileEntry struct {
-	PrincipalType  string    `json:"principal_type"`
-	PrincipalID    string    `json:"principal_id"`
-	CommandPattern string    `json:"command_pattern"`
-	Username       *string   `json:"username"`
-	Groupname      string    `json:"groupname"`
-	ServerIDs      *[]string `json:"server_ids"`
-	ExpiresAt      string    `json:"expires_at"`
-	Enabled        *bool     `json:"enabled"`
+	PrincipalType  string          `json:"principal_type"`
+	PrincipalID    string          `json:"principal_id"`
+	CommandPattern string          `json:"command_pattern"`
+	Username       json.RawMessage `json:"username"`
+	Groupname      string          `json:"groupname"`
+	ServerIDs      *[]string       `json:"server_ids"`
+	ExpiresAt      string          `json:"expires_at"`
+	Enabled        *bool           `json:"enabled"`
 }
 
 // validate refuses what the flags would refuse. server_ids is required, so
@@ -279,9 +279,6 @@ type fileEntry struct {
 func (item *fileEntry) validate() error {
 	item.PrincipalID = strings.TrimSpace(item.PrincipalID)
 	item.CommandPattern = strings.TrimSpace(item.CommandPattern)
-	if item.Username != nil {
-		*item.Username = strings.TrimSpace(*item.Username)
-	}
 	switch {
 	case item.PrincipalType != "" && item.PrincipalType != acl.PrincipalTypeServiceToken:
 		return fmt.Errorf("principal_type must be %q; a personal API token has no command list on the ledger", acl.PrincipalTypeServiceToken)
@@ -326,7 +323,13 @@ func parseEntryFile(data []byte) ([]entryDraft, error) {
 		}
 		username := ""
 		if item.Username != nil {
-			username = *item.Username
+			if bytes.Equal(bytes.TrimSpace(item.Username), []byte("null")) {
+				return nil, utils.MarkUsageError(fmt.Errorf("entry %d: username must be a string, not null", i))
+			}
+			if err := json.Unmarshal(item.Username, &username); err != nil {
+				return nil, fmt.Errorf("entry %d: username: %w", i, err)
+			}
+			username = strings.TrimSpace(username)
 		}
 		entries = append(entries, entryDraft{EntryRequest: acl.EntryRequest{
 			PrincipalID:    item.PrincipalID,
