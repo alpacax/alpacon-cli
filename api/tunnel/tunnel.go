@@ -34,7 +34,7 @@ func CreateTunnelSession(ac *client.AlpaconClient, serverName, username, groupna
 
 	responseBody, err := ac.SendPostRequest(tunnelSessionURL, request)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create tunnel session: %w", err)
+		return nil, err
 	}
 
 	var response TunnelSessionResponse
