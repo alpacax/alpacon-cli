@@ -563,7 +563,7 @@ What each refusal code means and what to do next:
 |---|---|---|
 | `work_session_required` | no session selected for this shell | `work-session create --use` or `work-session use <ID>` |
 | `work_session_not_active` | session not active (pending, approved, completed, revoked, or cancelled) | if pending or approved, wait; otherwise create or reuse a session |
-| `work_session_expired` | session has expired | `work-session extend <ID>` or create a new one |
+| `work_session_expired` | session has expired; the server refuses to extend it | create a new session with `work-session create` |
 | `work_session_scope_not_allowed` | operation not in session scopes | create a session with the right `--scope` |
 | `work_session_server_not_allowed` | target server not in session | create a session with the right `--server` |
 | `work_session_cluster_not_allowed` | target cluster not in session | `alpacon kube login <cluster>`, or create a session with the right `--cluster` |
