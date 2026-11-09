@@ -24,10 +24,12 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 	for _, tt := range []struct {
 		name, username, groupname    string
 		file                         bool
+		usernameGiven                bool
 		nullApplication, lookupFails bool
 		wantExit                     int
 	}{
 		{name: "default"}, {name: "confirmed", username: "deploy", groupname: "deploy"},
+		{name: "explicit empty username", usernameGiven: true},
 		{name: "other username", username: "root", wantExit: 2}, {name: "wildcard username", username: "*"},
 		{name: "other group", groupname: "root", wantExit: 2}, {name: "wildcard group", groupname: "*"},
 		{name: "wildcard accounts", username: "*", groupname: "*"},
@@ -77,7 +79,7 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 				}
 				if assert.Len(t, body.Entries, 1) {
 					username := tt.username
-					if username == "" {
+					if username == "" && !tt.usernameGiven {
 						username = "deploy"
 					}
 					assert.Equal(t, username, body.Entries[0].Username)
@@ -93,7 +95,7 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 				require.NoError(t, os.WriteFile(file, fileOf(t, fileItem(map[string]any{"username": tt.username, "groupname": tt.groupname})), 0600))
 				flags = []string{"--file", file}
 			} else {
-				if tt.username != "" {
+				if tt.username != "" || tt.usernameGiven {
 					flags = append(flags, "--username", tt.username)
 				}
 				if tt.groupname != "" {
@@ -167,6 +169,10 @@ func TestLedgerEntryAttributes_ApplicationAccount(t *testing.T) {
 		applies                              bool
 	}{
 		{"own", acl.PrincipalTypeServiceToken, "deploy", "", true, true},
+		{"empty username", acl.PrincipalTypeServiceToken, "", "", true, true},
+		{"empty username with own group", acl.PrincipalTypeServiceToken, "", "deploy", true, true},
+		{"empty username with wildcard group", acl.PrincipalTypeServiceToken, "", "*", true, true},
+		{"empty username with other group", acl.PrincipalTypeServiceToken, "", "root", true, false},
 		{"own group", acl.PrincipalTypeServiceToken, "deploy", "deploy", true, true},
 		{"other username", acl.PrincipalTypeServiceToken, "root", "", true, false},
 		{"other group", acl.PrincipalTypeServiceToken, "deploy", "root", true, false},

@@ -23,10 +23,10 @@ var entryAddCmd = &cobra.Command{
 
 Use * as a wildcard for arguments; a pattern without one pre-approves that exact
 command line. For a service token, the account is its application account;
-* in --username or --groupname means the same account. Any other account is
-refused. Omit --username to use the application account and --groupname for no
-group restriction. Without --server the entry covers every server in the
-workspace, and the command signer warns about it.
+* or an empty value in --username or --groupname means the same account. Any
+other account is refused. Omit --username to use the application account.
+Without --server the entry covers every server in the workspace, and the
+command signer warns about it.
 
 --file issues several entries at once from a JSON array whose items carry the
 ledger's own fields: principal_id (a service token ID), command_pattern,
@@ -52,8 +52,8 @@ listed and can be revoked.`,
 func init() {
 	entryAddCmd.Flags().String("token", "", "Service token the entry pre-approves the command for (name or ID)")
 	entryAddCmd.Flags().StringP("command", "c", "", "Command pattern to pre-approve (supports * wildcard)")
-	entryAddCmd.Flags().String("username", "", "Application account or * for the same account; any other account is refused (default: its application username)")
-	entryAddCmd.Flags().String("groupname", "", "Application account's own group or * for the same group; any other group is refused (default: no restriction)")
+	entryAddCmd.Flags().String("username", "", "Application account, * or an empty value for the same account; any other account is refused (default: its application username)")
+	entryAddCmd.Flags().String("groupname", "", "Application account's own group, * or an empty value for the same group; any other group is refused")
 	entryAddCmd.Flags().StringSlice("server", nil, "Servers the entry covers, by name or ID (repeatable or comma-separated; default: every server)")
 	entryAddCmd.Flags().String("expires-at", "", "Expiry time in RFC 3339 (default: no expiry)")
 	entryAddCmd.Flags().Bool("disabled", false, "Issue the entry disabled")
@@ -88,7 +88,7 @@ func runEntryAdd(cmd *cobra.Command, args []string) {
 			}
 			entries = []acl.EntryRequest{request}
 		}
-		return s.bindApplicationAccounts(entries)
+		return s.bindApplicationAccounts(entries, flagged == nil || !cmd.Flags().Changed("username"))
 	})
 	if err != nil {
 		utils.CliErrorWithExit("%s", utils.Reword(err, sentence(upperFirst(err.Error()))))
@@ -181,8 +181,8 @@ func (f *flagEntry) resolve(session *ledgerSession) (acl.EntryRequest, error) {
 	return request, nil
 }
 
-// bindApplicationAccounts confirms every principal and pins its account before a signer write.
-func (s *ledgerSession) bindApplicationAccounts(entries []acl.EntryRequest) error {
+// bindApplicationAccounts confirms every principal and defaults omitted usernames before a signer write.
+func (s *ledgerSession) bindApplicationAccounts(entries []acl.EntryRequest, defaultUsername bool) error {
 	ac, err := s.workspaceAPI()
 	if err != nil {
 		return err
@@ -211,7 +211,7 @@ func (s *ledgerSession) bindApplicationAccounts(entries []acl.EntryRequest) erro
 				"entry %d: groupname: the account must be the token's application account %q (code: service_token_account_not_own)", i, username)
 		}
 		entry.PrincipalID = token.ID
-		if entry.Username == "" {
+		if entry.Username == "" && defaultUsername {
 			entry.Username = username
 		}
 	}
