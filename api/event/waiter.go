@@ -95,7 +95,7 @@ func (w *Waiter) CatchUpFailed() <-chan error { return w.catchUpFailed }
 // returned frame is the server's bytes verbatim, except on a catch-up hit where it is
 // synthesized. A non-nil error means the wait could not run; Outcome is meaningless then.
 //
-// Wait returns only once everything it started has stopped: the listener and any catch-up read.
+// Wait returns only once the listener and any catch-up read have stopped (see Close).
 func (w *Waiter) Wait() ([]byte, Outcome, error) {
 	w.Start()
 	defer func() {

@@ -76,7 +76,8 @@ func (w *Watcher) Reconnected() <-chan struct{} { return w.reconnected }
 // reconnects keep failing is distinguishable from a quiet one.
 func (w *Watcher) ReconnectFailed() <-chan error { return w.reconnectFailed }
 
-// Close stops the Watcher and waits for its listener to end, requests in flight included.
+// Close stops the Watcher and waits for its listener to end, its own requests and dial included. A
+// best-effort close of a session whose dial failed may still be in flight, bounded by eventSessionCloseTimeout.
 // Call it only after Start, and never from a callback the listener runs.
 func (w *Watcher) Close() {
 	w.Stop()
