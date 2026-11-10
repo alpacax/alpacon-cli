@@ -419,6 +419,9 @@ func diffEditedUser(original []byte, edited any) (*UserEdit, error) {
 		}
 	}
 
+	if len(edit.Changes) == 0 && len(edit.Privileges) == 0 {
+		return nil, utils.ErrNoChanges
+	}
 	return edit, nil
 }
 
