@@ -252,6 +252,9 @@ func responseSignalFields(err error, fields localsignal.Fields) localsignal.Fiel
 		if carrier, ok := e.(interface{ LocalSignalAccount() string }); ok && carrier.LocalSignalAccount() != "" {
 			fields.Account = carrier.LocalSignalAccount()
 		}
+		if carrier, ok := e.(interface{ LocalSignalAssignee() bool }); ok && carrier.LocalSignalAssignee() {
+			fields.Assignee = true
+		}
 		if carrier, ok := e.(interface{ ErrorFields() map[string]any }); ok {
 			payload := carrier.ErrorFields()
 			if account, ok := payload["username"].(string); ok && account != "" {

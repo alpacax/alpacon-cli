@@ -67,7 +67,8 @@ Run the command again later to check for completion.`,
 
 			// Exit 0 would read as a command that finished with nothing to show.
 			if event.IsAwaitingApprovalStatus(details.Status) {
-				fields := localsignal.Fields{Command: true, Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username, ConsoleURL: details.ConsoleURL}
+				assignee := details.ApprovalLane == event.ApprovalLaneAssignee
+				fields := localsignal.Fields{Command: true, Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username, ConsoleURL: details.ConsoleURL, Assignee: assignee}
 				if details.WorkSession != nil {
 					fields.Session = details.WorkSession.ID
 				}
@@ -76,10 +77,7 @@ Run the command again later to check for completion.`,
 				if lookupErr != nil {
 					utils.CliWarning("failed to read approval request: %s", lookupErr)
 				}
-				message := fmt.Sprintf("Approval required—this command is awaiting human approval in the Alpacon console (web); status %s. It runs automatically once approved.", details.Status)
-				if requestID != "" {
-					message = fmt.Sprintf("Approval required—this command is awaiting human approval (approval request: %s) in the Alpacon console (web); status %s. It runs automatically once approved.", utils.SanitizeTerminalText(requestID), details.Status)
-				}
+				message := heldCommandMessage(assignee, requestID, details.Status)
 				utils.PrintPendingApproval(
 					message,
 					requestID,
@@ -154,6 +152,19 @@ Run the command again later to check for completion.`,
 // fill it in: a command without -u would run as the server's default account.
 // -g gets a placeholder too unless the detail names the group, since the
 // original may have carried one.
+// heldCommandMessage words a held command for exec logs: the session assignee's
+// own confirmation on the assignee lane, an approver's decision on any other.
+func heldCommandMessage(assignee bool, requestID, status string) string {
+	request := ""
+	if requestID != "" {
+		request = fmt.Sprintf(" (approval request: %s)", utils.SanitizeTerminalText(requestID))
+	}
+	if assignee {
+		return fmt.Sprintf("Confirmation required—this command is awaiting your own confirmation as the session's assignee, not an approver's%s, in the Alpacon console (web); status %s. It runs automatically once confirmed.", request, status)
+	}
+	return fmt.Sprintf("Approval required—this command is awaiting human approval%s in the Alpacon console (web); status %s. It runs automatically once approved.", request, status)
+}
+
 func logsAccountFlags(details event.EventDetails) (flags []string, note string) {
 	original := RemoteExecArgs{Username: details.Username, Groupname: details.Groupname}
 	if details.WorkSession != nil {

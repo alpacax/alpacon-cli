@@ -51,6 +51,9 @@ type Fields struct {
 	Gate       string
 	Session    string
 	ConsoleURL string
+	// Assignee marks a held command whose confirmation is the session's assignee's
+	// own, not an approver's. It changes the wording only, never the kind.
+	Assignee bool
 }
 
 type Notifier interface {
@@ -280,19 +283,29 @@ func Format(kind Kind, f Fields, folded int) (title, body string) {
 		}
 	case ApprovalPending:
 		title = "Alpacon: approval pending"
-		if !f.Command && strings.TrimSpace(f.Argv0) == "" {
+		isCommand := f.Command || strings.TrimSpace(f.Argv0) != ""
+		switch {
+		case !isCommand:
 			body = "Work Session"
 			if session != "" {
 				body += " " + session
 			}
-			body += " is waiting for approval."
-		} else {
+			body += " is waiting for approval. Open the approval or wait for an approver."
+		case f.Assignee:
+			// Only a held command can be the session assignee's own to confirm.
+			title = "Alpacon: confirmation pending"
+			body = command + " is waiting for your own confirmation, not an approver's."
+			if session != "" {
+				body += " Session " + session + "."
+			}
+			body += " Confirm or reject it in the Alpacon console."
+		default:
 			body = command + " is waiting for approval."
 			if session != "" {
 				body += " Session " + session + "."
 			}
+			body += " Open the approval or wait for an approver."
 		}
-		body += " Open the approval or wait for an approver."
 	case Paused:
 		title, body = "Alpacon: session paused", "Work Session"
 		if session != "" {

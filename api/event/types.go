@@ -102,7 +102,23 @@ type PendingApprovalError struct {
 	// FileSuggestion is the server's proposal to run the held command as a
 	// verified file instead; nil when the server made none.
 	FileSuggestion *FileExecutionSuggestion
+	// ApprovalLane is the server's approval_lane: who decides the open request.
+	// Empty on an older server.
+	ApprovalLane string
 }
+
+// ApprovalLaneAssignee is the approval_lane of a held command whose
+// confirmation belongs to the session's assignee, not to an approver.
+const ApprovalLaneAssignee = "assignee"
+
+// AssigneeConfirms says the held command is the session assignee's own to
+// confirm; any other lane, or none, is an approver's decision.
+func (e *PendingApprovalError) AssigneeConfirms() bool {
+	return e.ApprovalLane == ApprovalLaneAssignee
+}
+
+// LocalSignalAssignee lets the pending-approval signal word itself for the assignee.
+func (e *PendingApprovalError) LocalSignalAssignee() bool { return e.AssigneeConfirms() }
 
 // FileExecutionSuggestion is a held command line the server recognized as a
 // script on the target, restated as a verified file: the script's path, its
@@ -178,7 +194,11 @@ type EventDetails struct {
 	// FileExecutionSuggestion is set on a held command line the server reads as
 	// a script on the target; absent otherwise and on older servers.
 	FileExecutionSuggestion *FileExecutionSuggestion `json:"file_execution_suggestion"`
-	ConsoleURL              string                   `json:"console_url,omitempty"`
+	// ApprovalLane names who decides the open approval holding the command:
+	// "assignee" is the session's assignee, any other lane an approver. Null
+	// unless the command awaits approval, and absent on an older server.
+	ApprovalLane string `json:"approval_lane"`
+	ConsoleURL   string `json:"console_url,omitempty"`
 	CommandRejection
 	// RejectionNote is what the approver wrote when rejecting the hold: null unless a
 	// person rejected it, sent only to the requester and the approvers, and absent on
