@@ -1267,7 +1267,7 @@ func TestRedial_StopsWhenTheSessionEndsMidWait(t *testing.T) {
 // newTestReconnectClient is a client whose reconnect talks to baseURL and waits in
 // milliseconds rather than seconds.
 func newTestReconnectClient(baseURL string) *WebsocketClient {
-	ac := &client.AlpaconClient{HTTPClient: &http.Client{}, BaseURL: baseURL}
+	ac := &client.AlpaconClient{HTTPClient: &http.Client{Transport: &http.Transport{}}, BaseURL: baseURL}
 
 	wsClient := newWebsocketClient(nil)
 	wsClient.reconnect = newReconnector(ac, "sess-1")
