@@ -10,11 +10,13 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -698,7 +700,10 @@ func editTempFile(f editFile, data []byte, edit func(path string) error) ([]byte
 		return nil, fmt.Errorf("close temp file: %w", err)
 	}
 
-	if err := edit(f.Name()); err != nil {
+	stop := removeOnSignal(f.Name())
+	err := edit(f.Name())
+	stop()
+	if err != nil {
 		return nil, fmt.Errorf("run editor: %w", err)
 	}
 
@@ -707,6 +712,41 @@ func editTempFile(f editFile, data []byte, edit func(path string) error) ([]byte
 		return nil, fmt.Errorf("read edited file: %w", err)
 	}
 	return edited, nil
+}
+
+// editorSignals end the process while the editor runs; Go exits on them without running defers.
+var editorSignals = []os.Signal{os.Interrupt, syscall.SIGHUP, syscall.SIGTERM}
+
+// removeOnSignal removes path and re-raises the signal if one in editorSignals arrives before stop.
+func removeOnSignal(path string) (stop func()) {
+	sigs := make(chan os.Signal, 1)
+	for _, sig := range editorSignals {
+		if !signal.Ignored(sig) { // Notify would un-ignore a signal nohup asked to ignore
+			signal.Notify(sigs, sig)
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		select {
+		case sig := <-sigs:
+			_ = os.Remove(path)
+			signal.Stop(sigs)
+			reraise(sig)
+		case <-done:
+		}
+	}()
+	return func() {
+		signal.Stop(sigs)
+		close(done)
+	}
+}
+
+// reraise ends the process with sig under its default action, or exits 1 where that cannot be sent.
+func reraise(sig os.Signal) {
+	if p, err := os.FindProcess(os.Getpid()); err == nil && p.Signal(sig) == nil {
+		time.Sleep(time.Second) // delivery is asynchronous; the default action ends the process here
+	}
+	os.Exit(1)
 }
 
 // SplitPath splits a "server:/path" target into its server name and remote path.
