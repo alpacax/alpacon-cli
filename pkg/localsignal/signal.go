@@ -135,14 +135,19 @@ func (e *Emitter) Emit(kind Kind, fields Fields) {
 		return
 	}
 	_, body = Format(kind, fields, folded)
-	if link != "" {
-		body += " " + link
+	// The fold suffix lengthens the body, so the link must fit again or be left out.
+	notifyLink := link
+	if utf8.RuneCountInString(body)+1+utf8.RuneCountInString(notifyLink) > 256 {
+		notifyLink = ""
+	}
+	if notifyLink != "" {
+		body += " " + notifyLink
 	}
 	body = capText(body, 256)
 	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- e.notifier.Notify(ctx, title, body, link) }()
+	go func() { done <- e.notifier.Notify(ctx, title, body, notifyLink) }()
 	select {
 	case err := <-done:
 		if err != nil {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -630,33 +631,53 @@ func TestPendingCommandWithoutExecutable(t *testing.T) {
 func TestConsoleLinkBannerBodyLimit(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name string
-		size int
-		keep bool
+		name   string
+		size   int
+		folded int
+		keep   bool
 	}{
-		{"fits exactly", 256, true},
-		{"exceeds by one", 257, false},
+		{"fits exactly", 256, 0, true},
+		{"exceeds by one", 257, 0, false},
+		{"folded notification exceeds limit", 256, 3, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var output bytes.Buffer
 			e := New(&output, nil, nil)
 			e.WorkspaceURL = "https://console.example"
-			e.statePath = func() (string, error) { return "", errors.New("no state") }
+			path := filepath.Join(t.TempDir(), "signals.json")
+			now := time.Unix(1700000000, 0)
+			data, err := json.Marshal(map[string]entry{
+				"console.example|denied": {Last: now.Add(-time.Minute), Folded: tc.folded},
+			})
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(path, data, 0600))
+			e.statePath = func() (string, error) { return path, nil }
+			e.now = func() time.Time { return now }
 			e.headless = func() bool { return false }
 			fields := Fields{Argv0: "sudo", Server: "my-server"}
 			_, body := Format(Denied, fields, 0)
 			prefix := e.WorkspaceURL + "/"
-			fields.ConsoleURL = prefix + strings.Repeat("x", tc.size-utf8.RuneCountInString(body)-1-len(prefix))
+			const suffix = "/end42"
+			fields.ConsoleURL = prefix + strings.Repeat("x", tc.size-utf8.RuneCountInString(body)-1-len(prefix)-len(suffix)) + suffix
+			assert.Equal(t, tc.size, utf8.RuneCountInString(body+"\n"+fields.ConsoleURL))
 			wantLink := ""
-			if tc.keep {
+			if tc.keep && tc.folded == 0 {
 				wantLink = fields.ConsoleURL
 			}
-			e.notifier = notifyFunc(func(_ context.Context, _, _, link string) error {
+			_, wantNotifyBody := Format(Denied, fields, tc.folded)
+			if wantLink != "" {
+				wantNotifyBody += " " + wantLink
+			}
+			calls := 0
+			e.notifier = notifyFunc(func(_ context.Context, _ string, body, link string) error {
+				calls++
 				assert.Equal(t, wantLink, link)
+				assert.Equal(t, wantNotifyBody, body)
 				return nil
 			})
 			e.Emit(Denied, fields)
+			assert.Equal(t, 1, calls)
 			wantBody := body
 			if tc.keep {
 				wantBody += "\n" + fields.ConsoleURL
