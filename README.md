@@ -508,6 +508,22 @@ Run `alpacon --help` for the full list, or `alpacon <command> --help` for detail
 
 ## When a command is denied
 
+When a command or file transfer receives a 403 gate refusal, or a submitted command is later rejected, the CLI prints a red banner on a color terminal, or the same plain-text box on redirected stderr, before its error. Plan, rate, token scope, role, MFA, authentication, and validation refusals do not produce denial signals:
+
+```text
+==== ALPACON: COMMAND DENIED ====
+sudo on my-server as alice was refused by the risk gate and did not run. Session ses-1.
+================================
+```
+
+Pending command, sudo, and Work Session approvals show an `ALPACON: APPROVAL PENDING` banner when the CLI starts waiting or reports pending. A `session_paused` refusal shows `ALPACON: SESSION PAUSED`. A denial alone does not mean the session paused. With `--output json`, the banner goes to the controlling terminal (`/dev/tty` or `CONOUT$`) when available; stdout, stderr, and exit codes keep their existing contracts. Without a controlling terminal, the JSON run has no banner.
+
+The CLI also attempts a desktop notification on macOS, Linux (`notify-send` when installed), and Windows. Its title is `Alpacon: command denied`, `Alpacon: approval pending`, or `Alpacon: session paused`. The banner and notification include only the command's first word with its path removed, server, OS account, gate, and Work Session identifier when known; command arguments are omitted. The executable word is omitted if it contains quotes or backslashes. Account names must match `^[a-z_][a-z0-9_.-]{0,31}\$?$`; the server-returned username takes precedence over a command argument. Notification failures cannot change the result; each attempt has a two-second timeout, which the CLI waits for before exiting.
+
+When the server supplies `console_url`, the link is included only if its origin is trusted for the current workspace and the banner body, including the separating newline and full link, fits within 256 characters. The banner shows the full link on its own line, and the Windows notification opens it when clicked. Otherwise the link is omitted from both. A trusted link uses the workspace's scheme and either the same host and effective port, or, for a workspace under the default `alpacon.io` base domain, `alpacon.io` or one of its subdomains at the scheme's default port. Hostnames ignore case and a trailing dot; omitted HTTP and HTTPS ports mean 80 and 443. The URL must also be an absolute HTTP or HTTPS URL of at most 2,048 bytes, with no credentials, fragment marker, whitespace, control characters, or non-ASCII characters, and any explicit port must be between 1 and 65,535.
+
+Desktop notifications are always attempted within the rate limit, including in CI and over SSH; when the desktop cannot show one, delivery fails silently. The only exception is Windows service session 0, reported by the OS. Text-mode banners still print: on the controlling terminal when stderr is a terminal, and on stderr otherwise, including when an agent runs with non-terminal stdio. JSON mode uses the controlling terminal independently of notification delivery. There is no local-signal opt-out. The banner prints for every event. Only the desktop notification is limited, to one per workspace, Work Session and kind every 60 seconds (workspace and kind alone without a session); repeats are folded into the next notification as `+N more.`, and the shared state is stored in `~/.alpacon/state/signals.json` across CLI invocations. A limiter step that does not finish within 500 ms, or a state file that is not a regular file, emits the notification without updating the state.
+
 A submitted command the server answers with `status: denied` did not run. The CLI reports it as a final refusal and exits `6`, the same as a rejected command. This holds for `exec`, `exec logs`, `cp` downloads, and the downloads `edit` and `exec --file --from-server` make. A denied download fetches no file or archive, and the CLI never submits a denied command again.
 
 Under `--output json`, `error_code` is the server's `denial_code`, falling back to `rejection_cause`, then `not_approved`; `server.denial_code` and `server.result` keep the server's own values. Text shown in the terminal has control characters removed. A WorkSession refusal at submission time still exits `3`.

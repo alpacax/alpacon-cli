@@ -310,6 +310,10 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 			}))
 		}
 		if err != nil {
+			signalArgs := parsed
+			signalArgs.WorkSessionID = workSessionID
+			err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), alpaconClient)
+			utils.SignalRefusal(err)
 			if file == nil && isLineTooLong(err) {
 				reportLineTooLong(err, parsed)
 			}

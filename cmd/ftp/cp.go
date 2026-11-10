@@ -13,6 +13,7 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -114,6 +115,8 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 				}))
 
 				if err != nil {
+					err = utils.WithSignalFields(err, localsignal.Fields{Server: serverName, Account: username, Session: workSessionID}, alpaconClient)
+					utils.SignalRefusal(err)
 					utils.HandleWorkSessionError(err, utils.OperationWebFTP, serverName, authMethod, workSessionID)
 					utils.CliErrorWithExit("Failed to upload to '%s': %s", dest, err)
 					return
@@ -130,6 +133,8 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 				}))
 
 				if err != nil {
+					err = utils.WithSignalFields(err, localsignal.Fields{Server: serverName, Account: username, Session: workSessionID}, alpaconClient)
+					utils.SignalRefusal(err)
 					utils.HandleWorkSessionError(err, utils.OperationWebFTP, serverName, authMethod, workSessionID)
 					wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
 					reportDownloadRejection(err, wrappedSrc)

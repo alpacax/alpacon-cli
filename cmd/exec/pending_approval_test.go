@@ -2,16 +2,19 @@ package exec
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	osexec "os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -90,6 +93,18 @@ type pendingApprovalSignal struct {
 	ExitCode    int                `json:"exit_code"`
 	RequestID   string             `json:"request_id"`
 	NextActions []utils.NextAction `json:"next_actions"`
+}
+
+type approvalWaitNotifier struct{ path string }
+
+func (n approvalWaitNotifier) Notify(_ context.Context, title, _, _ string) error {
+	f, err := os.OpenFile(n.path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	_, err = fmt.Fprintln(f, title)
+	return err
 }
 
 // runExecHelper drives the real exec command in a helper process against a
@@ -334,7 +349,7 @@ func TestExecLogsRejectedExits6(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/"+jobID+"/" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": jobID, "status": "rejected"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": jobID, "status": "rejected", "rejection_gate": "approval"})
 			return
 		}
 		http.NotFound(w, r)
@@ -345,6 +360,7 @@ func TestExecLogsRejectedExits6(t *testing.T) {
 		_, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, jobID)
 		assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "a rejection is final; exit 1 reads as retryable")
 		assert.Contains(t, stderr, "was rejected; the server did not record why")
+		assert.Contains(t, stderr, "==== ALPACON: COMMAND DENIED ====\n")
 	})
 
 	t.Run("json", func(t *testing.T) {
@@ -424,6 +440,93 @@ func TestExecRejectedMidWaitExits6(t *testing.T) {
 
 	assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "a mid-wait rejection is final; stderr: %s", stderr)
 	assert.Contains(t, stderr, "rejected by a reviewer")
+}
+
+func TestExecExpiredGrantSignalsOnlyNonLapseRejection(t *testing.T) {
+	cases := []struct {
+		name, cause, gate, message, hint string
+		denied                           bool
+	}{
+		{
+			name:    "risk denial",
+			cause:   "risk_denied",
+			gate:    "risk",
+			message: "was rejected: the risk assessor refused it (rejection_cause: risk_denied, rejection_gate: risk)",
+			hint:    "The workspace risk policy refuses this command; the same command is refused the same way.",
+			denied:  true,
+		},
+		{
+			name:    "no cause",
+			gate:    "approval",
+			message: "was not approved before the approval request expired",
+		},
+		{
+			name:    "explicit lapse",
+			cause:   "approval_expired",
+			gate:    "approval",
+			message: "was rejected: its approval request expired with no decision (rejection_cause: approval_expired, rejection_gate: approval)",
+			hint:    "Ask an approver why the request went undecided.",
+		},
+	}
+	for _, tc := range cases {
+		for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+			t.Run(tc.name+"/"+format, func(t *testing.T) {
+				extra := map[string]any{"rejection_gate": tc.gate}
+				if tc.cause != "" {
+					extra["rejection_cause"] = tc.cause
+				}
+				ts, reads := newRejectedCommandSequenceServer("root", "wheel", extra, true, "expired")
+				defer ts.Close()
+				logPath := filepath.Join(t.TempDir(), "notifications")
+				require.NoError(t, os.WriteFile(logPath, nil, 0600))
+
+				stdout, stderr, exitCode := runHelperProcess(t, ts.URL,
+					"TestExecExpiredGrantSignalHelperProcess", execWorkSessionHelperMarker,
+					[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1", "ALPACON_TEST_POLL_INTERVAL=10ms", "ALPACON_TEST_NOTIFICATION_LOG=" + logPath},
+					[]string{"--output", format, "--wait-approval", "30s", "prod", "--", "sudo", "reboot"})
+				assert.Greater(t, reads.Load(), int64(2))
+				assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
+				assert.Equal(t, denialLine("SUDO_APPROVAL_REQUIRED"), stdout)
+				notifications, err := os.ReadFile(logPath)
+				require.NoError(t, err)
+				wantDenied := 0
+				if tc.denied {
+					wantDenied = 1
+				}
+				assert.Equal(t, wantDenied, strings.Count(string(notifications), "Alpacon: command denied\n"), "DENIED notification calls")
+				message := "command " + rejectedCommandID + " " + tc.message
+				if tc.cause != "" {
+					message += "."
+				}
+				if format == utils.OutputFormatTable {
+					assert.Equal(t, wantDenied, strings.Count(stderr, "==== ALPACON: COMMAND DENIED ====\n"), "DENIED banners")
+					assert.Contains(t, stderr, "Error: "+message+"\n")
+					if tc.hint != "" {
+						assert.Contains(t, stderr, "Hint: "+tc.hint+"\n")
+					}
+					return
+				}
+				envelope := lastEnvelope(t, stderr)
+				assert.False(t, envelope.OK)
+				assert.Equal(t, utils.ExitCodeNotApproved, envelope.ExitCode)
+				code := tc.cause
+				if code == "" {
+					code = "approval_expired"
+				}
+				assert.Equal(t, code, envelope.ErrorCode)
+				assert.Equal(t, message, envelope.Message)
+			})
+		}
+	}
+}
+
+func TestExecExpiredGrantSignalHelperProcess(t *testing.T) {
+	logPath := os.Getenv("ALPACON_TEST_NOTIFICATION_LOG")
+	if logPath == "" {
+		return
+	}
+	localsignal.NewNotifier = func() localsignal.Notifier { return approvalWaitNotifier{path: logPath} }
+	TestExecCommandWorkSessionGateHelperProcess(t)
 }
 
 // newResultPollRefusalServer accepts the command but throttles every read of

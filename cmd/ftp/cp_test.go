@@ -45,7 +45,7 @@ func TestReportDownloadRejectionExitsSixInEitherFormat(t *testing.T) {
 			assert.Equal(t, "account_bound_to_other_person", envelope.ErrorCode)
 			assert.Equal(t, "Failed to download from '[prod:/a]': command was rejected: the account it would run as was linked to another person before it was delivered (rejection_cause: account_bound_to_other_person)", envelope.Message)
 			assert.Equal(t, "download", envelope.Context["operation"])
-			assert.Equal(t, map[string]any{"rejection_cause": "account_bound_to_other_person", "rejection_gate": nil}, envelope.Server)
+			assert.Equal(t, map[string]any{"console_url": "https://console.example/commands/1", "work_session_id": "550e8400-e29b-41d4-a716-446655440000", "rejection_cause": "account_bound_to_other_person", "rejection_gate": nil}, envelope.Server)
 		})
 	}
 }
@@ -56,7 +56,7 @@ func TestReportDownloadRejectionHelperProcess(t *testing.T) {
 		return
 	}
 	utils.OutputFormat = format
-	rejected := &event.CommandRejectedError{Cause: "account_bound_to_other_person", Reported: true}
+	rejected := &event.CommandRejectedError{Cause: "account_bound_to_other_person", Reported: true, ConsoleURL: "https://console.example/commands/1", WorkSessionID: "550e8400-e29b-41d4-a716-446655440000"}
 	reportDownloadRejection(fmt.Errorf("download command: %w", rejected), "[prod:/a]")
 	os.Exit(99)
 }

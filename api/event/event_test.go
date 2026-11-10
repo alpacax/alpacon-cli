@@ -3,12 +3,15 @@ package event
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -412,6 +415,8 @@ func TestErrorFromDetails_UseFileExecutionCarriesCause(t *testing.T) {
 		"verification_status": "rejected",
 		"rejection_cause": "use_file_execution",
 		"rejection_gate": "approval",
+ "console_url": "https://console.example/commands/cmd-9",
+ "work_session": {"id":"ses-1"},
 		"result": "Save the script to a file and run it as a verified file.",
 		"server": {"id": "srv-1", "name": "prod"}
 	}`), &d))
@@ -420,6 +425,9 @@ func TestErrorFromDetails_UseFileExecutionCarriesCause(t *testing.T) {
 	var rejected *CommandRejectedError
 	require.ErrorAs(t, err, &rejected)
 	assert.Equal(t, RejectionCauseUseFileExecution, rejected.Cause)
+	assert.Equal(t, "approval", rejected.Gate)
+	assert.Equal(t, "https://console.example/commands/cmd-9", rejected.ConsoleURL)
+	assert.Equal(t, "ses-1", rejected.WorkSessionID)
 	assert.Equal(t, "command cmd-9 was refused because its command line carries a script body (use_file_execution)", err.Error())
 	code, _ := utils.ParseErrorResponse(err)
 	assert.Equal(t, RejectionCauseUseFileExecution, code)
@@ -2817,6 +2825,127 @@ func TestStreamApprovedCommand_RefusesACommandIDThatIsNotOneSegment(t *testing.T
 	err := StreamApprovedCommand(ac, "../x", io.Discard, time.Second)
 
 	require.ErrorIs(t, err, utils.ErrInvalidID)
+}
+
+func TestPendingCommandCarriesConsoleURL(t *testing.T) {
+	t.Parallel()
+	err := errorFromDetails(testPathID(t, "cmd-1"), EventDetails{Status: "awaiting_approval", ConsoleURL: "https://console.example/commands/1", WorkSession: &CommandWorkSession{ID: "ses-1"}})
+	var pending *PendingApprovalError
+	require.ErrorAs(t, err, &pending)
+	assert.Equal(t, "https://console.example/commands/1", pending.ConsoleURL)
+	assert.Equal(t, "ses-1", pending.WorkSessionID)
+}
+
+func TestRejectedCommandLocalSignal(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		rejection CommandRejectedError
+		want      bool
+	}{
+		{"reviewer refusal", CommandRejectedError{Gate: "approval", Cause: RejectionCauseApprovalRejected}, true},
+		{"expired flag", CommandRejectedError{Gate: "approval", Expired: true}, false},
+		{"non-lapse cause overrides expired flag", CommandRejectedError{Gate: "approval", Expired: true, Cause: RejectionCauseApprovalRejected}, true},
+		{"expired cause", CommandRejectedError{Gate: "approval", Cause: RejectionCauseApprovalExpired}, false},
+		{"cancelled", CommandRejectedError{Gate: "approval", Cause: "approval_cancelled"}, false},
+		{"unknown gate", CommandRejectedError{Gate: "future_gate", Cause: RejectionCauseApprovalRejected}, true},
+		{"network gate", CommandRejectedError{Gate: "network", Cause: RejectionCauseApprovalRejected}, true},
+		{"plan gate", CommandRejectedError{Gate: "plan", Cause: RejectionCauseApprovalRejected}, true},
+		{"without rejection metadata", *(&EventDetails{Status: "rejected"}).Rejection(), true},
+		{"signature_invalid", *(&EventDetails{Status: "completed", CommandRejection: CommandRejection{RejectionCause: types.SentString{Value: RejectionCauseSignatureInvalid, Sent: true}}}).Rejection(), true},
+		{"unsigned_file", *(&EventDetails{Status: "rejected", CommandRejection: CommandRejection{RejectionCause: types.SentString{Value: "unsigned_file", Sent: true}}}).Rejection(), true},
+		{"account_bound_to_other_person", *(&EventDetails{Status: "rejected", CommandRejection: CommandRejection{RejectionCause: types.SentString{Value: "account_bound_to_other_person", Sent: true}}}).Rejection(), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			_, stderr := testutil.CaptureOutput(t, func() { utils.SignalRefusal(&tc.rejection) })
+			state := filepath.Join(home, ".alpacon", "state", "signals.json")
+			if tc.want {
+				assert.Contains(t, stderr, "==== ALPACON: COMMAND DENIED ====")
+				if tc.rejection.Gate == "" {
+					assert.NotContains(t, stderr, "gate")
+				}
+				data, err := os.ReadFile(state)
+				require.NoError(t, err)
+				var signals map[string]any
+				require.NoError(t, json.Unmarshal(data, &signals))
+				assert.Contains(t, signals, "denied")
+			} else {
+				assert.Empty(t, stderr)
+				assert.NoFileExists(t, state)
+			}
+		})
+	}
+}
+
+func TestSuccessfulCommandWithPendingSudoApprovalSignals(t *testing.T) {
+	for _, lane := range []string{"polling", "streaming"} {
+		t.Run(lane, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			const output = "Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n"
+			pending := "pending_approval"
+			details := EventDetails{
+				ID: "cmd-1", Status: "completed", Success: new(true), ExitCode: new(0),
+				Result: output, Line: "sudo id", Username: "alice",
+				Server:      types.ServerSummary{Name: "my-server"},
+				WorkSession: &CommandWorkSession{ID: "ses-1"}, SudoGrantStatus: &pending,
+			}
+			var out bytes.Buffer
+			_, stderr := testutil.CaptureOutput(t, func() {
+				synctest.Test(t, func(t *testing.T) {
+					if lane == "streaming" {
+						ac := newStreamingServers(t, streamingServerConfig{
+							cmdID: "cmd-1", serverID: "srv-1", terminal: details,
+							wsChunks: []ChunkEvent{{Seq: 0, Content: output}},
+						})
+						require.NoError(t, RunCommandStreaming(ac, "my-server", "sudo id", "alice", "", nil, "ses-1", "", &out))
+						return
+					}
+					ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						if strings.Contains(r.URL.Path, "/chunks/") {
+							_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{})
+							return
+						}
+						_ = json.NewEncoder(w).Encode(details)
+					}))
+					ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+					for range 2 {
+						require.NoError(t, runCommandFallbackFromID(ac, testPathID(t, "cmd-1"), &out, time.Millisecond, false, errors.New("no stream")))
+					}
+				})
+			})
+			want := output
+			if lane == "polling" {
+				want += output
+			}
+			assert.Equal(t, want, out.String())
+			banners := 1
+			if lane == "polling" {
+				banners = 2
+			}
+			assert.Equal(t, banners, strings.Count(stderr, "==== ALPACON: APPROVAL PENDING ===="))
+			assert.Contains(t, stderr, "sudo on my-server as alice is waiting for approval. Session ses-1.")
+		})
+	}
+}
+
+func TestSignalAccountFromCommandDetails(t *testing.T) {
+	t.Parallel()
+	for _, status := range []string{"rejected", "awaiting_approval", "failed"} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			success := false
+			err := errorFromDetails(testPathID(t, "cmd-1"), EventDetails{Status: status, Username: "deploy", Success: &success})
+			require.Error(t, err)
+			var carrier interface{ LocalSignalAccount() string }
+			require.ErrorAs(t, err, &carrier)
+			assert.Equal(t, "deploy", carrier.LocalSignalAccount())
+		})
+	}
 }
 
 func TestGetEventListShowsRejectionInStatusCell(t *testing.T) {

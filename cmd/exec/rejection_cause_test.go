@@ -2,6 +2,7 @@ package exec
 
 import (
 	"encoding/json"
+	"maps"
 	"strings"
 	"testing"
 
@@ -105,7 +106,9 @@ func TestRejectedCommandReportsCauseGateAndNextStep(t *testing.T) {
 					if wantExit == 0 {
 						wantExit = utils.ExitCodeNotApproved
 					}
-					ts := newRejectedCommandServerWith("root", "wheel", tc.extra)
+					extra := maps.Clone(tc.extra)
+					extra["work_session"] = nil
+					ts := newRejectedCommandServerWith("root", "wheel", extra)
 					defer ts.Close()
 
 					stderr, exitCode := surface.run(t, ts.URL, format)
@@ -156,7 +159,7 @@ func TestRejectedCommandFromOlderServerSaysTheCauseWasNotRecorded(t *testing.T) 
 		for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 			t.Run(surface.name+"/"+format, func(t *testing.T) {
 				t.Parallel()
-				ts := newRejectedCommandServerWith("root", "wheel", nil)
+				ts := newRejectedCommandServerWith("root", "wheel", map[string]any{"work_session": nil})
 				defer ts.Close()
 
 				stderr, exitCode := surface.run(t, ts.URL, format)

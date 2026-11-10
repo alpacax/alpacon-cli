@@ -51,9 +51,12 @@ var phaseHints = map[string]string{
 // RemoteCommandError is returned when the remote command completed but exited
 // with a non-zero status. ExitCode is 1 when the server omits exit_code.
 type RemoteCommandError struct {
-	Output     string
-	ExitCode   int
-	ErrorPhase string
+	Username      string
+	ConsoleURL    string
+	WorkSessionID string
+	Output        string
+	ExitCode      int
+	ErrorPhase    string
 	// CommandID identifies the job this failure came from, so an approval wait
 	// has something to poll. ApprovalRequestID is filled in by that wait, not
 	// by the server response this error is built from.
@@ -92,7 +95,10 @@ func (e *CommandPollError) Unwrap() error { return e.Err }
 // console before it runs. CommandID identifies the parked job so a --wait caller can
 // poll it; re-submitting would create a duplicate command and approval request.
 type PendingApprovalError struct {
-	CommandID string
+	Username      string
+	ConsoleURL    string
+	WorkSessionID string
+	CommandID     string
 	// FileSuggestion is the server's proposal to run the held command as a
 	// verified file instead; nil when the server made none.
 	FileSuggestion *FileExecutionSuggestion
@@ -172,6 +178,7 @@ type EventDetails struct {
 	// FileExecutionSuggestion is set on a held command line the server reads as
 	// a script on the target; absent otherwise and on older servers.
 	FileExecutionSuggestion *FileExecutionSuggestion `json:"file_execution_suggestion"`
+	ConsoleURL              string                   `json:"console_url,omitempty"`
 	CommandRejection
 	// RejectionNote is what the approver wrote when rejecting the hold: null unless a
 	// person rejected it, sent only to the requester and the approvers, and absent on
@@ -389,3 +396,45 @@ func IsDeniedStatus(status string) bool {
 func IsStatusOnlyFailure(status string) bool {
 	return status == "stuck" || status == "error" || status == "cancelled"
 }
+
+func (e *CommandRejectedError) RejectedCommand() bool {
+	return !utils.IsApprovalLapse(e.ErrorCode())
+}
+func (e *CommandRejectedError) ErrorGate() string { return e.Gate }
+func (e *PendingApprovalError) ErrorFields() map[string]any {
+	if e.ConsoleURL == "" && e.WorkSessionID == "" {
+		return nil
+	}
+	fields := make(map[string]any)
+	if e.ConsoleURL != "" {
+		fields["console_url"] = e.ConsoleURL
+	}
+	if e.WorkSessionID != "" {
+		fields["work_session_id"] = e.WorkSessionID
+	}
+	return fields
+}
+func (d EventDetails) WorkSessionID() string {
+	if d.WorkSession != nil {
+		return d.WorkSession.ID
+	}
+	return ""
+}
+
+func (e *RemoteCommandError) ErrorFields() map[string]any {
+	if e.ConsoleURL == "" && e.WorkSessionID == "" {
+		return nil
+	}
+	fields := make(map[string]any)
+	if e.ConsoleURL != "" {
+		fields["console_url"] = e.ConsoleURL
+	}
+	if e.WorkSessionID != "" {
+		fields["work_session_id"] = e.WorkSessionID
+	}
+	return fields
+}
+
+func (e *CommandRejectedError) LocalSignalAccount() string { return e.Username }
+func (e *PendingApprovalError) LocalSignalAccount() string { return e.Username }
+func (e *RemoteCommandError) LocalSignalAccount() string   { return e.Username }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -480,7 +481,7 @@ func TestRunExecWithApprovalWait_TimesOutAfterWindow(t *testing.T) {
 		err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
 		elapsed := time.Since(start)
 
-		assert.Same(t, denial, err, "timeout returns the last pending denial for the caller's handler")
+		require.ErrorIs(t, err, denial, "timeout returns the last pending denial for the caller's handler")
 		assert.Equal(t, waitTimeout, elapsed, "loop must wait exactly the anchored window before timing out")
 	})
 }
@@ -621,7 +622,7 @@ func TestRunExecWithApprovalWait_TimeoutReportsThePendingDenial(t *testing.T) {
 
 		err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
 
-		assert.Same(t, denial, err, "a timed-out wait reports the pending denial, not the last poll failure")
+		require.ErrorIs(t, err, denial, "a timed-out wait reports the pending denial, not the last poll failure")
 	})
 }
 
@@ -647,7 +648,7 @@ func TestRunExecWithApprovalWait_GivesUpAfterConsecutivePollFailures(t *testing.
 
 	// The request is still open, so giving up must exit on the pending contract
 	// like the timeout does; the transport detail rides on the warning line.
-	assert.Same(t, denial, err, "an unreachable server leaves the approval request open")
+	require.ErrorIs(t, err, denial, "an unreachable server leaves the approval request open")
 	assert.Contains(t, stderr, "server said 502")
 	assert.Equal(t, utils.MaxConsecutivePollFailures, polls, "the bounded run of failed polls")
 }
@@ -828,20 +829,30 @@ func TestRunExecWithApprovalWait_ThrottleWarnsOnce(t *testing.T) {
 // command's own grant status, so a reviewer's rejection is visible on the very
 // next tick.
 func TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	origin := utils.LocalSignalConsoleOrigin
+	t.Cleanup(func() { utils.LocalSignalConsoleOrigin = origin })
+	utils.LocalSignalConsoleOrigin = func() (string, string) { return "https://console.example", "" }
 	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 		return denial
 	}
 	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 		status := "rejected"
-		return event.EventDetails{SudoGrantStatus: &status}, nil
+		return event.EventDetails{SudoGrantStatus: &status, CommandRejection: event.CommandRejection{RejectionGate: types.SentString{Value: "approval", Sent: true}}, ConsoleURL: "https://console.example/commands/1"}, nil
 	}
 	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
 		t.Fatal("stream must not run for a rejected command")
 		return nil
 	}
 
-	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+	var err error
+	stderr := captureStderr(t, func() {
+		err = RunExecWithApprovalWait(&client.AlpaconClient{BaseURL: "https://console.example"}, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+	})
+	assert.Contains(t, stderr, "==== ALPACON: COMMAND DENIED ====\n")
+	assert.Contains(t, stderr, "\nhttps://console.example/commands/1\n")
 
 	var rejected *event.CommandRejectedError
 	require.ErrorAs(t, err, &rejected)

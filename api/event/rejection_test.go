@@ -357,3 +357,35 @@ func TestDeniedCommandIsATerminalRefusal(t *testing.T) {
 		})
 	}
 }
+
+func TestCommandErrorContextFields(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, consoleURL, workSessionID string
+		want                            map[string]any
+	}{
+		{name: "neither"},
+		{name: "console only", consoleURL: "https://console.example/commands/1", want: map[string]any{"console_url": "https://console.example/commands/1"}},
+		{name: "work session only", workSessionID: "550e8400-e29b-41d4-a716-446655440000", want: map[string]any{"work_session_id": "550e8400-e29b-41d4-a716-446655440000"}},
+		{name: "both", consoleURL: "https://console.example/commands/1", workSessionID: "550e8400-e29b-41d4-a716-446655440000", want: map[string]any{"console_url": "https://console.example/commands/1", "work_session_id": "550e8400-e29b-41d4-a716-446655440000"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			errors := []struct {
+				name   string
+				fields interface{ ErrorFields() map[string]any }
+			}{
+				{"rejected", &CommandRejectedError{ConsoleURL: tc.consoleURL, WorkSessionID: tc.workSessionID}},
+				{"pending approval", &PendingApprovalError{ConsoleURL: tc.consoleURL, WorkSessionID: tc.workSessionID}},
+				{"remote command", &RemoteCommandError{ConsoleURL: tc.consoleURL, WorkSessionID: tc.workSessionID}},
+			}
+			for _, err := range errors {
+				t.Run(err.name, func(t *testing.T) {
+					t.Parallel()
+					assert.Equal(t, tc.want, err.fields.ErrorFields())
+				})
+			}
+		})
+	}
+}

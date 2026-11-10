@@ -10,9 +10,12 @@ import (
 // CommandRejectedError is a type so the CLI can exit with ExitCode: a retry is
 // refused again or files another approval request.
 type CommandRejectedError struct {
-	CommandID string
-	Expired   bool
-	Denied    bool
+	Username      string
+	ConsoleURL    string
+	WorkSessionID string
+	CommandID     string
+	Expired       bool
+	Denied        bool
 	// DenialCode is the server's denial_code on a denied command.
 	DenialCode types.SentString
 	Result     string
@@ -34,7 +37,7 @@ type CommandRejectedError struct {
 const RejectionCauseUseFileExecution = "use_file_execution"
 
 const (
-	RejectionCauseApprovalExpired  = "approval_expired"
+	RejectionCauseApprovalExpired  = utils.ApprovalExpired
 	RejectionCauseApprovalRejected = "approval_rejected"
 	// RejectionCauseSignatureInvalid comes with status completed, since the agent
 	// refuses the file after delivery, and IsRejected still counts it a rejection.
@@ -123,12 +126,15 @@ func (e *CommandRejectedError) ExitCode() int {
 func (d EventDetails) Rejection() *CommandRejectedError {
 	denied := IsDeniedStatus(d.Status)
 	e := &CommandRejectedError{
-		CommandID:  d.ID,
-		Denied:     denied,
-		DenialCode: d.DenialCode,
-		Cause:      d.RejectionCause.Value,
-		Gate:       d.RejectionGate.Value,
-		Reported:   d.Reported(),
+		Username:      d.Username,
+		ConsoleURL:    d.ConsoleURL,
+		WorkSessionID: d.WorkSessionID(),
+		CommandID:     d.ID,
+		Denied:        denied,
+		DenialCode:    d.DenialCode,
+		Cause:         d.RejectionCause.Value,
+		Gate:          d.RejectionGate.Value,
+		Reported:      d.Reported(),
 	}
 	if denied {
 		e.Result = d.Result
@@ -251,13 +257,16 @@ func (e *CommandRejectedError) NextActions() []utils.NextAction {
 	return []utils.NextAction{e.text().next}
 }
 
-// ErrorFields preserves the refusal fields the server sent. Denied results are
-// included because they can hold the only recorded reason.
+// ErrorFields keeps command context and the refusal fields the server sent.
+// Denied results can hold the only recorded reason; reported fields preserve nulls.
 func (e *CommandRejectedError) ErrorFields() map[string]any {
-	if !e.Reported && !e.DenialCode.Sent && e.Result == "" {
-		return nil
-	}
 	fields := make(map[string]any)
+	if e.ConsoleURL != "" {
+		fields["console_url"] = e.ConsoleURL
+	}
+	if e.WorkSessionID != "" {
+		fields["work_session_id"] = e.WorkSessionID
+	}
 	if e.DenialCode.Sent {
 		fields["denial_code"] = nullIfEmpty(e.DenialCode.Value)
 	}
@@ -270,6 +279,9 @@ func (e *CommandRejectedError) ErrorFields() map[string]any {
 	}
 	if e.Note != "" {
 		fields["rejection_note"] = e.Note
+	}
+	if len(fields) == 0 {
+		return nil
 	}
 	return fields
 }
