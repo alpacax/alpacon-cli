@@ -29,6 +29,7 @@ func TestWorkSessionWarningInvocation(t *testing.T) {
 		{name: "raw", header: "work_session_required_soon", sunset: "Tue, 01 Dec 2026 00:00:00 GMT", mode: "raw", want: warning},
 		{name: "download", header: "work_session_required_soon", sunset: "Tue, 01 Dec 2026 00:00:00 GMT", mode: "download", want: warning},
 		{name: "multiple clients and response paths", header: "work_session_required_soon", sunset: "Tue, 01 Dec 2026 00:00:00 GMT", mode: "mixed", want: warning},
+		{name: "among other warnings", header: "future_warning, work_session_required_soon", sunset: "Tue, 01 Dec 2026 00:00:00 GMT", mode: "standard", want: warning},
 		{name: "absent", sunset: "Tue, 01 Dec 2026 00:00:00 GMT", mode: "standard"},
 		{name: "unknown", header: "future_warning", sunset: "Tue, 01 Dec 2026 00:00:00 GMT", mode: "standard"},
 		{name: "invalid sunset", header: "work_session_required_soon", sunset: "not a date", mode: "standard"},
