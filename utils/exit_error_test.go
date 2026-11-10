@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -57,7 +58,8 @@ func TestFprintExitError_PrintsTheFailureItsConstructorNames(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var out bytes.Buffer
-			exitErr, _ := errors.AsType[*ExitError](tc.err)
+			exitErr, ok := errors.AsType[*ExitError](tc.err)
+			require.True(t, ok, "want a *ExitError, got %T", tc.err)
 
 			FprintExitError(&out, exitErr)
 
@@ -84,4 +86,63 @@ func TestExitError_UnwrapsTheCauseAmongItsArguments(t *testing.T) {
 
 	require.ErrorIs(t, err, cause)
 	assert.EqualError(t, err, "lookup failed: boom")
+}
+
+type hintedAPIError struct {
+	fakeAPIError
+	hint string
+}
+
+func (e *hintedAPIError) ErrorHint() string { return e.hint }
+
+// Serial: OutputFormat is process-wide.
+func TestFprintExitError_UnderJSONPrintsOneEnvelope(t *testing.T) {
+	saved := OutputFormat
+	OutputFormat = OutputFormatJSON
+	t.Cleanup(func() { OutputFormat = saved })
+	refusal := &hintedAPIError{fakeAPIError: fakeAPIError{code: "rbac_permission_required", status: 403}, hint: sampleHint}
+	cases := []struct {
+		name           string
+		err            error
+		wantErrorCode  string
+		wantHTTPStatus int
+		wantHint       bool
+	}{
+		{name: "server refusal", err: NewExitError("request failed: %s", refusal), wantErrorCode: "rbac_permission_required", wantHTTPStatus: 403, wantHint: true},
+		{name: "usage error", err: NewUsageExitError("expected one %s", "ENDPOINT"), wantErrorCode: ErrorCodeUsage},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			exitErr, ok := errors.AsType[*ExitError](tc.err)
+			require.True(t, ok, "want a *ExitError, got %T", tc.err)
+			var out bytes.Buffer
+
+			FprintExitError(&out, exitErr)
+
+			var env JSONErrorEnvelope[cliErrorCtx]
+			require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+			assert.Equal(t, exitErr.Code, env.ExitCode)
+			assert.Equal(t, tc.wantErrorCode, env.ErrorCode)
+			assert.Equal(t, tc.wantHTTPStatus, env.HTTPStatus)
+			if tc.wantHint {
+				assert.Contains(t, env.NextActions, NextAction{Description: sampleHint})
+			} else {
+				assert.Empty(t, env.NextActions)
+			}
+			assert.NotContains(t, out.String(), gitIssueURL)
+		})
+	}
+}
+
+func TestFprintExitError_SilentPrintsNothingUnderJSON(t *testing.T) {
+	saved := OutputFormat
+	OutputFormat = OutputFormatJSON
+	t.Cleanup(func() { OutputFormat = saved })
+	exitErr, ok := errors.AsType[*ExitError](NewSilentExitError(ExitCodeGeneralError))
+	require.True(t, ok)
+	var out bytes.Buffer
+
+	FprintExitError(&out, exitErr)
+
+	assert.Empty(t, out.String())
 }
