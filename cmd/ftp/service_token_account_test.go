@@ -18,8 +18,10 @@ import (
 )
 
 func TestCp_ApplicationAccountRefusal(t *testing.T) {
+	t.Parallel()
 	for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 		t.Run(format, func(t *testing.T) {
+			t.Parallel()
 			var submitted atomic.Bool
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -53,8 +55,7 @@ func TestCp_ApplicationAccountRefusal(t *testing.T) {
 			assert.Equal(t, 1, exitErr.ExitCode())
 			assert.True(t, submitted.Load(), "the upload creation must be refused")
 			assert.Empty(t, stdout.String())
-			assert.Contains(t, stderr.String(), "application_system_user_not_found")
-			assert.Contains(t, stderr.String(), "The service token's application cannot run as that account on that server. Run as an account bound to the application, or as its own account, and check that it is provisioned there (code: application_system_user_not_found).")
+			assert.Contains(t, stderr.String(), "the service token's application cannot run as that account on that server—run as an account bound to the application or as its own account, and check that it is provisioned there")
 			if format == utils.OutputFormatTable {
 				assert.NotContains(t, stderr.String(), "Invalid input.")
 			}

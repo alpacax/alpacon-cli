@@ -21,9 +21,11 @@ import (
 )
 
 func TestEntryAdd_ApplicationAccount(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name, username, groupname    string
 		file                         bool
+		secondEntry                  bool
 		usernameGiven                bool
 		nullApplication, lookupFails bool
 		wantExit                     int
@@ -38,13 +40,17 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 		{name: "batch wildcard username", username: "*", file: true},
 		{name: "batch confirmed", username: "deploy", groupname: "deploy", file: true},
 		{name: "batch other username", username: "root", file: true, wantExit: 2},
+		{name: "batch second username", username: "root", file: true, secondEntry: true, wantExit: 2},
 		{name: "batch other group", groupname: "root", file: true, wantExit: 2},
 		{name: "batch wildcard accounts", username: "*", groupname: "*", file: true},
 		{name: "null application", nullApplication: true, wantExit: 1},
 		{name: "workspace lookup fails", lookupFails: true, wantExit: 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var tokenLookups atomic.Int32
 			workspace := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				tokenLookups.Add(1)
 				w.Header().Set("Content-Type", "application/json")
 				if tt.lookupFails {
 					w.WriteHeader(http.StatusForbidden)
@@ -100,7 +106,11 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 				if tt.username == "" && !tt.usernameGiven {
 					username = nil
 				}
-				require.NoError(t, os.WriteFile(file, fileOf(t, fileItem(map[string]any{"username": username, "groupname": tt.groupname})), 0600))
+				items := []map[string]any{fileItem(map[string]any{"username": username, "groupname": tt.groupname})}
+				if tt.secondEntry {
+					items = append([]map[string]any{fileItem(nil)}, items...)
+				}
+				require.NoError(t, os.WriteFile(file, fileOf(t, items...), 0600))
 				flags = []string{"--file", file}
 			} else {
 				if tt.username != "" || tt.usernameGiven {
@@ -138,6 +148,10 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 				prefix := ""
 				if tt.file {
 					prefix, field = "Entry 0: ", strings.ToLower(field)
+					if tt.secondEntry {
+						prefix = "Entry 1: "
+						assert.Equal(t, int32(1), tokenLookups.Load())
+					}
 				}
 				assert.Equal(t, fmt.Sprintf("%s%s: the %s must be empty, * or %q (code: service_token_account_not_own).", prefix, field, noun, "deploy"), envelope.Message)
 			} else {

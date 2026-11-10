@@ -1478,7 +1478,7 @@ func codeOnlyMessage(code string) string {
 func codeSentence(code string) (sentence string, known bool) {
 	switch code {
 	case utils.ApplicationSystemUserNotFound:
-		return "The service token's application cannot run as that account on that server. Run as an account bound to the application, or as its own account, and check that it is provisioned there (code: " + code + ").", true
+		return "the service token's application cannot run as that account on that server—run as an account bound to the application or as its own account, and check that it is provisioned there", true
 	case utils.APINotFound:
 		return "the requested resource was not found", true
 	case utils.APIRateLimited:

@@ -231,10 +231,10 @@ func (s *ledgerSession) bindApplicationAccounts(entries []entryDraft, fileMode b
 			return fmt.Errorf("%sthe workspace did not return the service token's application username", prefix)
 		}
 		username := token.Application.Username
-		if entry.Username != "" && entry.Username != "*" && entry.Username != username {
+		if !accountMatches(entry.Username, username) {
 			return serviceTokenAccountError{fmt.Sprintf("%susername: the account must be empty, * or %q (code: service_token_account_not_own)", prefix, username)}
 		}
-		if entry.Groupname != "" && entry.Groupname != "*" && entry.Groupname != username {
+		if !accountMatches(entry.Groupname, username) {
 			return serviceTokenAccountError{fmt.Sprintf("%sgroupname: the group must be empty, * or %q (code: service_token_account_not_own)", prefix, username)}
 		}
 		entry.PrincipalID = token.ID
@@ -321,21 +321,13 @@ func parseEntryFile(data []byte) ([]entryDraft, error) {
 		if err := item.validate(); err != nil {
 			return nil, fmt.Errorf("entry %d: %w", i, err)
 		}
-		username := ""
-		if item.Username != nil {
-			if bytes.Equal(bytes.TrimSpace(item.Username), []byte("null")) {
-				return nil, utils.MarkUsageError(fmt.Errorf("entry %d: username must be a string, not null", i))
-			}
-			if err := json.Unmarshal(item.Username, &username); err != nil {
-				return nil, utils.MarkUsageError(fmt.Errorf("entry %d: username: %w", i, err))
-			}
-			username = strings.TrimSpace(username)
+		username, err := parseAccountField(item.Username, i, "username")
+		if err != nil {
+			return nil, err
 		}
-		groupname := ""
-		if item.Groupname != nil {
-			if err := json.Unmarshal(item.Groupname, &groupname); err != nil {
-				return nil, utils.MarkUsageError(fmt.Errorf("entry %d: groupname: %w", i, err))
-			}
+		groupname, err := parseAccountField(item.Groupname, i, "groupname")
+		if err != nil {
+			return nil, err
 		}
 		entries = append(entries, entryDraft{EntryRequest: acl.EntryRequest{
 			PrincipalID:    item.PrincipalID,
@@ -348,4 +340,18 @@ func parseEntryFile(data []byte) ([]entryDraft, error) {
 		}, usernameOmitted: item.Username == nil})
 	}
 	return entries, nil
+}
+
+func parseAccountField(data json.RawMessage, index int, field string) (string, error) {
+	if data == nil {
+		return "", nil
+	}
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return "", utils.MarkUsageError(fmt.Errorf("entry %d: %s must be a string, not null", index, field))
+	}
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		return "", utils.MarkUsageError(fmt.Errorf("entry %d: %s: %w", index, field, err))
+	}
+	return strings.TrimSpace(value), nil
 }

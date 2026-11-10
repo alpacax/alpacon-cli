@@ -102,8 +102,8 @@ func partitionServerRefs(refs []string) (ids []string, names []string, err error
 	return ids, names, nil
 }
 
-// workspaceNames maps the ids the listed entries reference to names, fetching
-// only what they need. Best effort: a failure leaves ids and logs under ALPACON_DEBUG.
+// workspaceNames maps the listed entries' ids to names and service tokens to application accounts,
+// fetching only what they need. Best effort: a failure leaves ids and logs under ALPACON_DEBUG.
 func (s *ledgerSession) workspaceNames(entries []acl.EntryResponse) (tokenNames, serverNames, tokenAccounts map[string]string) {
 	needTokens, needServers := false, false
 	for _, entry := range entries {

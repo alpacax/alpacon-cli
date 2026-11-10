@@ -44,7 +44,7 @@ func fileOf(t *testing.T, items ...map[string]any) []byte {
 func TestParseEntryFile(t *testing.T) {
 	t.Parallel()
 	data := fileOf(t,
-		fileItem(map[string]any{"command_pattern": "  uptime ", "username": " * "}),
+		fileItem(map[string]any{"command_pattern": "  uptime ", "username": " * ", "groupname": " deploy "}),
 		fileItem(map[string]any{
 			"command_pattern": "df -h", "username": "root", "server_ids": []string{"6ba7b810-9dad-11d1-80b4-00c04fd430c8"},
 			"expires_at": "2099-01-15T10:00:00Z", "enabled": false,
@@ -55,7 +55,7 @@ func TestParseEntryFile(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []entryDraft{
-		{EntryRequest: acl.EntryRequest{PrincipalID: fileTokenID, CommandPattern: "uptime", Username: "*", ServerIDs: []string{}, Enabled: true}},
+		{EntryRequest: acl.EntryRequest{PrincipalID: fileTokenID, CommandPattern: "uptime", Username: "*", Groupname: "deploy", ServerIDs: []string{}, Enabled: true}},
 		{EntryRequest: acl.EntryRequest{PrincipalID: fileTokenID, CommandPattern: "df -h", Username: "root",
 			ServerIDs: []string{"6ba7b810-9dad-11d1-80b4-00c04fd430c8"}, ExpiresAt: "2099-01-15T10:00:00Z", Enabled: false}},
 	}, entries)
@@ -79,7 +79,20 @@ func TestParseEntryFile_NullUsername(t *testing.T) {
 	assert.True(t, utils.IsUsageError(err), "a null username must be a usage error: %v", err)
 }
 
+func TestParseEntryFile_NullGroupname(t *testing.T) {
+	t.Parallel()
+	item := fileItem(nil)
+	item["groupname"] = nil
+
+	entries, err := parseEntryFile(fileOf(t, fileItem(nil), item))
+
+	require.ErrorContains(t, err, "entry 1: groupname must be a string, not null")
+	assert.Nil(t, entries)
+	assert.True(t, utils.IsUsageError(err), "a null groupname must be a usage error: %v", err)
+}
+
 func TestParseEntryFile_NonStringAccountFields(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name, field string
 		value       any
@@ -90,6 +103,7 @@ func TestParseEntryFile_NonStringAccountFields(t *testing.T) {
 		{name: "object groupname", field: "groupname", value: map[string]any{}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			data := fileOf(t, fileItem(nil), fileItem(map[string]any{tt.field: tt.value}))
 			entries, err := parseEntryFile(data)
 			require.ErrorContains(t, err, "entry 1: "+tt.field+":")
