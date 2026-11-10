@@ -99,7 +99,7 @@ func TestRunLogout_RemovesCredentialsWhenTheSessionIsUnusable(t *testing.T) {
 			}
 
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			setTestHome(t, home)
 			require.NoError(t, config.CreateConfig(workspaceURL, "my-workspace", tt.token, "", tt.accessToken, tt.refreshToken, "", tt.expiresIn, false))
 			login, err := config.LoadConfig()
 			require.NoError(t, err)
@@ -168,7 +168,7 @@ func TestRunLogout_RemovesCredentialsWhenTheAuthServerRefuses(t *testing.T) {
 			t.Cleanup(ts.Close)
 
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			setTestHome(t, home)
 			require.NoError(t, config.CreateConfig(ts.URL, "my-workspace", "", "", "access", "refresh", "", tt.expiresIn, true))
 			login, err := config.LoadConfig()
 			require.NoError(t, err)
@@ -195,7 +195,7 @@ func TestRunLogout_RemovesCredentialsWhenTheAuthServerRefuses(t *testing.T) {
 
 func TestRunLogout_KeepsALoginAnotherShellMade(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	require.NoError(t, config.CreateConfig("https://my-workspace.invalid", "my-workspace", "other-shell-key", "", "", "", "", 0, false))
 	stale := config.Config{WorkspaceURL: "https://my-workspace.invalid", Token: "fake-api-key"}
 
