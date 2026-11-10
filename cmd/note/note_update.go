@@ -29,6 +29,7 @@ var noteUpdateCmd = &cobra.Command{
 
 		noteDetail, err := note.UpdateNote(alpaconClient, noteID)
 		if err != nil {
+			utils.ExitIfNoChanges(err)
 			utils.CliErrorWithExit("Failed to update the note: %s.", err)
 		}
 

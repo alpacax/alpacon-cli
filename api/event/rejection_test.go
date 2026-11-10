@@ -275,7 +275,7 @@ func TestIsRejectedReadsTheStatusAndACompletedCommandsCause(t *testing.T) {
 		{"agent refused the signature after delivery", `{"status":"completed","success":false,"rejection_cause":"signature_invalid","rejection_gate":null}`, true},
 		{"completed with a null cause", `{"status":"completed","success":false,"rejection_cause":null}`, false},
 		{"completed with another cause keeps its result", `{"status":"completed","success":true,"rejection_cause":"unsigned_file"}`, false},
-		{"denied with a cause stays denied", `{"status":"denied","rejection_cause":"account_bound_to_other_person"}`, false},
+		{"denied with a cause is a refusal", `{"status":"denied","rejection_cause":"account_bound_to_other_person"}`, true},
 		{"running", `{"status":"running"}`, false},
 	}
 	for _, tc := range cases {
@@ -287,6 +287,105 @@ func TestIsRejectedReadsTheStatusAndACompletedCommandsCause(t *testing.T) {
 			got := d.IsRejected()
 
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestAReasonThatSanitizesToNothingKeepsTheAskTheApproverStep(t *testing.T) {
+	t.Parallel()
+	for name, note := range map[string]string{"whitespace only": `  \n `, "escape only": `\u001b[2K`} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			body := `,"rejection_cause":"approval_rejected","rejection_gate":"approval","rejection_note":"` + note + `"`
+
+			rejected := rejectedDetails(t, body).Rejection()
+
+			assert.Equal(t, []utils.NextAction{causeTexts[RejectionCauseApprovalRejected].next}, rejected.NextActions())
+			assert.Contains(t, rejected.ErrorFields(), "rejection_note")
+		})
+	}
+}
+
+func TestAnApproverReasonTakesThePlaceOfAskTheApprover(t *testing.T) {
+	t.Parallel()
+	body := `,"rejection_cause":"approval_rejected","rejection_gate":"approval","rejection_note":"Add a guard\non line 23.\u001b[2K"`
+
+	err := errorFromDetails(testPathID(t, "cmd-9"), rejectedDetails(t, body))
+
+	var rejected *CommandRejectedError
+	require.ErrorAs(t, err, &rejected)
+	assert.Equal(t, "command cmd-9 was rejected: an approver rejected it (rejection_cause: approval_rejected, rejection_gate: approval)", err.Error())
+	assert.Equal(t, []utils.NextAction{{Description: `The approver wrote: "Add a guard on line 23."`}}, rejected.NextActions())
+	assert.Equal(t, "Add a guard\non line 23.\u001b[2K", rejected.ErrorFields()["rejection_note"])
+}
+
+func TestNoReasonKeepsTheAskTheApproverStep(t *testing.T) {
+	t.Parallel()
+	for name, note := range map[string]string{"absent": ``, "null": `,"rejection_note":null`, "empty": `,"rejection_note":""`} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			body := `,"rejection_cause":"approval_rejected","rejection_gate":"approval"` + note
+
+			rejected := rejectedDetails(t, body).Rejection()
+
+			assert.Equal(t, []utils.NextAction{causeTexts[RejectionCauseApprovalRejected].next}, rejected.NextActions())
+			assert.NotContains(t, rejected.ErrorFields(), "rejection_note")
+		})
+	}
+}
+
+func TestDeniedCommandIsATerminalRefusal(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, body string }{
+		{"known denial code", `{"status":"denied","denial_code":"account_not_resolved","result":"The execution account could not be resolved."}`},
+		{"unknown denial code", `{"status":"denied","denial_code":"future_reason"}`},
+		{"no reason", `{"status":"denied"}`},
+		{"null denial code with rejection cause", `{"status":"denied","denial_code":null,"rejection_cause":"signature_invalid"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var details EventDetails
+			require.NoError(t, json.Unmarshal([]byte(tc.body), &details))
+
+			err := errorFromDetails(testPathID(t, "cmd-1"), details)
+
+			var refusal *CommandRejectedError
+			require.ErrorAs(t, err, &refusal)
+			assert.Equal(t, utils.ExitCodeNotApproved, refusal.ExitCode())
+			assert.Contains(t, err.Error(), "did not run")
+			assert.NotContains(t, err.Error(), "may still be running")
+		})
+	}
+}
+
+func TestCommandErrorContextFields(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, consoleURL, workSessionID string
+		want                            map[string]any
+	}{
+		{name: "neither"},
+		{name: "console only", consoleURL: "https://console.example/commands/1", want: map[string]any{"console_url": "https://console.example/commands/1"}},
+		{name: "work session only", workSessionID: "550e8400-e29b-41d4-a716-446655440000", want: map[string]any{"work_session_id": "550e8400-e29b-41d4-a716-446655440000"}},
+		{name: "both", consoleURL: "https://console.example/commands/1", workSessionID: "550e8400-e29b-41d4-a716-446655440000", want: map[string]any{"console_url": "https://console.example/commands/1", "work_session_id": "550e8400-e29b-41d4-a716-446655440000"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			errors := []struct {
+				name   string
+				fields interface{ ErrorFields() map[string]any }
+			}{
+				{"rejected", &CommandRejectedError{ConsoleURL: tc.consoleURL, WorkSessionID: tc.workSessionID}},
+				{"pending approval", &PendingApprovalError{ConsoleURL: tc.consoleURL, WorkSessionID: tc.workSessionID}},
+				{"remote command", &RemoteCommandError{ConsoleURL: tc.consoleURL, WorkSessionID: tc.workSessionID}},
+			}
+			for _, err := range errors {
+				t.Run(err.name, func(t *testing.T) {
+					t.Parallel()
+					assert.Equal(t, tc.want, err.fields.ErrorFields())
+				})
+			}
 		})
 	}
 }

@@ -3,12 +3,15 @@ package event
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -304,6 +307,18 @@ func TestSubmitCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
 	assert.False(t, hadKey, "body must omit work_session field when ID is empty")
 }
 
+func TestErrorFromDetails_SudoDenialCarriesHeld(t *testing.T) {
+	t.Parallel()
+	var details EventDetails
+	require.NoError(t, json.Unmarshal([]byte(`{"status":"completed","success":false,"exit_code":1,"held":{"approval_request":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","expires_at":null,"status_path":"/api/events/commands/cmd-9/"}}`), &details))
+
+	err := errorFromDetails(testPathID(t, "cmd-9"), details)
+
+	var remoteErr *RemoteCommandError
+	require.ErrorAs(t, err, &remoteErr)
+	assert.Same(t, details.Held, remoteErr.ErrorHeld())
+}
+
 func TestErrorFromDetails_PropagatesExitCode(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -400,6 +415,8 @@ func TestErrorFromDetails_UseFileExecutionCarriesCause(t *testing.T) {
 		"verification_status": "rejected",
 		"rejection_cause": "use_file_execution",
 		"rejection_gate": "approval",
+ "console_url": "https://console.example/commands/cmd-9",
+ "work_session": {"id":"ses-1"},
 		"result": "Save the script to a file and run it as a verified file.",
 		"server": {"id": "srv-1", "name": "prod"}
 	}`), &d))
@@ -408,6 +425,9 @@ func TestErrorFromDetails_UseFileExecutionCarriesCause(t *testing.T) {
 	var rejected *CommandRejectedError
 	require.ErrorAs(t, err, &rejected)
 	assert.Equal(t, RejectionCauseUseFileExecution, rejected.Cause)
+	assert.Equal(t, "approval", rejected.Gate)
+	assert.Equal(t, "https://console.example/commands/cmd-9", rejected.ConsoleURL)
+	assert.Equal(t, "ses-1", rejected.WorkSessionID)
 	assert.Equal(t, "command cmd-9 was refused because its command line carries a script body (use_file_execution)", err.Error())
 	code, _ := utils.ParseErrorResponse(err)
 	assert.Equal(t, RejectionCauseUseFileExecution, code)
@@ -522,6 +542,116 @@ func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 	var clientTimeout *ClientTimeoutError
 	require.ErrorAs(t, err, &clientTimeout, "deadline expiry must surface a client timeout")
 	assert.NotEmpty(t, delays(), "the loop must have waited on the fake clock before giving up")
+}
+
+func TestPollCommandExecution_StopsAfterMaxConsecutiveFailures(t *testing.T) {
+	t.Parallel()
+	var reqCount atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCount.Add(1)
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+	seams, _ := fakePollClock()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, 10*time.Millisecond, false, seams)
+
+	require.Error(t, err)
+	assert.Equal(t, int32(utils.MaxConsecutivePollFailures), reqCount.Load())
+	assert.Equal(t, http.StatusInternalServerError, utils.HTTPStatusCode(err))
+}
+
+// An MFA refusal comes back typed, so a caller that runs the step-up itself can
+// poll again after it.
+func TestPollCommandExecution_StopsOnNonTransientError(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		code   string
+	}{
+		{name: "not found", status: http.StatusNotFound, body: `{"detail": "Not found."}`},
+		{name: "mfa required", status: http.StatusForbidden, body: `{"code": "auth_mfa_required", "detail": "MFA required"}`, code: utils.AuthMFARequired},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var reqCount atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				reqCount.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer ts.Close()
+			seams, _ := fakePollClock()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, 10*time.Millisecond, false, seams)
+
+			require.Error(t, err)
+			assert.Equal(t, int32(1), reqCount.Load())
+			assert.Equal(t, tc.status, utils.HTTPStatusCode(err))
+			assert.Equal(t, tc.code, utils.StructuredErrorCode(err))
+		})
+	}
+}
+
+// Throttles keep their own backoff counter, so a 5xx after a throttled stretch
+// starts from the base tick, and they never count toward the failure cap.
+func TestPollCommandExecution_ThrottlesDoNotCountAsFailures(t *testing.T) {
+	t.Parallel()
+	const tick = 10 * time.Millisecond
+	reqCount := &atomic.Int32{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		n := reqCount.Add(1)
+		switch {
+		case n <= 3:
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"detail": "Request was throttled."}`))
+		case n <= 3+utils.MaxConsecutivePollFailures-1:
+			http.Error(w, "boom", http.StatusInternalServerError)
+		default:
+			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "completed"})
+		}
+	}))
+	defer ts.Close()
+	seams, delays := fakePollClock()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, tick, false, seams)
+
+	require.NoError(t, err)
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, []time.Duration{tick, tick, 2 * tick, 4 * tick, tick, 2 * tick, 4 * tick, 8 * tick}, delays())
+}
+
+// A throttle is no successful read, so it leaves a failure streak standing: a
+// reset here would let 500s and 429s alternate until the deadline.
+func TestPollCommandExecution_ThrottleKeepsTheFailureStreak(t *testing.T) {
+	t.Parallel()
+	reqCount := &atomic.Int32{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if reqCount.Add(1)%2 == 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"detail": "Request was throttled."}`))
+			return
+		}
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+	seams, _ := fakePollClock()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, 10*time.Millisecond, false, seams)
+
+	require.Error(t, err)
+	assert.Equal(t, http.StatusInternalServerError, utils.HTTPStatusCode(err))
+	assert.Equal(t, int32(2*utils.MaxConsecutivePollFailures-1), reqCount.Load())
 }
 
 // throttleServer replies 429 to the first throttled requests, then serves a
@@ -878,6 +1008,37 @@ func TestSubmitCommand_ReturnsJobID(t *testing.T) {
 	assert.Equal(t, "job-abc-123", resp.ID)
 }
 
+func TestEventDetails_DecodesHeld(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, body string
+		wantHeld   bool
+		wantExpiry bool
+	}{
+		{name: "a held object", body: `{"held":{"approval_request":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","expires_at":"2026-11-06T17:20:00+09:00","status_path":"/api/events/commands/550e8400-e29b-41d4-a716-446655440000/"}}`, wantHeld: true, wantExpiry: true},
+		{name: "a null expiry", body: `{"held":{"approval_request":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","expires_at":null,"status_path":"/api/events/commands/550e8400-e29b-41d4-a716-446655440000/"}}`, wantHeld: true},
+		{name: "held null", body: `{"held":null}`},
+		{name: "an older server sends no key", body: `{}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var details EventDetails
+
+			require.NoError(t, json.Unmarshal([]byte(tt.body), &details))
+
+			if !tt.wantHeld {
+				assert.Nil(t, details.Held)
+				return
+			}
+			require.NotNil(t, details.Held)
+			assert.Equal(t, "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47", details.Held.ApprovalRequest)
+			assert.Equal(t, "/api/events/commands/550e8400-e29b-41d4-a716-446655440000/", details.Held.StatusPath)
+			assert.Equal(t, tt.wantExpiry, details.Held.ExpiresAt != nil)
+		})
+	}
+}
+
 func TestGetCommandByID_ReturnsEventDetails(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1147,6 +1308,61 @@ func TestStreamSubscribed_FinWithFailedReadWaitsForPoll(t *testing.T) {
 		assert.Equal(t, "done\n", stdoutBuf.String())
 		assert.GreaterOrEqual(t, details.Load(), int32(2),
 			"a failed read must not surface as the result: a second read, the poll's, ended the run")
+	})
+}
+
+// runStream runs streamSubscribed to its end and returns the listener it used.
+func runStream(t *testing.T, ac *client.AlpaconClient, out io.Writer) (*CommandOutputListener, error) {
+	t.Helper()
+	listener := NewCommandOutputListener(ac)
+	listener.Start()
+	t.Cleanup(listener.Stop)
+	require.True(t, listener.WaitConnected(commandOutputConnectTimeout), "listener should connect")
+	return listener, streamSubscribed(ac, listener, testPathID(t, "cmd-uuid"), "srv-uuid", out, 5*time.Minute, false)
+}
+
+// A run of 5xx on the result read ends no run while the stream can still deliver
+// the fin, so a short API outage costs a long command neither output nor exit code.
+func TestStreamSubscribed_FailedReadsPastTheCapKeepTheRun(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		stdoutBuf := &bytes.Buffer{}
+		ac := newStreamingServers(t, streamingServerConfig{
+			cmdID:       "cmd-uuid",
+			serverID:    "srv-uuid",
+			wsFinFor:    "cmd-uuid",
+			detailFails: utils.MaxConsecutivePollFailures + 2,
+			terminal:    EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
+		})
+
+		_, err := runStream(t, ac, stdoutBuf)
+
+		require.NoError(t, err)
+		assert.Equal(t, "done\n", stdoutBuf.String())
+	})
+}
+
+// A 404 will repeat on every poll, so it ends the run with the stream still open.
+func TestStreamSubscribed_NonTransientPollErrorEndsTheRun(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		ac := newStreamingServers(t, streamingServerConfig{
+			cmdID:        "cmd-uuid",
+			serverID:     "srv-uuid",
+			detailStatus: http.StatusNotFound,
+		})
+
+		listener, err := runStream(t, ac, &bytes.Buffer{})
+
+		var pollFailure *CommandPollError
+		require.ErrorAs(t, err, &pollFailure)
+		assert.Equal(t, "cmd-uuid", pollFailure.CommandID)
+		assert.Equal(t, http.StatusNotFound, utils.HTTPStatusCode(err))
+		select {
+		case <-listener.done:
+		default:
+			t.Error("the run must stop its listener")
+		}
 	})
 }
 
@@ -1567,6 +1783,8 @@ type streamingServerConfig struct {
 	onSubscribe func(eventType, targetID string)
 	onDetail    func() // every detail-endpoint request, failing ones included
 	detailFails int    // leading detail GETs answered 500, before the held/running sequence starts
+	// detailStatus, when set, answers every detail request with it.
+	detailStatus int
 	// Detail-endpoint responses in order: heldPolls "awaiting_approval", then
 	// runningPolls "running", then terminal. The approval-resume path spends the
 	// first one on its server-id lookup, so its poll loop sees one held fewer.
@@ -1706,6 +1924,11 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			if cfg.onDetail != nil {
 				cfg.onDetail()
 			}
+			if cfg.detailStatus != 0 {
+				w.WriteHeader(cfg.detailStatus)
+				_, _ = w.Write([]byte(`{"detail":"unavailable"}`))
+				return
+			}
 			mu.Lock()
 			failing := failCount < cfg.detailFails
 			if failing {
@@ -1831,7 +2054,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 		},
 		{
 			name:     "unrecognized status returns unexpected-status error",
-			terminal: EventDetails{Status: "denied"},
+			terminal: EventDetails{Status: "future_status"},
 			check: func(t *testing.T, err error) {
 				t.Helper()
 				require.Error(t, err)
@@ -2540,47 +2763,6 @@ func TestCommandStream_DoesNotRedialAListenerThatFailed(t *testing.T) {
 	})
 }
 
-// A caller that runs the MFA wait itself gets the typed refusal at once; the
-// default poll keeps treating it like any other failed GET.
-func TestPollCommandExecution_SurfacesMFARefusalOnlyWhenAsked(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name       string
-		surfaceMFA bool
-		wantCode   bool
-	}{
-		{name: "surfaced", surfaceMFA: true, wantCode: true},
-		{name: "retried until the deadline", surfaceMFA: false, wantCode: false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			var requests atomic.Int32
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requests.Add(1)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = w.Write([]byte(`{"code": "auth_mfa_required", "detail": "MFA required"}`))
-			}))
-			defer ts.Close()
-
-			seams, _ := fakePollClock()
-			seams.surfaceMFA = tc.surfaceMFA
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 10*time.Millisecond, false, seams)
-			require.Error(t, err)
-			if tc.wantCode {
-				assert.Equal(t, utils.AuthMFARequired, utils.StructuredErrorCode(err))
-				assert.Equal(t, int32(1), requests.Load())
-				return
-			}
-			assert.Greater(t, requests.Load(), int32(1))
-			var clientTimeout *ClientTimeoutError
-			require.ErrorAs(t, err, &clientTimeout)
-		})
-	}
-}
-
 func TestCommandCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
 	const badID = "../../etc/test"
@@ -2645,6 +2827,127 @@ func TestStreamApprovedCommand_RefusesACommandIDThatIsNotOneSegment(t *testing.T
 	require.ErrorIs(t, err, utils.ErrInvalidID)
 }
 
+func TestPendingCommandCarriesConsoleURL(t *testing.T) {
+	t.Parallel()
+	err := errorFromDetails(testPathID(t, "cmd-1"), EventDetails{Status: "awaiting_approval", ConsoleURL: "https://console.example/commands/1", WorkSession: &CommandWorkSession{ID: "ses-1"}})
+	var pending *PendingApprovalError
+	require.ErrorAs(t, err, &pending)
+	assert.Equal(t, "https://console.example/commands/1", pending.ConsoleURL)
+	assert.Equal(t, "ses-1", pending.WorkSessionID)
+}
+
+func TestRejectedCommandLocalSignal(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		rejection CommandRejectedError
+		want      bool
+	}{
+		{"reviewer refusal", CommandRejectedError{Gate: "approval", Cause: RejectionCauseApprovalRejected}, true},
+		{"expired flag", CommandRejectedError{Gate: "approval", Expired: true}, false},
+		{"non-lapse cause overrides expired flag", CommandRejectedError{Gate: "approval", Expired: true, Cause: RejectionCauseApprovalRejected}, true},
+		{"expired cause", CommandRejectedError{Gate: "approval", Cause: RejectionCauseApprovalExpired}, false},
+		{"cancelled", CommandRejectedError{Gate: "approval", Cause: "approval_cancelled"}, false},
+		{"unknown gate", CommandRejectedError{Gate: "future_gate", Cause: RejectionCauseApprovalRejected}, true},
+		{"network gate", CommandRejectedError{Gate: "network", Cause: RejectionCauseApprovalRejected}, true},
+		{"plan gate", CommandRejectedError{Gate: "plan", Cause: RejectionCauseApprovalRejected}, true},
+		{"without rejection metadata", *(&EventDetails{Status: "rejected"}).Rejection(), true},
+		{"signature_invalid", *(&EventDetails{Status: "completed", CommandRejection: CommandRejection{RejectionCause: types.SentString{Value: RejectionCauseSignatureInvalid, Sent: true}}}).Rejection(), true},
+		{"unsigned_file", *(&EventDetails{Status: "rejected", CommandRejection: CommandRejection{RejectionCause: types.SentString{Value: "unsigned_file", Sent: true}}}).Rejection(), true},
+		{"account_bound_to_other_person", *(&EventDetails{Status: "rejected", CommandRejection: CommandRejection{RejectionCause: types.SentString{Value: "account_bound_to_other_person", Sent: true}}}).Rejection(), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			_, stderr := testutil.CaptureOutput(t, func() { utils.SignalRefusal(&tc.rejection) })
+			state := filepath.Join(home, ".alpacon", "state", "signals.json")
+			if tc.want {
+				assert.Contains(t, stderr, "==== ALPACON: COMMAND DENIED ====")
+				if tc.rejection.Gate == "" {
+					assert.NotContains(t, stderr, "gate")
+				}
+				data, err := os.ReadFile(state)
+				require.NoError(t, err)
+				var signals map[string]any
+				require.NoError(t, json.Unmarshal(data, &signals))
+				assert.Contains(t, signals, "denied")
+			} else {
+				assert.Empty(t, stderr)
+				assert.NoFileExists(t, state)
+			}
+		})
+	}
+}
+
+func TestSuccessfulCommandWithPendingSudoApprovalSignals(t *testing.T) {
+	for _, lane := range []string{"polling", "streaming"} {
+		t.Run(lane, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			const output = "Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n"
+			pending := "pending_approval"
+			details := EventDetails{
+				ID: "cmd-1", Status: "completed", Success: new(true), ExitCode: new(0),
+				Result: output, Line: "sudo id", Username: "alice",
+				Server:      types.ServerSummary{Name: "my-server"},
+				WorkSession: &CommandWorkSession{ID: "ses-1"}, SudoGrantStatus: &pending,
+			}
+			var out bytes.Buffer
+			_, stderr := testutil.CaptureOutput(t, func() {
+				synctest.Test(t, func(t *testing.T) {
+					if lane == "streaming" {
+						ac := newStreamingServers(t, streamingServerConfig{
+							cmdID: "cmd-1", serverID: "srv-1", terminal: details,
+							wsChunks: []ChunkEvent{{Seq: 0, Content: output}},
+						})
+						require.NoError(t, RunCommandStreaming(ac, "my-server", "sudo id", "alice", "", nil, "ses-1", "", &out))
+						return
+					}
+					ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						if strings.Contains(r.URL.Path, "/chunks/") {
+							_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{})
+							return
+						}
+						_ = json.NewEncoder(w).Encode(details)
+					}))
+					ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+					for range 2 {
+						require.NoError(t, runCommandFallbackFromID(ac, testPathID(t, "cmd-1"), &out, time.Millisecond, false, errors.New("no stream")))
+					}
+				})
+			})
+			want := output
+			if lane == "polling" {
+				want += output
+			}
+			assert.Equal(t, want, out.String())
+			banners := 1
+			if lane == "polling" {
+				banners = 2
+			}
+			assert.Equal(t, banners, strings.Count(stderr, "==== ALPACON: APPROVAL PENDING ===="))
+			assert.Contains(t, stderr, "sudo on my-server as alice is waiting for approval. Session ses-1.")
+		})
+	}
+}
+
+func TestSignalAccountFromCommandDetails(t *testing.T) {
+	t.Parallel()
+	for _, status := range []string{"rejected", "awaiting_approval", "failed"} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			success := false
+			err := errorFromDetails(testPathID(t, "cmd-1"), EventDetails{Status: status, Username: "deploy", Success: &success})
+			require.Error(t, err)
+			var carrier interface{ LocalSignalAccount() string }
+			require.ErrorAs(t, err, &carrier)
+			assert.Equal(t, "deploy", carrier.LocalSignalAccount())
+		})
+	}
+}
+
 func TestGetEventListShowsRejectionInStatusCell(t *testing.T) {
 	t.Parallel()
 	rows := []string{
@@ -2653,10 +2956,13 @@ func TestGetEventListShowsRejectionInStatusCell(t *testing.T) {
 		`{"id":"3","status":"rejected","success":null,"server":{"name":"prod"}}`,
 		`{"id":"4","status":"completed","success":true,"rejection_cause":null,"rejection_gate":null,"server":{"name":"prod"}}`,
 		`{"id":"5","status":"completed","success":false,"rejection_cause":"signature_invalid","rejection_gate":null,"server":{"name":"prod"}}`,
+		`{"id":"6","status":"denied","success":null,"denial_code":"account_not_resolved","server":{"name":"prod"}}`,
+		`{"id":"7","status":"denied","success":null,"rejection_cause":"risk_denied","server":{"name":"prod"}}`,
+		`{"id":"8","status":"denied","success":null,"server":{"name":"prod"}}`,
 	}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"count":5,"results":[` + strings.Join(rows, ",") + `]}`))
+		_, _ = w.Write([]byte(`{"count":8,"results":[` + strings.Join(rows, ",") + `]}`))
 	}))
 	defer ts.Close()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
@@ -2664,7 +2970,7 @@ func TestGetEventListShowsRejectionInStatusCell(t *testing.T) {
 	list, err := GetEventList(ac, 10, "", "")
 
 	require.NoError(t, err)
-	require.Len(t, list, 5)
+	require.Len(t, list, 8)
 	assert.Equal(t, "rejected: risk_denied, gate risk", list[0].StatusCell)
 	assert.Equal(t, "null", list[0].Status)
 	assert.Equal(t, types.SentString{Value: "risk_denied", Sent: true}, list[0].RejectionCause)
@@ -2677,6 +2983,10 @@ func TestGetEventListShowsRejectionInStatusCell(t *testing.T) {
 	assert.Equal(t, "true", list[3].Status)
 	assert.Equal(t, "rejected: signature_invalid", list[4].StatusCell)
 	assert.Equal(t, "false", list[4].Status)
+	assert.Equal(t, "denied: account_not_resolved", list[5].StatusCell)
+	assert.Equal(t, types.SentString{Value: "account_not_resolved", Sent: true}, list[5].DenialCode)
+	assert.Equal(t, "denied: risk_denied", list[6].StatusCell)
+	assert.Equal(t, "denied: cause not recorded", list[7].StatusCell)
 }
 
 func TestEventAttributesJSONKeepsStatusAndSentNulls(t *testing.T) {
@@ -2694,6 +3004,15 @@ func TestEventAttributesJSONKeepsStatusAndSentNulls(t *testing.T) {
 				CommandRejection: rejectionOf(types.SentString{Value: "risk_denied", Sent: true}, types.SentString{Value: "risk", Sent: true}),
 			},
 			want: `{"server":"","shell":"","command":"","result":"","status":"null","operator":"","requested_at":"","rejection_cause":"risk_denied","rejection_gate":"risk"}`,
+		},
+		{
+			name: "denied row keeps its denial code",
+			row: EventAttributes{
+				Status:     "null",
+				StatusCell: "denied: account_not_resolved",
+				DenialCode: types.SentString{Value: "account_not_resolved", Sent: true},
+			},
+			want: `{"server":"","shell":"","command":"","result":"","status":"null","operator":"","requested_at":"","denial_code":"account_not_resolved"}`,
 		},
 		{
 			name: "sent nulls stay null",
@@ -2742,4 +3061,29 @@ func TestEventAttributesTableKeepsItsColumns(t *testing.T) {
 	assert.Contains(t, out, "rejected: risk_denied, gate risk")
 	assert.NotContains(t, out, "null")
 	assert.NotContains(t, out, "REJECTION")
+}
+
+func TestDeniedCommandDoesNotPrintRefusalAsRemoteOutput(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		sessionStatus int
+	}{{"stream", 0}, {"poll fallback", http.StatusInternalServerError}} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var output bytes.Buffer
+				var submissions atomic.Int32
+				ac := newStreamingServers(t, streamingServerConfig{
+					cmdID: "cmd-1", serverID: "srv-1", sessionStatus: tc.sessionStatus,
+					terminal: EventDetails{Status: "denied", Result: "refused\x1b[2J\u202ehidden"},
+					submits:  &submissions,
+				})
+
+				err := runCommandStreamingWithWriter(ac, "srv", "whoami", "", "", nil, "", "", &output)
+
+				require.Error(t, err)
+				assert.Empty(t, output.String(), "a refusal reason belongs in the sanitized error, not raw command output")
+				assert.Equal(t, int32(1), submissions.Load(), "a refused command must not be resubmitted")
+			})
+		})
+	}
 }

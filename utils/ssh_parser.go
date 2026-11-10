@@ -1,6 +1,9 @@
 package utils
 
-import "strings"
+import (
+	"runtime"
+	"strings"
+)
 
 // SSHTarget represents a parsed SSH-like target with user, host, and path components.
 type SSHTarget struct {
@@ -33,11 +36,37 @@ func ParseSSHTarget(target string) SSHTarget {
 	return result
 }
 
-// IsRemoteTarget checks if a target string represents a remote location.
-// A target is considered remote if it contains a colon (:).
+// IsRemoteTarget reports whether target holds a colon and is not spelled as a local path:
+// a ./, ../, .\, ..\, \\ or / prefix, C:\x, or C:/x on Windows.
 func IsRemoteTarget(target string) bool {
+	return isRemoteTargetOn(runtime.GOOS, target)
+}
+
+func isRemoteTargetOn(goos, target string) bool {
+	if isExplicitLocalPath(goos, target) {
+		return false
+	}
 	_, target = splitUserPrefix(target)
 	return strings.Contains(target, ":")
+}
+
+// isExplicitLocalPath: C:\x is a drive path on every OS; C:/x only on Windows, since
+// elsewhere it is also server "C" with an absolute path.
+func isExplicitLocalPath(goos, target string) bool {
+	driveLetter := len(target) >= 3 && isASCIILetter(target[0]) && target[1] == ':'
+	if driveLetter && (target[2] == '\\' || (target[2] == '/' && goos == "windows")) {
+		return true
+	}
+	for _, prefix := range []string{"/", "./", "../", `.\`, `..\`, `\\`} {
+		if strings.HasPrefix(target, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func isASCIILetter(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }
 
 func splitUserPrefix(target string) (string, string) {
