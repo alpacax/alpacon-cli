@@ -49,6 +49,8 @@ changes back to the original path when the editor exits.
 The command uses the same WebFTP transport and permission behavior as 'alpacon cp'.
 Use -u/--username and -g/--groupname the same way you would with 'alpacon cp'.
 Interactive browser login requires an active WorkSession with the webftp scope.
+Exit code 3 indicates a WorkSession gate denial; run with --output json to
+parse a machine-readable diagnostic on stderr.
 
 The file is downloaded in full before editing; files larger than 10 MB prompt
 for confirmation (skipped with --force) before opening in the editor.
