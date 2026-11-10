@@ -43,7 +43,7 @@ var (
 	ansiEscapeRE = regexp.MustCompile(`\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|[PX^_][^\x1b]*\x1b\\|\[[\x30-\x3f]*[\x20-\x2f]*[@-~]|[\x20-\x2f]*[\x40-\x7e])`)
 )
 
-// ErrNoChanges indicates that the editor returned byte-identical data.
+// ErrNoChanges reports that the edited file is byte-identical to what the editor was given.
 var ErrNoChanges = errors.New("no changes made")
 
 type editFile interface {
@@ -648,7 +648,7 @@ func ProcessEditedData(originalData []byte) (any, error) {
 func processEditedData(originalData []byte, edit func(path string) error) (any, error) {
 	prettyJSON, err := PrettyJSON(originalData)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("format response JSON: %w", err)
 	}
 
 	editedContent, err := editInTempFile(prettyJSON.Bytes(), edit)
@@ -667,7 +667,6 @@ func processEditedData(originalData []byte, edit func(path string) error) (any, 
 	return jsonData, nil
 }
 
-// openInEditor runs $EDITOR, or vi when it is unset, on path.
 func openInEditor(path string) error {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
@@ -679,31 +678,31 @@ func openInEditor(path string) error {
 	return cmd.Run()
 }
 
-// editInTempFile removes the temporary record on every return path.
 func editInTempFile(data []byte, edit func(path string) error) ([]byte, error) {
-	tmpl, err := os.CreateTemp("", "example.*.json")
+	f, err := os.CreateTemp("", "example.*.json")
 	if err != nil {
 		return nil, fmt.Errorf("create temp file: %w", err)
 	}
-	return editTempFile(tmpl, data, edit)
+	return editTempFile(f, data, edit)
 }
 
-func editTempFile(tmpl editFile, data []byte, edit func(path string) error) ([]byte, error) {
-	defer func() { _ = os.Remove(tmpl.Name()) }()
+// editTempFile removes the temp file on every return path.
+func editTempFile(f editFile, data []byte, edit func(path string) error) ([]byte, error) {
+	defer func() { _ = os.Remove(f.Name()) }()
 
-	if _, err := tmpl.Write(data); err != nil {
-		_ = tmpl.Close()
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
 		return nil, fmt.Errorf("write temp file: %w", err)
 	}
-	if err := tmpl.Close(); err != nil {
+	if err := f.Close(); err != nil {
 		return nil, fmt.Errorf("close temp file: %w", err)
 	}
 
-	if err := edit(tmpl.Name()); err != nil {
+	if err := edit(f.Name()); err != nil {
 		return nil, fmt.Errorf("run editor: %w", err)
 	}
 
-	edited, err := os.ReadFile(tmpl.Name())
+	edited, err := os.ReadFile(f.Name())
 	if err != nil {
 		return nil, fmt.Errorf("read edited file: %w", err)
 	}
