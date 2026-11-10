@@ -47,6 +47,7 @@ func ExitWithFailureJSON(f Failure) {
 	if OutputFormat != OutputFormatJSON {
 		return
 	}
+	SignalPaused(f.Err)
 	FprintFailureJSON(os.Stderr, f)
 	os.Exit(f.ExitCode)
 }

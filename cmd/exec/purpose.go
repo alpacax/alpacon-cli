@@ -80,7 +80,7 @@ re-submitting it.`,
 				// one code, so this cannot say which happened—which is exactly the
 				// branch a machine consumer needs a field rather than prose for.
 				utils.PrintPurposeRefused(jobID, err)
-				return &utils.ExitError{Code: utils.ExitCodeGeneralError}
+				return utils.NewSilentExitError(utils.ExitCodeGeneralError)
 			}
 
 			// The command re-enters judgment on the worker, so there is no verdict to

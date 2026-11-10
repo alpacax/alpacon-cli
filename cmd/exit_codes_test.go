@@ -180,7 +180,7 @@ func TestCommandsExitTwoWhenTheyRejectTheirOwnFlagsOrArguments(t *testing.T) {
 		{name: "cp with one argument", args: []string{"cp", "a"}, wantExit: usage, wantStderr: "at least two arguments"},
 		{name: "cp with two local paths", args: []string{"cp", "a", "b"}, wantExit: usage, wantStderr: "Invalid combination of source and destination"},
 		{name: "cp with mixed users", args: []string{"cp", "a@h:/x", "b@h:/y", "/tmp"}, wantExit: usage, wantStderr: "must use the same user"},
-		{name: "cp with mixed local and remote sources", args: []string{"cp", "a", "h:/x", "/tmp"}, wantExit: usage, wantStderr: "cannot mix local and remote"},
+		{name: "cp with mixed local and remote sources", args: []string{"cp", "a", "srv:/x", "/tmp"}, wantExit: usage, wantStderr: "cannot mix local and remote"},
 		{name: "websh invite without an email", args: []string{"websh", "invite", "s1"}, wantExit: usage, wantStderr: "At least one --email is required"},
 		{name: "server create with an unknown platform", args: []string{"server", "create", "--platform", "bad"}, wantExit: usage, wantStderr: "Invalid platform"},
 		{name: "server create with an unknown method", args: []string{"server", "create", "--method", "bogus"}, wantExit: usage, wantStderr: "Invalid method"},

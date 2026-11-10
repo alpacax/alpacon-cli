@@ -6,6 +6,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/approval"
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -42,6 +43,15 @@ Run the command again later to check for completion.`,
 				}
 				return utils.NewExitError("failed to fetch command result: %s", err)
 			}
+			switch details.Status {
+			case "completed", "success", "failed":
+				if details.SudoGrantStatus != nil && *details.SudoGrantStatus == "pending_approval" {
+					utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{
+						Command: true, Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name,
+						Account: details.Username, Session: details.WorkSessionID(), ConsoleURL: details.ConsoleURL,
+					}, alpaconClient)
+				}
+			}
 			if line := event.StandingGrantLine(details); line != "" {
 				_, _ = fmt.Fprintln(stderr, line)
 			}
@@ -52,11 +62,16 @@ Run the command again later to check for completion.`,
 				utils.PrintPurposeDemand(
 					utils.PurposeDemandLead, details.ID, details.PurposeExpiresAt,
 				)
-				return &utils.ExitError{Code: utils.ExitCodePurposeRequired}
+				return utils.NewSilentExitError(utils.ExitCodePurposeRequired)
 			}
 
 			// Exit 0 would read as a command that finished with nothing to show.
 			if event.IsAwaitingApprovalStatus(details.Status) {
+				fields := localsignal.Fields{Command: true, Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username, ConsoleURL: details.ConsoleURL}
+				if details.WorkSession != nil {
+					fields.Session = details.WorkSession.ID
+				}
+				utils.EmitLocalSignal(localsignal.ApprovalPending, fields, alpaconClient)
 				requestID, lookupErr := approval.FindCommandApprovalRequestID(alpaconClient, details.ID)
 				if lookupErr != nil {
 					utils.CliWarning("failed to read approval request: %s", lookupErr)
@@ -70,15 +85,16 @@ Run the command again later to check for completion.`,
 					requestID,
 					utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", details.ID)},
 				)
-				return &utils.ExitError{Code: utils.ExitCodePendingApproval}
+				return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 			}
 
 			// Exit 6 through the envelope, as exec does: a retry is refused again or
 			// files another approval request.
 			if details.IsRejected() {
 				rejected := details.Rejection()
+				utils.SignalRefusal(utils.WithSignalFields(rejected, localsignal.Fields{Command: true, Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name, Account: details.Username}, alpaconClient))
 				// A script-body refusal has file-execution guidance of its own.
-				if rejected.Cause == event.RejectionCauseUseFileExecution {
+				if rejected.WantsFileExecution() {
 					accountFlags, accountNote := logsAccountFlags(details)
 					return reportUseFileExecution(stderr, rejected, details.Server.Name, accountFlags, false, accountNote)
 				}
@@ -125,7 +141,7 @@ Run the command again later to check for completion.`,
 				_, _ = fmt.Fprint(stderr, stderrLine)
 			}
 			if exitCode != 0 {
-				return &utils.ExitError{Code: exitCode}
+				return utils.NewSilentExitError(exitCode)
 			}
 			return nil
 		}),

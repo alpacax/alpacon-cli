@@ -217,7 +217,7 @@ const (
 	// ExitCodeNotApproved is the process exit code for an awaited approval that ended without the
 	// grant: rejected, expired, revoked, cancelled, or completed. Where ExitCodePendingApproval
 	// means the outcome is still open, this one tells scripts and AI agents to stop re-requesting
-	// approval.
+	// approval. A command the server denied after submission (status denied) exits with it too.
 	ExitCodeNotApproved = 6
 
 	// ExitCodePurposeRequired is the process exit code for a command the verification gate parked

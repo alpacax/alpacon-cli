@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/alpacax/alpacon-cli/api/cert"
-	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -17,6 +16,8 @@ var authorityCreateCmd = &cobra.Command{
 	Short: "Create a new certificate authority",
 	Long: `
   	Initializes a new certificate authority within the system, allowing you to sign and manage certificates and define their policies.
+
+	CA creation requires an Alpacon API that accepts requests without an owner field.
 	`,
 	Example: `alpacon authority create`,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -53,12 +54,6 @@ func promptForAuthority(ac *client.AlpaconClient) cert.AuthorityRequest {
 		utils.CliErrorWithExit("Failed to retrieve the server %s", err)
 	}
 	authorityRequest.Agent = agentID
-
-	owner := utils.PromptForRequiredInput("Owner(username): ")
-	authorityRequest.Owner, err = iam.GetUserIDByName(ac, owner)
-	if err != nil {
-		utils.CliErrorWithExit("Failed to retrieve the user %s", err)
-	}
 
 	return authorityRequest
 }

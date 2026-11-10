@@ -41,6 +41,7 @@ from the CLI; edits that tighten these settings or leave them unchanged are save
 
 		data, err := workspace.EditAccessControl(alpaconClient)
 		if err != nil {
+			utils.ExitIfNoChanges(err)
 			utils.CliErrorWithExit("Failed to prepare access control update: %s.", err)
 		}
 

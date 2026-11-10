@@ -170,7 +170,7 @@ func TestRunExecWithApprovalWait_DoesNotWaitOnAPurposeDemand(t *testing.T) {
 		start := time.Now()
 		err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
 
-		assert.Same(t, demand, err, "the demand must reach the caller unchanged")
+		require.ErrorIs(t, err, demand)
 		assert.Equal(t, 1, calls, "a purpose demand must not be retried inside the wait loop")
 		assert.Equal(t, time.Duration(0), time.Since(start), "the wait window must not be entered at all")
 	})

@@ -720,7 +720,7 @@ func fetchFromURL(httpClient *http.Client, url string, maxAttempts int) (*http.R
 		if utils.IsFatalClientError(resp.StatusCode) {
 			return nil, fetchStatusError{
 				status: resp.StatusCode, code: refusalCode, source: refusalSource,
-				hint: utils.ParseRefusalHint(body, resp.StatusCode),
+				hint: utils.ParseRefusalHint(body, resp.StatusCode), fields: refusalFields(body),
 			}
 		}
 
@@ -735,7 +735,7 @@ func fetchFromURL(httpClient *http.Client, url string, maxAttempts int) (*http.R
 				code, source := parseRefusal(body)
 				return nil, fetchStatusError{
 					status: resp.StatusCode, code: code, source: source,
-					hint: utils.ParseRefusalHint(body, resp.StatusCode), attempts: count + 1,
+					hint: utils.ParseRefusalHint(body, resp.StatusCode), fields: refusalFields(body), attempts: count + 1,
 				}
 			}
 			return nil, fmt.Errorf("download failed after %d attempts (last status: %d)", count+1, resp.StatusCode)
@@ -893,6 +893,9 @@ func completeSingleDownloadWith(ac *client.AlpaconClient, serverID string, postB
 	}); err != nil {
 		return 0, err
 	}
+	if status.IsRejected() {
+		return 0, status.Rejection()
+	}
 
 	if status.Status == "stuck" || status.Status == "error" {
 		return 0, fmt.Errorf("command failed with status: %s", status.Status)
@@ -962,6 +965,9 @@ func completeBulkDownload(ac *client.AlpaconClient, serverID string, respBody []
 		return err
 	}); err != nil {
 		return err
+	}
+	if status.IsRejected() {
+		return status.Rejection()
 	}
 
 	if status.Status == "stuck" || status.Status == "error" {
@@ -1098,6 +1104,7 @@ func calcPollTimeout(fileCount int, totalBytes int64) time.Duration {
 // attempts is set when the refusal is the last of a retried status that ran
 // out of attempts.
 type fetchStatusError struct {
+	fields       map[string]any
 	status       int
 	code, source string
 	hint         string
@@ -1114,6 +1121,16 @@ func (e fetchStatusError) HTTPStatusCode() int { return e.status }
 func (e fetchStatusError) ErrorCode() string   { return e.code }
 func (e fetchStatusError) ErrorSource() string { return e.source }
 func (e fetchStatusError) ErrorHint() string   { return e.hint }
+
+func (e fetchStatusError) ErrorFields() map[string]any { return e.fields }
+func (e fetchStatusError) ErrorGate() string           { gate, _ := e.fields["gate"].(string); return gate }
+func refusalFields(body []byte) map[string]any {
+	var fields map[string]any
+	if json.Unmarshal(body, &fields) != nil {
+		return nil
+	}
+	return fields
+}
 
 func parseRefusal(body []byte) (code, source string) {
 	var refusal utils.ErrorResponse

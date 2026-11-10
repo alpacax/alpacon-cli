@@ -11,11 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/alpacax/alpacon-cli/api/event"
 	ftpapi "github.com/alpacax/alpacon-cli/api/ftp"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -47,6 +49,8 @@ changes back to the original path when the editor exits.
 The command uses the same WebFTP transport and permission behavior as 'alpacon cp'.
 Use -u/--username and -g/--groupname the same way you would with 'alpacon cp'.
 Interactive browser login requires an active WorkSession with the webftp scope.
+Exit code 3 indicates a WorkSession gate denial; run with --output json to
+parse a machine-readable diagnostic on stderr.
 
 The file is downloaded in full before editing; files larger than 10 MB prompt
 for confirmation (skipped with --force) before opening in the editor.
@@ -89,6 +93,10 @@ redirections, or '&&' will not work.`,
 		if err != nil {
 			printPreservedTempPath(result)
 			utils.HandleWorkSessionError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID)
+			var rejected *event.CommandRejectedError
+			if errors.As(err, &rejected) {
+				utils.CliErrorEnvelopeWithExitCode(rejected.ExitCode(), "edit", err, "Failed to edit '%s:%s': %s", target.Server, target.RemotePath, rejected)
+			}
 			if refusedForWantOfForce(err, utils.IsInteractiveShell()) {
 				err = utils.MarkUsageError(err)
 			}
@@ -149,6 +157,8 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 					return retryErr
 				}))
 			}
+			err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
+			utils.SignalRefusal(err)
 			return downloaded, err
 		},
 		upload: func(target editTarget, localPath, workSessionID string) error {
@@ -158,6 +168,8 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 					return ftpapi.UploadLocalFileAs(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, workSessionID)
 				}))
 			}
+			err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
+			utils.SignalRefusal(err)
 			return err
 		},
 		runEditor:    runLocalEditor,
@@ -166,7 +178,8 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 }
 
 func parseEditTarget(arg, usernameFlag string) (editTarget, error) {
-	if !utils.IsRemoteTarget(arg) {
+	// Not utils.IsRemoteTarget: the argument is always remote, so "h:/etc/x" is not a drive path.
+	if !strings.Contains(arg, ":") {
 		return editTarget{}, fmt.Errorf("remote path must be in format [USER@]SERVER:PATH")
 	}
 	sshTarget := utils.ParseSSHTarget(arg)

@@ -88,6 +88,10 @@ func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecutio
 		{"Reviewed at", reviewedAt},
 		{"Added at", req.AddedAt.Local().Format("2006-01-02 15:04")},
 	}
+	if note := utils.SanitizeTerminalOneLine(req.RejectionNote); note != "" {
+		// The approver's own words, stripped of terminal escapes like any server value.
+		rows = append(rows, describeRow{"Rejection reason", note})
+	}
 	rows = append(rows, contextRows(req.Metadata)...)
 	if fe != nil {
 		rows = append(rows, fileExecutionRows(fe)...)
@@ -198,7 +202,7 @@ func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 	}
 	if s := meta.Sudo; s != nil {
 		add("Sudo command", s.Command)
-		add("  Run as", s.RunAs)
+		add("Run as", s.RunAs)
 		add("Purpose", s.Purpose)
 		add("Server", s.ServerName)
 		add("Risk level", s.RiskLevel)

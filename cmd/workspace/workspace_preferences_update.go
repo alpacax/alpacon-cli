@@ -27,6 +27,7 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 
 		preferencesDetail, err := workspace.UpdatePreferences(alpaconClient)
 		if err != nil {
+			utils.ExitIfNoChanges(err)
 			utils.CliErrorWithExit("Failed to update workspace preferences: %s.", err)
 		}
 
