@@ -164,15 +164,22 @@ func runTunnel(cmd *cobra.Command, args []string, flags tunnelFlagValues, newAPI
 		sigChan = ch
 	}
 
-	exitCode, err := executeTunnelCommand(ac, flags, cmd, args, sigChan)
+	return tunnelExitError(executeTunnelCommand(ac, flags, cmd, args, sigChan))
+}
+
+// tunnelExitError maps a tunnel run's exit code and error to what RunE returns.
+func tunnelExitError(exitCode int, err error) error {
 	if err != nil {
+		if exitErr, ok := errors.AsType[*utils.ExitError](err); ok { // the gate's exit 3 and diagnostic
+			return exitErr
+		}
 		if exitCode > 1 { // the local command's own exit code
 			return utils.NewExitErrorWithCode(exitCode, "%s", err)
 		}
 		return utils.NewExitError("%s", err)
 	}
 	if exitCode != 0 {
-		return &utils.ExitError{Code: exitCode} // the local command already reported its failure
+		return utils.NewSilentExitError(exitCode) // the local command already reported its failure
 	}
 	return nil
 }
@@ -193,7 +200,9 @@ func executeTunnelCommand(ac *client.AlpaconClient, flags tunnelFlagValues, cmd 
 func handleTunnelStartError(ac *client.AlpaconClient, flags tunnelFlagValues, err error, serverName string, retry func() error) error {
 	err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(ac, retry))
 	if utils.StructuredErrorCode(err) != "" { // a code quoted in an agent's open-failure text is not a gate refusal
-		utils.HandleWorkSessionError(err, utils.OperationTunnel, serverName, flags.authMethod, flags.workSessionID)
+		if gateErr := utils.WorkSessionExitError(err, utils.OperationTunnel, serverName, flags.authMethod, flags.workSessionID); gateErr != nil {
+			return gateErr
+		}
 	}
 	return utils.InteractiveOnly(err, "open a tunnel")
 }
