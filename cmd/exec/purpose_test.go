@@ -22,7 +22,6 @@ func runExecPurposeHelper(t *testing.T, workspaceURL string, args ...string) (st
 	return runInProcess(t, workspaceURL, "purpose", "", args)
 }
 
-// runExecPurposeOK is runExecPurposeHelper for the success path, returning stderr.
 func runExecPurposeOK(t *testing.T, workspaceURL string, args ...string) string {
 	t.Helper()
 	_, stderr, exitCode := runExecPurposeHelper(t, workspaceURL, args...)
