@@ -2,19 +2,38 @@ package exec
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	osexec "os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	heldRequestUUID = "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47"
+	heldStatusPath  = "/api/events/commands/cmd-1/"
+	heldDeadline    = "2999-11-06T17:20:00+09:00"
+)
+
+var (
+	reRunAction   = utils.NextAction{Command: "alpacon exec prod -- sudo reboot"}
+	consoleAction = utils.NextAction{Description: "Approve it out of band in the Alpacon console (web/Slack). Where supported, pass --wait (or --wait-approval DURATION for a longer timeout) on the original command to block until approval."}
+	heldActions   = []utils.NextAction{
+		{Description: "Approval request: " + heldRequestUUID},
+		{Description: "The approval must be decided by " + heldDeadline},
+		{Command: "alpacon api " + heldStatusPath, Description: "Where to read the command's sudo_grant_status while waiting; once it reads authorized, re-run the command"},
+	}
 )
 
 // newApprovalDenialServer returns a test server that resolves one server and
@@ -74,6 +93,18 @@ type pendingApprovalSignal struct {
 	ExitCode    int                `json:"exit_code"`
 	RequestID   string             `json:"request_id"`
 	NextActions []utils.NextAction `json:"next_actions"`
+}
+
+type approvalWaitNotifier struct{ path string }
+
+func (n approvalWaitNotifier) Notify(_ context.Context, title, _, _ string) error {
+	f, err := os.OpenFile(n.path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	_, err = fmt.Fprintln(f, title)
+	return err
 }
 
 // runExecHelper drives the real exec command in a helper process against a
@@ -318,7 +349,7 @@ func TestExecLogsRejectedExits6(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/"+jobID+"/" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": jobID, "status": "rejected"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": jobID, "status": "rejected", "rejection_gate": "approval"})
 			return
 		}
 		http.NotFound(w, r)
@@ -329,6 +360,7 @@ func TestExecLogsRejectedExits6(t *testing.T) {
 		_, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, jobID)
 		assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "a rejection is final; exit 1 reads as retryable")
 		assert.Contains(t, stderr, "was rejected; the server did not record why")
+		assert.Contains(t, stderr, "==== ALPACON: COMMAND DENIED ====\n")
 	})
 
 	t.Run("json", func(t *testing.T) {
@@ -410,10 +442,109 @@ func TestExecRejectedMidWaitExits6(t *testing.T) {
 	assert.Contains(t, stderr, "rejected by a reviewer")
 }
 
-// newResultPollRefusalServer accepts the command but refuses every read of its
-// result with a work-session gate code, so the result poll runs into its
-// client timeout with that refusal last seen.
+func TestExecExpiredGrantSignalsOnlyNonLapseRejection(t *testing.T) {
+	cases := []struct {
+		name, cause, gate, message, hint string
+		denied                           bool
+	}{
+		{
+			name:    "risk denial",
+			cause:   "risk_denied",
+			gate:    "risk",
+			message: "was rejected: the risk assessor refused it (rejection_cause: risk_denied, rejection_gate: risk)",
+			hint:    "The workspace risk policy refuses this command; the same command is refused the same way.",
+			denied:  true,
+		},
+		{
+			name:    "no cause",
+			gate:    "approval",
+			message: "was not approved before the approval request expired",
+		},
+		{
+			name:    "explicit lapse",
+			cause:   "approval_expired",
+			gate:    "approval",
+			message: "was rejected: its approval request expired with no decision (rejection_cause: approval_expired, rejection_gate: approval)",
+			hint:    "Ask an approver why the request went undecided.",
+		},
+	}
+	for _, tc := range cases {
+		for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+			t.Run(tc.name+"/"+format, func(t *testing.T) {
+				extra := map[string]any{"rejection_gate": tc.gate}
+				if tc.cause != "" {
+					extra["rejection_cause"] = tc.cause
+				}
+				ts, reads := newRejectedCommandSequenceServer("root", "wheel", extra, true, "expired")
+				defer ts.Close()
+				logPath := filepath.Join(t.TempDir(), "notifications")
+				require.NoError(t, os.WriteFile(logPath, nil, 0600))
+
+				stdout, stderr, exitCode := runHelperProcess(t, ts.URL,
+					"TestExecExpiredGrantSignalHelperProcess", execWorkSessionHelperMarker,
+					[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1", "ALPACON_TEST_POLL_INTERVAL=10ms", "ALPACON_TEST_NOTIFICATION_LOG=" + logPath},
+					[]string{"--output", format, "--wait-approval", "30s", "prod", "--", "sudo", "reboot"})
+				assert.Greater(t, reads.Load(), int64(2))
+				assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
+				assert.Equal(t, denialLine("SUDO_APPROVAL_REQUIRED"), stdout)
+				notifications, err := os.ReadFile(logPath)
+				require.NoError(t, err)
+				wantDenied := 0
+				if tc.denied {
+					wantDenied = 1
+				}
+				assert.Equal(t, wantDenied, strings.Count(string(notifications), "Alpacon: command denied\n"), "DENIED notification calls")
+				message := "command " + rejectedCommandID + " " + tc.message
+				if tc.cause != "" {
+					message += "."
+				}
+				if format == utils.OutputFormatTable {
+					assert.Equal(t, wantDenied, strings.Count(stderr, "==== ALPACON: COMMAND DENIED ====\n"), "DENIED banners")
+					assert.Contains(t, stderr, "Error: "+message+"\n")
+					if tc.hint != "" {
+						assert.Contains(t, stderr, "Hint: "+tc.hint+"\n")
+					}
+					return
+				}
+				envelope := lastEnvelope(t, stderr)
+				assert.False(t, envelope.OK)
+				assert.Equal(t, utils.ExitCodeNotApproved, envelope.ExitCode)
+				code := tc.cause
+				if code == "" {
+					code = "approval_expired"
+				}
+				assert.Equal(t, code, envelope.ErrorCode)
+				assert.Equal(t, message, envelope.Message)
+			})
+		}
+	}
+}
+
+func TestExecExpiredGrantSignalHelperProcess(t *testing.T) {
+	logPath := os.Getenv("ALPACON_TEST_NOTIFICATION_LOG")
+	if logPath == "" {
+		return
+	}
+	localsignal.NewNotifier = func() localsignal.Notifier { return approvalWaitNotifier{path: logPath} }
+	TestExecCommandWorkSessionGateHelperProcess(t)
+}
+
+// newResultPollRefusalServer accepts the command but throttles every read of
+// its result, so the result poll runs into its client timeout with that
+// refusal last seen. Any other refusal would end the poll at once.
 func newResultPollRefusalServer(hint string) *httptest.Server {
+	return newResultPollServer(func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		body := map[string]any{"code": utils.APIRateLimited, "gate": "rate"}
+		if hint != "" {
+			body["hint"] = hint
+		}
+		_ = json.NewEncoder(w).Encode(body)
+	})
+}
+
+// newResultPollServer accepts the command and answers every read of its result with result.
+func newResultPollServer(result func(http.ResponseWriter)) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -422,12 +553,7 @@ func newResultPollRefusalServer(hint string) *httptest.Server {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
 			_, _ = fmt.Fprintf(w, `[{"id":"cmd-1"}]`)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
-			w.WriteHeader(http.StatusForbidden)
-			body := map[string]any{"code": utils.WorkSessionExpired, "source": "command"}
-			if hint != "" {
-				body["hint"] = hint
-			}
-			_ = json.NewEncoder(w).Encode(body)
+			result(w)
 		default:
 			http.NotFound(w, r)
 		}
@@ -435,11 +561,11 @@ func newResultPollRefusalServer(hint string) *httptest.Server {
 }
 
 // A result poll that times out stays a client timeout (exit 1, [client_timeout])
-// even when the reads it timed out on were refused at a work-session gate: only
-// the refusal's hint goes with the timeout, printed once, never its code.
+// even when the reads it timed out on were throttled: only the refusal's hint
+// goes with the timeout, printed once, never its code.
 func TestExecResultPollTimeoutStaysATimeout(t *testing.T) {
 	t.Parallel()
-	const hint = "This work session has expired; start a new one or extend it."
+	const hint = "Too many requests were made in a short time; wait, then retry."
 	for _, tt := range []struct {
 		name string
 		hint string
@@ -456,7 +582,7 @@ func TestExecResultPollTimeoutStaysATimeout(t *testing.T) {
 
 			assert.Equal(t, 1, exitCode, "stderr: %s", stderr)
 			assert.Contains(t, stderr, "[client_timeout]")
-			assert.NotContains(t, stderr, "WorkSession", "a timeout must not read as the work-session gate")
+			assert.NotContains(t, stderr, utils.APIRateLimited, "a timeout must not read as the throttle refusal")
 			if tt.hint != "" {
 				assert.Equal(t, 1, strings.Count(stderr, "Hint: "+hint), "stderr: %s", stderr)
 				return
@@ -464,6 +590,27 @@ func TestExecResultPollTimeoutStaysATimeout(t *testing.T) {
 			assert.NotContains(t, stderr, "Hint:")
 		})
 	}
+}
+
+// A poll that stops on a failed read leaves the command behind, so the report must
+// not read as if it never ran: running it again could run it twice.
+func TestExecResultPollFailureSaysTheCommandWasNotCancelled(t *testing.T) {
+	t.Parallel()
+	ts := newResultPollServer(func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"detail":"Not found."}`))
+	})
+	defer ts.Close()
+
+	_, stderr, exitCode := runHelperProcess(t, ts.URL,
+		"TestExecCommandWorkSessionGateHelperProcess", execWorkSessionHelperMarker,
+		[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1"},
+		[]string{"prod", "--", "uptime"})
+
+	assert.Equal(t, 1, exitCode, "stderr: %s", stderr)
+	assert.Contains(t, stderr, "command cmd-1 was submitted and not cancelled")
+	assert.Contains(t, stderr, "alpacon exec logs cmd-1")
+	assert.NotContains(t, stderr, "failed to execute command")
 }
 
 func TestExecLogsApprovalLookupFallback(t *testing.T) {
@@ -507,6 +654,105 @@ func TestExecLogsApprovalLookupFallback(t *testing.T) {
 			} else {
 				assert.NotContains(t, stderr, "failed to read approval request")
 			}
+		})
+	}
+}
+
+// newHeldDenialServer answers an exec command with a sudo approval denial whose
+// detail carries held, or no held key at all when held is nil.
+func newHeldDenialServer(held map[string]any) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
+			_, _ = fmt.Fprintf(w, `[{"id":"cmd-1"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
+			resp := map[string]any{
+				"id":        "cmd-1",
+				"status":    "completed",
+				"success":   false,
+				"exit_code": 1,
+				"result":    denialLine("SUDO_APPROVAL_REQUIRED"),
+			}
+			if held != nil {
+				resp["held"] = held
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func fullHeld() map[string]any {
+	return map[string]any{"approval_request": heldRequestUUID, "expires_at": heldDeadline, "status_path": heldStatusPath}
+}
+
+func TestExecPendingApproval_HeldReachesTheJSONEnvelope(t *testing.T) {
+	t.Parallel()
+	ts := newHeldDenialServer(fullHeld())
+	defer ts.Close()
+
+	stdout, _, exitCode := runExecHelper(t, ts.URL, "--output", "json", "prod", "--", "sudo", "reboot")
+
+	assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
+	var got pendingApprovalSignal
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got), "stdout: %s", stdout)
+	assert.Equal(t, heldRequestUUID, got.RequestID)
+	assert.Equal(t, append([]utils.NextAction{reRunAction, consoleAction}, heldActions...), got.NextActions)
+}
+
+func TestExecPendingApproval_HeldIsPrintedInTableOutput(t *testing.T) {
+	t.Parallel()
+	ts := newHeldDenialServer(fullHeld())
+	defer ts.Close()
+
+	_, stderr, exitCode := runExecHelper(t, ts.URL, "prod", "--", "sudo", "reboot")
+
+	assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
+	for _, action := range heldActions {
+		assert.Contains(t, stderr, "  "+action.PlainText()+"\n")
+	}
+}
+
+// An older server sends no held key; the envelope keeps the actions it had before.
+func TestExecPendingApproval_NoHeldKeyKeepsTodaysOutput(t *testing.T) {
+	t.Parallel()
+	ts := newHeldDenialServer(nil)
+	defer ts.Close()
+
+	stdout, stderr, exitCode := runExecHelper(t, ts.URL, "--output", "json", "prod", "--", "sudo", "reboot")
+
+	assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
+	var got pendingApprovalSignal
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got), "stdout: %s", stdout)
+	assert.Empty(t, got.RequestID)
+	assert.Equal(t, []utils.NextAction{reRunAction, consoleAction}, got.NextActions)
+	assert.NotContains(t, stderr, "alpacon api")
+}
+
+func TestExecPendingApproval_BadStatusPathIsDropped(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ name, path string }{
+		{"dot-dot segment", "/api/events/../servers/"},
+		{"absolute URL", "https://evil.example.com/api/events/commands/cmd-1/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			held := fullHeld()
+			held["status_path"] = tc.path
+			ts := newHeldDenialServer(held)
+			defer ts.Close()
+
+			stdout, _, exitCode := runExecHelper(t, ts.URL, "--output", "json", "prod", "--", "sudo", "reboot")
+
+			assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
+			var got pendingApprovalSignal
+			require.NoError(t, json.Unmarshal([]byte(stdout), &got), "stdout: %s", stdout)
+			assert.Equal(t, append([]utils.NextAction{reRunAction, consoleAction}, heldActions[:2]...), got.NextActions)
 		})
 	}
 }

@@ -30,6 +30,7 @@ var serverUpdateCmd = &cobra.Command{
 
 		serverDetail, err := server.UpdateServer(alpaconClient, serverName)
 		if err != nil {
+			utils.ExitIfNoChanges(err)
 			utils.CliErrorWithExit("Failed to update the server info: %s.", err)
 		}
 

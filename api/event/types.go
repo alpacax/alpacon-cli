@@ -8,6 +8,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 // phaseDescriptions humanizes server-classified error_phase identifiers.
@@ -50,15 +51,23 @@ var phaseHints = map[string]string{
 // RemoteCommandError is returned when the remote command completed but exited
 // with a non-zero status. ExitCode is 1 when the server omits exit_code.
 type RemoteCommandError struct {
-	Output     string
-	ExitCode   int
-	ErrorPhase string
+	Username      string
+	ConsoleURL    string
+	WorkSessionID string
+	Output        string
+	ExitCode      int
+	ErrorPhase    string
 	// CommandID identifies the job this failure came from, so an approval wait
 	// has something to poll. ApprovalRequestID is filled in by that wait, not
 	// by the server response this error is built from.
 	CommandID         string
 	ApprovalRequestID string
+	// Held is the open approval the command detail named, or the one the wait
+	// read last; nil when there is none or the server predates the field.
+	Held *utils.HeldRequest
 }
+
+func (e *RemoteCommandError) ErrorHeld() *utils.HeldRequest { return e.Held }
 
 // ClientTimeoutError is returned when the CLI gave up polling for the command
 // result before the server reported a terminal status.
@@ -72,12 +81,24 @@ type ClientTimeoutError struct {
 
 func (e *ClientTimeoutError) ErrorHint() string { return e.hint }
 
+// CommandPollError is returned when the poll of a submitted command ended on a
+// failed read. The command was not cancelled, so running it again may run it twice.
+type CommandPollError struct {
+	CommandID string
+	Err       error
+}
+
+func (e *CommandPollError) Unwrap() error { return e.Err }
+
 // PendingApprovalError is returned when the server parked a command at the
 // "awaiting_approval" status: a human must approve it out of band in the Alpacon
 // console before it runs. CommandID identifies the parked job so a --wait caller can
 // poll it; re-submitting would create a duplicate command and approval request.
 type PendingApprovalError struct {
-	CommandID string
+	Username      string
+	ConsoleURL    string
+	WorkSessionID string
+	CommandID     string
 	// FileSuggestion is the server's proposal to run the held command as a
 	// verified file instead; nil when the server made none.
 	FileSuggestion *FileExecutionSuggestion
@@ -118,6 +139,7 @@ type EventAttributes struct {
 	Operator              string           `json:"operator"`
 	RequestedAt           string           `json:"requested_at" table:"Requested At"`
 	ApprovedFileExecution *json.RawMessage `json:"approved_file_execution,omitempty" table:"-"`
+	DenialCode            types.SentString `json:"denial_code,omitzero" table:"-"`
 	CommandRejection      `table:"-"`
 }
 
@@ -130,6 +152,7 @@ type EventDetails struct {
 	ErrorPhase            *string             `json:"error_phase"`
 	Result                string              `json:"result"`
 	Status                string              `json:"status"`
+	DenialCode            types.SentString    `json:"denial_code,omitzero"`
 	Cancellable           bool                `json:"cancellable"`
 	ResponseDelay         float64             `json:"response_delay"`
 	ElapsedTime           float64             `json:"elapsed_time"`
@@ -149,10 +172,18 @@ type EventDetails struct {
 	// distinguishable from a status the server deliberately left empty.
 	SudoApprovalRequestID *string `json:"sudo_approval_request_id"`
 	SudoGrantStatus       *string `json:"sudo_grant_status"`
+	// Held is the open approval deciding this command's sudo. Null, or absent on
+	// an older server, says nothing about whether a wait has ended.
+	Held *utils.HeldRequest `json:"held"`
 	// FileExecutionSuggestion is set on a held command line the server reads as
 	// a script on the target; absent otherwise and on older servers.
 	FileExecutionSuggestion *FileExecutionSuggestion `json:"file_execution_suggestion"`
+	ConsoleURL              string                   `json:"console_url,omitempty"`
 	CommandRejection
+	// RejectionNote is what the approver wrote when rejecting the hold: null unless a
+	// person rejected it, sent only to the requester and the approvers, and absent on
+	// an older server.
+	RejectionNote *string `json:"rejection_note"`
 	// The account the command ran as and the work session it ran under, so a
 	// re-run printed from the detail repeats them. WorkSession is null when the
 	// command ran under none.
@@ -280,6 +311,10 @@ func (*ClientTimeoutError) Error() string {
 	return "CLI timed out waiting for command result"
 }
 
+func (e *CommandPollError) Error() string {
+	return fmt.Sprintf("command %s was submitted and not cancelled, but its result could not be read: %v", e.CommandID, e.Err)
+}
+
 func (*PendingApprovalError) Error() string {
 	return "command is awaiting human approval"
 }
@@ -349,9 +384,57 @@ func IsRejectedStatus(status string) bool {
 	return status == "rejected"
 }
 
+// IsDeniedStatus reports whether status is the server's terminal state for a
+// submitted command it refused to run, with the reason in denial_code.
+func IsDeniedStatus(status string) bool {
+	return status == "denied"
+}
+
 // IsStatusOnlyFailure reports the terminal failures whose whole outcome is a
 // line about the status: the command never reached a result worth printing. The polling and
 // detach paths both read it, so a new status-only terminal state goes here, not at either caller.
 func IsStatusOnlyFailure(status string) bool {
 	return status == "stuck" || status == "error" || status == "cancelled"
 }
+
+func (e *CommandRejectedError) RejectedCommand() bool {
+	return !utils.IsApprovalLapse(e.ErrorCode())
+}
+func (e *CommandRejectedError) ErrorGate() string { return e.Gate }
+func (e *PendingApprovalError) ErrorFields() map[string]any {
+	if e.ConsoleURL == "" && e.WorkSessionID == "" {
+		return nil
+	}
+	fields := make(map[string]any)
+	if e.ConsoleURL != "" {
+		fields["console_url"] = e.ConsoleURL
+	}
+	if e.WorkSessionID != "" {
+		fields["work_session_id"] = e.WorkSessionID
+	}
+	return fields
+}
+func (d EventDetails) WorkSessionID() string {
+	if d.WorkSession != nil {
+		return d.WorkSession.ID
+	}
+	return ""
+}
+
+func (e *RemoteCommandError) ErrorFields() map[string]any {
+	if e.ConsoleURL == "" && e.WorkSessionID == "" {
+		return nil
+	}
+	fields := make(map[string]any)
+	if e.ConsoleURL != "" {
+		fields["console_url"] = e.ConsoleURL
+	}
+	if e.WorkSessionID != "" {
+		fields["work_session_id"] = e.WorkSessionID
+	}
+	return fields
+}
+
+func (e *CommandRejectedError) LocalSignalAccount() string { return e.Username }
+func (e *PendingApprovalError) LocalSignalAccount() string { return e.Username }
+func (e *RemoteCommandError) LocalSignalAccount() string   { return e.Username }

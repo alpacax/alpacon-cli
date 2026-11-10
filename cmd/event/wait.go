@@ -148,12 +148,12 @@ func runWait(cmd *cobra.Command, newClient func() (*client.AlpaconClient, error)
 		utils.PrintPendingApproval(
 			fmt.Sprintf("Timed out after %s with no matching %s event. The outcome is still open.", timeout, displayType),
 			"", utils.NextAction{})
-		return &utils.ExitError{Code: utils.ExitCodePendingApproval}
+		return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 	case eventapi.OutcomeCanceled:
 		utils.PrintPendingApproval(
 			fmt.Sprintf("Interrupted before a matching %s event arrived. The outcome is still open.", displayType),
 			"", utils.NextAction{})
-		return &utils.ExitError{Code: utils.ExitCodePendingApproval}
+		return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 	}
 
 	// A render failure must not change a settled outcome's exit code—renderEvent writes
@@ -163,7 +163,7 @@ func runWait(cmd *cobra.Command, newClient func() (*client.AlpaconClient, error)
 	}
 
 	if outcome == eventapi.OutcomeFailed {
-		return &utils.ExitError{Code: utils.ExitCodeNotApproved}
+		return utils.NewSilentExitError(utils.ExitCodeNotApproved)
 	}
 	return nil
 }

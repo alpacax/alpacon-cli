@@ -30,6 +30,7 @@ var webhookUpdateCmd = &cobra.Command{
 
 		webhookDetail, err := webhook.UpdateWebhook(alpaconClient, webhookName)
 		if err != nil {
+			utils.ExitIfNoChanges(err)
 			utils.CliErrorWithExit("Failed to update the webhook: %s.", err)
 		}
 

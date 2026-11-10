@@ -112,9 +112,15 @@ type tokenNextCarrier interface {
 	ErrorNextUnderAPIToken() bool
 }
 
-// selfRelativePath matches a path whose every segment is plain characters that
+// apiPathArgumentPattern matches a path whose every segment is plain characters that
 // no shell, terminal or URL parser reads differently, with no "." or ".." segment.
-var selfRelativePath = regexp.MustCompile(`^(/[A-Za-z0-9_~-][A-Za-z0-9_.~-]*)+/?$`)
+var apiPathArgumentPattern = regexp.MustCompile(`^(/[A-Za-z0-9_~-][A-Za-z0-9_.~-]*)+/?$`)
+
+// isSafeAPIPathArgument reports whether path is safe to hand to `alpacon api` as
+// one shell word: within MaxServerHintBytes and matching apiPathArgumentPattern.
+func isSafeAPIPathArgument(path string) bool {
+	return len(path) <= MaxServerHintBytes && apiPathArgumentPattern.MatchString(path)
+}
 
 // ParseRefusalNext returns the "next" string a 402/403/405/429 body carries,
 // or "" on any other status, where a field of that name is a request field.
@@ -143,7 +149,7 @@ func refusalNext(err error) (next string, underAPIToken bool) {
 		if next == "" {
 			continue
 		}
-		if len(next) > MaxServerHintBytes || !selfRelativePath.MatchString(next) {
+		if !isSafeAPIPathArgument(next) {
 			return "", false
 		}
 		tokenCarrier, ok := e.(tokenNextCarrier)
@@ -152,11 +158,8 @@ func refusalNext(err error) (next string, underAPIToken bool) {
 	return "", false
 }
 
-// RefusalNextActions is the server's guidance for a refused request, shown
-// under the error line: each distinct hint as sent, then where to read the
-// request's state ("next"), then the Retry-After wait of a gated refusal other
-// than a plan limit. Nil when err carries none. Under an API token "next" is
-// text only, since a path the server names may refuse token authentication.
+// RefusalNextActions returns server hints, status paths, retry delays and held approvals.
+// A refusal's "next" is text only under an API token because that path may reject it.
 func RefusalNextActions(err error) []NextAction {
 	var actions []NextAction
 	for _, hint := range refusalHints(err) {
@@ -173,7 +176,7 @@ func RefusalNextActions(err error) []NextAction {
 	if wait := RetryAfter(err); wait > 0 && gate != "" && gate != GatePlan {
 		actions = append(actions, NextAction{Description: fmt.Sprintf("Retry after %ds", retryAfterSeconds(wait))})
 	}
-	return actions
+	return append(actions, heldNextActions(err)...)
 }
 
 // Reword returns an error that reads as message and keeps err in its chain,

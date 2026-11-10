@@ -2,7 +2,6 @@ package server
 
 import (
 	"github.com/alpacax/alpacon-cli/api/server"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -17,18 +16,14 @@ var serverRefreshCmd = &cobra.Command{
 	Example: `alpacon server refresh my-server`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		serverName := args[0]
-
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		err = server.RequestServerAction(alpaconClient, serverName, server.ActionUpdateInformation, false)
-		if err != nil {
+		if err := refreshServer(args[0]); err != nil {
 			utils.CliErrorWithExit("Failed to refresh the server information: %s.", err)
 		}
 
 		utils.CliSuccess("System information refresh requested. Run 'alpacon events' to monitor progress.")
 	},
+}
+
+func refreshServer(serverName string) error {
+	return requestServerActionWithMFA(serverName, server.ActionUpdateInformation, false)
 }

@@ -10,9 +10,10 @@ import (
 )
 
 // ExitError is a failure a RunE command returns: cmd.Execute prints it with PrintExitError and exits
-// with Code. Built from Code alone it prints nothing, for a command that wrote its own failure line.
+// with Code. Build it with a constructor; NewSilentExitError is the one that prints nothing.
 type ExitError struct {
 	Code      int
+	silent    bool
 	usage     bool
 	footer    bool
 	envelope  bool // built by NewEnvelopeExitError: json mode classifies cause under operation
@@ -54,6 +55,11 @@ func NewExitErrorWithCode(code int, msg string, args ...any) error {
 	return newExitError(code, false, msg, args)
 }
 
+// NewSilentExitError exits with code and prints nothing, for a command that wrote its own failure line.
+func NewSilentExitError(code int) error {
+	return &ExitError{Code: code, silent: true}
+}
+
 // NewUsageExitError is the failure CliUsageErrorWithExit reports: exit 2 with error_code usage_error.
 func NewUsageExitError(msg string, args ...any) error {
 	return newUsageExitError("", msg, args)
@@ -62,19 +68,15 @@ func NewUsageExitError(msg string, args ...any) error {
 // NewEnvelopeExitError is the failure CliErrorEnvelopeWithExit reports: exit 1 with the footer, or 2
 // when err or an argument is a usage error; json mode classifies err under operation.
 func NewEnvelopeExitError(operation string, err error, msg string, args ...any) error {
-	return newEnvelopeExitError(operation, err, msg, args)
+	if IsUsageError(err) || usageErrorIn(args) {
+		return newUsageExitError(operation, msg, args)
+	}
+	return &ExitError{Code: ExitCodeGeneralError, footer: true, envelope: true, operation: operation, cause: err, msg: msg, args: args}
 }
 
 // NewUsageEnvelopeExitError is the failure CliUsageErrorEnvelopeWithExit reports.
 func NewUsageEnvelopeExitError(operation, msg string, args ...any) error {
 	return newUsageExitError(operation, msg, args)
-}
-
-func newEnvelopeExitError(operation string, err error, msg string, args []any) *ExitError {
-	if IsUsageError(err) || usageErrorIn(args) {
-		return newUsageExitError(operation, msg, args)
-	}
-	return &ExitError{Code: ExitCodeGeneralError, footer: true, envelope: true, operation: operation, cause: err, msg: msg, args: args}
 }
 
 func newExitError(code int, footer bool, msg string, args []any) *ExitError {
@@ -91,7 +93,23 @@ func newUsageExitError(operation, msg string, args []any) *ExitError {
 // PrintExitError writes e to stderr: the error line, the server's hint and the footer, or one
 // envelope under --output json.
 func PrintExitError(e *ExitError) {
+	signalExitError(e)
 	printExitError(TrackedStderr(), os.Stderr, e)
+}
+
+// signalExitError signals what the legacy helpers signaled on the same failure: the first error under
+// --output json, unless it is a usage error, and the refusal the error line reports otherwise.
+func signalExitError(e *ExitError) {
+	if e.silent {
+		return
+	}
+	if OutputFormat == OutputFormatJSON {
+		if !e.usage {
+			SignalPaused(envelopeFailure(e.Code, "", e.msg, e.args).Err)
+		}
+		return
+	}
+	signalCliError(refusalGuidance(e.cause, e.args), e.args)
 }
 
 // FprintExitError writes what PrintExitError writes to w.
@@ -102,14 +120,14 @@ func FprintExitError(w io.Writer, e *ExitError) {
 // printExitError takes two writers because the envelope starts on a fresh line only when it is
 // handed os.Stderr itself.
 func printExitError(text, envelope io.Writer, e *ExitError) {
-	if e.msg == "" {
+	if e.silent {
 		return
 	}
 	if OutputFormat == OutputFormatJSON {
 		failure := envelopeFailure(e.Code, "", e.msg, e.args)
 		switch {
 		case e.usage:
-			failure = Failure{ExitCode: e.Code, ErrorCode: ErrorCodeUsage, Operation: e.operation, Message: failure.Message}
+			failure.ErrorCode, failure.Operation, failure.Err = ErrorCodeUsage, e.operation, nil
 		case e.envelope:
 			failure = Failure{ExitCode: e.Code, Operation: e.operation, Err: e.cause, Message: failure.Message, NextActions: RefusalNextActions(refusalGuidance(e.cause, e.args))}
 		}
