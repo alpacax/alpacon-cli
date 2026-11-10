@@ -15,6 +15,7 @@ const (
 	OperationCommand = "command"
 	OperationWebFTP  = "webftp"
 	OperationWebsh   = "websh"
+	OperationTunnel  = "tunnel"
 	// OperationKube targets a cluster rather than a server: it needs a session
 	// that holds the kube scope and targets that cluster.
 	OperationKube = "kube"
@@ -167,6 +168,8 @@ func workSessionTokenNote(operation string) string {
 	switch operation {
 	case OperationWebsh:
 		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open an interactive terminal; it needs " + LoginWithoutTokenHint + "."
+	case OperationTunnel:
+		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open a tunnel; it needs " + LoginWithoutTokenHint + "."
 	case OperationKube:
 		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open a kube session; it needs " + LoginWithoutTokenHint + "."
 	}
@@ -269,8 +272,12 @@ func workSessionNextActions(code, operation, target, activeWS string) []NextActi
 		if aiagent.FromEnvironment().Detected() {
 			accountCreate = agentCreateCmd + " --account <account>"
 		}
+		retry := "alpacon exec" + workSessionFlag(activeWS) + " -u <approved account> " + serverArg + " -- <command>"
+		if operation == OperationTunnel {
+			retry = "alpacon tunnel" + workSessionFlag(activeWS) + " -u <approved account> " + serverArg + " -l <LOCAL_PORT> -r <REMOTE_PORT>"
+		}
 		return []NextAction{
-			{Command: "alpacon exec" + workSessionFlag(activeWS) + " -u <approved account> " + serverArg + " -- <command>", Description: "pass -u with the session's account (shown by 'alpacon work-session current')"},
+			{Command: retry, Description: "pass -u with the session's account (shown by 'alpacon work-session current')"},
 			{Command: accountCreate, Description: accountSessionCreateDescription},
 		}
 	case WorkSessionAgentSessionRequired:
