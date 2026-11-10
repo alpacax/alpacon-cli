@@ -78,16 +78,15 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			return
 		}
 
-		username, err := normalizeArgs(args, username)
+		plan, err := planCopy(args, username)
 		if err != nil {
 			utils.CliUsageErrorWithExit("%v", err)
 			return
 		}
+		username = plan.username
+		sources, dest := plan.sources, plan.dest
 
-		sources := args[:len(args)-1]
-		dest := args[len(args)-1]
-
-		if err := validatePaths(sources, dest); err != nil {
+		if err := plan.validate(); err != nil {
 			utils.CliUsageErrorWithExit("%s", err.Error())
 			return
 		}
@@ -106,7 +105,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
 		workSessionID := worksession.ResolveOrExit(alpaconClient, flagWorkSession)
 
-		if isLocalPaths(sources) && isRemotePath(dest) {
+		if plan.isUpload() {
 			serverName, err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
 			if err != nil {
 				err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(alpaconClient, func() error {
@@ -124,7 +123,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			}
 			wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
 			utils.CliSuccess("Uploaded %s to %s", wrappedSrc, dest)
-		} else if isRemotePath(sources[0]) && isLocalPath(dest) {
+		} else if plan.isDownload() {
 			serverName, err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
 			if err != nil {
 				err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(alpaconClient, func() error {
@@ -176,14 +175,6 @@ func isRemotePath(path string) bool {
 	return utils.IsRemoteTarget(path)
 }
 
-func isLocalPath(path string) bool {
-	return utils.IsLocalTarget(path)
-}
-
-func isLocalPaths(paths []string) bool {
-	return !slices.ContainsFunc(paths, isRemotePath)
-}
-
 // normalizeArgs resolves the username, then strips the inline user prefixes in
 // place: the -u flag wins and inline users are ignored; without it the inline
 // users must agree, and two different ones are an error. Resolution finishes
@@ -208,24 +199,58 @@ func normalizeArgs(args []string, username string) (string, error) {
 	return username, nil
 }
 
-// stripUserPrefix rewrites user@host:path as host:path, handing back the user.
-// The : is required to tell the syntax from a local file name holding an @. A
-// trailing colon survives ("alice@myserver:" stays remote), so validatePaths
-// reports the missing remote path rather than a source/destination mismatch.
+// stripUserPrefix rewrites user@host:path as host:path, handing back the user. A local
+// name holding an @ stays as is; "alice@myserver:" stays remote, so validate reports the path.
 func stripUserPrefix(arg string) (rewritten, user string) {
-	if !strings.Contains(arg, "@") || !strings.Contains(arg, ":") {
+	if !strings.Contains(arg, "@") || !utils.IsRemoteTarget(arg) {
 		return arg, ""
 	}
 	sshTarget := utils.ParseSSHTarget(arg)
 	return sshTarget.Host + ":" + sshTarget.Path, sshTarget.User
 }
 
-func validatePaths(sources []string, dest string) error {
+// copyPlan is one cp invocation after its arguments were classified and stripped of user prefixes.
+type copyPlan struct {
+	sources  []string
+	dest     string
+	username string
+	remote   []bool // one flag per source, then the destination
+}
+
+// planCopy classifies every argument before normalizeArgs strips the user prefixes:
+// "alice@h:\x" is remote, but the stripped "h:\x" would read as a drive path.
+func planCopy(args []string, username string) (copyPlan, error) {
+	remote := classifyPaths(args)
+	username, err := normalizeArgs(args, username)
+	if err != nil {
+		return copyPlan{}, err
+	}
+	last := len(args) - 1
+	return copyPlan{sources: args[:last], dest: args[last], username: username, remote: remote}, nil
+}
+
+func classifyPaths(args []string) []bool {
+	remote := make([]bool, len(args))
+	for i, arg := range args {
+		remote[i] = isRemotePath(arg)
+	}
+	return remote
+}
+
+func (p copyPlan) isUpload() bool {
+	return !slices.Contains(p.remote[:len(p.sources)], true) && p.remote[len(p.sources)]
+}
+
+func (p copyPlan) isDownload() bool {
+	return p.remote[0] && !p.remote[len(p.sources)]
+}
+
+func (p copyPlan) validate() error {
 	hasLocal := false
 	hasRemote := false
 
-	for _, src := range sources {
-		if isRemotePath(src) {
+	for i := range p.sources {
+		if p.remote[i] {
 			hasRemote = true
 		} else {
 			hasLocal = true
@@ -240,11 +265,11 @@ func validatePaths(sources []string, dest string) error {
 			"  • Cannot mix: alpacon cp file1.txt server:/file2.txt /dest/  ❌")
 	}
 
-	allPaths := make([]string, 0, len(sources)+1)
-	allPaths = append(allPaths, sources...)
-	allPaths = append(allPaths, dest)
-	for _, path := range allPaths {
-		if isRemotePath(path) {
+	allPaths := make([]string, 0, len(p.sources)+1)
+	allPaths = append(allPaths, p.sources...)
+	allPaths = append(allPaths, p.dest)
+	for i, path := range allPaths {
+		if p.remote[i] {
 			// SplitPath accepts an empty remote path; cp requires one. Its error
 			// text is replaced by the guidance message below.
 			if _, remotePath, err := utils.SplitPath(path); err != nil || remotePath == "" {
