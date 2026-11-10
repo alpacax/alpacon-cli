@@ -325,20 +325,12 @@ func runWebsh(cmd *cobra.Command, args []string, newClient clientFactory) error 
 	}
 	// Start the sudo MFA listener in the background so it does not delay the terminal; a sudo
 	// typed before it is ready lets the approval request expire, and the user can retry.
-	listenerDone := make(chan *event.SudoListener, 1)
-	go func() {
-		listenerDone <- setupSudoListener(alpaconClient, serverName, session.ID)
-	}()
-	defer func() {
-		select {
-		case sl := <-listenerDone:
-			if sl != nil {
-				sl.Stop()
-			}
-		case <-time.After(3 * time.Second):
-			// Don't block exit if listener setup is stuck
+	defer runInBackground(func() func() {
+		if sl := setupSudoListener(alpaconClient, serverName, session.ID); sl != nil {
+			return sl.Stop
 		}
-	}()
+		return nil
+	}, sudoListenerExitGrace)()
 
 	if err = websh.OpenNewTerminal(alpaconClient, session); err != nil {
 		// A session the client could not get back to says so on its own terms:
@@ -375,6 +367,31 @@ func extractValue(args []string, i int) (string, int) {
 		return args[i+1], i + 1
 	}
 	return "", i
+}
+
+// sudoListenerExitGrace is how long exit waits for a sudo listener still being set up.
+const sudoListenerExitGrace = 3 * time.Second
+
+// runInBackground runs start on its own goroutine and returns the stop for the caller to defer.
+// The stop waits up to grace for start and runs the stop it returned; one that arrives later
+// runs when it does, so nothing start set up outlives the command.
+func runInBackground(start func() (stop func()), grace time.Duration) func() {
+	started := make(chan func(), 1)
+	go func() { started <- start() }()
+	return func() {
+		select {
+		case stop := <-started:
+			if stop != nil {
+				stop()
+			}
+		case <-time.After(grace): // don't block exit if setup is stuck
+			go func() {
+				if stop := <-started; stop != nil {
+					stop()
+				}
+			}()
+		}
+	}
 }
 
 // setupSudoListener starts the sudo MFA listener for the given websh session.
