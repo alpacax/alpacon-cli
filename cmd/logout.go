@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"net/url"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/auth0"
@@ -34,29 +35,73 @@ var logoutCmd = &cobra.Command{
 			utils.CliWarning("This will log you out from all workspaces associated with this account.")
 		}
 
-		httpClient := httpclient.New(validConfig.Insecure)
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Failed to create Alpacon API client: %s.", err)
-		}
-		envInfo, err := auth0.FetchAuthEnv(validConfig.WorkspaceURL, httpClient)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to fetch authentication environment: %s.", err)
-		}
-
-		if envInfo.Auth0.Method == "auth0" {
-			if validConfig.AccessToken != "" && validConfig.RefreshToken != "" {
-				_, err := ac.SendPostRequest(blacklistURL, nil)
-				if err != nil {
-					utils.CliErrorWithExit("%s", blacklistFailure(err))
-				}
-			}
-			err = auth0.Logout(httpClient, validConfig)
-		} else {
-			err = auth.Logout(ac, validConfig)
-		}
-		reportLogout(err)
+		reportLogout(runLogout(validConfig))
 	},
+}
+
+// runLogout asks the server to end the session as far as it can, then removes
+// the local credentials unless another shell has logged in since.
+func runLogout(validConfig config.Config) error {
+	if !endServerSession(validConfig) {
+		utils.CliWarning("The server-side session may still be valid.")
+	}
+	return config.DeleteConfig(validConfig)
+}
+
+// endServerSession reports whether every server call succeeded. A failed call
+// only warns, so an offline or expired session can still be logged out.
+func endServerSession(validConfig config.Config) bool {
+	if _, err := url.Parse(validConfig.WorkspaceURL); err != nil { // BuildURL would exit before DeleteConfig
+		utils.CliWarning("Skipped the server logout: the workspace URL does not parse: %s.", err)
+		return false
+	}
+
+	httpClient := httpclient.New(validConfig.Insecure)
+	ok := true
+	warn := func(format string, err error) {
+		utils.CliWarning(format, err)
+		ok = false
+	}
+
+	// Built first, so it reads the login this command loaded.
+	ac, err := client.NewAlpaconAPIClient()
+	if err != nil {
+		warn("Failed to create Alpacon API client: %s.", err)
+		if utils.ClassifyError(err) == utils.ErrorCodeNetwork { // later calls would wait out the same timeout
+			return false
+		}
+	}
+
+	hasAuth0Session := validConfig.AccessToken != "" && validConfig.RefreshToken != ""
+	envInfo, err := auth0.FetchAuthEnv(validConfig.WorkspaceURL, httpClient)
+	if err != nil {
+		warn("Failed to fetch authentication environment: %s.", err)
+		if utils.ClassifyError(err) == utils.ErrorCodeNetwork { // later calls would wait out the same timeout
+			return false
+		}
+	}
+	isAuth0 := hasAuth0Session // without the auth env the config itself shows the method
+	if envInfo != nil {
+		isAuth0 = envInfo.Auth0.Method == "auth0"
+	}
+
+	if isAuth0 {
+		if ac != nil && hasAuth0Session {
+			if _, err := ac.SendPostRequest(blacklistURL, nil); err != nil {
+				warn("%s", blacklistFailure(err))
+			}
+		}
+		if envInfo != nil && hasAuth0Session { // the revoke needs the Auth0 domain the env names
+			if err := auth0.RevokeToken(httpClient, envInfo, validConfig.RefreshToken); err != nil {
+				warn("Failed to revoke token: %s.", err)
+			}
+		}
+	} else if ac != nil {
+		if err := auth.Logout(ac); err != nil {
+			warn("Log out from Alpacon failed: %s.", err)
+		}
+	}
+	return ok
 }
 
 func reportLogout(err error) {

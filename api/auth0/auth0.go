@@ -426,10 +426,10 @@ func requestRefreshedToken(envInfo *AuthEnvResponse, httpClient *http.Client, re
 	return &tokenRes, nil
 }
 
-func RevokeToken(httpClient *http.Client, workspaceURL string, refreshToken string) error {
-	envInfo, err := FetchAuthEnv(workspaceURL, httpClient)
-	if err != nil {
-		return err
+// RevokeToken revokes refreshToken at the Auth0 domain envInfo names.
+func RevokeToken(httpClient *http.Client, envInfo *AuthEnvResponse, refreshToken string) error {
+	if _, err := url.Parse("https://" + envInfo.Auth0.Domain); err != nil { // BuildURL would exit instead
+		return fmt.Errorf("invalid Auth0 domain: %w", err)
 	}
 	data := map[string]string{
 		"client_id": envInfo.Auth0.ClientID,
@@ -519,18 +519,4 @@ func extractSubdomain(workspaceURL string) (string, error) {
 	}
 
 	return parts[0], nil
-}
-
-func Logout(httpClient *http.Client, validConfig config.Config) error {
-	if validConfig.AccessToken != "" && validConfig.RefreshToken != "" {
-		err := RevokeToken(httpClient, validConfig.WorkspaceURL, validConfig.RefreshToken)
-		if err != nil {
-			return fmt.Errorf("failed to revoke token: %v", err)
-		}
-	}
-	err := config.DeleteConfig(validConfig)
-	if err != nil {
-		return err
-	}
-	return nil
 }
