@@ -129,8 +129,9 @@ func TestRunWait_LeavesNoGoroutineBehindOnceItReturns(t *testing.T) {
 	exitErr, ok := errors.AsType[*utils.ExitError](err)
 	require.True(t, ok, "want an ExitError, got %v", err)
 	assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
-	assert.Eventually(t, func() bool { return len(waitGoroutines()) == 0 }, 2*time.Second, 10*time.Millisecond,
-		"goroutines runWait started are still running: %v", waitGoroutines())
+	assert.Empty(t, waitGoroutines(false), "joined before runWait returns")
+	assert.Eventually(t, func() bool { return len(waitGoroutines(true)) == 0 }, 2*time.Second, 10*time.Millisecond,
+		"the signal goroutine is still running")
 }
 
 // newRejectingEventServer opens an event session and its WebSocket, then refuses the subscription,
@@ -167,12 +168,16 @@ func newRejectingEventServer(t *testing.T) *httptest.Server {
 	return ts
 }
 
-// waitGoroutines returns the stacks of live goroutines that runWait started.
-func waitGoroutines() []string {
+// waitGoroutines returns the stacks of live goroutines runWait started: with signal, the signal
+// goroutine, which ends on its own once runWait returns; without, the reporter and every
+// goroutine of the waiter, which runWait joins.
+func waitGoroutines(signal bool) []string {
 	buf := make([]byte, 1<<20)
 	var found []string
 	for g := range strings.SplitSeq(string(buf[:runtime.Stack(buf, true)]), "\n\n") {
-		if strings.Contains(g, "cmd/event.reportOutages") || strings.Contains(g, "cmd/event.runWait.func") {
+		isSignal := strings.Contains(g, "cmd/event.runWait.func") && !strings.Contains(g, "reportOutages")
+		joined := strings.Contains(g, "cmd/event.reportOutages") || strings.Contains(g, "alpacon-cli/api/event.")
+		if (signal && isSignal) || (!signal && joined) {
 			found = append(found, g)
 		}
 	}

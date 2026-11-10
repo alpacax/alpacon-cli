@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -117,7 +118,11 @@ func runWait(cmd *cobra.Command, newClient func() (*client.AlpaconClient, error)
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigChan)
-	done := make(chan struct{}) // closed on return, so neither goroutine outlives runWait
+	// Closed on return, so neither goroutine outlives runWait; the reporter is also joined, so
+	// no warning it was already printing lands after the failure line.
+	var reporter sync.WaitGroup
+	defer reporter.Wait()
+	done := make(chan struct{})
 	defer close(done)
 	go func() {
 		select {
@@ -131,7 +136,7 @@ func runWait(cmd *cobra.Command, newClient func() (*client.AlpaconClient, error)
 		waiter.Stop()
 	}()
 
-	go reportOutages(waiter, done)
+	reporter.Go(func() { reportOutages(waiter, done) })
 
 	// Stripped for the same reason server text is: --type lands in a terminal, and a CI
 	// script or an agent may build it from a source the caller does not control.

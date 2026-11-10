@@ -1,6 +1,7 @@
 package event
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,7 +51,7 @@ func TestWaiter_CatchUpRunsOnlyAfterTheSubscriptionStands(t *testing.T) {
 		}, holdOpen)
 
 		w := newTestWaiter(t, ts, WaitOptions{
-			CatchUp: func() (string, error) {
+			CatchUp: func(context.Context) (string, error) {
 				catchUpSawSubscribes.Store(subscribes.Load())
 				return "pending", nil
 			},
@@ -73,7 +74,7 @@ func TestWaiter_CatchUpDecidesWithoutAnEvent(t *testing.T) {
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, holdOpen)
 
 	w := newTestWaiter(t, ts, WaitOptions{
-		CatchUp: func() (string, error) { return "approved", nil },
+		CatchUp: func(context.Context) (string, error) { return "approved", nil },
 		OK:      []string{"approved"},
 		Fail:    []string{"rejected"},
 		Timeout: testWaitTimeout,
@@ -194,7 +195,7 @@ func TestWaiter_CatchUpErrorIsReportedButDoesNotEndTheWait(t *testing.T) {
 		ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, holdOpen)
 
 		w := newTestWaiter(t, ts, WaitOptions{
-			CatchUp: func() (string, error) { return "", errors.New("rest is down") },
+			CatchUp: func(context.Context) (string, error) { return "", errors.New("rest is down") },
 			OK:      []string{"approved"},
 			Timeout: testShortTimeout,
 		})
@@ -243,7 +244,7 @@ func TestWaiter_ReconnectRerunsCatchUp(t *testing.T) {
 		})
 
 		w := newTestWaiter(t, ts, WaitOptions{
-			CatchUp: func() (string, error) {
+			CatchUp: func(context.Context) (string, error) {
 				if catchUps.Add(1) == 1 {
 					return "pending", nil
 				}
@@ -259,5 +260,29 @@ func TestWaiter_ReconnectRerunsCatchUp(t *testing.T) {
 		// Events published during the outage are gone; re-running catch-up is the only recovery.
 		assert.Equal(t, OutcomeMatched, outcome, "a reconnect must re-run catch-up")
 		assert.Equal(t, int32(2), catchUps.Load())
+	})
+}
+
+func TestWaiter_WaitReturnsOnlyOnceACatchUpStillInFlightHasStopped(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, holdOpen)
+		var finished atomic.Bool
+		w := newTestWaiter(t, ts, WaitOptions{
+			CatchUp: func(ctx context.Context) (string, error) {
+				defer finished.Store(true)
+				<-ctx.Done()            // a REST read the server never answers
+				time.Sleep(time.Second) // and takes a moment to unwind once cancelled
+				return "", ctx.Err()
+			},
+			OK:      []string{"approved"},
+			Timeout: testShortTimeout,
+		})
+
+		_, outcome, err := w.Wait()
+
+		require.NoError(t, err)
+		assert.Equal(t, OutcomeTimeout, outcome)
+		assert.True(t, finished.Load(), "the catch-up read must have stopped before Wait returns")
 	})
 }
