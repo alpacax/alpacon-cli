@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -173,11 +174,16 @@ func UpdateWorkSession(ac *client.AlpaconClient, id string, req WorkSessionUpdat
 }
 
 func GetWorkSession(ac *client.AlpaconClient, id string) (*WorkSession, error) {
+	return GetWorkSessionWithContext(context.Background(), ac, id)
+}
+
+// GetWorkSessionWithContext is GetWorkSession bounded by ctx.
+func GetWorkSessionWithContext(ctx context.Context, ac *client.AlpaconClient, id string) (*WorkSession, error) {
 	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
 		return nil, err
 	}
-	body, err := ac.SendGetRequest(api.IDURL(workSessionURL, pathID, "", nil))
+	body, err := ac.SendGetRequestWithContext(ctx, api.IDURL(workSessionURL, pathID, "", nil))
 	if err != nil {
 		return nil, err
 	}

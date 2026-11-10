@@ -1,6 +1,7 @@
 package event
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -40,7 +41,7 @@ func TestCreateEventSession(t *testing.T) {
 		BaseURL:    ts.URL,
 	}
 
-	resp, err := CreateEventSession(ac)
+	resp, err := CreateEventSession(context.Background(), ac)
 	require.NoError(t, err)
 	assert.Equal(t, expected.ID, resp.ID)
 	assert.Equal(t, expected.WebsocketURL, resp.WebsocketURL)
@@ -89,7 +90,7 @@ func TestSubscribeEvent_SendsExpectedPayload(t *testing.T) {
 				BaseURL:    ts.URL,
 			}
 
-			err := SubscribeEvent(ac, "channel-456", tt.eventType, tt.targetID)
+			err := SubscribeEvent(context.Background(), ac, "channel-456", tt.eventType, tt.targetID)
 			assert.NoError(t, err)
 		})
 	}
@@ -119,7 +120,7 @@ func TestSubscribeEvent_OmitsEmptyTarget(t *testing.T) {
 		BaseURL:    ts.URL,
 	}
 
-	require.NoError(t, SubscribeEvent(ac, "channel-456", "notification", ""))
+	require.NoError(t, SubscribeEvent(context.Background(), ac, "channel-456", "notification", ""))
 
 	got := <-bodies
 	require.NoError(t, got.err)
@@ -143,7 +144,7 @@ func TestCreateEventSession_ServerError(t *testing.T) {
 		BaseURL:    ts.URL,
 	}
 
-	resp, err := CreateEventSession(ac)
+	resp, err := CreateEventSession(context.Background(), ac)
 	require.Error(t, err)
 	assert.Nil(t, resp)
 }
@@ -160,7 +161,7 @@ func TestSubscribeEvent_ServerError(t *testing.T) {
 		BaseURL:    ts.URL,
 	}
 
-	err := SubscribeEvent(ac, "channel-456", EventTypeSudo, "session-123")
+	err := SubscribeEvent(context.Background(), ac, "channel-456", EventTypeSudo, "session-123")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to subscribe to sudo events: ")
 }
@@ -179,7 +180,7 @@ func TestSubscribeEvent_NotFoundKeepsTheStatusReachable(t *testing.T) {
 		BaseURL:    ts.URL,
 	}
 
-	err := SubscribeEvent(ac, "channel-456", EventTypeSudo, "session-123")
+	err := SubscribeEvent(context.Background(), ac, "channel-456", EventTypeSudo, "session-123")
 	require.Error(t, err)
 	// websh reads the status off this error to stay quiet on an older server, so the
 	// wrap must keep it reachable.

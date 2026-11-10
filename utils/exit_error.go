@@ -16,7 +16,9 @@ type ExitError struct {
 	silent    bool
 	usage     bool
 	footer    bool
+	envelope  bool // built by NewEnvelopeExitError: json mode classifies cause under operation
 	operation string
+	cause     error
 	msg       string
 	args      []any
 	print     func(text, envelope io.Writer) // replaces the error line for a failure with its own layout
@@ -32,6 +34,9 @@ func (e *ExitError) Error() string {
 // Unwrap returns the errors among the message's arguments, so a caller can still inspect the cause.
 func (e *ExitError) Unwrap() []error {
 	var causes []error
+	if e.cause != nil {
+		causes = append(causes, e.cause)
+	}
 	for _, arg := range e.args {
 		if err, ok := arg.(error); ok && err != nil {
 			causes = append(causes, err)
@@ -61,6 +66,24 @@ func NewUsageExitError(msg string, args ...any) error {
 	return newUsageExitError("", msg, args)
 }
 
+// NewEnvelopeExitError is the failure CliErrorEnvelopeWithExit reports: exit 1 with the footer, or 2
+// when err or an argument is a usage error; json mode classifies err under operation.
+func NewEnvelopeExitError(operation string, err error, msg string, args ...any) error {
+	return newEnvelopeExitError(operation, err, msg, args)
+}
+
+// NewUsageEnvelopeExitError is the failure CliUsageErrorEnvelopeWithExit reports.
+func NewUsageEnvelopeExitError(operation, msg string, args ...any) error {
+	return newUsageExitError(operation, msg, args)
+}
+
+func newEnvelopeExitError(operation string, err error, msg string, args []any) *ExitError {
+	if IsUsageError(err) || usageErrorIn(args) {
+		return newUsageExitError(operation, msg, args)
+	}
+	return &ExitError{Code: ExitCodeGeneralError, footer: true, envelope: true, operation: operation, cause: err, msg: msg, args: args}
+}
+
 func newExitError(code int, footer bool, msg string, args []any) *ExitError {
 	if code == ExitCodeGeneralError && usageErrorIn(args) {
 		return newUsageExitError("", msg, args)
@@ -86,12 +109,14 @@ func signalExitError(e *ExitError) {
 		return
 	}
 	if OutputFormat == OutputFormatJSON {
-		if !e.usage {
+		if e.envelope && e.cause != nil {
+			SignalPaused(e.cause)
+		} else if !e.usage {
 			SignalPaused(envelopeFailure(e.Code, "", e.msg, e.args).Err)
 		}
 		return
 	}
-	signalCliError(refusalErrorIn(e.args), e.args)
+	signalCliError(refusalGuidance(e.cause, e.args), e.args)
 }
 
 // FprintExitError writes what PrintExitError writes to w.
@@ -111,13 +136,16 @@ func printExitError(text, envelope io.Writer, e *ExitError) {
 	}
 	if OutputFormat == OutputFormatJSON {
 		failure := envelopeFailure(e.Code, "", e.msg, e.args)
-		if e.usage {
+		switch {
+		case e.usage:
 			failure.ErrorCode, failure.Operation, failure.Err = ErrorCodeUsage, e.operation, nil
+		case e.envelope:
+			failure = Failure{ExitCode: e.Code, Operation: e.operation, Err: e.cause, Message: failure.Message, NextActions: RefusalNextActions(refusalGuidance(e.cause, e.args))}
 		}
 		PrintJSONError(envelope, failure.envelope())
 		return
 	}
-	printCliErrorTo(text, refusalErrorIn(e.args), e.msg, e.args...)
+	printCliErrorTo(text, refusalGuidance(e.cause, e.args), e.msg, e.args...)
 	if e.footer {
 		printIssueFooter(text)
 	}
