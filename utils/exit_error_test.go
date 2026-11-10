@@ -6,6 +6,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -145,4 +147,35 @@ func TestFprintExitError_SilentPrintsNothingUnderJSON(t *testing.T) {
 	FprintExitError(&out, exitErr)
 
 	assert.Empty(t, out.String())
+}
+
+// Serial: it swaps deliverLocalSignal, OutputFormat and stderr.
+func TestPrintExitError_SignalsThePauseItReports(t *testing.T) {
+	savedDeliver, savedFormat := deliverLocalSignal, OutputFormat
+	t.Cleanup(func() { deliverLocalSignal, OutputFormat = savedDeliver, savedFormat })
+	paused := &signalRefusalStub{code: "session_paused", gate: "session"}
+	cases := []struct {
+		name      string
+		format    string
+		err       error
+		wantKinds []localsignal.Kind
+	}{
+		{name: "table", format: OutputFormatTable, err: NewExitError("command failed: %s", paused), wantKinds: []localsignal.Kind{localsignal.Paused}},
+		{name: "json", format: OutputFormatJSON, err: NewExitError("command failed: %s", paused), wantKinds: []localsignal.Kind{localsignal.Paused}},
+		{name: "empty message", format: OutputFormatTable, err: NewExitError("", paused), wantKinds: []localsignal.Kind{localsignal.Paused}},
+		{name: "silent", format: OutputFormatTable, err: NewSilentExitError(ExitCodeGeneralError)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var kinds []localsignal.Kind
+			deliverLocalSignal = func(kind localsignal.Kind, _ localsignal.Fields) { kinds = append(kinds, kind) }
+			OutputFormat = tc.format
+			exitErr, ok := errors.AsType[*ExitError](tc.err)
+			require.True(t, ok, "want a *ExitError, got %T", tc.err)
+
+			_, _ = testutil.CaptureOutput(t, func() { PrintExitError(exitErr) })
+
+			assert.Equal(t, tc.wantKinds, kinds)
+		})
+	}
 }

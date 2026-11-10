@@ -81,7 +81,7 @@ func PrintExitError(e *ExitError) {
 // signalExitError signals what the legacy helpers signaled on the same failure: the first error under
 // --output json, unless it is a usage error, and the refusal the error line reports otherwise.
 func signalExitError(e *ExitError) {
-	if e.msg == "" {
+	if e.silent {
 		return
 	}
 	if OutputFormat == OutputFormatJSON {
