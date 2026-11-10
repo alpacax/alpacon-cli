@@ -32,7 +32,6 @@ func newSessionRejectingServer() *httptest.Server {
 }
 
 func TestExecFallbackWarnsWithTheServersReasonWhenTheSessionIsRejected(t *testing.T) {
-	t.Parallel()
 	ts := newSessionRejectingServer()
 	defer ts.Close()
 

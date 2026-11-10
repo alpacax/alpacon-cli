@@ -26,7 +26,6 @@ func lastEnvelope(t *testing.T, stderr string) rejectionEnvelope {
 }
 
 func TestRejectedCommandReportsCauseGateAndNextStep(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name        string
 		extra       map[string]any
@@ -101,7 +100,6 @@ func TestRejectedCommandReportsCauseGateAndNextStep(t *testing.T) {
 		for _, tc := range cases {
 			for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 				t.Run(surface.name+"/"+tc.name+"/"+format, func(t *testing.T) {
-					t.Parallel()
 					wantExit := tc.wantExit
 					if wantExit == 0 {
 						wantExit = utils.ExitCodeNotApproved
@@ -133,7 +131,6 @@ func TestRejectedCommandReportsCauseGateAndNextStep(t *testing.T) {
 }
 
 func TestRejectedCommandFromOlderServerSaysTheCauseWasNotRecorded(t *testing.T) {
-	t.Parallel()
 	const wantMessage = "was rejected; the server did not record why."
 	wantNext := utils.NextAction{Description: "Check the command in the Alpacon console (web); the cause was not recorded."}
 	surfaces := []struct {
@@ -158,7 +155,6 @@ func TestRejectedCommandFromOlderServerSaysTheCauseWasNotRecorded(t *testing.T) 
 	for _, surface := range surfaces {
 		for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 			t.Run(surface.name+"/"+format, func(t *testing.T) {
-				t.Parallel()
 				ts := newRejectedCommandServerWith("root", "wheel", map[string]any{"work_session": nil})
 				defer ts.Close()
 
@@ -182,7 +178,6 @@ func TestRejectedCommandFromOlderServerSaysTheCauseWasNotRecorded(t *testing.T) 
 }
 
 func TestDeniedCommandReportsARefusalOnEveryExecSurface(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name       string
 		extra      map[string]any
@@ -282,7 +277,6 @@ func TestDeniedCommandReportsARefusalOnEveryExecSurface(t *testing.T) {
 		for _, tc := range tests {
 			for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 				t.Run(surface.name+"/"+tc.name+"/"+format, func(t *testing.T) {
-					t.Parallel()
 					ts := newRejectedCommandServerWith("root", "wheel", tc.extra)
 					defer ts.Close()
 
@@ -311,7 +305,6 @@ func TestDeniedCommandReportsARefusalOnEveryExecSurface(t *testing.T) {
 }
 
 func TestDeniedCommandSanitizesTheDisplayedResult(t *testing.T) {
-	t.Parallel()
 	ts := newRejectedCommandServerWith("root", "wheel", map[string]any{
 		"status":      "denied",
 		"denial_code": "account_not_resolved",

@@ -1,18 +1,17 @@
 package exec
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -107,23 +106,18 @@ func (n approvalWaitNotifier) Notify(_ context.Context, title, _, _ string) erro
 	return err
 }
 
-// runExecHelper drives the real exec command in a helper process against a
-// fake server and returns its stdout, stderr, and exit code; the caller asserts
-// the exit code it expects.
+// runExecHelper drives the real exec command in process against a fake server and returns its
+// stdout, stderr, and exit code; the caller asserts the exit code it expects.
 func runExecHelper(t *testing.T, workspaceURL string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
-	return runHelperProcess(t, workspaceURL,
-		"TestExecCommandWorkSessionGateHelperProcess", execWorkSessionHelperMarker,
-		[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1"}, args)
+	return runInProcess(t, workspaceURL, "", "", args)
 }
 
-// runExecLogsHelper is runExecHelper for `exec logs`, whose output format rides
-// on an env var—see TestExecLogsHelperProcess.
+// runExecLogsHelper is runExecHelper for `exec logs`, whose --output lives on the root command
+// this tree does not build, so the format is set directly.
 func runExecLogsHelper(t *testing.T, workspaceURL, outputFormat string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
-	return runHelperProcess(t, workspaceURL,
-		"TestExecLogsHelperProcess", execLogsHelperMarker,
-		[]string{"GO_WANT_EXEC_LOGS_HELPER=1", "ALPACON_TEST_OUTPUT_FORMAT=" + outputFormat}, args)
+	return runInProcess(t, workspaceURL, "logs", outputFormat, args)
 }
 
 // runExecWaitHelper is runExecHelper with the approval-wait poll interval cut to
@@ -131,32 +125,10 @@ func runExecLogsHelper(t *testing.T, workspaceURL, outputFormat string, args ...
 // per tick.
 func runExecWaitHelper(t *testing.T, workspaceURL string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
-	return runHelperProcess(t, workspaceURL,
-		"TestExecCommandWorkSessionGateHelperProcess", execWorkSessionHelperMarker,
-		[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1", "ALPACON_TEST_POLL_INTERVAL=10ms"}, args)
-}
-
-func runHelperProcess(t *testing.T, workspaceURL, testName, marker string, env, args []string) (stdout, stderr string, exitCode int) {
-	t.Helper()
-
-	home := t.TempDir()
-	writeExecCommandTestConfig(t, home, workspaceURL)
-
-	helper := osexec.Command(os.Args[0],
-		append([]string{"-test.run=^" + testName + "$", "--", marker}, args...)...)
-	helper.Env = append(os.Environ(), "ALPACON_WORK_SESSION=", "HOME="+home)
-	helper.Env = append(helper.Env, env...)
-	var outBuf, errBuf bytes.Buffer
-	helper.Stdout = &outBuf
-	helper.Stderr = &errBuf
-
-	err := helper.Run()
-	if err == nil {
-		return outBuf.String(), errBuf.String(), 0
-	}
-	var exitErr *osexec.ExitError
-	require.ErrorAs(t, err, &exitErr)
-	return outBuf.String(), errBuf.String(), exitErr.ExitCode()
+	orig := approvalWaitPollInterval
+	t.Cleanup(func() { approvalWaitPollInterval = orig })
+	approvalWaitPollInterval = 10 * time.Millisecond
+	return runExecHelper(t, workspaceURL, args...)
 }
 
 // TestExecStatusAwaitingApprovalExits4WithJSONSignal drives the status-level HITL
@@ -164,7 +136,6 @@ func runHelperProcess(t *testing.T, workspaceURL, testName, marker string, env, 
 // command and asserts it converges on the same pending-approval contract as the
 // denial-code path: exit 4 and a {"status":"pending_approval", ...} envelope.
 func TestExecStatusAwaitingApprovalExits4WithJSONSignal(t *testing.T) {
-	t.Parallel()
 	ts := newAwaitingApprovalServer()
 	defer ts.Close()
 
@@ -181,7 +152,6 @@ func TestExecStatusAwaitingApprovalExits4WithJSONSignal(t *testing.T) {
 }
 
 func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
-	t.Parallel()
 	ts := newApprovalDenialServer(denialLine("SUDO_APPROVAL_REQUIRED"))
 	defer ts.Close()
 
@@ -202,7 +172,7 @@ func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
 }
 
 // TestExecIntentDeviationPrintsSelfServiceHint pins the denial-code hint to the
-// pending-approval path, which exits 4 before HandleCommandResult. Without an
+// pending-approval path, which exits 4 before commandResultFailure. Without an
 // explicit print, the reviewer-free way out of an intent deviation (re-declaring
 // the session intent) never reaches the user.
 func TestExecIntentDeviationPrintsSelfServiceHint(t *testing.T) {
@@ -220,7 +190,7 @@ func TestExecIntentDeviationPrintsSelfServiceHint(t *testing.T) {
 }
 
 // TestExecIntentDeviationPrintsSelfServiceHintAfterWaitTimeout covers the other
-// way into HandlePendingApproval: a --wait that ran out of window returns the
+// way into pendingApprovalFailure: a --wait that ran out of window returns the
 // last denial to the same handler, so the self-service hint must survive the
 // wait rather than only reaching the user on the no-wait path.
 func TestExecIntentDeviationPrintsSelfServiceHintAfterWaitTimeout(t *testing.T) {
@@ -289,27 +259,8 @@ func runIntentDeviationHelper(t *testing.T, extraArgs ...string) (stdout, stderr
 	return stdout, stderr
 }
 
-const execLogsHelperMarker = "exec-logs-helper"
-
-// TestExecLogsHelperProcess runs `exec logs` in a subprocess so a test can read
-// its exit code. The output format arrives as an env var: --output lives on
-// RootCmd, which this helper does not build.
-func TestExecLogsHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_EXEC_LOGS_HELPER") != "1" {
-		return
-	}
-	args, ok := helperArgsAfter(os.Args, execLogsHelperMarker)
-	if !ok {
-		fmt.Fprintln(os.Stderr, "missing "+execLogsHelperMarker+" marker")
-		os.Exit(2)
-	}
-	utils.OutputFormat = os.Getenv("ALPACON_TEST_OUTPUT_FORMAT")
-	logsCmd.Run(logsCmd, args)
-}
-
 // Exit 0 would tell a consumer reading the code alone that the command finished.
 func TestExecLogsAwaitingApprovalExits4(t *testing.T) {
-	t.Parallel()
 	const jobID = "a1b2c3d4-5678-abcd-ef01-234567890abc"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -344,7 +295,6 @@ func TestExecLogsAwaitingApprovalExits4(t *testing.T) {
 // The sibling exit-6 paths (exec, work-session create) answer --output json with
 // an error envelope, so prose here would break a consumer polling exec logs.
 func TestExecLogsRejectedExits6(t *testing.T) {
-	t.Parallel()
 	const jobID = "a1b2c3d4-5678-abcd-ef01-234567890abc"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -381,7 +331,6 @@ func TestExecLogsRejectedExits6(t *testing.T) {
 
 // Exit 1 reads as transient, so an agent re-runs a rejected command forever.
 func TestExecRejectedExits6(t *testing.T) {
-	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -406,7 +355,6 @@ func TestExecRejectedExits6(t *testing.T) {
 // process exit: TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait stops at
 // the returned error, and TestExecRejectedExits6 enters through the no-wait path.
 func TestExecRejectedMidWaitExits6(t *testing.T) {
-	t.Parallel()
 	var detailReads atomic.Int64
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -480,10 +428,10 @@ func TestExecExpiredGrantSignalsOnlyNonLapseRejection(t *testing.T) {
 				logPath := filepath.Join(t.TempDir(), "notifications")
 				require.NoError(t, os.WriteFile(logPath, nil, 0600))
 
-				stdout, stderr, exitCode := runHelperProcess(t, ts.URL,
-					"TestExecExpiredGrantSignalHelperProcess", execWorkSessionHelperMarker,
-					[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1", "ALPACON_TEST_POLL_INTERVAL=10ms", "ALPACON_TEST_NOTIFICATION_LOG=" + logPath},
-					[]string{"--output", format, "--wait-approval", "30s", "prod", "--", "sudo", "reboot"})
+				origNotifier := localsignal.NewNotifier
+				t.Cleanup(func() { localsignal.NewNotifier = origNotifier })
+				localsignal.NewNotifier = func() localsignal.Notifier { return approvalWaitNotifier{path: logPath} }
+				stdout, stderr, exitCode := runExecWaitHelper(t, ts.URL, "--output", format, "--wait-approval", "30s", "prod", "--", "sudo", "reboot")
 				assert.Greater(t, reads.Load(), int64(2))
 				assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
 				assert.Equal(t, denialLine("SUDO_APPROVAL_REQUIRED"), stdout)
@@ -518,15 +466,6 @@ func TestExecExpiredGrantSignalsOnlyNonLapseRejection(t *testing.T) {
 			})
 		}
 	}
-}
-
-func TestExecExpiredGrantSignalHelperProcess(t *testing.T) {
-	logPath := os.Getenv("ALPACON_TEST_NOTIFICATION_LOG")
-	if logPath == "" {
-		return
-	}
-	localsignal.NewNotifier = func() localsignal.Notifier { return approvalWaitNotifier{path: logPath} }
-	TestExecCommandWorkSessionGateHelperProcess(t)
 }
 
 // newResultPollRefusalServer accepts the command but throttles every read of
@@ -564,21 +503,17 @@ func newResultPollServer(result func(http.ResponseWriter)) *httptest.Server {
 // even when the reads it timed out on were throttled: only the refusal's hint
 // goes with the timeout, printed once, never its code.
 func TestExecResultPollTimeoutStaysATimeout(t *testing.T) {
-	t.Parallel()
 	const hint = "Too many requests were made in a short time; wait, then retry."
 	for _, tt := range []struct {
 		name string
 		hint string
 	}{{name: "with a hint", hint: hint}, {name: "without a hint"}} {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			ts := newResultPollRefusalServer(tt.hint)
 			defer ts.Close()
 
-			_, stderr, exitCode := runHelperProcess(t, ts.URL,
-				"TestExecCommandWorkSessionGateHelperProcess", execWorkSessionHelperMarker,
-				[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1", "ALPACON_EXEC_TIMEOUT=300ms"},
-				[]string{"prod", "--", "uptime"})
+			t.Setenv("ALPACON_EXEC_TIMEOUT", "300ms")
+			_, stderr, exitCode := runExecHelper(t, ts.URL, "prod", "--", "uptime")
 
 			assert.Equal(t, 1, exitCode, "stderr: %s", stderr)
 			assert.Contains(t, stderr, "[client_timeout]")
@@ -595,17 +530,13 @@ func TestExecResultPollTimeoutStaysATimeout(t *testing.T) {
 // A poll that stops on a failed read leaves the command behind, so the report must
 // not read as if it never ran: running it again could run it twice.
 func TestExecResultPollFailureSaysTheCommandWasNotCancelled(t *testing.T) {
-	t.Parallel()
 	ts := newResultPollServer(func(w http.ResponseWriter) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"detail":"Not found."}`))
 	})
 	defer ts.Close()
 
-	_, stderr, exitCode := runHelperProcess(t, ts.URL,
-		"TestExecCommandWorkSessionGateHelperProcess", execWorkSessionHelperMarker,
-		[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1"},
-		[]string{"prod", "--", "uptime"})
+	_, stderr, exitCode := runExecHelper(t, ts.URL, "prod", "--", "uptime")
 
 	assert.Equal(t, 1, exitCode, "stderr: %s", stderr)
 	assert.Contains(t, stderr, "command cmd-1 was submitted and not cancelled")
@@ -614,7 +545,6 @@ func TestExecResultPollFailureSaysTheCommandWasNotCancelled(t *testing.T) {
 }
 
 func TestExecLogsApprovalLookupFallback(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name    string
 		status  int
@@ -630,7 +560,6 @@ func TestExecLogsApprovalLookupFallback(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
@@ -691,7 +620,6 @@ func fullHeld() map[string]any {
 }
 
 func TestExecPendingApproval_HeldReachesTheJSONEnvelope(t *testing.T) {
-	t.Parallel()
 	ts := newHeldDenialServer(fullHeld())
 	defer ts.Close()
 
@@ -705,7 +633,6 @@ func TestExecPendingApproval_HeldReachesTheJSONEnvelope(t *testing.T) {
 }
 
 func TestExecPendingApproval_HeldIsPrintedInTableOutput(t *testing.T) {
-	t.Parallel()
 	ts := newHeldDenialServer(fullHeld())
 	defer ts.Close()
 
@@ -719,7 +646,6 @@ func TestExecPendingApproval_HeldIsPrintedInTableOutput(t *testing.T) {
 
 // An older server sends no held key; the envelope keeps the actions it had before.
 func TestExecPendingApproval_NoHeldKeyKeepsTodaysOutput(t *testing.T) {
-	t.Parallel()
 	ts := newHeldDenialServer(nil)
 	defer ts.Close()
 
@@ -734,14 +660,12 @@ func TestExecPendingApproval_NoHeldKeyKeepsTodaysOutput(t *testing.T) {
 }
 
 func TestExecPendingApproval_BadStatusPathIsDropped(t *testing.T) {
-	t.Parallel()
 	cases := []struct{ name, path string }{
 		{"dot-dot segment", "/api/events/../servers/"},
 		{"absolute URL", "https://evil.example.com/api/events/commands/cmd-1/"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			held := fullHeld()
 			held["status_path"] = tc.path
 			ts := newHeldDenialServer(held)

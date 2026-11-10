@@ -260,7 +260,6 @@ func TestLineTooLongGuidanceKeepsTheApprovalWait(t *testing.T) {
 }
 
 func TestExecAcceptedLineSendsNoGuidance(t *testing.T) {
-	t.Parallel()
 	s := &lengthRefusalServer{}
 	ts := newLengthRefusalServer(t, s)
 
@@ -274,7 +273,6 @@ func TestExecAcceptedLineSendsNoGuidance(t *testing.T) {
 
 // Both lanes stop on the first refusal: one submission, then no upload and no second submission.
 func TestExecLineTooLongExits1WithTheFileLaneCommand(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name string
 		args []string
@@ -298,7 +296,6 @@ func TestExecLineTooLongExits1WithTheFileLaneCommand(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			s := refusingLength()
 			ts := newLengthRefusalServer(t, s)
 			command := oversizedCommand()
@@ -316,7 +313,6 @@ func TestExecLineTooLongExits1WithTheFileLaneCommand(t *testing.T) {
 }
 
 func TestExecLineTooLongJSONEnvelopeNamesTheCommand(t *testing.T) {
-	t.Parallel()
 	s := refusingLength()
 	ts := newLengthRefusalServer(t, s)
 	command := oversizedCommand()
@@ -342,7 +338,6 @@ func TestExecLineTooLongJSONEnvelopeNamesTheCommand(t *testing.T) {
 }
 
 func TestExecLineTooLongWithEnvNeverPrintsTheValue(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name string
 		args []string
@@ -352,7 +347,6 @@ func TestExecLineTooLongWithEnvNeverPrintsTheValue(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			s := refusingLength()
 			ts := newLengthRefusalServer(t, s)
 
@@ -367,7 +361,6 @@ func TestExecLineTooLongWithEnvNeverPrintsTheValue(t *testing.T) {
 }
 
 func TestExecLineOver64KBSaysItOutgrowsTheFileLane(t *testing.T) {
-	t.Parallel()
 	s := refusingLength()
 	ts := newLengthRefusalServer(t, s)
 
@@ -380,7 +373,6 @@ func TestExecLineOver64KBSaysItOutgrowsTheFileLane(t *testing.T) {
 }
 
 func TestExecMaxLengthOnAnotherFieldGetsNoFileLaneGuidance(t *testing.T) {
-	t.Parallel()
 	s := &lengthRefusalServer{status: http.StatusBadRequest, response: otherFieldMaxLength}
 	ts := newLengthRefusalServer(t, s)
 
@@ -394,7 +386,6 @@ func TestExecMaxLengthOnAnotherFieldGetsNoFileLaneGuidance(t *testing.T) {
 
 // A script already on the file lane has nowhere else to go, so the guidance stays out of its error.
 func TestExecLineTooLongOnTheFileLaneIsReportedAsTheServerSaidIt(t *testing.T) {
-	t.Parallel()
 	script := filepath.Join(t.TempDir(), "deploy.sh")
 	require.NoError(t, os.WriteFile(script, []byte("echo hi\n"), 0o600))
 	s := refusingLength()

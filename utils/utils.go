@@ -823,9 +823,17 @@ func SplitAndTrim(s, sep string) []string {
 
 // RequirePositiveInt exits with a usage error when an integer flag is not positive.
 func RequirePositiveInt(flagName string, value int) {
-	if value <= 0 {
-		CliUsageErrorWithExit("--%s must be a positive integer.", flagName)
+	if exitErr, ok := errors.AsType[*ExitError](CheckPositiveInt(flagName, value)); ok {
+		exitWithError(exitErr)
 	}
+}
+
+// CheckPositiveInt is the usage failure RequirePositiveInt reports, or nil for a positive value.
+func CheckPositiveInt(flagName string, value int) error {
+	if value <= 0 {
+		return NewUsageExitError("--%s must be a positive integer.", flagName)
+	}
+	return nil
 }
 
 func RejectUnknownSubcommand(notes ...string) cobra.PositionalArgs {

@@ -80,13 +80,22 @@ func CliUsageErrorWithExit(msg string, args ...any) {
 // CliParseErrorWithExit reports a command line cmd could not parse and exits 2 in format, the --output
 // value its caller found before the parse stopped; table mode points to cmd's help.
 func CliParseErrorWithExit(cmd *cobra.Command, format, msg string) {
+	exitWithError(newParseExitError(cmd, format, msg))
+}
+
+// NewParseExitError is the failure CliParseErrorWithExit reports. It applies format, as that does.
+func NewParseExitError(cmd *cobra.Command, format, msg string) error {
+	return newParseExitError(cmd, format, msg)
+}
+
+func newParseExitError(cmd *cobra.Command, format, msg string) *ExitError {
 	if format != "" {
 		_ = SetOutputFormat(format) // an invalid value keeps the current format
 	}
 	if OutputFormat == OutputFormatJSON {
-		CliUsageErrorWithExit("%s", msg)
+		return newUsageExitError("", "%s", []any{msg})
 	}
-	CliUsageErrorWithExit("%s\nRun '%s --help' for usage.", msg, cmd.CommandPath())
+	return newUsageExitError("", "%s\nRun '%s --help' for usage.", []any{msg, cmd.CommandPath()})
 }
 
 func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {

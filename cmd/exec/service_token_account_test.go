@@ -13,10 +13,8 @@ import (
 )
 
 func TestExec_ApplicationAccountRefusal(t *testing.T) {
-	t.Parallel()
 	for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 		t.Run(format, func(t *testing.T) {
-			t.Parallel()
 			var submitted atomic.Bool
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")

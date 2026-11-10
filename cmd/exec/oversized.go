@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"io"
 	"net/http"
 	"strings"
 
@@ -53,8 +54,8 @@ func fileLaneObstacle(parsed RemoteExecArgs) string {
 	return reason
 }
 
-// reportLineTooLong exits 1 with the length refusal and the file-lane command to run instead.
-func reportLineTooLong(err error, parsed RemoteExecArgs) {
+// lineTooLongFailure returns exit 1 with the length refusal and the file-lane command to run instead.
+func lineTooLongFailure(stderr io.Writer, err error, parsed RemoteExecArgs) error {
 	message, hint, action := lineTooLongGuidance(parsed)
-	reportCodedRefusalWithExit(1, "command", err, message, hint, []utils.NextAction{action})
+	return codedRefusalWithExit(stderr, utils.ExitCodeGeneralError, "command", err, message, hint, []utils.NextAction{action})
 }

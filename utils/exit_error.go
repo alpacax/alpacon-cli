@@ -19,6 +19,7 @@ type ExitError struct {
 	operation string
 	msg       string
 	args      []any
+	print     func(text, envelope io.Writer) // replaces the error line for a failure with its own layout
 }
 
 func (e *ExitError) Error() string {
@@ -81,7 +82,7 @@ func PrintExitError(e *ExitError) {
 // signalExitError signals what the legacy helpers signaled on the same failure: the first error under
 // --output json, unless it is a usage error, and the refusal the error line reports otherwise.
 func signalExitError(e *ExitError) {
-	if e.silent {
+	if e.silent || e.print != nil {
 		return
 	}
 	if OutputFormat == OutputFormatJSON {
@@ -102,6 +103,10 @@ func FprintExitError(w io.Writer, e *ExitError) {
 // handed os.Stderr itself.
 func printExitError(text, envelope io.Writer, e *ExitError) {
 	if e.silent {
+		return
+	}
+	if e.print != nil {
+		e.print(text, envelope)
 		return
 	}
 	if OutputFormat == OutputFormatJSON {

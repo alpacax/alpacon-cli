@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -90,7 +89,7 @@ var (
 // pendingApproval marks the codes the server emits after creating an approval grant: the sudo call
 // fails now, but a reviewer can still approve it. Flagging them here rather than in a second list
 // keeps the hints and that code set from drifting apart. selfService narrows those to entries whose
-// guidance names a way out other than waiting for a reviewer. HandlePendingApproval prints only
+// guidance names a way out other than waiting for a reviewer. pendingApprovalFailure prints only
 // those, since its own message already says to re-run after approval, and pendingSudoDenial
 // prefers them whatever the table order.
 //
@@ -445,7 +444,7 @@ func credentialInlineHint(invokedAs Invocation) string {
 // RunExecWithPresenceStepUp runs a command via RunCommandWithRetry and, when it is denied for a
 // missing recent MFA (SUDO_PRESENCE_REQUIRED) on an interactive terminal, offers an MFA step-up
 // and retries once. A non-interactive caller gets the verification link to complete out of band
-// and the denial unchanged, so HandleCommandResult prints the static hint. Interactive websh keeps
+// and the denial unchanged, so commandResultFailure prints the static hint. Interactive websh keeps
 // its own sudo MFA flow.
 func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
 	return runWithPresenceStepUp(ac, serverName, func() error {
@@ -474,7 +473,7 @@ func runWithPresenceStepUp(ac *client.AlpaconClient, serverName string, run comm
 	}
 
 	// Presence is fresh—retry once. Any remaining denial falls through to the
-	// static hint in HandleCommandResult.
+	// static hint in commandResultFailure.
 	return run()
 }
 
@@ -583,7 +582,7 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 
 	// Status-hold: the server parked this job at awaiting_approval (it never ran).
 	// With --wait, resubscribe to the same job and stream once approved instead of
-	// re-submitting; without --wait, surface it for HandlePendingApproval.
+	// re-submitting; without --wait, surface it for pendingApprovalFailure.
 	var pendingErr *event.PendingApprovalError
 	if errors.As(err, &pendingErr) {
 		if waitTimeout <= 0 {
@@ -717,6 +716,9 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 // or been spent by another attempt.
 func runAfterApproval(run commandRun, held *utils.HeldRequest) error {
 	err := run()
+	// Each shape gets the sentence its way out needs: a repeated denial needs a fresh request,
+	// while a parked job runs on its own once approved, so advising a re-run would contradict the
+	// pending text pendingApprovalFailure prints next.
 	var pendingErr *event.PendingApprovalError
 	switch {
 	case isApprovalDenial(err) && held.Expired():
@@ -769,30 +771,34 @@ func isPollFailure(err error) bool {
 	return errors.As(err, &typeErr)
 }
 
-// HandlePurposeDemand reports a command the gate parked for its purpose and
-// exits, or returns false when err is something else.
+// purposeDemandFailure reports a command the gate parked for its purpose and
+// returns its exit, or nil when err is something else.
 //
 // It never waits, not even under --wait. --wait exists because an approval is
 // somebody else's to give and the caller can only block; a purpose demand is
 // this caller's own to answer, and the window is about a minute, so blocking
 // would spend the command's single chance on sleep. It runs ahead of
-// HandlePendingApproval because a parked command has no approval request yet:
+// pendingApprovalFailure because a parked command has no approval request yet:
 // reporting one would name a queue nobody has been added to.
-func HandlePurposeDemand(err error) bool {
+func purposeDemandFailure(err error) error {
 	var purposeErr *event.AwaitingPurposeError
 	if !errors.As(err, &purposeErr) {
-		return false
+		return nil
 	}
 	utils.PrintPurposeDemand(
 		utils.PurposeDemandLead, purposeErr.CommandID, purposeErr.ExpiresAt,
 	)
-	os.Exit(utils.ExitCodePurposeRequired)
-	return true
+	return utils.NewSilentExitError(utils.ExitCodePurposeRequired)
 }
 
-// HandlePendingApproval reports an approval hold and exits with ExitCodePendingApproval.
-// It returns false when err is neither a parked command nor a sudo approval denial.
-func HandlePendingApproval(err error, parsed RemoteExecArgs) bool {
+// pendingApprovalFailure reports a command left pending human approval and not waited on—a job the
+// server parked at awaiting_approval (PendingApprovalError) or a sudo denial with an approval
+// request in flight—and returns ExitCodePendingApproval, or nil when err is neither.
+// The approval request id is reported only when a --wait poll picked one up
+// (pendingWithRequestID). The sudo-denial path repeats the invoked command (reRunHint), and a held
+// command line the server reads as a script also gets its --file --from-server form
+// (fileSuggestionAction).
+func pendingApprovalFailure(stderr io.Writer, err error, parsed RemoteExecArgs) error {
 	// Status-hold: held job runs automatically once approved, so point at exec logs.
 	var pendingErr *event.PendingApprovalError
 	if errors.As(err, &pendingErr) {
@@ -808,18 +814,17 @@ func HandlePendingApproval(err error, parsed RemoteExecArgs) bool {
 			utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", pendingErr.CommandID)},
 			extra...,
 		)
-		os.Exit(utils.ExitCodePendingApproval)
-		return true
+		return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 	}
 	output, ok := approvalDenialOutput(err)
 	if !ok {
-		return false
+		return nil
 	}
 	utils.SignalApprovalPending(err, commandSignalFields(err, parsed))
-	// This exits before HandleCommandResult, so a self-service way out (re-declaring a stale
+	// This returns before commandResultFailure, so a self-service way out (re-declaring a stale
 	// session intent) would otherwise never reach the user.
 	if hint, _ := pendingSudoDenial(output); hint != "" {
-		fmt.Fprint(os.Stderr, hint)
+		_, _ = fmt.Fprint(stderr, hint)
 	}
 	requestID := ""
 	var remoteErr *event.RemoteCommandError
@@ -836,8 +841,7 @@ func HandlePendingApproval(err error, parsed RemoteExecArgs) bool {
 		reRunHint(parsed),
 		utils.RefusalNextActions(err)...,
 	)
-	os.Exit(utils.ExitCodePendingApproval)
-	return true
+	return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 }
 
 // RunCommandWithRetry executes a remote command with MFA/username-required error
@@ -875,69 +879,70 @@ func runWithRetry(ac *client.AlpaconClient, serverName string, run commandRun) e
 	return nil
 }
 
-// HandleCommandResult exits appropriately on error. Output is streamed to stdout
-// during execution; on a remote failure the error carries that output, used here
-// only to surface the sudo-denial hint (not re-printed). invokedAs names the
-// command the user ran so a hint can quote it; empty falls back to exec.
-func HandleCommandResult(err error, invokedAs Invocation) {
-	if err != nil {
-		var remoteErr *event.RemoteCommandError
-		if errors.As(err, &remoteErr) {
-			stderrText, exitCode := remoteFailureReport(remoteErr)
-			fmt.Fprint(os.Stderr, stderrText)
-			os.Exit(exitCode)
-		}
-		var clientTimeout *event.ClientTimeoutError
-		if errors.As(err, &clientTimeout) {
-			fmt.Fprint(os.Stderr, clientTimeoutLine())
-			// A wait that ended on a refusal (a 429 in practice) keeps its hint.
-			utils.PrintRefusalHints(os.Stderr, clientTimeout)
-			os.Exit(1)
-		}
-		var pollFailure *event.CommandPollError
-		if errors.As(err, &pollFailure) {
-			reportCommandPollFailure(err, pollFailure)
-			return
-		}
-		var rejected *event.CommandRejectedError
-		if errors.As(err, &rejected) {
-			// Final for this command line: a retry is refused again or files another approval request.
-			reportCommandRejection(err, rejected)
-			return
-		}
-		if isCommandInlineCredentialError(err) {
-			reportCodedRefusal("command", err, commandInlineCredentialMessage, credentialInlineHint(invokedAs))
-			return
-		}
-		utils.CliErrorWithExit("%s", err)
+// commandResultFailure reports a failed run and returns its exit, or nil when err is nil. Output is
+// streamed to stdout during execution; on a remote failure the error carries that output, used
+// here only to surface the sudo-denial hint (not re-printed). invokedAs names the command the user
+// ran so a hint can quote it; empty falls back to exec.
+func commandResultFailure(stderr io.Writer, err error, invokedAs Invocation) error {
+	if err == nil {
+		return nil
 	}
+	var remoteErr *event.RemoteCommandError
+	if errors.As(err, &remoteErr) {
+		stderrText, exitCode := remoteFailureReport(remoteErr)
+		_, _ = fmt.Fprint(stderr, stderrText)
+		return utils.NewSilentExitError(exitCode)
+	}
+	var clientTimeout *event.ClientTimeoutError
+	if errors.As(err, &clientTimeout) {
+		_, _ = fmt.Fprint(stderr, clientTimeoutLine())
+		// A wait that ended on a refusal (a 429 in practice) keeps its hint.
+		utils.PrintRefusalHints(stderr, clientTimeout)
+		return utils.NewSilentExitError(utils.ExitCodeGeneralError)
+	}
+	var pollFailure *event.CommandPollError
+	if errors.As(err, &pollFailure) {
+		return commandPollFailure(stderr, err, pollFailure)
+	}
+	var rejected *event.CommandRejectedError
+	if errors.As(err, &rejected) {
+		// Final for this command line: a retry is refused again or files another approval request.
+		return commandRejectionFailure(stderr, err, rejected)
+	}
+	if isCommandInlineCredentialError(err) {
+		return codedRefusal(stderr, "command", err, commandInlineCredentialMessage, credentialInlineHint(invokedAs))
+	}
+	return utils.NewExitError("%s", err)
 }
 
-// reportCommandPollFailure points at the job rather than a retry, which could run the
+// commandPollFailure points at the job rather than a retry, which could run the
 // command twice. A server hint prints beside the action, since it cannot replace it.
-func reportCommandPollFailure(err error, failure *event.CommandPollError) {
+func commandPollFailure(stderr io.Writer, err error, failure *event.CommandPollError) error {
 	message := strings.TrimRight(utils.SanitizeTerminalText(failure.Error()), ".")
 	logs := utils.NextAction{
 		Command:     fmt.Sprintf("alpacon exec logs %s", failure.CommandID),
 		Description: "check the command before running it again",
 	}
-	utils.ExitWithFailureJSON(utils.Failure{ExitCode: 1, Operation: "command", Err: err, Message: message + ".", NextActions: []utils.NextAction{logs}})
-	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
-	fmt.Fprint(os.Stderr, denialHintLine(logs.PlainText()+"\n"))
-	utils.PrintRefusalHints(os.Stderr, err)
-	os.Exit(1)
+	utils.SignalPaused(err)
+	if utils.OutputFormat == utils.OutputFormatJSON {
+		utils.FprintFailureJSON(stderr, utils.Failure{ExitCode: 1, Operation: "command", Err: err, Message: message + ".", NextActions: []utils.NextAction{logs}})
+		return utils.NewSilentExitError(utils.ExitCodeGeneralError)
+	}
+	_, _ = fmt.Fprintf(stderr, "%s: %s.\n", utils.Red("Error"), message)
+	_, _ = fmt.Fprint(stderr, denialHintLine(logs.PlainText()+"\n"))
+	utils.PrintRefusalHints(stderr, err)
+	return utils.NewSilentExitError(utils.ExitCodeGeneralError)
 }
 
-func reportCommandRejection(err error, rejected *event.CommandRejectedError) {
+func commandRejectionFailure(stderr io.Writer, err error, rejected *event.CommandRejectedError) error {
 	actions := rejected.NextActions()
 	if len(actions) == 0 {
-		utils.CliErrorEnvelopeWithExitCode(rejected.ExitCode(), "command", err, "%s", rejected)
-		return
+		return envelopeFailure(stderr, rejected.ExitCode(), "command", err, rejected.Error())
 	}
-	reportCodedRefusalWithExit(rejected.ExitCode(), "command", err, rejected.Error(), denialHintLine(actions[0].PlainText()+"\n"), actions)
+	return codedRefusalWithExit(stderr, rejected.ExitCode(), "command", err, rejected.Error(), denialHintLine(actions[0].PlainText()+"\n"), actions)
 }
 
-// remoteFailureReport is what HandleCommandResult writes to stderr for a
+// remoteFailureReport is what commandResultFailure writes to stderr for a
 // command that failed on the server, and the exit code it leaves with: the
 // outcome line, then the sudo denial guidance when the output needs one.
 func remoteFailureReport(remoteErr *event.RemoteCommandError) (string, int) {
@@ -945,28 +950,62 @@ func remoteFailureReport(remoteErr *event.RemoteCommandError) (string, int) {
 	return stderrLine + sudoDenialHint(remoteErr.Output), exitCode
 }
 
-// reportCodedRefusal is the one way out for a server refusal the CLI has a
+// codedRefusal is the one way out for a server refusal the CLI has a
 // sentence for: under --output json the envelope carries the server's code and
-// the message; table mode prints the red Error line and the hint. Exits 1, or 2 for a usage error.
-// The server's hint, when err carries one, takes the place of the local hint.
-func reportCodedRefusal(operation string, err error, message, hint string) {
-	reportCodedRefusalWithExit(1, operation, err, message, hint, nil)
+// the message; table mode prints the red Error line and the hint. Returns exit 1, or 2 for a usage
+// error. The server's hint, when err carries one, takes the place of the local hint.
+func codedRefusal(stderr io.Writer, operation string, err error, message, hint string) error {
+	return codedRefusalWithExit(stderr, utils.ExitCodeGeneralError, operation, err, message, hint, nil)
 }
 
-// reportCodedRefusalWithExit is reportCodedRefusal with a chosen exit code and the envelope's
+// codedRefusalWithExit is codedRefusal with a chosen exit code and the envelope's
 // next_actions; table mode prints no actions, so hint should spell them out.
-func reportCodedRefusalWithExit(code int, operation string, err error, message, hint string, actions []utils.NextAction) {
-	utils.ExitIfUsageError(code, operation, err, "%s.", message)
-	utils.ExitWithFailureJSON(utils.Failure{ExitCode: code, Operation: operation, Err: err, Message: message + ".", NextActions: actions})
-	utils.SignalPaused(err)
-	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
-	if hint := codedRefusalHint(err, hint); hint != "" {
-		fmt.Fprint(os.Stderr, hint)
+func codedRefusalWithExit(stderr io.Writer, code int, operation string, err error, message, hint string, actions []utils.NextAction) error {
+	if usage := usageFailure(stderr, code, operation, err, message+"."); usage != nil {
+		return usage
 	}
-	os.Exit(code)
+	utils.SignalPaused(err)
+	if utils.OutputFormat == utils.OutputFormatJSON {
+		utils.FprintFailureJSON(stderr, utils.Failure{ExitCode: code, Operation: operation, Err: err, Message: message + ".", NextActions: actions})
+		return utils.NewSilentExitError(code)
+	}
+	_, _ = fmt.Fprintf(stderr, "%s: %s.\n", utils.Red("Error"), message)
+	if hint := codedRefusalHint(err, hint); hint != "" {
+		_, _ = fmt.Fprint(stderr, hint)
+	}
+	return utils.NewSilentExitError(code)
 }
 
-// codedRefusalHint is the hint reportCodedRefusal prints: the server's, when
+// envelopeFailure reports err under message with exit code: the envelope carries err's code and
+// hints, and table mode prints the Error line and err's hints.
+func envelopeFailure(stderr io.Writer, code int, operation string, err error, message string) error {
+	if usage := usageFailure(stderr, code, operation, err, message); usage != nil {
+		return usage
+	}
+	utils.SignalPaused(err)
+	if utils.OutputFormat == utils.OutputFormatJSON {
+		utils.FprintFailureJSON(stderr, utils.Failure{ExitCode: code, Operation: operation, Err: err, Message: message, NextActions: utils.RefusalNextActions(err)})
+		return utils.NewSilentExitError(code)
+	}
+	_, _ = fmt.Fprintf(stderr, "%s: %s\n", utils.Red("Error"), utils.SanitizeTerminalBlockKeepingTabs(message))
+	utils.PrintRefusalHints(stderr, err)
+	return utils.NewSilentExitError(code)
+}
+
+// usageFailure turns a failure that would exit 1 into the usage error it is when err is one, as
+// utils.ExitIfUsageError does, and returns nil otherwise.
+func usageFailure(stderr io.Writer, code int, operation string, err error, message string) error {
+	if code != utils.ExitCodeGeneralError || !utils.IsUsageError(err) {
+		return nil
+	}
+	if utils.OutputFormat == utils.OutputFormatJSON {
+		utils.FprintFailureJSON(stderr, utils.Failure{ExitCode: utils.ExitCodeUsageError, ErrorCode: utils.ErrorCodeUsage, Operation: operation, Message: message})
+		return utils.NewSilentExitError(utils.ExitCodeUsageError)
+	}
+	return utils.NewUsageExitError("%s", message)
+}
+
+// codedRefusalHint is the hint codedRefusal prints: the server's, when
 // err carries one, otherwise the local one it was given.
 func codedRefusalHint(err error, local string) string {
 	if serverHint := utils.RefusalHint(err); serverHint != "" {
@@ -987,7 +1026,7 @@ func propagateCommandError(err error) (error, bool) {
 		return pending, true
 	}
 	// The purpose demand is the caller's to answer, so it must reach
-	// HandlePurposeDemand intact rather than be retried as a transport failure.
+	// purposeDemandFailure intact rather than be retried as a transport failure.
 	var purposeDemand *event.AwaitingPurposeError
 	if errors.As(err, &purposeDemand) {
 		return purposeDemand, true
@@ -1060,18 +1099,17 @@ func remoteCommandOutcome(remoteErr *event.RemoteCommandError) (stderrLine strin
 	return stderrLine, remoteErr.ExitCode
 }
 
-// HandleExecUserRefusal reports the missing execution user and exits 1, or returns false when err
-// is something else. Under --output json it returns false, leaving the generic error envelope.
-func HandleExecUserRefusal(err error, parsed RemoteExecArgs) bool {
+// execUserFailure reports the missing execution user and returns exit 1, or nil when err is
+// something else. Under --output json it returns nil, leaving the generic error envelope.
+func execUserFailure(stderr io.Writer, err error, parsed RemoteExecArgs) error {
 	if utils.OutputFormat == utils.OutputFormatJSON {
-		return false
+		return nil
 	}
 	message, hint, ok := execUserRefusal(err, parsed)
 	if !ok {
-		return false
+		return nil
 	}
-	reportCodedRefusal("command", err, message, hint)
-	return true
+	return codedRefusal(stderr, "command", err, message, hint)
 }
 
 // execUserRefusal renders the refusal for a command sent with no execution user.

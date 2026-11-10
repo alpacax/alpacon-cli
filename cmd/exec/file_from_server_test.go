@@ -202,7 +202,6 @@ func newFileDownloadServer(s *fileDownloadServer, content []byte, failure string
 // end: the script is read from the --file path as the run-as account, with no
 // local copy, and the bytes read are the bytes submitted for review.
 func TestExecFileFromServerSubmitsTheDownloadedBytes(t *testing.T) {
-	t.Parallel()
 	content := "#!/bin/bash\nset -euo pipefail\necho deploy\n"
 	var s fileDownloadServer
 	ts := newFileDownloadServer(&s, []byte(content), "")
@@ -237,7 +236,6 @@ func TestExecFileFromServerSubmitsTheDownloadedBytes(t *testing.T) {
 // read, is empty, or exceeds the content ceiling stops the run before the
 // submission.
 func TestExecFileFromServerRefusalsNeverSubmit(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		content []byte
@@ -262,7 +260,6 @@ func TestExecFileFromServerRefusalsNeverSubmit(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var s fileDownloadServer
 			ts := newFileDownloadServer(&s, tt.content, tt.failure)
 			defer ts.Close()
@@ -280,7 +277,6 @@ func TestExecFileFromServerRefusalsNeverSubmit(t *testing.T) {
 }
 
 func TestExecFileFromServerDeniedExitsNotApproved(t *testing.T) {
-	t.Parallel()
 	var s fileDownloadServer
 	s.denialCode = "account_not_resolved"
 	s.denialResult = "The execution account could not be resolved."
@@ -325,20 +321,17 @@ const heldScriptSuggestionLine = "alpacon exec -u root --file /opt/deploy.sh --f
 // the server reads as a script gets the --file --from-server form of it under
 // the pending message, in both output formats.
 func TestExecHeldScriptPrintsTheFromServerSuggestion(t *testing.T) {
-	t.Parallel()
 	ts := newHeldScriptServer(`{"path":"/opt/deploy.sh","interpreter":"/bin/bash","args":["--fast"]}`)
 	// The subtests run in parallel, after this function returns.
 	t.Cleanup(ts.Close)
 
 	t.Run("table", func(t *testing.T) {
-		t.Parallel()
 		_, stderr, exitCode := runExecHelper(t, ts.URL, "root@prod", "--", "bash", "/opt/deploy.sh", "--fast")
 		assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
 		assert.Contains(t, stderr, "alpacon exec logs cmd-1")
 		assert.Contains(t, stderr, "  "+heldScriptSuggestionLine+"  # ")
 	})
 	t.Run("json", func(t *testing.T) {
-		t.Parallel()
 		stdout, _, exitCode := runExecHelper(t, ts.URL, "--output", "json", "root@prod", "--", "bash", "/opt/deploy.sh", "--fast")
 		assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
 		var got pendingApprovalSignal
@@ -353,7 +346,6 @@ func TestExecHeldScriptPrintsTheFromServerSuggestion(t *testing.T) {
 // command line whose interpreter was a bare name gets the --from-server line
 // with an --interpreter placeholder and the 'command -v' hint to fill it.
 func TestExecHeldScriptWithBareInterpreterPrintsAPlaceholder(t *testing.T) {
-	t.Parallel()
 	ts := newHeldScriptServer(`{"path":"/opt/deploy.sh","interpreter":null,"interpreter_name":"bash","args":["--fast"]}`)
 	defer ts.Close()
 
@@ -366,7 +358,6 @@ func TestExecHeldScriptWithBareInterpreterPrintsAPlaceholder(t *testing.T) {
 // TestExecHeldCommandWithoutSuggestionKeepsTodaysHint pins that a held command
 // the server made no suggestion for prints no --from-server line.
 func TestExecHeldCommandWithoutSuggestionKeepsTodaysHint(t *testing.T) {
-	t.Parallel()
 	ts := newHeldScriptServer("")
 	defer ts.Close()
 
