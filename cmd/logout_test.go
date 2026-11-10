@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -74,12 +73,13 @@ func TestRunLogout_RemovesCredentialsWhenTheSessionIsUnusable(t *testing.T) {
 		expiresIn    int
 		wantPath     string
 		wantNoPath   []string
+		wantWarning  string
 	}{
-		{name: "api key and unreachable workspace", unreachable: true, token: "fake-api-key"},
-		{name: "expired access token and unreachable workspace", unreachable: true, accessToken: "expired", refreshToken: "refresh"},
-		{name: "expired access token without refresh token", accessToken: "expired", wantNoPath: []string{blacklistURL, "/api/auth/logout/"}},
-		{name: "valid access token and failing blacklist", accessToken: "access", refreshToken: "refresh", expiresIn: 3600, wantPath: blacklistURL, wantNoPath: []string{"/api/auth/logout/"}},
-		{name: "api key and failing logout request", token: "fake-api-key", wantPath: "/api/auth/logout/", wantNoPath: []string{blacklistURL}},
+		{name: "api key and unreachable workspace", unreachable: true, token: "fake-api-key", wantWarning: "Failed to fetch authentication environment"},
+		{name: "expired access token and unreachable workspace", unreachable: true, accessToken: "expired", refreshToken: "refresh", wantWarning: "Failed to create Alpacon API client"},
+		{name: "expired access token without refresh token", accessToken: "expired", wantNoPath: []string{blacklistURL, "/api/auth/logout/"}, wantWarning: "Failed to create Alpacon API client"},
+		{name: "valid access token and failing blacklist", accessToken: "access", refreshToken: "refresh", expiresIn: 3600, wantPath: blacklistURL, wantNoPath: []string{"/api/auth/logout/"}, wantWarning: "Failed to set black list"},
+		{name: "api key and failing logout request", token: "fake-api-key", wantPath: "/api/auth/logout/", wantNoPath: []string{blacklistURL}, wantWarning: "Log out from Alpacon failed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -109,6 +109,7 @@ func TestRunLogout_RemovesCredentialsWhenTheSessionIsUnusable(t *testing.T) {
 
 			require.NoError(t, runErr)
 			assert.NoFileExists(t, filepath.Join(home, ".alpacon", "config.json"))
+			assert.Contains(t, stderr, tt.wantWarning)
 			assert.Contains(t, stderr, "server-side session may still be valid")
 			mu.Lock()
 			defer mu.Unlock()
@@ -135,14 +136,14 @@ func TestRunLogout_RemovesCredentialsWhenTheAuthServerRefuses(t *testing.T) {
 			name:         "refresh token rejected",
 			wantPaths:    []string{"/oauth/token", "/oauth/revoke"},
 			wantNoPaths:  []string{strings.TrimSuffix(blacklistURL, "/")},
-			wantWarnings: []string{"Failed to create Alpacon API client", "failed to revoke token"},
+			wantWarnings: []string{"Failed to create Alpacon API client", "Failed to revoke token"},
 		},
 		{
 			name:         "blacklist and revoke refused",
 			expiresIn:    3600,
 			wantPaths:    []string{strings.TrimSuffix(blacklistURL, "/"), "/oauth/revoke"},
 			wantNoPaths:  []string{"/oauth/token"},
-			wantWarnings: []string{"Failed to set black list", "failed to revoke token"},
+			wantWarnings: []string{"Failed to set black list", "Failed to revoke token"},
 		},
 	}
 	for _, tt := range tests {
@@ -181,6 +182,7 @@ func TestRunLogout_RemovesCredentialsWhenTheAuthServerRefuses(t *testing.T) {
 			for _, w := range tt.wantWarnings {
 				assert.Contains(t, stderr, w)
 			}
+			assert.Contains(t, stderr, "server-side session may still be valid")
 			mu.Lock()
 			defer mu.Unlock()
 			for _, p := range tt.wantPaths {
@@ -193,6 +195,7 @@ func TestRunLogout_RemovesCredentialsWhenTheAuthServerRefuses(t *testing.T) {
 	}
 }
 
+// Serial: the config lives under HOME, which t.Setenv sets.
 func TestRunLogout_KeepsALoginAnotherShellMade(t *testing.T) {
 	home := t.TempDir()
 	setTestHome(t, home)
@@ -203,6 +206,74 @@ func TestRunLogout_KeepsALoginAnotherShellMade(t *testing.T) {
 	_, _ = testutil.CaptureOutput(t, func() { runErr = runLogout(stale) })
 
 	require.ErrorIs(t, runErr, config.ErrLoginChanged)
-	_, err := os.Stat(filepath.Join(home, ".alpacon", "config.json"))
-	assert.NoError(t, err)
+	kept, err := config.LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "other-shell-key", kept.Token)
+}
+
+// Serial: the config lives under HOME, which t.Setenv sets.
+func TestRunLogout_DoesNotWarnWhenTheServerLogsOut(t *testing.T) {
+	tests := []struct {
+		name         string
+		method       string
+		token        string
+		accessToken  string
+		refreshToken string
+		wantPaths    []string
+	}{
+		{name: "api key", token: "fake-api-key", wantPaths: []string{"/api/auth/logout"}},
+		{name: "auth0 session", method: "auth0", accessToken: "access", refreshToken: "refresh", wantPaths: []string{strings.TrimSuffix(blacklistURL, "/"), "/oauth/revoke"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var paths []string
+			var ts *httptest.Server
+			ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				path := strings.TrimSuffix(r.URL.Path, "/")
+				mu.Lock()
+				paths = append(paths, path)
+				mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				if path == "/api/auth/env" {
+					_, _ = fmt.Fprintf(w, `{"auth0":{"method":%q,"client_id":"cid","domain":%q}}`, tt.method, strings.TrimPrefix(ts.URL, "https://"))
+					return
+				}
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			t.Cleanup(ts.Close)
+			home := t.TempDir()
+			setTestHome(t, home)
+			require.NoError(t, config.CreateConfig(ts.URL, "my-workspace", tt.token, "", tt.accessToken, tt.refreshToken, "", 3600, true))
+			login, err := config.LoadConfig()
+			require.NoError(t, err)
+
+			var runErr error
+			_, stderr := testutil.CaptureOutput(t, func() { runErr = runLogout(login) })
+
+			require.NoError(t, runErr)
+			assert.NoFileExists(t, filepath.Join(home, ".alpacon", "config.json"))
+			assert.NotContains(t, stderr, "Warning")
+			mu.Lock()
+			defer mu.Unlock()
+			for _, p := range tt.wantPaths {
+				assert.Contains(t, paths, p)
+			}
+		})
+	}
+}
+
+// Serial: the config lives under HOME, which t.Setenv sets.
+func TestRunLogout_RemovesCredentialsWhenTheWorkspaceURLDoesNotParse(t *testing.T) {
+	home := t.TempDir()
+	setTestHome(t, home)
+	require.NoError(t, config.CreateConfig("http://[::1", "my-workspace", "fake-api-key", "", "", "", "", 0, false))
+	login := config.Config{WorkspaceURL: "http://[::1", Token: "fake-api-key"}
+
+	var runErr error
+	_, stderr := testutil.CaptureOutput(t, func() { runErr = runLogout(login) })
+
+	require.NoError(t, runErr)
+	assert.NoFileExists(t, filepath.Join(home, ".alpacon", "config.json"))
+	assert.Contains(t, stderr, "workspace URL does not parse")
 }

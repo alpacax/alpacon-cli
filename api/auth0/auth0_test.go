@@ -920,3 +920,12 @@ func TestFetchAuthEnv_ErrorCarriesTheStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestRevokeToken_RefusesAnAuth0DomainThatDoesNotParse(t *testing.T) {
+	t.Parallel()
+	env := &AuthEnvResponse{Auth0: Auth0Config{Method: "auth0", Domain: "[::1"}}
+
+	err := RevokeToken(http.DefaultClient, env, "refresh")
+
+	assert.ErrorContains(t, err, "invalid Auth0 domain")
+}
