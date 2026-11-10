@@ -96,6 +96,11 @@ func TestParseEditTarget(t *testing.T) {
 	assert.Equal(t, "/etc/nginx/nginx.conf", target.RemotePath)
 	assert.Equal(t, "root", target.Username)
 
+	target, err = parseEditTarget("h:/etc/app.conf", "")
+	require.NoError(t, err)
+	assert.Equal(t, "h", target.Server)
+	assert.Equal(t, "/etc/app.conf", target.RemotePath)
+
 	target, err = parseEditTarget("root@prod:/etc/nginx/nginx.conf", "deploy")
 	require.NoError(t, err)
 	assert.Equal(t, "deploy", target.Username)

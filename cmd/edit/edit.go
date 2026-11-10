@@ -176,7 +176,8 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 }
 
 func parseEditTarget(arg, usernameFlag string) (editTarget, error) {
-	if !utils.IsRemoteTarget(arg) {
+	// Not utils.IsRemoteTarget: the argument is always remote, so "h:/etc/x" is not a drive path.
+	if !strings.Contains(arg, ":") {
 		return editTarget{}, fmt.Errorf("remote path must be in format [USER@]SERVER:PATH")
 	}
 	sshTarget := utils.ParseSSHTarget(arg)
