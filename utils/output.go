@@ -239,9 +239,16 @@ func PrintTable(slice any) {
 // ExitCodeGeneralError. It is not for a walk that collected nothing: that is an
 // ordinary failure for CliErrorWithExit.
 func PartialTableWithExit(rows any, msg string, args ...any) {
+	_ = PartialTableExitError(rows, msg, args...)
+	os.Exit(ExitCodeGeneralError)
+}
+
+// PartialTableExitError is PartialTableWithExit for a RunE command: it prints the same and returns
+// a silent ExitCodeGeneralError, since the warning is already the failure line.
+func PartialTableExitError(rows any, msg string, args ...any) error {
 	CliWarning(msg, args...)
 	PrintTable(rows)
-	os.Exit(ExitCodeGeneralError)
+	return NewSilentExitError(ExitCodeGeneralError)
 }
 
 // PrintListOrExit prints a list a paginated read returned with err. On a nil err it

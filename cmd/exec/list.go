@@ -1,6 +1,9 @@
 package exec
 
 import (
+	"errors"
+	"os"
+
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -38,7 +41,16 @@ func AddListFlags(cmd *cobra.Command) {
 // RunListFromFlags requires the flag set registered by AddListFlags. It prints the failure and
 // exits, for a command that has not moved to RunE yet.
 func RunListFromFlags(cmd *cobra.Command) {
-	exitOnFailure(listFromFlags(cmd, client.NewAlpaconAPIClient))
+	err := listFromFlags(cmd, client.NewAlpaconAPIClient)
+	if err == nil {
+		return
+	}
+	exitErr, ok := errors.AsType[*utils.ExitError](err)
+	if !ok {
+		utils.CliErrorWithExit("%s", err)
+	}
+	utils.PrintExitError(exitErr)
+	os.Exit(exitErr.Code)
 }
 
 func listFromFlags(cmd *cobra.Command, newClient clientFactory) error {
