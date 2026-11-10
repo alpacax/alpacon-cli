@@ -3,9 +3,7 @@ package websh
 import (
 	"bytes"
 	"errors"
-	"io"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
@@ -15,27 +13,18 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
-
-// stubClient answers every request with status and a JSON body.
-func stubClient(status int, body string) clientFactory {
+// stubClient answers every request from respond.
+func stubClient(respond func(*http.Request) (status int, body string)) clientFactory {
 	return func() (*client.AlpaconClient, error) {
-		ac := &client.AlpaconClient{
-			BaseURL:   "https://workspace.example",
-			UserAgent: "alpacon-test",
-			HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-				return jsonResponse(status, body), nil
-			})},
-		}
+		ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, UserAgent: "alpacon-test", HTTPClient: testutil.StubClient(respond)}
 		ac.SetAccessToken("secret-token")
 		return ac, nil
 	}
 }
 
-func jsonResponse(status int, body string) *http.Response {
-	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}
+// answer responds to every request with status and a JSON body.
+func answer(status int, body string) func(*http.Request) (int, string) {
+	return func(*http.Request) (int, string) { return status, body }
 }
 
 // noClient stands in for a factory a usage error must never reach.
@@ -121,7 +110,7 @@ func TestWebshSubcommandsReportAClientThatCannotBeBuilt(t *testing.T) {
 func TestWebshCloseReportsTheServersRefusalWithExit1(t *testing.T) {
 	t.Parallel()
 
-	stderr, code := executeWebsh(stubClient(http.StatusInternalServerError, `{"detail": "boom"}`), "close", "550e8400-e29b-41d4-a716-446655440000")
+	stderr, code := executeWebsh(stubClient(answer(http.StatusInternalServerError, `{"detail": "boom"}`)), "close", "550e8400-e29b-41d4-a716-446655440000")
 
 	assert.Equal(t, utils.ExitCodeGeneralError, code)
 	assert.Contains(t, stderr, "Failed to close websh session:")
@@ -132,7 +121,7 @@ func TestWebshSessionRefusedByTheWorkSessionGateExits3WithTheDiagnostic(t *testi
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("ALPACON_WORK_SESSION", "")
 
-	stderr, code := executeWebsh(stubClient(http.StatusForbidden, `{"code": "work_session_required"}`),
+	stderr, code := executeWebsh(stubClient(answer(http.StatusForbidden, `{"code": "work_session_required"}`)),
 		"--work-session", "550e8400-e29b-41d4-a716-446655440000", "my-server")
 
 	assert.Equal(t, utils.ExitCodeWorkSessionDenied, code)
@@ -144,24 +133,16 @@ func TestWebshSessionRefusedByTheWorkSessionGateExits3WithTheDiagnostic(t *testi
 func TestWebshCommandRefusedByTheWorkSessionGateExits3WithTheDiagnostic(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("ALPACON_WORK_SESSION", "")
-	newClient := func() (*client.AlpaconClient, error) {
-		ac, err := stubClient(http.StatusOK, `{"count":1,"results":[{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","name":"my-server"}]}`)()
-		if err != nil {
-			return nil, err
+	newClient := stubClient(func(req *http.Request) (int, string) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/api/servers/servers/":
+			return http.StatusOK, `{"count":1,"results":[{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","name":"my-server"}]}`
+		case req.Method == http.MethodPost && req.URL.Path == "/api/events/commands/":
+			return http.StatusForbidden, `{"code": "work_session_required", "source": "command"}`
+		default: // the output stream is refused, so the run falls back to polling at once
+			return http.StatusNotFound, `{}`
 		}
-		lookup := ac.HTTPClient.Transport
-		ac.HTTPClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			switch {
-			case req.Method == http.MethodGet && req.URL.Path == "/api/servers/servers/":
-				return lookup.RoundTrip(req)
-			case req.Method == http.MethodPost && req.URL.Path == "/api/events/commands/":
-				return jsonResponse(http.StatusForbidden, `{"code": "work_session_required", "source": "command"}`), nil
-			default: // the output stream is refused, so the run falls back to polling at once
-				return jsonResponse(http.StatusNotFound, `{}`), nil
-			}
-		})
-		return ac, nil
-	}
+	})
 
 	var stderr string
 	var code int

@@ -109,7 +109,7 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 }
 
 // buildRemoteExecArgs assembles the shared-runner args for websh command mode.
-// username and serverName come in separately because Run resolves user@host
+// username and serverName come in separately because runWebsh resolves user@host
 // after parsing. InvokedAs is pinned to WebshInvocation so a refusal hint
 // renders websh syntax.
 func buildRemoteExecArgs(parsed WebshArgs, username, serverName string) execCmd.RemoteExecArgs {
@@ -125,8 +125,8 @@ func buildRemoteExecArgs(parsed WebshArgs, username, serverName string) execCmd.
 	}
 }
 
-// clientFactory builds the API client a command talks to; tests hand in one over a stub transport.
-type clientFactory func() (*client.AlpaconClient, error)
+// clientFactory builds the API client a command talks to.
+type clientFactory = func() (*client.AlpaconClient, error)
 
 var WebshCmd = newCommand(client.NewAlpaconAPIClient)
 
