@@ -358,6 +358,8 @@ $ alpacon tunnel prod-k8s -l 6443 -r 6443 -- kubectl --server=https://127.0.0.1:
 
 `--` separates the tunnel command from the inner command. `alpacon tunnel` does not auto-detect app ports—pass `127.0.0.1:<LOCAL_PORT>` explicitly.
 
+Under browser login with no usable work session, `tunnel` exits `3` (see [When a command is denied](#when-a-command-is-denied)). With `-- COMMAND`, once the tunnel is open the exit code is the inner command's own, so an inner command that exits `3` looks the same as a gate denial by exit code alone.
+
 When one side of a forwarded connection finishes sending and half-closes it, as `nc` does when its input ends, the other direction keeps carrying data for up to five minutes. Past that, the tunnel resets the connection and says so on stderr. This needs Alpamon 2.8.7 or later on the server; with an older agent, the other direction still stops when the first side half-closes.
 
 ### Work sessions
