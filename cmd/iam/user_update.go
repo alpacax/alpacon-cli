@@ -47,9 +47,6 @@ one of them never exits 0, whether or not the rest of the edit was applied.`,
 		}
 
 		if len(edit.Changes) == 0 {
-			if len(edit.Privileges) == 0 {
-				utils.CliInfoWithExit("No changes made. Aborting update.")
-			}
 			utils.CliErrorWithExit("Nothing was applied: the only edits were to read-only privilege flags.")
 		}
 
