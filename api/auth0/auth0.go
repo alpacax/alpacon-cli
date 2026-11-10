@@ -522,15 +522,11 @@ func extractSubdomain(workspaceURL string) (string, error) {
 }
 
 func Logout(httpClient *http.Client, validConfig config.Config) error {
-	if validConfig.AccessToken != "" && validConfig.RefreshToken != "" {
-		err := RevokeToken(httpClient, validConfig.WorkspaceURL, validConfig.RefreshToken)
-		if err != nil {
-			return fmt.Errorf("failed to revoke token: %v", err)
-		}
+	if validConfig.AccessToken == "" || validConfig.RefreshToken == "" {
+		return nil
 	}
-	err := config.DeleteConfig(validConfig)
-	if err != nil {
-		return err
+	if err := RevokeToken(httpClient, validConfig.WorkspaceURL, validConfig.RefreshToken); err != nil {
+		return fmt.Errorf("failed to revoke token: %v", err)
 	}
 	return nil
 }
