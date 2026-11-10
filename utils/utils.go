@@ -690,7 +690,10 @@ func editInTempFile(data []byte, edit func(path string) error) ([]byte, error) {
 
 // editTempFile removes the temp file on every return path.
 func editTempFile(f editFile, data []byte, edit func(path string) error) ([]byte, error) {
-	stop := removeOnSignal(f.Name())
+	stop := cleanupOnSignal(func() {
+		_ = f.Close() // Windows refuses to remove a file that is still open
+		_ = os.Remove(f.Name())
+	})
 	defer func() {
 		_ = os.Remove(f.Name())
 		stop() // only after the remove, so a signal in between still cleans up
@@ -718,9 +721,9 @@ func editTempFile(f editFile, data []byte, edit func(path string) error) ([]byte
 // editorSignals end the process while the edit runs; Go exits on them without running defers.
 var editorSignals = []os.Signal{os.Interrupt, syscall.SIGHUP, syscall.SIGTERM}
 
-// removeOnSignal removes path and re-raises the signal if one in editorSignals arrives before stop.
+// cleanupOnSignal runs cleanup and re-raises the signal if one in editorSignals arrives before stop.
 // stop returns once the watcher is gone, so a signal that raced it is re-raised, not dropped.
-func removeOnSignal(path string) (stop func()) {
+func cleanupOnSignal(cleanup func()) (stop func()) {
 	sigs := make(chan os.Signal, 1)
 	for _, sig := range editorSignals {
 		if !signal.Ignored(sig) { // Notify would un-ignore a signal nohup asked to ignore
@@ -735,7 +738,7 @@ func removeOnSignal(path string) (stop func()) {
 			close(exited)
 			return
 		}
-		_ = os.Remove(path)
+		cleanup()
 		signal.Stop(sigs)
 		reraise(sig)
 	}()
