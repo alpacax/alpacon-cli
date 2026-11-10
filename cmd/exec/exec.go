@@ -3,10 +3,8 @@ package exec
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"os"
 	"slices"
 	"sort"
 	"strconv"
@@ -266,19 +264,6 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 	}
 	cmd.AddCommand(newListCommand(newClient), newLogsCommand(newClient), newPurposeCommand(newClient))
 	return cmd
-}
-
-// exitOnFailure prints err the way cmd.Execute prints a RunE command's failure and exits.
-func exitOnFailure(err error) {
-	if err == nil {
-		return
-	}
-	exitErr, ok := errors.AsType[*utils.ExitError](err)
-	if !ok {
-		utils.CliErrorWithExit("%s", err)
-	}
-	utils.PrintExitError(exitErr)
-	os.Exit(exitErr.Code)
 }
 
 // RemoteExec is the shared post-parse execution path for exec and websh command mode, returning
