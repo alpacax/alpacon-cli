@@ -107,7 +107,7 @@ func printExitError(text, envelope io.Writer, e *ExitError) {
 	if OutputFormat == OutputFormatJSON {
 		failure := envelopeFailure(e.Code, "", e.msg, e.args)
 		if e.usage {
-			failure = Failure{ExitCode: e.Code, ErrorCode: ErrorCodeUsage, Operation: e.operation, Message: failure.Message}
+			failure.ErrorCode, failure.Operation, failure.Err = ErrorCodeUsage, e.operation, nil
 		}
 		PrintJSONError(envelope, failure.envelope())
 		return
