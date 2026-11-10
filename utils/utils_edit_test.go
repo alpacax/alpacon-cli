@@ -224,3 +224,27 @@ func TestExitIfNoChangesHelperProcess(t *testing.T) {
 	ExitIfNoChanges(fmt.Errorf("failed to update: %w", ErrNoChanges))
 	_, _ = fmt.Fprintln(os.Stderr, "ExitIfNoChanges returned")
 }
+
+func TestPendingSignalReturnsASignalBufferedBeforeDone(t *testing.T) {
+	t.Parallel()
+	for range 100 { // select picks a ready case at random, so one pass could miss a dropped signal
+		sigs := make(chan os.Signal, 1)
+		sigs <- os.Interrupt
+		done := make(chan struct{})
+		close(done)
+
+		got := pendingSignal(sigs, done)
+
+		require.Equal(t, os.Interrupt, got)
+	}
+}
+
+func TestPendingSignalReturnsNilWhenDoneWithNoSignal(t *testing.T) {
+	t.Parallel()
+	done := make(chan struct{})
+	close(done)
+
+	got := pendingSignal(make(chan os.Signal, 1), done)
+
+	assert.Nil(t, got)
+}

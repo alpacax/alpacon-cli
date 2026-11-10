@@ -45,7 +45,7 @@ var (
 	ansiEscapeRE = regexp.MustCompile(`\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|[PX^_][^\x1b]*\x1b\\|\[[\x30-\x3f]*[\x20-\x2f]*[@-~]|[\x20-\x2f]*[\x40-\x7e])`)
 )
 
-// ErrNoChanges reports that the edited file is byte-identical to what the editor was given.
+// ErrNoChanges reports that an edit left nothing to apply.
 var ErrNoChanges = errors.New("no changes made")
 
 type editFile interface {
@@ -690,7 +690,11 @@ func editInTempFile(data []byte, edit func(path string) error) ([]byte, error) {
 
 // editTempFile removes the temp file on every return path.
 func editTempFile(f editFile, data []byte, edit func(path string) error) ([]byte, error) {
-	defer func() { _ = os.Remove(f.Name()) }()
+	stop := removeOnSignal(f.Name())
+	defer func() {
+		_ = os.Remove(f.Name())
+		stop() // only after the remove, so a signal in between still cleans up
+	}()
 
 	if _, err := f.Write(data); err != nil {
 		_ = f.Close()
@@ -700,10 +704,7 @@ func editTempFile(f editFile, data []byte, edit func(path string) error) ([]byte
 		return nil, fmt.Errorf("close temp file: %w", err)
 	}
 
-	stop := removeOnSignal(f.Name())
-	err := edit(f.Name())
-	stop()
-	if err != nil {
+	if err := edit(f.Name()); err != nil {
 		return nil, fmt.Errorf("run editor: %w", err)
 	}
 
@@ -714,10 +715,11 @@ func editTempFile(f editFile, data []byte, edit func(path string) error) ([]byte
 	return edited, nil
 }
 
-// editorSignals end the process while the editor runs; Go exits on them without running defers.
+// editorSignals end the process while the edit runs; Go exits on them without running defers.
 var editorSignals = []os.Signal{os.Interrupt, syscall.SIGHUP, syscall.SIGTERM}
 
 // removeOnSignal removes path and re-raises the signal if one in editorSignals arrives before stop.
+// stop returns once the watcher is gone, so a signal that raced it is re-raised, not dropped.
 func removeOnSignal(path string) (stop func()) {
 	sigs := make(chan os.Signal, 1)
 	for _, sig := range editorSignals {
@@ -726,18 +728,36 @@ func removeOnSignal(path string) (stop func()) {
 		}
 	}
 	done := make(chan struct{})
+	exited := make(chan struct{})
 	go func() {
-		select {
-		case sig := <-sigs:
-			_ = os.Remove(path)
-			signal.Stop(sigs)
-			reraise(sig)
-		case <-done:
+		sig := pendingSignal(sigs, done)
+		if sig == nil {
+			close(exited)
+			return
 		}
+		_ = os.Remove(path)
+		signal.Stop(sigs)
+		reraise(sig)
 	}()
 	return func() {
 		signal.Stop(sigs)
 		close(done)
+		<-exited
+	}
+}
+
+// pendingSignal waits for a signal or done; after done it still returns a signal already buffered.
+func pendingSignal(sigs <-chan os.Signal, done <-chan struct{}) os.Signal {
+	select {
+	case sig := <-sigs:
+		return sig
+	case <-done:
+		select {
+		case sig := <-sigs:
+			return sig
+		default:
+			return nil
+		}
 	}
 }
 
