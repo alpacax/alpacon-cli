@@ -57,17 +57,18 @@ func endServerSession(validConfig config.Config) bool {
 		ok = false
 	}
 
+	// Built before any request, so it reads the same login another shell may soon replace.
+	ac, err := client.NewAlpaconAPIClient()
+	if err != nil {
+		warn("Failed to create Alpacon API client: %s.", err)
+	}
+
 	// Without the auth env lookup the config itself shows the method.
 	isAuth0 := validConfig.AccessToken != "" && validConfig.RefreshToken != ""
 	if envInfo, err := auth0.FetchAuthEnv(validConfig.WorkspaceURL, httpClient); err != nil {
 		warn("Failed to fetch authentication environment: %s.", err)
 	} else {
 		isAuth0 = envInfo.Auth0.Method == "auth0"
-	}
-
-	ac, err := client.NewAlpaconAPIClient()
-	if err != nil {
-		warn("Failed to create Alpacon API client: %s.", err)
 	}
 
 	if isAuth0 {
