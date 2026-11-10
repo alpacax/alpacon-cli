@@ -29,7 +29,7 @@ type rawRoundTripFunc func(*http.Request) (*http.Response, error)
 
 func newTestClient(baseURL string) *AlpaconClient {
 	return &AlpaconClient{
-		HTTPClient: &http.Client{},
+		HTTPClient: &http.Client{Transport: &http.Transport{}}, // own transport: httptest's Close() resets DefaultTransport
 		BaseURL:    baseURL,
 		Token:      "test-token",
 	}
@@ -1382,7 +1382,7 @@ func TestLoadCurrentUser_ErrorIsCachedOnFailure(t *testing.T) {
 // leaves it: an access token, no legacy API key.
 func newBearerTestClient(baseURL, accessToken string) *AlpaconClient {
 	ac := &AlpaconClient{
-		HTTPClient: &http.Client{},
+		HTTPClient: &http.Client{Transport: &http.Transport{}},
 		BaseURL:    baseURL,
 	}
 	ac.SetAccessToken(accessToken)
