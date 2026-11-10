@@ -117,15 +117,21 @@ func runWait(cmd *cobra.Command, newClient func() (*client.AlpaconClient, error)
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigChan)
+	done := make(chan struct{}) // closed on return, so neither goroutine outlives runWait
+	defer close(done)
 	go func() {
-		<-sigChan
+		select {
+		case <-sigChan:
+		case <-done:
+			return
+		}
 		// Disarmed here too: waiter.Stop can hang closing the WebSocket, and the deferred
 		// Stop runs only once Wait returns, so only this goroutine lets a second Ctrl+C terminate.
 		signal.Stop(sigChan)
 		waiter.Stop()
 	}()
 
-	go reportOutages(waiter)
+	go reportOutages(waiter, done)
 
 	// Stripped for the same reason server text is: --type lands in a terminal, and a CI
 	// script or an agent may build it from a source the caller does not control.
@@ -168,13 +174,15 @@ func runWait(cmd *cobra.Command, newClient func() (*client.AlpaconClient, error)
 	return nil
 }
 
-// reportOutages runs for the life of the command. Both conditions can recur: a catch-up
+// reportOutages runs until done closes, when runWait returns. Both conditions can recur: a catch-up
 // can fail on the first check and again after any reconnect, and reconnects can keep
 // failing. Draining ReconnectFailed also keeps the watcher's one-slot notice free so a
 // later outage is not dropped.
-func reportOutages(waiter *eventapi.Waiter) {
+func reportOutages(waiter *eventapi.Waiter, done <-chan struct{}) {
 	for {
 		select {
+		case <-done:
+			return
 		case err := <-waiter.CatchUpFailed():
 			// Reworded rather than flattened, so a refusal's hint still prints.
 			utils.CliWarning("Could not read the current state: %s. Still waiting for an event.", utils.Reword(err, strip(err.Error())))
