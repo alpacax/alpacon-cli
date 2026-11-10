@@ -35,12 +35,14 @@ type tunnelCommandRuntime interface {
 	Close(cause error)
 }
 
-var tunnelFlags tunnelFlagValues
+var TunnelCmd = newCommand(client.NewAlpaconAPIClient)
 
-var TunnelCmd = &cobra.Command{
-	Use:   "tunnel [flags] SERVER [-- COMMAND...]", // [flags] stays before --: words after it go to the local command
-	Short: "Create a TCP tunnel (optionally run a command)",
-	Long: `
+func newCommand(newAPIClient func() (*client.AlpaconClient, error)) *cobra.Command {
+	var flags tunnelFlagValues
+	cmd := &cobra.Command{
+		Use:   "tunnel [flags] SERVER [-- COMMAND...]", // [flags] stays before --: words after it go to the local command
+		Short: "Create a TCP tunnel (optionally run a command)",
+		Long: `
 	Create a TCP tunnel that forwards local TCP traffic to a remote server port.
 	Use -l/--local and -r/--remote to configure local and remote ports.
 	If '-- COMMAND [ARGS...]' is provided, Alpacon runs the local command
@@ -60,7 +62,7 @@ var TunnelCmd = &cobra.Command{
 	parse a machine-readable diagnostic on stderr. With '-- COMMAND', once the
 	tunnel is open the exit code is the local command's own, which can also be 3.
 	`,
-	Example: `
+		Example: `
 	# Forward local 9000 to remote 8082
 	alpacon tunnel my-server -l 9000 -r 8082
 
@@ -82,12 +84,13 @@ var TunnelCmd = &cobra.Command{
 	# Run kubectl with attached tunnel session
 	alpacon tunnel prod-k8s -l 6443 -r 6443 -- kubectl --server=https://127.0.0.1:6443 get pods
 	`,
-	Args: validateTunnelArgs,
-	Run:  runTunnel,
-}
-
-func init() {
-	bindTunnelFlags(TunnelCmd, &tunnelFlags)
+		Args: validateTunnelArgs,
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return runTunnel(cmd, args, flags, newAPIClient)
+		}),
+	}
+	bindTunnelFlags(cmd, &flags)
+	return cmd
 }
 
 func bindTunnelFlags(cmd *cobra.Command, flags *tunnelFlagValues) {
@@ -139,17 +142,19 @@ func validateTunnelArgs(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func runTunnel(cmd *cobra.Command, args []string) {
-	if err := tunnelruntime.ValidatePorts(tunnelFlags.remotePort, tunnelFlags.localPort); err != nil {
-		utils.CliUsageErrorWithExit("%s", err)
+func runTunnel(cmd *cobra.Command, args []string, flags tunnelFlagValues, newAPIClient func() (*client.AlpaconClient, error)) error {
+	if err := tunnelruntime.ValidatePorts(flags.remotePort, flags.localPort); err != nil {
+		return utils.NewUsageExitError("%s", err)
 	}
-	tunnelFlags.authMethod = config.ResolveAuthMethod()
-	ac, err := client.NewAlpaconAPIClient()
+	flags.authMethod = config.ResolveAuthMethod()
+	ac, err := newAPIClient()
 	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
-	// Write resolved value back: handleTunnelStartError's retry and gate report both use this UUID.
-	tunnelFlags.workSessionID = worksession.ResolveOrExit(ac, tunnelFlags.workSessionID)
+	// Resolve once: handleTunnelStartError's retry and gate report both use this UUID.
+	if flags.workSessionID, err = worksession.Resolve(ac, flags.workSessionID); err != nil {
+		return utils.NewExitError("%s", err)
+	}
 
 	var sigChan <-chan os.Signal
 	if cmd.ArgsLenAtDash() < 0 {
@@ -159,44 +164,54 @@ func runTunnel(cmd *cobra.Command, args []string) {
 		sigChan = ch
 	}
 
-	exitCode, err := executeTunnelCommand(ac, cmd, args, sigChan)
-	if err != nil {
-		if exitCode > 1 { // the local command's own exit code
-			utils.CliErrorWithExitCode(exitCode, "%s", err)
-		}
-		utils.CliErrorWithExit("%s", err)
-	}
-	if exitCode != 0 {
-		os.Exit(exitCode)
-	}
+	return tunnelExitError(executeTunnelCommand(ac, flags, cmd, args, sigChan))
 }
 
-func executeTunnelCommand(ac *client.AlpaconClient, cmd *cobra.Command, args []string, sigChan <-chan os.Signal) (int, error) {
+// tunnelExitError maps a tunnel run's exit code and error to what RunE returns.
+func tunnelExitError(exitCode int, err error) error {
+	if err != nil {
+		if exitErr, ok := errors.AsType[*utils.ExitError](err); ok { // the gate's exit 3 and diagnostic
+			return exitErr
+		}
+		if exitCode > 1 { // the local command's own exit code
+			return utils.NewExitErrorWithCode(exitCode, "%s", err)
+		}
+		return utils.NewExitError("%s", err)
+	}
+	if exitCode != 0 {
+		return utils.NewSilentExitError(exitCode) // the local command already reported its failure
+	}
+	return nil
+}
+
+func executeTunnelCommand(ac *client.AlpaconClient, flags tunnelFlagValues, cmd *cobra.Command, args []string, sigChan <-chan os.Signal) (int, error) {
 	dashIndex := cmd.ArgsLenAtDash()
 	if dashIndex >= 0 {
 		serverName, localCommand, err := extractRunInvocation(args, dashIndex)
 		if err != nil {
 			return 1, err
 		}
-		return executeTunnelRunWithInvocation(ac, serverName, localCommand)
+		return executeTunnelRunWithInvocation(ac, flags, serverName, localCommand)
 	}
 
-	return 0, executeTunnel(ac, args[0], sigChan)
+	return 0, executeTunnel(ac, flags, args[0], sigChan)
 }
 
-func handleTunnelStartError(ac *client.AlpaconClient, err error, serverName string, retry func() error) error {
+func handleTunnelStartError(ac *client.AlpaconClient, flags tunnelFlagValues, err error, serverName string, retry func() error) error {
 	err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(ac, retry))
 	if utils.StructuredErrorCode(err) != "" { // a code quoted in an agent's open-failure text is not a gate refusal
-		utils.HandleWorkSessionError(err, utils.OperationTunnel, serverName, tunnelFlags.authMethod, tunnelFlags.workSessionID)
+		if gateErr := utils.WorkSessionExitError(err, utils.OperationTunnel, serverName, flags.authMethod, flags.workSessionID); gateErr != nil {
+			return gateErr
+		}
 	}
 	return utils.InteractiveOnly(err, "open a tunnel")
 }
 
-func executeTunnel(ac *client.AlpaconClient, serverName string, sigChan <-chan os.Signal) error {
-	runtime, err := tunnelruntime.Start(tunnelFlags.toStartOptions(ac, serverName))
+func executeTunnel(ac *client.AlpaconClient, flags tunnelFlagValues, serverName string, sigChan <-chan os.Signal) error {
+	runtime, err := tunnelruntime.Start(flags.toStartOptions(ac, serverName))
 	if err != nil {
-		err = handleTunnelStartError(ac, err, serverName, func() error {
-			runtime, err = tunnelruntime.Start(tunnelFlags.toStartOptions(ac, serverName))
+		err = handleTunnelStartError(ac, flags, err, serverName, func() error {
+			runtime, err = tunnelruntime.Start(flags.toStartOptions(ac, serverName))
 			return err
 		})
 		if err != nil {

@@ -3,11 +3,10 @@ package tunnel
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -91,16 +90,11 @@ func TestValidateTunnelArgs(t *testing.T) {
 }
 
 func TestExecuteTunnelCommandRunModeReturnsErrorForInvalidRemotePort(t *testing.T) {
-	originalFlags := tunnelFlags
-	t.Cleanup(func() {
-		tunnelFlags = originalFlags
-	})
-
-	tunnelFlags.localPort = "5432"
-	tunnelFlags.remotePort = "invalid"
+	t.Parallel()
+	flags := tunnelFlagValues{localPort: "5432", remotePort: "invalid"}
 
 	cmd, args := parseTunnelCommandArgs(t, []string{"prod-db", "--", "psql"})
-	exitCode, err := executeTunnelCommand(&client.AlpaconClient{}, cmd, args, nil)
+	exitCode, err := executeTunnelCommand(&client.AlpaconClient{}, flags, cmd, args, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -148,7 +142,7 @@ func TestHandleTunnelStartError_TokenRefusalAsksForInteractiveLogin(t *testing.T
 			t.Parallel()
 			err := tunnelCreateError(t, tt.code)
 
-			got := handleTunnelStartError(&client.AlpaconClient{}, err, "my-server", nil)
+			got := handleTunnelStartError(&client.AlpaconClient{}, tunnelFlagValues{}, err, "my-server", nil)
 
 			assert.EqualError(t, got, "a token cannot open a tunnel; run 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device) and try again")
 		})
@@ -159,24 +153,27 @@ func TestHandleTunnelStartError_NonGateRefusalPassesThrough(t *testing.T) {
 	t.Parallel()
 	err := tunnelCreateError(t, "some_other_refusal")
 
-	got := handleTunnelStartError(&client.AlpaconClient{}, err, "my-server", nil)
+	got := handleTunnelStartError(&client.AlpaconClient{}, tunnelFlagValues{}, err, "my-server", nil)
 
 	assert.Equal(t, err, got)
 }
 
-// Serial: a regression reaches the gate's os.Exit and would end the test binary.
 func TestHandleTunnelStartError_CodeQuotedInAgentReportIsNotAGateRefusal(t *testing.T) {
+	t.Parallel()
 	err := fmt.Errorf("failed to open tunnel on my-server: connection refused; code: %s", utils.WorkSessionRequired)
 
-	got := handleTunnelStartError(&client.AlpaconClient{}, err, "my-server", nil)
+	got := handleTunnelStartError(&client.AlpaconClient{}, tunnelFlagValues{}, err, "my-server", nil)
 
 	assert.Equal(t, err, got)
 }
 
 const tunnelGateSessionID = "550e8400-e29b-41d4-a716-446655440000"
 
-// Serial: it runs the helper process below.
+// Serial: it sets utils.OutputFormat.
 func TestHandleTunnelStartError_GateRefusalExitsThreeWithNextActions(t *testing.T) {
+	t.Setenv("AI_AGENT", "")
+	utils.OutputFormat = utils.OutputFormatJSON
+	t.Cleanup(func() { utils.OutputFormat = utils.OutputFormatTable })
 	tests := []struct {
 		name string
 		code string
@@ -189,16 +186,16 @@ func TestHandleTunnelStartError_GateRefusalExitsThreeWithNextActions(t *testing.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := exec.Command(os.Args[0], "-test.run=TestHandleTunnelStartErrorGateHelperProcess")
-			cmd.Env = append(os.Environ(), "GO_WANT_TUNNEL_GATE_CODE="+tt.code, "AI_AGENT=")
+			flags := tunnelFlagValues{workSessionID: tunnelGateSessionID, authMethod: "Browser login"}
+			err := tunnelCreateError(t, tt.code)
+
+			got := handleTunnelStartError(&client.AlpaconClient{}, flags, err, "my-server", nil)
+
+			exitErr, ok := errors.AsType[*utils.ExitError](got)
+			require.True(t, ok, "want an ExitError, got %v", got)
+			assert.Equal(t, utils.ExitCodeWorkSessionDenied, exitErr.Code)
 			var stderr bytes.Buffer
-			cmd.Stderr = &stderr
-
-			err := cmd.Run()
-
-			var exitErr *exec.ExitError
-			require.ErrorAs(t, err, &exitErr)
-			assert.Equal(t, utils.ExitCodeWorkSessionDenied, exitErr.ExitCode())
+			utils.FprintExitError(&stderr, exitErr)
 			var env struct {
 				ExitCode  int    `json:"exit_code"`
 				ErrorCode string `json:"error_code"`
@@ -226,20 +223,6 @@ func TestHandleTunnelStartError_GateRefusalExitsThreeWithNextActions(t *testing.
 			assert.NotContains(t, strings.Join(commands, "\n"), "alpacon exec")
 		})
 	}
-}
-
-// Serial: the child reaches the gate's os.Exit, and the parent's own run returns at once.
-func TestHandleTunnelStartErrorGateHelperProcess(t *testing.T) {
-	code := os.Getenv("GO_WANT_TUNNEL_GATE_CODE")
-	if code == "" {
-		return
-	}
-	utils.OutputFormat = utils.OutputFormatJSON
-	tunnelFlags.workSessionID = tunnelGateSessionID
-	tunnelFlags.authMethod = "Browser login"
-	err := tunnelCreateError(t, code)
-	_ = handleTunnelStartError(&client.AlpaconClient{}, err, "my-server", nil)
-	os.Exit(0)
 }
 
 func TestToStartOptionsCarriesTheCallersClient(t *testing.T) {
