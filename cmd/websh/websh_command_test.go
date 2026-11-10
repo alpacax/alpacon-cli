@@ -154,3 +154,24 @@ func TestWebshCommandRefusedByTheWorkSessionGateExits3WithTheDiagnostic(t *testi
 	assert.Contains(t, stderr, "  target server : my-server\n")
 	assert.Contains(t, banner, "whoami on my-server was refused by the work_session gate and did not run.")
 }
+
+// Serial: the warning and the table go to the process streams.
+func TestWebshRecordsShowsTheRecordsReadBeforeAFailureAndExits1WithNoErrorLine(t *testing.T) {
+	newClient := stubClient(func(req *http.Request) (int, string) {
+		if req.URL.Query().Get("cursor") == "" {
+			return http.StatusOK, `{"next": "TOKEN2", "results": [{"added_at": "2026-11-10T09:00:00Z", "record": "ls -la"}]}`
+		}
+		return http.StatusBadRequest, `{"detail": "boom"}`
+	})
+	var stderr string
+	var code int
+
+	stdout, warning := testutil.CaptureOutput(t, func() {
+		stderr, code = executeWebsh(newClient, "records", "550e8400-e29b-41d4-a716-446655440000")
+	})
+
+	assert.Equal(t, utils.ExitCodeGeneralError, code)
+	assert.Empty(t, stderr)
+	assert.Contains(t, warning, "Showing only the 1 records read before the request failed:")
+	assert.Contains(t, stdout, "ls -la")
+}

@@ -52,9 +52,7 @@ Use --query to search records by command text (fuzzy match).`,
 			}
 
 			if err != nil {
-				utils.CliWarning("Showing only the %d records read before the request failed: %s.", len(rows), err)
-				utils.PrintTable(rows)
-				return &utils.ExitError{Code: utils.ExitCodeGeneralError}
+				return utils.PartialTableExitError(rows, "Showing only the %d records read before the request failed: %s.", len(rows), err)
 			}
 			utils.PrintTable(rows)
 			return nil
