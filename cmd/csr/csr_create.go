@@ -194,8 +194,8 @@ func createSignRequestErrorText(err error, validDays int) string {
 	if code, _ := utils.ParseErrorResponse(err); code == certApi.CodeInvalidPeriod && utils.RefusalHint(err) == "" {
 		if validDays == 0 {
 			return "The CA's default validity exceeds its own maximum (Default and Max Valid Days in " +
-				"'alpacon authority ls'). Request a validity within the maximum, or ask the CA's owner to " +
-				"correct its settings."
+				"'alpacon authority ls'). Request a validity within the maximum, or ask someone with permission " +
+				"to update the CA to correct its settings."
 		}
 		return fmt.Sprintf("The CA refused a validity of %d days: it must be between 1 and the CA's maximum "+
 			"(Max Valid Days in 'alpacon authority ls'). Request a validity within the maximum, or leave "+

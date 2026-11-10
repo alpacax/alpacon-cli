@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -2196,6 +2197,14 @@ func TestNewAlpaconAPIClient_PinsSchemaNameWhenSlugWasRenamed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://new-slug.us1.alpacon.io", ac.BaseURL)
 	assert.Equal(t, "frozen-schema", ac.WorkspaceName)
+	writeConfigJSON(t, home, `{"workspace_url":"https://other.example","base_domain":"example","token":"alpat-other"}`)
+	origin := ac.LocalSignalOrigin()
+	assert.Equal(t, "https://new-slug.us1.alpacon.io", origin.WorkspaceURL)
+	assert.Equal(t, "alpacon.io", origin.BaseDomain)
+	err = ac.withRefusalNextFor(&apiError{code: "session_paused"})
+	fields := utils.SignalFields(utils.WithSignalFields(err, localsignal.Fields{Server: "my-server"}))
+	require.NotNil(t, fields.Origin)
+	assert.Equal(t, origin, *fields.Origin)
 }
 
 // A config written before schema_name existed holds only the host label, which

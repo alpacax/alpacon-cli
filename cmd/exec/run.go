@@ -14,6 +14,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
@@ -193,6 +194,15 @@ type Invocation string
 // approvalOutcome is what the wait loop reads off a command's sudo grant
 // status: keep waiting, take the grant, or stop because none is coming.
 type approvalOutcome int
+
+// approvalPoll is one read of the grant a denial left behind. held is the
+// detail's own answer, nil included: a null held does not end the wait.
+type approvalPoll struct {
+	outcome   approvalOutcome
+	requestID string
+	held      *utils.HeldRequest
+	rejected  *event.CommandRejectedError
+}
 
 // commandRun submits one command and streams it to completion. The retry,
 // presence step-up and approval-wait layers take one so they serve the generic
@@ -499,10 +509,10 @@ func isApprovalDenial(err error) bool {
 
 // pollApprovalOnce reads the grant the denial left behind. The command it names
 // already ran and was blocked, so this is a status read, not a re-attempt.
-func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalOutcome, string, *event.CommandRejectedError, error) {
+func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalPoll, error) {
 	details, err := getCommandByID(ac, cmdID)
 	if err != nil {
-		return outcomePending, "", nil, err
+		return approvalPoll{outcome: outcomePending}, err
 	}
 	requestID := ""
 	if details.SudoApprovalRequestID != nil {
@@ -517,7 +527,7 @@ func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalOutcome, 
 	if details.IsRejected() && (rejected.Cause != "" || grant != outcomeExpired) {
 		outcome = outcomeRejected
 	}
-	return outcome, requestID, rejected, nil
+	return approvalPoll{outcome: outcome, requestID: requestID, held: details.Held, rejected: rejected}, nil
 }
 
 // RunExecWithApprovalWait runs a command via RunExecWithPresenceStepUp and, when it is denied with
@@ -534,7 +544,7 @@ func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalOutcome, 
 // fresh approval request on every tick.
 func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
 	return runWithApprovalWait(ac, func() error {
-		return runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+		return utils.WithSignalFields(runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, purpose, out), localsignal.Fields{Argv0: localsignal.Argv0(command), Server: serverName, Account: username, Session: workSessionID})
 	}, waitTimeout, out)
 }
 
@@ -544,7 +554,7 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 // are the same layers the generic lane runs through.
 func RunFileExecWithApprovalWait(ac *client.AlpaconClient, serverName string, file event.FileExecution, username, groupname, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
 	return runWithApprovalWait(ac, func() error {
-		return runWithPresenceStepUp(ac, serverName, func() error {
+		err := runWithPresenceStepUp(ac, serverName, func() error {
 			// One stream for the attempt and its MFA retries; see RunCommandWithRetry.
 			stream := event.NewCommandStream(ac)
 			defer stream.Close()
@@ -552,13 +562,24 @@ func RunFileExecWithApprovalWait(ac *client.AlpaconClient, serverName string, fi
 				return stream.RunFileCommand(serverName, file, username, groupname, workSessionID, purpose, out)
 			})
 		})
+		return utils.WithSignalFields(err, localsignal.Fields{Argv0: localsignal.Argv0(file.Path), Server: serverName, Account: username, Session: workSessionID})
 	}, waitTimeout, out)
 }
 
 // runWithApprovalWait is RunExecWithApprovalWait over a commandRun: run is the
 // first attempt and, once a reviewer grants the request, the re-run.
-func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout time.Duration, out io.Writer) error {
+func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout time.Duration, out io.Writer) (result error) {
 	err := run()
+	err = utils.WithSignalFields(err, utils.SignalFields(err), ac)
+	announced := false
+	defer func() {
+		fields := utils.SignalFields(err)
+		result = utils.WithSignalFields(result, fields, ac)
+		utils.SignalRefusal(result)
+		if announced {
+			result = utils.MarkApprovalSignaled(result)
+		}
+	}()
 
 	// Status-hold: the server parked this job at awaiting_approval (it never ran).
 	// With --wait, resubscribe to the same job and stream once approved instead of
@@ -568,6 +589,8 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 		if waitTimeout <= 0 {
 			return err
 		}
+		utils.SignalApprovalPending(err, utils.SignalFields(err))
+		announced = true
 		spinner := utils.NewSpinner("Waiting for approval in the Alpacon console (output streams once approved)...")
 		spinner.Start()
 		defer spinner.Stop()
@@ -585,6 +608,8 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 		// Nothing to poll: fall back to reporting the denial as it stands.
 		return err
 	}
+	utils.SignalApprovalPending(err, utils.SignalFields(err))
+	announced = true
 	cmdID := denialErr.CommandID
 
 	spinner := utils.NewSpinner(approvalWaitMessage)
@@ -603,6 +628,10 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 	failures := 0
 	throttles := 0
 	lastRequestID := ""
+	// lastHeld follows the latest read, including null; lastDeadline retains the
+	// latest non-null hold for the post-approval re-run.
+	lastHeld := denialErr.Held
+	lastDeadline := denialErr.Held
 	budget := utils.NewThrottleBudget(waitTimeout)
 	// lastRefusal is the refusal (a 429 in practice) the latest status read got,
 	// if it got one, so a wait that times out on it still prints its hint.
@@ -613,9 +642,9 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 			spinner.Stop()
 			// Report only the timeout; the caller's pending-approval message already names --wait-approval.
 			utils.CliWarning("%s", utils.HintOnly(fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", waitTimeout), lastRefusal))
-			return pendingWithRequestID(pendingDenial, lastRequestID)
+			return pendingWithApprovalDetails(pendingDenial, lastRequestID, lastHeld)
 		case <-poll.C:
-			outcome, requestID, rejected, err := pollApprovalOnce(ac, cmdID)
+			read, err := pollApprovalOnce(ac, cmdID)
 			lastRefusal = nil
 			if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
 				lastRefusal = err
@@ -645,7 +674,7 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 					// The approval request is still open, so exit on the pending contract: exit 1
 					// reads as retryable, and an agent re-running exec would file a second request.
 					utils.CliWarning("Approval wait gave up after %d failed polls (%s); the command is still pending.", failures, err)
-					return pendingWithRequestID(pendingDenial, lastRequestID)
+					return pendingWithApprovalDetails(pendingDenial, lastRequestID, lastHeld)
 				}
 				poll.Reset(utils.NextPollBackoff(approvalWaitPollInterval, failures-1, utils.RetryAfter(err)))
 				continue
@@ -654,23 +683,28 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 				// A fatal 4xx on the status read says nothing about the still-open request, so exit
 				// on the pending contract as above.
 				utils.CliWarning("Approval status read failed (%s); the command is still pending.", err)
-				return pendingWithRequestID(pendingDenial, lastRequestID)
+				return pendingWithApprovalDetails(pendingDenial, lastRequestID, lastHeld)
 			}
 			failures = 0
 			throttles = 0
 			// No budget reset: reading a still-pending grant is not progress, so the allowance
 			// lasts the whole wait; resetting per poll would re-earn it on any non-429 response.
-			if requestID != "" {
-				lastRequestID = requestID
+			if read.requestID != "" {
+				lastRequestID = read.requestID
 			}
-			switch outcome {
+			lastHeld = read.held
+			if read.held != nil {
+				lastDeadline = read.held
+			}
+			// sudo_grant_status alone ends the wait; held is only carried.
+			switch read.outcome {
 			case outcomeApproved:
 				spinner.Stop()
-				return runAfterApproval(run)
+				return runAfterApproval(run, lastDeadline)
 			case outcomeRejected, outcomeExpired:
 				spinner.Stop()
 				// Settled without a grant; CommandRejectedError carries it to ExitCodeNotApproved.
-				return rejected
+				return read.rejected
 			}
 			// A fixed gap over a 30m wait outspends the server's service-token
 			// throttle, so the gap widens as the wait ages.
@@ -679,17 +713,14 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 	}
 }
 
-// runAfterApproval runs the command once the grant is authorized. A denial here
-// means the grant went somewhere else—it expired, or another attempt spent
-// it—so this reports that instead of opening a second wait the user never
-// asked for.
-func runAfterApproval(run commandRun) error {
+// A second denial does not start another wait; the grant may have expired
+// or been spent by another attempt.
+func runAfterApproval(run commandRun, held *utils.HeldRequest) error {
 	err := run()
-	// Each shape gets the sentence its way out needs: a repeated denial needs a fresh request,
-	// while a parked job runs on its own once approved, so advising a re-run would contradict the
-	// pending text HandlePendingApproval prints next.
 	var pendingErr *event.PendingApprovalError
 	switch {
+	case isApprovalDenial(err) && held.Expired():
+		utils.CliWarning("The approval deadline (%s) has passed and the command was denied again. Re-run the command to request a new approval.", held.ExpiresAt.Format(time.RFC3339))
 	case isApprovalDenial(err):
 		utils.CliWarning("The approval was granted but the command was denied again; the grant appears already used or expired. Re-run the command to request approval again.")
 	case errors.As(err, &pendingErr):
@@ -698,16 +729,18 @@ func runAfterApproval(run commandRun) error {
 	return err
 }
 
-// pendingWithRequestID copies the denial so the wait can attach what it learned
-// while polling. The original is the caller's; mutating it would surprise them.
-func pendingWithRequestID(denial error, requestID string) error {
+// Copy the caller's denial so attaching the latest approval details does not mutate it.
+func pendingWithApprovalDetails(denial error, requestID string, held *utils.HeldRequest) error {
 	var remoteErr *event.RemoteCommandError
-	if requestID == "" || !errors.As(denial, &remoteErr) {
+	if !errors.As(denial, &remoteErr) || (requestID == "" && held == remoteErr.Held) {
 		return denial
 	}
-	withID := *remoteErr
-	withID.ApprovalRequestID = requestID
-	return &withID
+	withDetails := *remoteErr
+	if requestID != "" {
+		withDetails.ApprovalRequestID = requestID
+	}
+	withDetails.Held = held
+	return &withDetails
 }
 
 // isPollFailure reports whether a status read carried no usable answer: a network error, an
@@ -757,17 +790,13 @@ func HandlePurposeDemand(err error) bool {
 	return true
 }
 
-// HandlePendingApproval reports a command left pending human approval and not waited on—a job the
-// server parked at awaiting_approval (PendingApprovalError) or a sudo denial with an approval
-// request in flight—and exits with ExitCodePendingApproval, or returns false when err is neither.
-// The approval request id is reported only when a --wait poll picked one up
-// (pendingWithRequestID). The sudo-denial path repeats the invoked command (reRunHint), and a held
-// command line the server reads as a script also gets its --file --from-server form
-// (fileSuggestionAction).
+// HandlePendingApproval reports an approval hold and exits with ExitCodePendingApproval.
+// It returns false when err is neither a parked command nor a sudo approval denial.
 func HandlePendingApproval(err error, parsed RemoteExecArgs) bool {
 	// Status-hold: held job runs automatically once approved, so point at exec logs.
 	var pendingErr *event.PendingApprovalError
 	if errors.As(err, &pendingErr) {
+		utils.SignalApprovalPending(err, commandSignalFields(err, parsed))
 		var extra []utils.NextAction
 		if action, ok := fileSuggestionAction(parsed, pendingErr.FileSuggestion); ok {
 			extra = append(extra, action)
@@ -786,6 +815,7 @@ func HandlePendingApproval(err error, parsed RemoteExecArgs) bool {
 	if !ok {
 		return false
 	}
+	utils.SignalApprovalPending(err, commandSignalFields(err, parsed))
 	// This exits before HandleCommandResult, so a self-service way out (re-declaring a stale
 	// session intent) would otherwise never reach the user.
 	if hint, _ := pendingSudoDenial(output); hint != "" {
@@ -795,12 +825,16 @@ func HandlePendingApproval(err error, parsed RemoteExecArgs) bool {
 	var remoteErr *event.RemoteCommandError
 	if errors.As(err, &remoteErr) {
 		requestID = remoteErr.ApprovalRequestID
+		if requestID == "" && remoteErr.Held != nil {
+			requestID = remoteErr.Held.ApprovalRequest
+		}
 	}
 	utils.PrintPendingApproval(
 		"Approval required—a human must approve this sudo command in the Alpacon console (web). "+
 			"Re-run after approval, or use --wait (or --wait-approval DURATION for a longer wait) to block until it is approved.",
 		requestID,
 		reRunHint(parsed),
+		utils.RefusalNextActions(err)...,
 	)
 	os.Exit(utils.ExitCodePendingApproval)
 	return true
@@ -860,6 +894,11 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 			utils.PrintRefusalHints(os.Stderr, clientTimeout)
 			os.Exit(1)
 		}
+		var pollFailure *event.CommandPollError
+		if errors.As(err, &pollFailure) {
+			reportCommandPollFailure(err, pollFailure)
+			return
+		}
 		var rejected *event.CommandRejectedError
 		if errors.As(err, &rejected) {
 			// Final for this command line: a retry is refused again or files another approval request.
@@ -872,6 +911,21 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 		}
 		utils.CliErrorWithExit("%s", err)
 	}
+}
+
+// reportCommandPollFailure points at the job rather than a retry, which could run the
+// command twice. A server hint prints beside the action, since it cannot replace it.
+func reportCommandPollFailure(err error, failure *event.CommandPollError) {
+	message := strings.TrimRight(utils.SanitizeTerminalText(failure.Error()), ".")
+	logs := utils.NextAction{
+		Command:     fmt.Sprintf("alpacon exec logs %s", failure.CommandID),
+		Description: "check the command before running it again",
+	}
+	utils.ExitWithFailureJSON(utils.Failure{ExitCode: 1, Operation: "command", Err: err, Message: message + ".", NextActions: []utils.NextAction{logs}})
+	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
+	fmt.Fprint(os.Stderr, denialHintLine(logs.PlainText()+"\n"))
+	utils.PrintRefusalHints(os.Stderr, err)
+	os.Exit(1)
 }
 
 func reportCommandRejection(err error, rejected *event.CommandRejectedError) {
@@ -904,6 +958,7 @@ func reportCodedRefusal(operation string, err error, message, hint string) {
 func reportCodedRefusalWithExit(code int, operation string, err error, message, hint string, actions []utils.NextAction) {
 	utils.ExitIfUsageError(code, operation, err, "%s.", message)
 	utils.ExitWithFailureJSON(utils.Failure{ExitCode: code, Operation: operation, Err: err, Message: message + ".", NextActions: actions})
+	utils.SignalPaused(err)
 	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
 	if hint := codedRefusalHint(err, hint); hint != "" {
 		fmt.Fprint(os.Stderr, hint)
@@ -921,8 +976,8 @@ func codedRefusalHint(err error, local string) string {
 }
 
 // propagateCommandError reports errors RunCommandWithRetry must return unchanged (never
-// MFA-retried or wrapped): phased errors, a status-hold PendingApprovalError and an
-// AwaitingPurposeError.
+// MFA-retried or wrapped): phased errors, a status-hold PendingApprovalError, an
+// AwaitingPurposeError and a CommandPollError.
 func propagateCommandError(err error) (error, bool) {
 	if phased, ok := asPhasedError(err); ok {
 		return phased, true
@@ -936,6 +991,10 @@ func propagateCommandError(err error) (error, bool) {
 	var purposeDemand *event.AwaitingPurposeError
 	if errors.As(err, &purposeDemand) {
 		return purposeDemand, true
+	}
+	var pollFailure *event.CommandPollError
+	if errors.As(err, &pollFailure) {
+		return pollFailure, true
 	}
 	return nil, false
 }
@@ -1031,4 +1090,24 @@ func execUserRequiredExamples(invokedAs Invocation) string {
 		return "  alpacon websh -u USERNAME SERVER 'COMMAND'\n  alpacon websh USERNAME@SERVER 'COMMAND'\n"
 	}
 	return "  alpacon exec -u USERNAME SERVER -- COMMAND\n  alpacon exec USERNAME@SERVER -- COMMAND\n"
+}
+
+func commandSignalFields(err error, parsed RemoteExecArgs) localsignal.Fields {
+	fields := utils.SignalFields(err)
+	if fields.Argv0 == "" {
+		fields.Argv0 = localsignal.Argv0(parsed.Command)
+		if parsed.File != nil {
+			fields.Argv0 = localsignal.Argv0(parsed.File.Path)
+		}
+	}
+	if fields.Server == "" {
+		fields.Server = parsed.Server
+	}
+	if fields.Account == "" {
+		fields.Account = parsed.Username
+	}
+	if fields.Session == "" {
+		fields.Session = parsed.WorkSessionID
+	}
+	return fields
 }

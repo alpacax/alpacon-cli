@@ -1,9 +1,13 @@
 package tunnel
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -139,20 +143,97 @@ func TestHandleTunnelStartError_TokenRefusalAsksForInteractiveLogin(t *testing.T
 			t.Parallel()
 			err := tunnelCreateError(t, tt.code)
 
-			got := handleTunnelStartError(&client.AlpaconClient{}, err, "my-server", nil)
+			got := handleTunnelStartError(&client.AlpaconClient{}, tunnelFlagValues{}, err, "my-server", nil)
 
 			assert.EqualError(t, got, "a token cannot open a tunnel; run 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device) and try again")
 		})
 	}
 }
 
-func TestHandleTunnelStartError_OtherRefusalPassesThrough(t *testing.T) {
+func TestHandleTunnelStartError_NonGateRefusalPassesThrough(t *testing.T) {
 	t.Parallel()
-	err := tunnelCreateError(t, utils.WorkSessionRequired)
+	err := tunnelCreateError(t, "some_other_refusal")
 
-	got := handleTunnelStartError(&client.AlpaconClient{}, err, "my-server", nil)
+	got := handleTunnelStartError(&client.AlpaconClient{}, tunnelFlagValues{}, err, "my-server", nil)
 
 	assert.Equal(t, err, got)
+}
+
+// Serial: a regression reaches the gate's os.Exit and would end the test binary.
+func TestHandleTunnelStartError_CodeQuotedInAgentReportIsNotAGateRefusal(t *testing.T) {
+	err := fmt.Errorf("failed to open tunnel on my-server: connection refused; code: %s", utils.WorkSessionRequired)
+
+	got := handleTunnelStartError(&client.AlpaconClient{}, tunnelFlagValues{}, err, "my-server", nil)
+
+	assert.Equal(t, err, got)
+}
+
+const tunnelGateSessionID = "550e8400-e29b-41d4-a716-446655440000"
+
+// Serial: it runs the helper process below.
+func TestHandleTunnelStartError_GateRefusalExitsThreeWithNextActions(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+	}{
+		{"no session selected", utils.WorkSessionRequired},
+		{"session not active", utils.WorkSessionNotActive},
+		{"server not in session", utils.WorkSessionServerNotAllowed},
+		{"session expired", utils.WorkSessionExpired},
+		{"account not approved", utils.WorkSessionAccountNotApproved},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=TestHandleTunnelStartErrorGateHelperProcess")
+			cmd.Env = append(os.Environ(), "GO_WANT_TUNNEL_GATE_CODE="+tt.code, "AI_AGENT=")
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+
+			err := cmd.Run()
+
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, utils.ExitCodeWorkSessionDenied, exitErr.ExitCode())
+			var env struct {
+				ExitCode  int    `json:"exit_code"`
+				ErrorCode string `json:"error_code"`
+				Context   struct {
+					RequiredScope string   `json:"required_scope"`
+					Servers       []string `json:"target_servers"`
+					Current       *string  `json:"current_worksession"`
+					AuthMethod    string   `json:"auth_method"`
+				} `json:"context"`
+				NextActions []utils.NextAction `json:"next_actions"`
+			}
+			require.NoError(t, json.Unmarshal(stderr.Bytes(), &env), stderr.String())
+			assert.Equal(t, tt.code, env.ErrorCode)
+			assert.Equal(t, "tunnel", env.Context.RequiredScope)
+			assert.Equal(t, []string{"my-server"}, env.Context.Servers)
+			assert.Equal(t, utils.ExitCodeWorkSessionDenied, env.ExitCode)
+			assert.Equal(t, "Browser login", env.Context.AuthMethod)
+			require.NotNil(t, env.Context.Current)
+			assert.Equal(t, tunnelGateSessionID, *env.Context.Current)
+			var commands []string
+			for _, a := range env.NextActions {
+				commands = append(commands, a.Command)
+			}
+			assert.Contains(t, strings.Join(commands, "\n"), "--scope tunnel --server my-server")
+			assert.NotContains(t, strings.Join(commands, "\n"), "alpacon exec")
+		})
+	}
+}
+
+// Serial: the child reaches the gate's os.Exit, and the parent's own run returns at once.
+func TestHandleTunnelStartErrorGateHelperProcess(t *testing.T) {
+	code := os.Getenv("GO_WANT_TUNNEL_GATE_CODE")
+	if code == "" {
+		return
+	}
+	utils.OutputFormat = utils.OutputFormatJSON
+	flags := tunnelFlagValues{workSessionID: tunnelGateSessionID, authMethod: "Browser login"}
+	err := tunnelCreateError(t, code)
+	_ = handleTunnelStartError(&client.AlpaconClient{}, flags, err, "my-server", nil)
+	os.Exit(0)
 }
 
 func TestToStartOptionsCarriesTheCallersClient(t *testing.T) {

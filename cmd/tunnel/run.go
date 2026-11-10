@@ -26,7 +26,7 @@ const (
 func executeTunnelRunWithInvocation(ac *client.AlpaconClient, flags tunnelFlagValues, serverName string, localCommand []string) (int, error) {
 	runtime, err := tunnelruntime.Start(flags.toStartOptions(ac, serverName))
 	if err != nil {
-		err = handleTunnelStartError(ac, err, serverName, func() error {
+		err = handleTunnelStartError(ac, flags, err, serverName, func() error {
 			runtime, err = tunnelruntime.Start(flags.toStartOptions(ac, serverName))
 			return err
 		})

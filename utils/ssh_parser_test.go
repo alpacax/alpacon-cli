@@ -179,6 +179,81 @@ func TestIsRemoteTarget(t *testing.T) {
 			input:    "prod-docker:/tmp/alice@example.com",
 			expected: true,
 		},
+		{
+			name:     "Windows drive letter with backslash",
+			input:    `C:\Users\alice\notes.txt`,
+			expected: false,
+		},
+		{
+			name:     "Windows drive root",
+			input:    `D:\`,
+			expected: false,
+		},
+		{
+			name:     "Single-letter server with a relative path",
+			input:    "c:notes.txt",
+			expected: true,
+		},
+		{
+			name:     "Single-letter server with an absolute path and a user",
+			input:    "alice@h:/tmp/file",
+			expected: true,
+		},
+		{
+			name:     "Windows extended-length path",
+			input:    `\\?\C:\Users\alice\notes.txt`,
+			expected: false,
+		},
+		{
+			name:     "Windows device path",
+			input:    `\\.\C:\notes.txt`,
+			expected: false,
+		},
+		{
+			name:     "Dot-slash path holding a colon",
+			input:    "./a:b.txt",
+			expected: false,
+		},
+		{
+			name:     "Dot-dot-slash path holding a colon",
+			input:    "../a:b.txt",
+			expected: false,
+		},
+		{
+			name:     "Dot-dot-backslash path holding a colon",
+			input:    `..\a:b.txt`,
+			expected: false,
+		},
+		{
+			name:     "Lowercase Windows drive letter",
+			input:    `c:\Users\alice\notes.txt`,
+			expected: false,
+		},
+		{
+			name:     "User-prefixed single-letter server with a backslash path",
+			input:    `alice@h:\notes.txt`,
+			expected: true,
+		},
+		{
+			name:     "Drive letter and colon alone",
+			input:    "C:",
+			expected: true,
+		},
+		{
+			name:     "Dot-backslash path holding a colon",
+			input:    `.\a:b.txt`,
+			expected: false,
+		},
+		{
+			name:     "Absolute path holding a colon",
+			input:    "/tmp/a:b.txt",
+			expected: false,
+		},
+		{
+			name:     "Dot-slash path holding an at sign and a colon",
+			input:    "./a@b:c.txt",
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -237,6 +312,29 @@ func TestIsLocalTarget(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := IsLocalTarget(tt.input)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestIsRemoteTargetByPlatform(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		goos     string
+		input    string
+		expected bool
+	}{
+		{name: "Windows reads C colon slash as a local path", goos: "windows", input: "C:/Users/alice/notes.txt", expected: false},
+		{name: "Linux reads C colon slash as server C", goos: "linux", input: "C:/Users/alice/notes.txt", expected: true},
+		{name: "Darwin reads h colon slash as server h", goos: "darwin", input: "h:/x", expected: true},
+		{name: "Windows still reads a two-letter server as remote", goos: "windows", input: "ab:/x", expected: true},
+		{name: "Windows still reads a user-prefixed single-letter server as remote", goos: "windows", input: "alice@h:/x", expected: true},
+		{name: "Backslash drive path is local on Linux", goos: "linux", input: `C:\dl\`, expected: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isRemoteTargetOn(tt.goos, tt.input))
 		})
 	}
 }

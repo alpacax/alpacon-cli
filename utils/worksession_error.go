@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -14,6 +15,7 @@ const (
 	OperationCommand = "command"
 	OperationWebFTP  = "webftp"
 	OperationWebsh   = "websh"
+	OperationTunnel  = "tunnel"
 	// OperationKube targets a cluster rather than a server: it needs a session
 	// that holds the kube scope and targets that cluster.
 	OperationKube = "kube"
@@ -74,16 +76,34 @@ func isWorkSessionCode(code string) bool {
 	return ok
 }
 
+// deniedCommand is a command the server refused after it was submitted; its code is
+// the command's own outcome, so a name shared with a gate code is not a gate refusal.
+type deniedCommand interface {
+	SubmittedCommandDenied() bool
+}
+
 // HandleWorkSessionError prints a WorkSession gate diagnostic and exits(3); no-op for other errors.
 // target is what the operation names: a cluster for OperationKube, a server otherwise.
 func HandleWorkSessionError(err error, operation, target, authMethod, activeWS string) {
 	if err == nil {
 		return
 	}
+	var denied deniedCommand
+	if errors.As(err, &denied) && denied.SubmittedCommandDenied() {
+		return
+	}
 	code, _ := ParseErrorResponse(err)
 	if !isWorkSessionCode(code) {
 		return
 	}
+	fields := SignalFields(err)
+	if fields.Server == "" && operation != OperationKube {
+		fields.Server = target
+	}
+	if fields.Session == "" {
+		fields.Session = activeWS
+	}
+	SignalPaused(WithSignalFields(err, fields))
 	hint := RefusalHint(err)
 	if OutputFormat == OutputFormatJSON {
 		PrintJSONError(os.Stderr, buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS, hint))
@@ -148,6 +168,8 @@ func workSessionTokenNote(operation string) string {
 	switch operation {
 	case OperationWebsh:
 		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open an interactive terminal; it needs " + LoginWithoutTokenHint + "."
+	case OperationTunnel:
+		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open a tunnel; it needs " + LoginWithoutTokenHint + "."
 	case OperationKube:
 		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open a kube session; it needs " + LoginWithoutTokenHint + "."
 	}
@@ -250,8 +272,12 @@ func workSessionNextActions(code, operation, target, activeWS string) []NextActi
 		if aiagent.FromEnvironment().Detected() {
 			accountCreate = agentCreateCmd + " --account <account>"
 		}
+		retry := "alpacon exec" + workSessionFlag(activeWS) + " -u <approved account> " + serverArg + " -- <command>"
+		if operation == OperationTunnel {
+			retry = "alpacon tunnel" + workSessionFlag(activeWS) + " -u <approved account> " + serverArg + " -l <LOCAL_PORT> -r <REMOTE_PORT>"
+		}
 		return []NextAction{
-			{Command: "alpacon exec" + workSessionFlag(activeWS) + " -u <approved account> " + serverArg + " -- <command>", Description: "pass -u with the session's account (shown by 'alpacon work-session current')"},
+			{Command: retry, Description: "pass -u with the session's account (shown by 'alpacon work-session current')"},
 			{Command: accountCreate, Description: accountSessionCreateDescription},
 		}
 	case WorkSessionAgentSessionRequired:
@@ -268,7 +294,7 @@ func workSessionNextActions(code, operation, target, activeWS string) []NextActi
 			{Command: "alpacon work-session current", Description: "pending/approved: wait until active; completed/revoked/cancelled: create or reuse below"},
 		}, createOrReuse...)
 	case WorkSessionExpired:
-		return []NextAction{{Command: workSessionExtendCommand(activeWS)}, {Command: createCmd}, agentCreate}
+		return []NextAction{{Command: createCmd}, agentCreate}
 	case WorkSessionAssigneeMismatch:
 		// The session belongs to another principal; agents cannot `use`, so take the agent-aware
 		// path.
@@ -288,13 +314,6 @@ func workSessionFlag(activeWS string) string {
 		return ""
 	}
 	return " --work-session " + activeWS
-}
-
-func workSessionExtendCommand(activeWS string) string {
-	if activeWS != "" {
-		return fmt.Sprintf("alpacon work-session extend %s", activeWS)
-	}
-	return "alpacon work-session extend <ID>"
 }
 
 // kubeWorkSessionNextActions suggests a session that targets the cluster with
@@ -334,7 +353,7 @@ func kubeWorkSessionNextActions(code, clusterName, activeWS string) []NextAction
 		}
 		return []NextAction{wait, reuse, login, agentCreate}
 	case WorkSessionExpired:
-		return []NextAction{{Command: workSessionExtendCommand(activeWS)}, login, agentCreate}
+		return []NextAction{login, agentCreate}
 	default: // required, not_usable, assignee_mismatch, and the scope, cluster, server and account codes
 		return []NextAction{reuse, login, agentCreate}
 	}

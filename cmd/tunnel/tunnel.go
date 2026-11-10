@@ -10,6 +10,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
+	"github.com/alpacax/alpacon-cli/config"
 	tunnelruntime "github.com/alpacax/alpacon-cli/pkg/tunnel/runtime"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -22,6 +23,7 @@ type tunnelFlagValues struct {
 	groupname     string
 	verbose       bool
 	workSessionID string
+	authMethod    string // read once in runTunnel, not a flag
 }
 
 type tunnelCommandRuntime interface {
@@ -55,6 +57,10 @@ func newCommand(newAPIClient func() (*client.AlpaconClient, error)) *cobra.Comma
 	Requires an active WorkSession when using Browser login (Auth0). Token auth (API
 	token or Service token) cannot open a tunnel—that needs 'alpacon login' without -t
 	(on a machine without a browser, open the printed URL on another device).
+
+	Exit code 3 indicates a WorkSession gate denial; run with --output json to
+	parse a machine-readable diagnostic on stderr. With '-- COMMAND', once the
+	tunnel is open the exit code is the local command's own, which can also be 3.
 	`,
 		Example: `
 	# Forward local 9000 to remote 8082
@@ -140,11 +146,12 @@ func runTunnel(cmd *cobra.Command, args []string, flags tunnelFlagValues, newAPI
 	if err := tunnelruntime.ValidatePorts(flags.remotePort, flags.localPort); err != nil {
 		return utils.NewUsageExitError("%s", err)
 	}
+	flags.authMethod = config.ResolveAuthMethod()
 	ac, err := newAPIClient()
 	if err != nil {
 		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
-	// Resolve once so handleTunnelStartError's retry reuses the same UUID.
+	// Resolve once: handleTunnelStartError's retry and gate report both use this UUID.
 	if flags.workSessionID, err = worksession.Resolve(ac, flags.workSessionID); err != nil {
 		return utils.NewExitError("%s", err)
 	}
@@ -183,14 +190,18 @@ func executeTunnelCommand(ac *client.AlpaconClient, flags tunnelFlagValues, cmd 
 	return 0, executeTunnel(ac, flags, args[0], sigChan)
 }
 
-func handleTunnelStartError(ac *client.AlpaconClient, err error, serverName string, retry func() error) error {
-	return utils.InteractiveOnly(utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(ac, retry)), "open a tunnel")
+func handleTunnelStartError(ac *client.AlpaconClient, flags tunnelFlagValues, err error, serverName string, retry func() error) error {
+	err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(ac, retry))
+	if utils.StructuredErrorCode(err) != "" { // a code quoted in an agent's open-failure text is not a gate refusal
+		utils.HandleWorkSessionError(err, utils.OperationTunnel, serverName, flags.authMethod, flags.workSessionID)
+	}
+	return utils.InteractiveOnly(err, "open a tunnel")
 }
 
 func executeTunnel(ac *client.AlpaconClient, flags tunnelFlagValues, serverName string, sigChan <-chan os.Signal) error {
 	runtime, err := tunnelruntime.Start(flags.toStartOptions(ac, serverName))
 	if err != nil {
-		err = handleTunnelStartError(ac, err, serverName, func() error {
+		err = handleTunnelStartError(ac, flags, err, serverName, func() error {
 			runtime, err = tunnelruntime.Start(flags.toStartOptions(ac, serverName))
 			return err
 		})

@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/acl"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,7 +44,7 @@ func fileOf(t *testing.T, items ...map[string]any) []byte {
 func TestParseEntryFile(t *testing.T) {
 	t.Parallel()
 	data := fileOf(t,
-		fileItem(map[string]any{"command_pattern": "  uptime ", "username": " * "}),
+		fileItem(map[string]any{"command_pattern": "  uptime ", "username": " * ", "groupname": " deploy "}),
 		fileItem(map[string]any{
 			"command_pattern": "df -h", "username": "root", "server_ids": []string{"6ba7b810-9dad-11d1-80b4-00c04fd430c8"},
 			"expires_at": "2099-01-15T10:00:00Z", "enabled": false,
@@ -51,10 +54,10 @@ func TestParseEntryFile(t *testing.T) {
 	entries, err := parseEntryFile(data)
 
 	require.NoError(t, err)
-	assert.Equal(t, []acl.EntryRequest{
-		{PrincipalID: fileTokenID, CommandPattern: "uptime", Username: "*", ServerIDs: []string{}, Enabled: true},
-		{PrincipalID: fileTokenID, CommandPattern: "df -h", Username: "root",
-			ServerIDs: []string{"6ba7b810-9dad-11d1-80b4-00c04fd430c8"}, ExpiresAt: "2099-01-15T10:00:00Z", Enabled: false},
+	assert.Equal(t, []entryDraft{
+		{EntryRequest: acl.EntryRequest{PrincipalID: fileTokenID, CommandPattern: "uptime", Username: "*", Groupname: "deploy", ServerIDs: []string{}, Enabled: true}},
+		{EntryRequest: acl.EntryRequest{PrincipalID: fileTokenID, CommandPattern: "df -h", Username: "root",
+			ServerIDs: []string{"6ba7b810-9dad-11d1-80b4-00c04fd430c8"}, ExpiresAt: "2099-01-15T10:00:00Z", Enabled: false}},
 	}, entries)
 }
 
@@ -62,6 +65,68 @@ func TestParseEntryFile_AllowsTrailingWhitespace(t *testing.T) {
 	t.Parallel()
 	_, err := parseEntryFile(append(fileOf(t, fileItem(nil)), "\n\n"...))
 	assert.NoError(t, err)
+}
+
+func TestParseEntryFile_NullUsername(t *testing.T) {
+	t.Parallel()
+	item := fileItem(nil)
+	item["username"] = nil
+
+	entries, err := parseEntryFile(fileOf(t, fileItem(nil), item))
+
+	require.ErrorContains(t, err, "entry 1: username must be a string, not null")
+	assert.Nil(t, entries)
+	assert.True(t, utils.IsUsageError(err), "a null username must be a usage error: %v", err)
+}
+
+func TestParseEntryFile_NullGroupname(t *testing.T) {
+	t.Parallel()
+	item := fileItem(nil)
+	item["groupname"] = nil
+
+	entries, err := parseEntryFile(fileOf(t, fileItem(nil), item))
+
+	require.ErrorContains(t, err, "entry 1: groupname must be a string, not null")
+	assert.Nil(t, entries)
+	assert.True(t, utils.IsUsageError(err), "a null groupname must be a usage error: %v", err)
+}
+
+func TestParseEntryFile_NonStringAccountFields(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name, field string
+		value       any
+	}{
+		{name: "numeric username", field: "username", value: 42},
+		{name: "object username", field: "username", value: map[string]any{}},
+		{name: "numeric groupname", field: "groupname", value: 42},
+		{name: "object groupname", field: "groupname", value: map[string]any{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			data := fileOf(t, fileItem(nil), fileItem(map[string]any{tt.field: tt.value}))
+			entries, err := parseEntryFile(data)
+			require.ErrorContains(t, err, "entry 1: "+tt.field+":")
+			assert.Nil(t, entries)
+			assert.True(t, utils.IsUsageError(err), "a non-string %s must be a usage error: %v", tt.field, err)
+
+			file := t.TempDir() + "/entries.json"
+			require.NoError(t, os.WriteFile(file, data, 0600))
+			flags, err := json.Marshal([]string{"--file", file})
+			require.NoError(t, err)
+			child := exec.Command(os.Args[0], "-test.run=^TestEntryAddApplicationAccountHelper$")
+			child.Env = append(os.Environ(), "ALPACON_ACCOUNT_HELPER="+string(flags))
+			_, err = child.Output()
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode())
+			var envelope utils.JSONErrorEnvelope[map[string]any]
+			require.NoError(t, json.Unmarshal(exitErr.Stderr, &envelope))
+			assert.Equal(t, utils.ErrorCodeUsage, envelope.ErrorCode)
+			assert.Equal(t, utils.ExitCodeUsageError, envelope.ExitCode)
+			assert.Contains(t, envelope.Message, "entry 1: "+tt.field+":")
+		})
+	}
 }
 
 func TestParseEntryFile_Refusals(t *testing.T) {
@@ -77,17 +142,14 @@ func TestParseEntryFile_Refusals(t *testing.T) {
 		{name: "misspelled field", data: string(fileOf(t, fileItem(map[string]any{"server_id": []string{"x"}}))), wantErr: "server_id"},
 		{name: "trailing data", data: valid + ` {"unexpected": true}`, wantErr: "continues after it"},
 		{name: "second array", data: `[] ` + valid, wantErr: "continues after it"},
-		{name: "explicit service token", data: string(fileOf(t, fileItem(map[string]any{"principal_type": "service_token", "username": ""}))), wantErr: "entry 0: username"},
 		{name: "personal API token", data: string(fileOf(t, fileItem(map[string]any{"principal_type": "api_token"}))), wantErr: "entry 0: principal_type"},
 		{name: "other principal type", data: string(fileOf(t, fileItem(map[string]any{"principal_type": "user"}))), wantErr: "entry 0: principal_type"},
 		{name: "principal id missing", data: string(fileOf(t, fileItem(map[string]any{"principal_id": nil}))), wantErr: "entry 0: principal_id"},
 		{name: "principal id not an id", data: string(fileOf(t, fileItem(map[string]any{"principal_id": "deploy-bot"}))), wantErr: "entry 0: principal_id"},
 		{name: "blank command", data: string(fileOf(t, fileItem(map[string]any{"command_pattern": "  "}))), wantErr: "entry 0: command_pattern"},
-		{name: "blank username", data: string(fileOf(t, fileItem(map[string]any{"username": " "}))), wantErr: "entry 0: username"},
 		{name: "server ids omitted", data: string(fileOf(t, fileItem(map[string]any{"server_ids": nil}))), wantErr: "entry 0: server_ids is required"},
 		{name: "server ids null", data: strings.Replace(valid, `"server_ids":[]`, `"server_ids":null`, 1), wantErr: "entry 0: server_ids is required"},
 		{name: "empty server id", data: string(fileOf(t, fileItem(map[string]any{"server_ids": []string{""}}))), wantErr: "entry 0: a server value is empty"},
-		{name: "second entry refused", data: string(fileOf(t, fileItem(nil), fileItem(map[string]any{"username": ""}))), wantErr: "entry 1: username"},
 		{name: "expiry in the past", data: string(fileOf(t, fileItem(map[string]any{"expires_at": "2001-01-01T00:00:00Z"}))), wantErr: "entry 0: --expires-at 2001-01-01T00:00:00Z is not in the future"},
 		{name: "unreadable expiry", data: string(fileOf(t, fileItem(map[string]any{"expires_at": "tomorrow"}))), wantErr: "entry 0: --expires-at must be an RFC 3339 time"},
 	}
@@ -194,4 +256,12 @@ func TestWorkspaceNames_FetchesOnlyWhatTheEntriesNeed(t *testing.T) {
 			assert.Equal(t, tt.wantPaths, paths)
 		})
 	}
+}
+
+func TestParseEntryFile_DefaultApplicationAccount(t *testing.T) {
+	t.Parallel()
+	entries, err := parseEntryFile(fileOf(t, fileItem(map[string]any{"username": nil})))
+	require.NoError(t, err)
+	assert.Empty(t, entries[0].Username)
+	assert.True(t, entries[0].usernameOmitted, "an absent username must default to the application account")
 }

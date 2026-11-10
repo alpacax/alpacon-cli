@@ -110,7 +110,17 @@ func envelopeFailure(exitCode int, errorCode, msg string, args []any) Failure {
 // among their own arguments, so every call site that formats a server error
 // into its message prints the server's hint without naming it.
 func printCliError(err error, msg string, args ...any) {
+	signalCliError(err, args)
 	printCliErrorTo(TrackedStderr(), err, msg, args...)
+}
+
+// signalCliError signals the refusal an error line reports, as printCliError does before printing it.
+func signalCliError(err error, args []any) {
+	if err != nil {
+		SignalPaused(err)
+	} else {
+		signalErrorsIn(args)
+	}
 }
 
 func printCliErrorTo(w io.Writer, err error, msg string, args ...any) {
