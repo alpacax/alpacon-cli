@@ -595,6 +595,7 @@ func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, er
 		return nil, redirectRefusedStatus(resp), utils.WithRedirectStatus(utils.RedactURLError(err), resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	warnWorkSessionRequiredSoon(resp.Header)
 
 	respBody, err := readJSONResponse(resp)
 	if err != nil {
@@ -886,6 +887,7 @@ func (ac *AlpaconClient) rawRoundTrip(req *http.Request) (*RawResponse, error) {
 		return nil, utils.WithRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	warnWorkSessionRequiredSoon(resp.Header)
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
@@ -1053,6 +1055,7 @@ func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, e
 		return nil, utils.WithRedirectStatus(utils.RedactURLError(err), resp)
 	}
 
+	warnWorkSessionRequiredSoon(resp.Header)
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
