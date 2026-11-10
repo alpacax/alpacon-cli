@@ -1,6 +1,7 @@
 package event
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -40,6 +41,9 @@ type wsListener struct {
 	transport      *http.Transport
 	stableLifetime time.Duration
 
+	// ctx bounds every request and dial the listener makes; Stop cancels it so none outlives the listener.
+	ctx         context.Context
+	cancel      context.CancelFunc
 	done        chan struct{}
 	stopped     chan struct{} // closed when listenLoop exits
 	connected   chan struct{} // closed once a dial connected and onConnected returned
@@ -56,7 +60,10 @@ func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (*Event
 	if ac != nil {
 		wsHeader = ac.SetWebsocketHeader()
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	w := &wsListener{
+		ctx:              ctx,
+		cancel:           cancel,
 		provision:        provision,
 		wsHeader:         wsHeader,
 		handshakeTimeout: handshakeTimeout,
@@ -115,6 +122,7 @@ func (w *wsListener) WaitConnected(timeout time.Duration) bool {
 func (w *wsListener) Stop() {
 	w.closeOnce.Do(func() {
 		close(w.done)
+		w.cancel()
 		w.mu.Lock()
 		if w.conn != nil {
 			_ = w.conn.Close()
@@ -168,7 +176,7 @@ func (w *wsListener) connectAndListen() bool {
 	if t := w.transport; t != nil {
 		dialer.NetDialContext, dialer.Proxy = t.DialContext, t.Proxy
 	}
-	conn, resp, dialErr := dialer.Dial(session.WebsocketURL, w.wsHeader)
+	conn, resp, dialErr := dialer.DialContext(w.ctx, session.WebsocketURL, w.wsHeader)
 	if dialErr != nil {
 		if w.onDialFailed != nil {
 			w.onDialFailed(utils.WebsocketDialError("failed to connect to the event channel", dialErr, resp))

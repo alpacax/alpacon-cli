@@ -76,6 +76,13 @@ func (w *Watcher) Reconnected() <-chan struct{} { return w.reconnected }
 // reconnects keep failing is distinguishable from a quiet one.
 func (w *Watcher) ReconnectFailed() <-chan error { return w.reconnectFailed }
 
+// Close stops the Watcher and waits for its listener to end, requests in flight included.
+// Call it only after Start, and never from a callback the listener runs.
+func (w *Watcher) Close() {
+	w.Stop()
+	<-w.stopped
+}
+
 // Err returns the error that stopped the Watcher before it ever subscribed.
 func (w *Watcher) Err() error {
 	w.stateMu.Lock()
@@ -95,7 +102,7 @@ func (w *Watcher) sessionCreateFailed(cause error) error {
 }
 
 func (w *Watcher) provisionSession() (*EventSessionResponse, error) {
-	session, err := CreateEventSession(w.ac)
+	session, err := CreateEventSession(w.ctx, w.ac)
 	if err != nil {
 		return nil, w.sessionCreateFailed(err)
 	}
@@ -144,7 +151,7 @@ func (w *Watcher) subscribe() error {
 	first := !w.subscribed
 	w.stateMu.Unlock()
 
-	if err := SubscribeEvent(w.ac, channelID, w.eventType, w.targetID); err != nil {
+	if err := SubscribeEvent(w.ctx, w.ac, channelID, w.eventType, w.targetID); err != nil {
 		return w.fail(err)
 	}
 

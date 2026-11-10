@@ -910,6 +910,11 @@ func (ac *AlpaconClient) SendGetRequestWithContext(ctx context.Context, url stri
 
 // SendPostRequest sends body as JSON in a POST request to the workspace.
 func (ac *AlpaconClient) SendPostRequest(url string, body any) ([]byte, error) {
+	return ac.SendPostRequestWithContext(context.Background(), url, body)
+}
+
+// SendPostRequestWithContext is SendPostRequest bounded by ctx, as SendGetRequestWithContext is.
+func (ac *AlpaconClient) SendPostRequestWithContext(ctx context.Context, url string, body any) ([]byte, error) {
 	jsonValue, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -919,7 +924,7 @@ func (ac *AlpaconClient) SendPostRequest(url string, body any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ac.sendRequest(req)
+	return ac.sendRequest(req.WithContext(ctx))
 }
 
 // SendPostRequestWithStatus is SendPostRequest plus the response's HTTP status code. Use it only

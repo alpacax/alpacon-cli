@@ -69,7 +69,7 @@ func runWatch(cmd *cobra.Command, newClient func() (*client.AlpaconClient, error
 
 	watcher := eventapi.NewWatcher(alpaconClient, eventapi.EventType(eventType), target)
 	watcher.Start()
-	defer watcher.Stop()
+	defer watcher.Close() // waits for the listener, so no request outlives the command
 
 	if !watcher.WaitConnected(watchConnectTimeout) {
 		// A rejected subscription is not retried, so its message is the useful one.

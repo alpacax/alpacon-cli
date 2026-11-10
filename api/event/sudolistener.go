@@ -99,7 +99,7 @@ func (sl *SudoListener) Err() error {
 }
 
 func (sl *SudoListener) provisionSession() (*EventSessionResponse, error) {
-	session, err := CreateEventSession(sl.ac)
+	session, err := CreateEventSession(sl.ctx, sl.ac)
 	if err != nil {
 		return nil, sl.fail(err)
 	}
@@ -116,7 +116,7 @@ func (sl *SudoListener) subscribe() error {
 	channelID := sl.channelID
 	sl.stateMu.Unlock()
 
-	if err := SubscribeEvent(sl.ac, channelID, EventTypeSudo, sl.sessionID); err != nil {
+	if err := SubscribeEvent(sl.ctx, sl.ac, channelID, EventTypeSudo, sl.sessionID); err != nil {
 		return sl.fail(err)
 	}
 
