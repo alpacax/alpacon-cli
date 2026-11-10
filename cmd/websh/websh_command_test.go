@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -25,12 +26,16 @@ func stubClient(status int, body string) clientFactory {
 			BaseURL:   "https://workspace.example",
 			UserAgent: "alpacon-test",
 			HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-				return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+				return jsonResponse(status, body), nil
 			})},
 		}
 		ac.SetAccessToken("secret-token")
 		return ac, nil
 	}
+}
+
+func jsonResponse(status int, body string) *http.Response {
+	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}
 }
 
 // noClient stands in for a factory a usage error must never reach.
@@ -133,4 +138,38 @@ func TestWebshSessionRefusedByTheWorkSessionGateExits3WithTheDiagnostic(t *testi
 	assert.Equal(t, utils.ExitCodeWorkSessionDenied, code)
 	assert.Contains(t, stderr, "the websh operation requires an active WorkSession on this authentication.")
 	assert.Contains(t, stderr, "  target server : my-server\n")
+}
+
+// Serial: HOME points at an empty directory, and the denial banner goes to the process stderr.
+func TestWebshCommandRefusedByTheWorkSessionGateExits3WithTheDiagnostic(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ALPACON_WORK_SESSION", "")
+	newClient := func() (*client.AlpaconClient, error) {
+		ac, err := stubClient(http.StatusOK, `{"count":1,"results":[{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","name":"my-server"}]}`)()
+		if err != nil {
+			return nil, err
+		}
+		lookup := ac.HTTPClient.Transport
+		ac.HTTPClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch {
+			case req.Method == http.MethodGet && req.URL.Path == "/api/servers/servers/":
+				return lookup.RoundTrip(req)
+			case req.Method == http.MethodPost && req.URL.Path == "/api/events/commands/":
+				return jsonResponse(http.StatusForbidden, `{"code": "work_session_required", "source": "command"}`), nil
+			default: // the output stream is refused, so the run falls back to polling at once
+				return jsonResponse(http.StatusNotFound, `{}`), nil
+			}
+		})
+		return ac, nil
+	}
+
+	var stderr string
+	var code int
+	_, banner := testutil.CaptureOutput(t, func() {
+		stderr, code = executeWebsh(newClient, "--work-session", "550e8400-e29b-41d4-a716-446655440000", "my-server", "whoami")
+	})
+
+	assert.Equal(t, utils.ExitCodeWorkSessionDenied, code)
+	assert.Contains(t, stderr, "  target server : my-server\n")
+	assert.Contains(t, banner, "whoami on my-server was refused by the work_session gate and did not run.")
 }

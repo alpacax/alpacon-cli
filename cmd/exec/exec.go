@@ -268,12 +268,6 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 	return cmd
 }
 
-// RunRemoteExec is RemoteExec for a command that has not moved to RunE yet (websh): it prints the
-// failure and exits with its code.
-func RunRemoteExec(parsed RemoteExecArgs) {
-	exitOnFailure(RemoteExec(client.NewAlpaconAPIClient, os.Stdout, os.Stderr, parsed))
-}
-
 // exitOnFailure prints err the way cmd.Execute prints a RunE command's failure and exits.
 func exitOnFailure(err error) {
 	if err == nil {
