@@ -17,7 +17,7 @@ func TestWithExitError_SilencesCobraOnlyForAnExitError(t *testing.T) {
 		err         error
 		wantSilence bool
 	}{
-		{name: "exit error", err: &ExitError{Code: ExitCodeGeneralError}, wantSilence: true},
+		{name: "exit error", err: NewSilentExitError(ExitCodeGeneralError), wantSilence: true},
 		{name: "plain error", err: errors.New("unreported"), wantSilence: false},
 		{name: "success", err: nil, wantSilence: false},
 	}
@@ -49,8 +49,9 @@ func TestFprintExitError_PrintsTheFailureItsConstructorNames(t *testing.T) {
 		{name: "general error keeps the footer", err: NewExitError("lookup failed: %s", errors.New("boom")), wantCode: ExitCodeGeneralError, wantLine: "lookup failed: boom\n", wantFooter: true},
 		{name: "chosen code drops the footer", err: NewExitErrorWithCode(ExitCodeServerBusy, "server busy"), wantCode: ExitCodeServerBusy, wantLine: "server busy\n"},
 		{name: "usage error", err: NewUsageExitError("expected one %s", "ENDPOINT"), wantCode: ExitCodeUsageError, wantLine: "expected one ENDPOINT\n"},
+		{name: "empty message still prints the error line", err: NewExitError(""), wantCode: ExitCodeGeneralError, wantLine: ": \n", wantFooter: true},
 		{name: "usage cause promotes exit one to two", err: NewExitError("%s", usageCause), wantCode: ExitCodeUsageError, wantLine: "bad flag\n"},
-		{name: "code alone prints nothing", err: &ExitError{Code: ExitCodeGeneralError}, wantCode: ExitCodeGeneralError},
+		{name: "silent prints nothing", err: NewSilentExitError(ExitCodeGeneralError), wantCode: ExitCodeGeneralError},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -123,12 +123,12 @@ func newCommand(newAPIClient func() (*client.AlpaconClient, error)) *cobra.Comma
 							return utils.NewExitErrorWithCode(utils.ExitCodeGeneralError, "%s", writeErr)
 						}
 					}
-					return &utils.ExitError{Code: utils.ExitCodeGeneralError}
+					return utils.NewSilentExitError(utils.ExitCodeGeneralError)
 				}
 				return utils.NewExitErrorWithCode(code, "%s", err)
 			}
 			if code != 0 {
-				return &utils.ExitError{Code: code}
+				return utils.NewSilentExitError(code)
 			}
 			return nil
 		}),

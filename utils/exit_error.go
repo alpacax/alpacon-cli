@@ -10,9 +10,10 @@ import (
 )
 
 // ExitError is a failure a RunE command returns: cmd.Execute prints it with PrintExitError and exits
-// with Code. Built from Code alone it prints nothing, for a command that wrote its own failure line.
+// with Code. Build it with a constructor; NewSilentExitError is the one that prints nothing.
 type ExitError struct {
 	Code      int
+	silent    bool
 	usage     bool
 	footer    bool
 	operation string
@@ -47,6 +48,11 @@ func NewExitError(msg string, args ...any) error {
 // NewExitErrorWithCode is the failure CliErrorWithExitCode reports: the given exit and no footer.
 func NewExitErrorWithCode(code int, msg string, args ...any) error {
 	return newExitError(code, false, msg, args)
+}
+
+// NewSilentExitError exits with code and prints nothing, for a command that wrote its own failure line.
+func NewSilentExitError(code int) error {
+	return &ExitError{Code: code, silent: true}
 }
 
 // NewUsageExitError is the failure CliUsageErrorWithExit reports: exit 2 with error_code usage_error.
@@ -95,7 +101,7 @@ func FprintExitError(w io.Writer, e *ExitError) {
 // printExitError takes two writers because the envelope starts on a fresh line only when it is
 // handed os.Stderr itself.
 func printExitError(text, envelope io.Writer, e *ExitError) {
-	if e.msg == "" {
+	if e.silent {
 		return
 	}
 	if OutputFormat == OutputFormatJSON {
