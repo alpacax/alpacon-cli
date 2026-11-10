@@ -82,6 +82,10 @@ func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (*Event
 	return w
 }
 
+// stopping reports whether Stop has run. A request or dial that fails after it failed because Stop
+// cancelled it, so callers must not record that failure as a refusal or announce it as an outage.
+func (w *wsListener) stopping() bool { return w.ctx.Err() != nil }
+
 func (w *wsListener) closeUnopenedSession(id string) {
 	if id != "" {
 		w.closeUnopened(id)

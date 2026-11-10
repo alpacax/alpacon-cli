@@ -184,6 +184,9 @@ func (w *Watcher) failureStopsLocked() bool { return !w.subscribed }
 // login surfaces the server's own message rather than a generic connect timeout.
 // Later failures are ordinary reconnect material.
 func (w *Watcher) fail(cause error) error {
+	if w.stopping() {
+		return cause
+	}
 	w.stateMu.Lock()
 	fatal := w.failureStopsLocked()
 	if fatal {

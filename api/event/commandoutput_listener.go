@@ -84,6 +84,9 @@ func (l *CommandOutputListener) Err() error {
 func (l *CommandOutputListener) provisionSession() (*EventSessionResponse, error) {
 	session, err := CreateEventSession(l.ctx, l.ac)
 	if err != nil {
+		if l.stopping() {
+			return nil, err
+		}
 		l.stateMu.Lock()
 		l.err = err
 		// Before the first subscribe a fatal 4xx gives up, since the caller falls back to polling

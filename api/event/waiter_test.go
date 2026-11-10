@@ -286,3 +286,37 @@ func TestWaiter_WaitReturnsOnlyOnceACatchUpStillInFlightHasStopped(t *testing.T)
 		assert.True(t, finished.Load(), "the catch-up read must have stopped before Wait returns")
 	})
 }
+
+func TestWaiter_StopDuringTheFirstSubscriptionCancelsTheWait(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		subscribing, release := make(chan struct{}), make(chan struct{})
+		defer close(release) // a failed require must not leave the handler blocked in the bubble
+		mux := http.NewServeMux()
+		ts := testutil.NewPipeServer(t, mux)
+		mux.HandleFunc("POST "+eventSessionsURL, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(EventSessionResponse{ID: "session", WebsocketURL: ts.WebsocketURL("/ws/"), ChannelID: "channel"})
+		})
+		mux.HandleFunc(eventSubscriptionsURL, func(http.ResponseWriter, *http.Request) {
+			close(subscribing)
+			<-release
+		})
+		upgrader := websocket.Upgrader{}
+		mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {
+			if conn, err := upgrader.Upgrade(w, r, nil); err == nil {
+				holdOpen(conn, 0)
+			}
+		})
+		w := newTestWaiter(t, ts, WaitOptions{OK: []string{"approved"}, Timeout: testWaitTimeout})
+		go func() { <-subscribing; w.Stop() }() // Ctrl+C while the first subscription is in flight
+
+		_, outcome, err := w.Wait()
+
+		require.NoError(t, err)
+		assert.Equal(t, OutcomeCanceled, outcome)
+		// Wait has joined the listener, so a cancelled subscription recorded as a refusal would show
+		// here; whether Wait itself read it first is down to scheduling.
+		require.NoError(t, w.Err())
+	})
+}
