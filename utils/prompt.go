@@ -59,11 +59,24 @@ func PromptForPassword(promptText string) string {
 }
 
 func PromptForInput(promptText string) string {
-	input, err := promptForInput(os.Stdin, promptText)
+	input, err := ReadInput(promptText)
 	if err != nil {
-		CliErrorWithExit("No input received.")
+		exitWithError(noInputError())
 	}
 	return input
+}
+
+// ReadInput is PromptForInput for a RunE command: it returns the failure PromptForInput exits with.
+func ReadInput(promptText string) (string, error) {
+	input, err := promptForInput(os.Stdin, promptText)
+	if err != nil {
+		return "", noInputError()
+	}
+	return input, nil
+}
+
+func noInputError() *ExitError {
+	return newExitError(ExitCodeGeneralError, true, "No input received.", nil)
 }
 
 func promptForInput(r io.Reader, promptText string) (string, error) {
@@ -86,10 +99,27 @@ func noteEchoedNewline(r io.Reader, readErr error) {
 }
 
 func PromptForRequiredInput(promptText string) string {
+	input, err := ReadRequiredInput(promptText)
+	if err != nil {
+		exitWithError(noInputError())
+	}
+	return input
+}
+
+// ReadRequiredInput is PromptForRequiredInput for a RunE command: it asks again on an empty line and
+// returns the failure PromptForRequiredInput exits with.
+func ReadRequiredInput(promptText string) (string, error) {
+	return readRequiredInput(os.Stdin, promptText)
+}
+
+func readRequiredInput(r io.Reader, promptText string) (string, error) {
 	for {
-		input := PromptForInput(promptText)
+		input, err := promptForInput(r, promptText)
+		if err != nil {
+			return "", noInputError()
+		}
 		if input != "" {
-			return input
+			return input, nil
 		}
 		CliWarning("This field is required. Please enter a value.")
 	}
@@ -138,12 +168,35 @@ func PromptForListInput(promptText string) []string {
 // In non-interactive mode (piped stdin, CI, etc.), it exits and asks for --yes flag.
 // Returns on confirm; exits the program on decline.
 func ConfirmAction(msg string, args ...any) {
-	if !IsInteractiveShell() {
-		CliErrorWithCode(ExitCodeUsageError, ErrorCodeConfirmationRequired, "This operation requires confirmation. Use --yes (-y) to skip the prompt in non-interactive mode.")
+	proceed, err := Confirm(msg, args...)
+	if err != nil {
+		exitWithError(confirmationRequiredError())
 	}
-	if !PromptForBool(confirmPrompt(msg, args...)) {
-		CliInfoWithExit("Operation cancelled.")
+	if !proceed {
+		os.Exit(0)
 	}
+}
+
+// Confirm is ConfirmAction for a RunE command. A decline prints the cancel notice and returns false,
+// which the caller ends on with exit 0; a non-interactive run returns the exit-2 failure.
+func Confirm(msg string, args ...any) (bool, error) {
+	return confirm(IsInteractiveShell(), os.Stdin, msg, args...)
+}
+
+func confirm(interactive bool, r io.Reader, msg string, args ...any) (bool, error) {
+	if !interactive {
+		return false, confirmationRequiredError()
+	}
+	if !promptForBool(r, confirmPrompt(msg, args...)) {
+		CliInfo("Operation cancelled.")
+		return false, nil
+	}
+	return true, nil
+}
+
+func confirmationRequiredError() *ExitError {
+	return &ExitError{Code: ExitCodeUsageError, errorCode: ErrorCodeConfirmationRequired,
+		msg: "This operation requires confirmation. Use --yes (-y) to skip the prompt in non-interactive mode."}
 }
 
 // confirmPrompt formats a confirmation prompt without control characters, so a

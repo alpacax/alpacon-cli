@@ -31,10 +31,10 @@ the flag and read the whole catalog.`,
 	Example: `  alpacon user role catalog
   alpacon user role catalog --hide-object-roles
   alpacon user role catalog --output json`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		// Filter only when hiding: --hide-object-roles=false asks for the whole catalog, and
@@ -47,11 +47,12 @@ the flag and read the whole catalog.`,
 
 		roles, err := rbac.GetRoleCatalog(alpaconClient, autoAssigned)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the role catalog: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
+			return utils.NewExitError("Failed to retrieve the role catalog: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		utils.PrintTable(rbac.RoleAttributesFrom(roles))
-	},
+		return nil
+	}),
 }
 
 func init() {

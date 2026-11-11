@@ -946,3 +946,38 @@ func TestRejectUnknownSubcommandPassesWhenNoWordIsGiven(t *testing.T) {
 
 	assert.NoError(t, err)
 }
+
+func TestParseIntList(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		input   string
+		want    []int
+		wantErr bool
+	}{
+		{"one index", "1", []int{1}, false},
+		{"indexes with spaces", " 1, 2 ,3", []int{1, 2, 3}, false},
+		{"a word among them", "1,x", nil, true},
+		{"empty input", "", nil, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := ParseIntList(tt.input)
+
+			if !tt.wantErr {
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, got)
+				return
+			}
+			exitErr, ok := errors.AsType[*ExitError](err)
+			require.True(t, ok, "want an ExitError, got %v", err)
+			assert.Equal(t, ExitCodeGeneralError, exitErr.Code)
+			assert.Equal(t, "Invalid input: only integers allowed.", exitErr.Error())
+			assert.True(t, exitErr.footer, "the failure keeps its report-an-issue footer")
+			assert.Nil(t, got)
+		})
+	}
+}

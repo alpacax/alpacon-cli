@@ -24,56 +24,77 @@ var userCreateCmd = &cobra.Command{
 	Example: ` 
 	alpacon user create
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 
 		isSaaS, err := config.IsSaaS()
 		if err != nil {
-			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+			return utils.NewExitError("Not logged in. Run 'alpacon login' first.")
 		}
 		if isSaaS {
-			utils.CliErrorWithExit("This command is only available for self-hosted workspaces. Use 'alpacon user invite' instead.")
+			return utils.NewExitError("This command is only available for self-hosted workspaces. Use 'alpacon user invite' instead.")
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if err := alpaconClient.LoadCurrentUser(); err != nil {
-			utils.CliErrorWithExit("Failed to load current user: %s", err)
+			return utils.NewExitError("Failed to load current user: %s", err)
 		}
 
 		if alpaconClient.Privileges == "general" {
-			utils.CliErrorWithExit("Insufficient permissions to create users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
+			return utils.NewExitError("Insufficient permissions to create users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
 		}
 
-		userRequest := promptForUser(alpaconClient)
+		userRequest, err := promptForUser(alpaconClient)
+		if err != nil {
+			return err
+		}
 
 		password, err := iam.CreateUser(alpaconClient, userRequest)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to create the new user: %s", err)
+			return utils.NewExitError("Failed to create the new user: %s", err)
 		}
 
 		utils.CliSuccess("User created: %s", userRequest.Username)
 		if err := printGeneratedPassword(os.Stdout, utils.CliInfo, password); err != nil {
-			utils.CliErrorWithExit("The user was created, but %s. Set a new password for the user before they can log in.", err)
+			return utils.NewExitError("The user was created, but %s. Set a new password for the user before they can log in.", err)
 		}
-	},
+		return nil
+	}),
 }
 
 // promptForUser offers the privilege fields only to a superuser, so the caller must run
 // LoadCurrentUser first.
-func promptForUser(ac *client.AlpaconClient) iam.UserCreateRequest {
+func promptForUser(ac *client.AlpaconClient) (iam.UserCreateRequest, error) {
 	var userRequest iam.UserCreateRequest
 
-	userRequest.Username = utils.PromptForRequiredInput("Username(required): ")
-	userRequest.FirstName = utils.PromptForRequiredInput("First name(required): ")
-	userRequest.LastName = utils.PromptForRequiredInput("Last name(required): ")
-	userRequest.Email = utils.PromptForRequiredInput("Email(required): ")
-	userRequest.Phone = utils.PromptForInput("Phone number(optional): ")
-	userRequest.Tags = utils.PromptForInput("Tags (optional, comma-separated, e.g., #dev, #ops): ")
-	userRequest.Description = utils.PromptForInput("Description(optional): ")
-	userRequest.Shell = utils.PromptForInput("Shell(optional, An absolute path for a shell of choice. default: /bin/bash): ")
+	fields := []struct {
+		value    *string
+		prompt   string
+		required bool
+	}{
+		{&userRequest.Username, "Username(required): ", true},
+		{&userRequest.FirstName, "First name(required): ", true},
+		{&userRequest.LastName, "Last name(required): ", true},
+		{&userRequest.Email, "Email(required): ", true},
+		{&userRequest.Phone, "Phone number(optional): ", false},
+		{&userRequest.Tags, "Tags (optional, comma-separated, e.g., #dev, #ops): ", false},
+		{&userRequest.Description, "Description(optional): ", false},
+		{&userRequest.Shell, "Shell(optional, An absolute path for a shell of choice. default: /bin/bash): ", false},
+	}
+	for _, f := range fields {
+		read := utils.ReadInput
+		if f.required {
+			read = utils.ReadRequiredInput
+		}
+		input, err := read(f.prompt)
+		if err != nil {
+			return userRequest, err
+		}
+		*f.value = input
+	}
 
 	userRequest.IsLdapUser = utils.PromptForBool("LDAP status")
 
@@ -82,7 +103,7 @@ func promptForUser(ac *client.AlpaconClient) iam.UserCreateRequest {
 		userRequest.IsSuperuser = utils.PromptForBool("Superuser status")
 	}
 
-	return userRequest
+	return userRequest, nil
 }
 
 // printGeneratedPassword keeps stdout to the password line alone so a script can capture it.

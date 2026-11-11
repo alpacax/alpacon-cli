@@ -32,28 +32,34 @@ catalog' to see the names this workspace defines.`,
   alpacon user role grant john superuser --reason "SEC-1421" -y
   alpacon user role grant john auditor --dry-run`,
 	Args: cobra.ExactArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		reason := reasonFlag(cmd)
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		yes, _ := cmd.Flags().GetBool("yes")
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		// Role first: resolving the user first would fail before the transposed-argument hint fires.
-		role := resolveRoleForBinding(alpaconClient, "grant", args[0], args[1])
-		subj := resolveSubject(alpaconClient, args[:1])
+		role, err := resolveRoleForBinding(alpaconClient, "grant", args[0], args[1])
+		if err != nil {
+			return err
+		}
+		subj, err := resolveSubject(alpaconClient, args[:1])
+		if err != nil {
+			return err
+		}
 
 		bindings, err := rbac.GetUserBindings(alpaconClient, subj.ID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to read %s's current roles: %s.", subj.Label, describeRBACError(alpaconClient, gateRoleRead, err))
+			return utils.NewExitError("Failed to read %s's current roles: %s.", subj.Label, describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		if rbac.FindWorkspaceBinding(bindings, role.ID) != nil {
 			utils.CliInfo("%s already holds %s workspace-wide. Nothing to do.", subj.Label, role.Name)
-			return
+			return nil
 		}
 
 		request := rbac.BindingCreateRequest{User: subj.ID, Role: role.ID, Reason: reason}
@@ -68,11 +74,13 @@ catalog' to see the names this workspace defines.`,
 
 		if dryRun {
 			utils.CliInfo("Would grant %s to %s (user %s, role %s), workspace-wide.", role.Name, subj.Label, subj.ID, role.ID)
-			return
+			return nil
 		}
 
 		if rbac.IsPlatformTier(role.Name) && !yes {
-			utils.ConfirmAction("Grant %s the %s role?", subj.Label, role.Name)
+			if proceed, err := utils.Confirm("Grant %s the %s role?", subj.Label, role.Name); err != nil || !proceed {
+				return err
+			}
 		}
 
 		grant := func() error {
@@ -84,12 +92,13 @@ catalog' to see the names this workspace defines.`,
 		}
 		// A duplicate means another writer won the race; the asked-for end state holds.
 		if err != nil && !rbac.IsDuplicateBinding(err) {
-			utils.CliErrorWithExit("Failed to grant %s to %s: %s.", role.Name, subj.Label, describeRBACError(alpaconClient, gateRoleWrite, err))
+			return utils.NewExitError("Failed to grant %s to %s: %s.", role.Name, subj.Label, describeRBACError(alpaconClient, gateRoleWrite, err))
 		}
 
 		utils.CliSuccess("Granted %s to %s.", role.Name, subj.Label)
 		reportWorkspaceRoles(alpaconClient, subj.ID, subj.Label)
-	},
+		return nil
+	}),
 }
 
 func init() {
@@ -100,22 +109,21 @@ func init() {
 
 // resolveRoleForBinding checks for transposed arguments on failure: most CLIs in this space put
 // the role before the user, so 'grant admin john' is the mistake an operator arrives with.
-func resolveRoleForBinding(ac *client.AlpaconClient, verb, userArg, roleArg string) *rbac.RoleResponse {
+func resolveRoleForBinding(ac *client.AlpaconClient, verb, userArg, roleArg string) (*rbac.RoleResponse, error) {
 	role, err := rbac.ResolveRole(ac, roleArg)
 	if err == nil {
-		return role
+		return role, nil
 	}
 
 	missingID := utils.IsUUID(strings.TrimSpace(roleArg)) && utils.HTTPStatusCode(err) == http.StatusNotFound
 	if errors.Is(err, rbac.ErrNotFound) || missingID {
 		if _, swapErr := rbac.ResolveRole(ac, userArg); swapErr == nil && !mayNameAUser(ac, userArg) {
-			utils.CliUsageErrorWithExit("No role named %q, but %q is one. The user comes first: 'alpacon user role %s %s %s'.",
+			return nil, utils.NewUsageExitError("No role named %q, but %q is one. The user comes first: 'alpacon user role %s %s %s'.",
 				roleArg, userArg, verb, roleArg, userArg)
 		}
 	}
 
-	utils.CliErrorWithExit("Failed to resolve the role: %s.", describeRBACError(ac, gateRoleRead, err))
-	return nil
+	return nil, utils.NewExitError("Failed to resolve the role: %s.", describeRBACError(ac, gateRoleRead, err))
 }
 
 // mayNameAUser is false only when the lookup answered that no user has this name, so the

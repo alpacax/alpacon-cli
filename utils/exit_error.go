@@ -18,6 +18,7 @@ type ExitError struct {
 	footer    bool
 	envelope  bool // built by NewEnvelopeExitError: json mode classifies cause under operation
 	operation string
+	errorCode string // the json error_code when the failure names one instead of classifying it
 	cause     error
 	msg       string
 	args      []any
@@ -141,7 +142,7 @@ func printExitError(text, envelope io.Writer, e *ExitError) {
 		return
 	}
 	if OutputFormat == OutputFormatJSON {
-		failure := envelopeFailure(e.Code, "", e.msg, e.args)
+		failure := envelopeFailure(e.Code, e.errorCode, e.msg, e.args)
 		switch {
 		case e.usage:
 			failure.ErrorCode, failure.Operation, failure.Err = ErrorCodeUsage, e.operation, nil

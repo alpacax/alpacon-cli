@@ -25,18 +25,20 @@ the 'alpacon user role' command that makes the change instead. An edit that touc
 one of them never exits 0, whether or not the rest of the edit was applied.`,
 	Example: `  alpacon user update john`,
 	Args:    cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		userName := args[0]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		userID, edit, err := iam.PrepareUserUpdate(alpaconClient, userName)
 		if err != nil {
-			utils.ExitIfNoChanges(err)
-			utils.CliErrorWithExit("Failed to update the user info: %s.", err)
+			if utils.ReportNoChanges(err) {
+				return nil
+			}
+			return utils.NewExitError("Failed to update the user info: %s.", err)
 		}
 
 		// Report the privilege edits first, so the guidance survives a failed patch.
@@ -47,23 +49,24 @@ one of them never exits 0, whether or not the rest of the edit was applied.`,
 		}
 
 		if len(edit.Changes) == 0 {
-			utils.CliErrorWithExit("Nothing was applied: the only edits were to read-only privilege flags.")
+			return utils.NewExitError("Nothing was applied: the only edits were to read-only privilege flags.")
 		}
 
 		userDetail, err := iam.PatchUser(alpaconClient, userID, edit.Changes)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to update the user info: %s.", err)
+			return utils.NewExitError("Failed to update the user info: %s.", err)
 		}
 
 		utils.PrintJson(userDetail)
 
 		// Non-zero exit: a wrapper reading 0 would carry on as though the promotion had landed.
 		if len(edit.Privileges) > 0 {
-			utils.CliErrorWithExit("The other edits were applied, but the privilege flags were not sent. Run the 'alpacon user role' command above to change them.")
+			return utils.NewExitError("The other edits were applied, but the privilege flags were not sent. Run the 'alpacon user role' command above to change them.")
 		}
 
 		utils.CliSuccess("User updated: %s", userName)
-	},
+		return nil
+	}),
 }
 
 // roleCommandFor maps a privilege-flag edit to the equivalent 'alpacon user role' command.

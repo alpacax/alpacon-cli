@@ -115,6 +115,7 @@ func TestFprintExitError_UnderJSONPrintsOneEnvelope(t *testing.T) {
 	}{
 		{name: "server refusal", err: NewExitError("request failed: %s", refusal), wantErrorCode: "rbac_permission_required", wantHTTPStatus: 403, wantHint: true},
 		{name: "usage error", err: NewUsageExitError("expected one %s", "ENDPOINT"), wantErrorCode: ErrorCodeUsage},
+		{name: "confirmation required", err: confirmationRequiredError(), wantErrorCode: ErrorCodeConfirmationRequired},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -137,6 +138,20 @@ func TestFprintExitError_UnderJSONPrintsOneEnvelope(t *testing.T) {
 			assert.NotContains(t, out.String(), gitIssueURL)
 		})
 	}
+}
+
+// Serial: OutputFormat is process-wide.
+func TestFprintExitError_ConfirmationRequiredKeepsItsEnvelope(t *testing.T) {
+	saved := OutputFormat
+	OutputFormat = OutputFormatJSON
+	t.Cleanup(func() { OutputFormat = saved })
+	var out bytes.Buffer
+
+	FprintExitError(&out, confirmationRequiredError())
+
+	assert.JSONEq(t, `{"ok":false,"exit_code":2,"error_code":"confirmation_required",`+
+		`"message":"This operation requires confirmation. Use --yes (-y) to skip the prompt in non-interactive mode.",`+
+		`"context":{"operation":""}}`, out.String())
 }
 
 func TestFprintExitError_SilentPrintsNothingUnderJSON(t *testing.T) {
