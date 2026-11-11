@@ -539,12 +539,63 @@ func fileSuggestionAction(parsed RemoteExecArgs, s *event.FileExecutionSuggestio
 }
 
 // containerExecRe matches a command line that runs something inside a
-// container or pod, and containerInlineRe a program body carried on that line:
-// an interpreter's -c or -e argument, a heredoc, or a Django shell.
-var (
-	containerExecRe   = regexp.MustCompile(`\b(docker|podman|nerdctl|kubectl)\b[^|;&]*\bexec\b`)
-	containerInlineRe = regexp.MustCompile(`\s-[ce](\s|$)|<<|manage\.py\s+shell`)
-)
+// container or pod.
+var containerExecRe = regexp.MustCompile(`\b(docker|podman|nerdctl|kubectl)\b[^|;&]*\bexec\b`)
+
+// containerExecValueFlags are the runtime exec options that take the next
+// argument as their value, so that argument is neither the target nor the
+// program (docker -e KEY=value, kubectl -c sidecar).
+var containerExecValueFlags = map[string]bool{
+	"-e": true, "--env": true, "--env-file": true, "-u": true, "--user": true,
+	"-w": true, "--workdir": true, "-c": true, "--container": true,
+	"-n": true, "--namespace": true, "--kubeconfig": true, "--context": true,
+	"--pod-running-timeout": true,
+}
+
+// containerProgram returns the argv the container runs: what follows `--`
+// when present, else what follows the runtime's options and the target.
+func containerProgram(command string) []string {
+	loc := containerExecRe.FindStringIndex(command)
+	if loc == nil {
+		return nil
+	}
+	args := strings.Fields(command[loc[1]:])
+	for i, arg := range args {
+		if arg == "--" {
+			return args[i+1:]
+		}
+	}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "-") {
+			return args[i+1:]
+		}
+		if containerExecValueFlags[arg] {
+			i++
+		}
+	}
+	return nil
+}
+
+// containerRunsInlineProgram reports whether the container is handed a program
+// body on the line itself: an interpreter's -c or -e argument, a heredoc, or a
+// Django shell. Runtime options such as docker -e or kubectl -c do not count.
+func containerRunsInlineProgram(command string) bool {
+	program := containerProgram(command)
+	if len(program) == 0 {
+		return false
+	}
+	joined := strings.Join(program, " ")
+	if strings.Contains(joined, "<<") || strings.Contains(joined, "manage.py shell") {
+		return true
+	}
+	for _, arg := range program[1:] {
+		if arg == "-c" || arg == "-e" {
+			return true
+		}
+	}
+	return false
+}
 
 // containerScriptAction points a held command line that runs an inline program
 // inside a container or pod at the verified file lane. --file cannot reach into
@@ -555,8 +606,7 @@ var (
 // command already on the file lane, one that carried --env (the file lane cannot
 // take it), or one that does not match both patterns.
 func containerScriptAction(parsed RemoteExecArgs) (utils.NextAction, bool) {
-	if parsed.File != nil || len(parsed.Env) > 0 ||
-		!containerExecRe.MatchString(parsed.Command) || !containerInlineRe.MatchString(parsed.Command) {
+	if parsed.File != nil || len(parsed.Env) > 0 || !containerRunsInlineProgram(parsed.Command) {
 		return utils.NextAction{}, false
 	}
 	parts := append([]string{string(ExecInvocation)}, runAsFlags(parsed)...)

@@ -3,6 +3,7 @@ package exec
 import (
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -33,6 +34,21 @@ func TestContainerScriptAction(t *testing.T) {
 			name:   "container exec that runs a named management command",
 			parsed: RemoteExecArgs{Server: "srv", Command: "docker exec app python manage.py migrate"},
 			want:   false,
+		},
+		{
+			name:   "kubectl -c selects a container, not a program body",
+			parsed: RemoteExecArgs{Server: "srv", Command: "kubectl exec -c sidecar pod -- python script.py"},
+			want:   false,
+		},
+		{
+			name:   "docker -e sets an environment variable, not a program body",
+			parsed: RemoteExecArgs{Server: "srv", Command: "docker exec -e KEY=value app python script.py"},
+			want:   false,
+		},
+		{
+			name:   "runtime options before an inline program",
+			parsed: RemoteExecArgs{Server: "srv", Command: `docker exec -e KEY=value -w /app app python -c "print(1)"`},
+			want:   true,
 		},
 		{
 			name:   "inline program on the host, not in a container",
@@ -75,4 +91,25 @@ func TestContainerScriptActionKeepsRunAsFlags(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "alpacon exec -u root -g wheel --work-session ws-1 --upload --file /tmp/container-work.sh --file-from ./container-work.sh srv", action.Command)
 	assert.Contains(t, action.Description, "cancel it in the Alpacon console")
+}
+
+// A held container command gets the script template only when the server sent
+// no suggestion: one it sent that this CLI cannot render is still its answer.
+func TestExecHeldContainerCommandTemplateWaitsForNoSuggestion(t *testing.T) {
+	line := []string{"root@prod", "--", "docker", "exec", "app", "python", "-c", "print(1)"}
+
+	t.Run("no suggestion", func(t *testing.T) {
+		ts := newHeldScriptServer("")
+		defer ts.Close()
+		_, stderr, exitCode := runExecHelper(t, ts.URL, line...)
+		assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
+		assert.Contains(t, stderr, "--upload --file /tmp/container-work.sh")
+	})
+	t.Run("suggestion this CLI cannot render", func(t *testing.T) {
+		ts := newHeldScriptServer(`{"path":"relative.sh","interpreter":"/bin/bash","args":[]}`)
+		defer ts.Close()
+		_, stderr, exitCode := runExecHelper(t, ts.URL, line...)
+		assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
+		assert.NotContains(t, stderr, "--upload --file /tmp/container-work.sh")
+	})
 }

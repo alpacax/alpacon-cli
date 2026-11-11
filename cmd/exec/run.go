@@ -807,8 +807,12 @@ func pendingApprovalFailure(stderr io.Writer, err error, parsed RemoteExecArgs) 
 		var extra []utils.NextAction
 		if action, ok := fileSuggestionAction(parsed, pendingErr.FileSuggestion); ok {
 			extra = append(extra, action)
-		} else if action, ok := containerScriptAction(parsed); ok {
-			extra = append(extra, action)
+		} else if pendingErr.FileSuggestion == nil {
+			// Only when the server sent no suggestion: one it sent that this
+			// CLI cannot render is still its answer, not a gap to fill.
+			if action, ok := containerScriptAction(parsed); ok {
+				extra = append(extra, action)
+			}
 		}
 		utils.PrintPendingApproval(
 			"Approval required—this command is held for human approval in the Alpacon console (web). "+
