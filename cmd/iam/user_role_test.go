@@ -2,6 +2,7 @@ package iam
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -140,6 +141,32 @@ func TestSplitCanIArgs(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantSubject, subject)
 			assert.Equal(t, tt.wantPermission, permission)
+		})
+	}
+}
+
+func TestSplitCanIArgs_RejectsWhatIsNotAPermission(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		args    []string
+		wantMsg string
+	}{
+		{"a transposed pair names the order", []string{"server:update", "john"}, "The user comes first: 'alpacon user permission can-i john server:update'."},
+		{"one word without a colon", []string{"update"}, `"update" is not a permission.`},
+		{"a second word without a colon", []string{"john", "update"}, `"update" is not a permission.`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, err := splitCanIArgs(tt.args)
+
+			exitErr, ok := errors.AsType[*utils.ExitError](err)
+			require.True(t, ok, "want an ExitError, got %v", err)
+			assert.Equal(t, utils.ExitCodeUsageError, exitErr.Code)
+			assert.Contains(t, exitErr.Error(), tt.wantMsg)
 		})
 	}
 }
@@ -589,6 +616,54 @@ func TestResolveSubjectCanonicalizesAUUID(t *testing.T) {
 			assert.Equal(t, canonical, got.PK)
 			assert.Equal(t, canonical, got.ID)
 			assert.Equal(t, typed, got.Label, "the label echoes what the operator typed")
+		})
+	}
+}
+
+func TestResolveRoleForBinding_NamesTransposedArguments(t *testing.T) {
+	t.Parallel()
+	const roleID = "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47"
+	tests := []struct {
+		name     string
+		userArg  string
+		roleArg  string
+		users    []map[string]any
+		wantCode int
+		wantMsg  string
+	}{
+		{"a role given first and no such user", "admin", "john", nil, utils.ExitCodeUsageError,
+			"No role named \"john\", but \"admin\" is one. The user comes first: 'alpacon user role grant john admin'."},
+		{"a user who shares the role's name", "admin", "john", []map[string]any{{"id": "550e8400-e29b-41d4-a716-446655440000", "username": "admin"}},
+			utils.ExitCodeGeneralError, "Failed to resolve the role"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/rbac/roles/":
+					var roles []map[string]any
+					if r.URL.Query().Get("name") == "admin" {
+						roles = []map[string]any{{"id": roleID, "name": "admin"}}
+					}
+					_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{Count: len(roles), Results: roles})
+				case "/api/iam/users/":
+					_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{Count: len(tt.users), Results: tt.users})
+				default:
+					t.Errorf("unexpected request %s", r.URL)
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			}))
+			defer ts.Close()
+
+			_, err := resolveRoleForBinding(&client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, "grant", tt.userArg, tt.roleArg)
+
+			exitErr, ok := errors.AsType[*utils.ExitError](err)
+			require.True(t, ok, "want an ExitError, got %v", err)
+			assert.Equal(t, tt.wantCode, exitErr.Code)
+			assert.Contains(t, exitErr.Error(), tt.wantMsg)
 		})
 	}
 }
