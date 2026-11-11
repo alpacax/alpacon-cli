@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -146,25 +145,14 @@ func TestListKubeSessionsAskClusterNamesOnlyWhenNeeded(t *testing.T) {
 	}
 }
 
-func resetKubeSessionsFlags(t *testing.T, cluster string, all bool) {
-	t.Helper()
-	oldCluster, oldAll := kubeSessionsCluster, kubeSessionsAll
-	kubeSessionsCluster, kubeSessionsAll = cluster, all
-	t.Cleanup(func() { kubeSessionsCluster, kubeSessionsAll = oldCluster, oldAll })
-}
-
-// Serial: it sets HOME, swaps os.Stdout and flips utils.OutputFormat.
+// Serial: it swaps os.Stdout and flips utils.OutputFormat.
 func TestKubeSessionsPrintsTable(t *testing.T) {
 	f := &sessionListServer{sessions: []string{openSessionJSON, closedSessionJSON}}
 	ts := httptest.NewServer(f.handler(t))
 	defer ts.Close()
-	setupKubeCommandConfig(t, ts.URL)
-	withOutputFormat(t, utils.OutputFormatTable)
-	resetKubeSessionsFlags(t, "", true)
+	stdout, stderr, code := runKubeCommandWith(t, apiClientTo(ts), utils.OutputFormatTable, "sessions", "--all")
 
-	stdout, _ := testutil.CaptureOutput(t, func() {
-		kubeSessionsCmd.Run(kubeSessionsCmd, nil)
-	})
+	require.Equal(t, 0, code, stderr)
 
 	assert.Regexp(t, `ID\s+CLUSTER\s+USER\s+STATUS\s+EXPIRES AT`, stdout)
 	assert.Regexp(t, `s-1\s+prod-east\s+alice\s+open\s+2026-11-0`, stdout)
@@ -172,18 +160,14 @@ func TestKubeSessionsPrintsTable(t *testing.T) {
 	assert.NotContains(t, stdout, "CLUSTER ID")
 }
 
-// Serial: it sets HOME, swaps os.Stdout and flips utils.OutputFormat.
+// Serial: it swaps os.Stdout and flips utils.OutputFormat.
 func TestKubeSessionsJSON(t *testing.T) {
 	f := &sessionListServer{sessions: []string{openSessionJSON}}
 	ts := httptest.NewServer(f.handler(t))
 	defer ts.Close()
-	setupKubeCommandConfig(t, ts.URL)
-	withOutputFormat(t, utils.OutputFormatJSON)
-	resetKubeSessionsFlags(t, "", false)
+	stdout, stderr, code := runKubeCommandWith(t, apiClientTo(ts), utils.OutputFormatJSON, "sessions")
 
-	stdout, _ := testutil.CaptureOutput(t, func() {
-		kubeSessionsCmd.Run(kubeSessionsCmd, nil)
-	})
+	require.Equal(t, 0, code, stderr)
 
 	// The local-time format itself is pinned by TestProjectSessions.
 	expiresAt := time.Date(2026, 11, 2, 11, 0, 0, 0, time.UTC).Local().Format("2006-01-02 15:04")
@@ -191,18 +175,14 @@ func TestKubeSessionsJSON(t *testing.T) {
 		"expires_at":%q,"token_expired_at":"2026-11-02T11:00:00Z","closed_at":null}]`, expiresAt), stdout)
 }
 
-// Serial: it sets HOME, swaps os.Stdout and flips utils.OutputFormat.
+// Serial: it swaps os.Stdout and flips utils.OutputFormat.
 func TestKubeSessionsEmptyJSON(t *testing.T) {
 	f := &sessionListServer{}
 	ts := httptest.NewServer(f.handler(t))
 	defer ts.Close()
-	setupKubeCommandConfig(t, ts.URL)
-	withOutputFormat(t, utils.OutputFormatJSON)
-	resetKubeSessionsFlags(t, "", false)
+	stdout, stderr, code := runKubeCommandWith(t, apiClientTo(ts), utils.OutputFormatJSON, "sessions")
 
-	stdout, _ := testutil.CaptureOutput(t, func() {
-		kubeSessionsCmd.Run(kubeSessionsCmd, nil)
-	})
+	require.Equal(t, 0, code, stderr)
 
 	assert.JSONEq(t, `[]`, stdout)
 }

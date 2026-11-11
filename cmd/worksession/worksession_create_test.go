@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1083,6 +1084,35 @@ func TestWorkSessionCreateUseOnAnUnknownStatusExitsGeneralError(t *testing.T) {
 			assert.Equal(t, utils.ErrorCodeCLI, got.ErrorCode)
 			assert.Equal(t, opCreate, got.Context.Operation)
 			assert.Equal(t, message, got.Message)
+		})
+	}
+}
+
+func TestWaitExitErrorReturnsTheExitInsteadOfTakingIt(t *testing.T) {
+	session := &wsapi.WorkSession{ID: "550e8400-e29b-41d4-a716-446655440000"}
+	cases := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantText string
+	}{
+		{name: "settled", err: &terminalWaitError{message: "work session was rejected", sessionID: session.ID}, wantCode: utils.ExitCodeNotApproved, wantText: "work session was rejected"},
+		{name: "still_pending", err: &pendingWaitError{message: "timed out waiting for approval after 1s"}, wantCode: utils.ExitCodePendingApproval, wantText: "The outcome is still open"},
+		{name: "polling_failed", err: fmt.Errorf("polling failed: %w", os.ErrDeadlineExceeded), wantCode: utils.ExitCodeGeneralError, wantText: "polling failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var err error
+			_, stderr := testutil.CaptureOutput(t, func() {
+				err = WaitExitError(opCreate, session, utils.NextAction{}, tc.err)
+			})
+
+			var exitErr *utils.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			var rendered bytes.Buffer
+			utils.FprintExitError(&rendered, exitErr)
+			assert.Equal(t, tc.wantCode, exitErr.Code)
+			assert.Contains(t, stderr+rendered.String(), tc.wantText) // printed here or by the caller, never lost
 		})
 	}
 }

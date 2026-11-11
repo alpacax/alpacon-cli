@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -16,50 +15,53 @@ type describeRow struct {
 	Value string `table:"Value"`
 }
 
-var kubeDescribeCmd = &cobra.Command{
-	Use:     "describe CLUSTER",
-	Aliases: []string{"desc"},
-	Short:   "Show details of a Kubernetes cluster",
-	Long: `Show the details of one cluster: provider, versions, node count,
+func newKubeDescribeCmd(newClient clientFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:     "describe CLUSTER",
+		Aliases: []string{"desc"},
+		Short:   "Show details of a Kubernetes cluster",
+		Long: `Show the details of one cluster: provider, versions, node count,
 connectivity, groups, and tags.
 
 Use --output json to see the full raw response, with group IDs in place of
 names and status and tags as the server stores them.`,
-	Example: `  alpacon kube describe prod-cluster
+		Example: `  alpacon kube describe prod-cluster
   alpacon kube desc prod-cluster --output json`,
-	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		clusterID, err := kubernetes.GetClusterIDByName(ac, args[0])
-		if err != nil {
-			// Only the list endpoint's 404 means the surface is off; a 404 on
-			// the detail below is a cluster deleted since it was resolved.
-			if kubernetes.IsSurfaceOff(err) {
-				exitNotEnabled()
-			}
-			utils.CliErrorWithExit("Failed to retrieve the cluster: %s.", err)
-		}
-
-		if utils.OutputFormat == utils.OutputFormatJSON {
-			body, err := kubernetes.GetClusterDetailRaw(ac, clusterID)
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			ac, err := newClient()
 			if err != nil {
-				utils.CliErrorWithExit("Failed to retrieve the cluster: %s.", err)
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
-			utils.PrintJson(body)
-			return
-		}
 
-		cluster, err := kubernetes.GetClusterDetail(ac, clusterID)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the cluster: %s.", err)
-		}
+			clusterID, err := kubernetes.GetClusterIDByName(ac, args[0])
+			if err != nil {
+				// Only the list endpoint's 404 means the surface is off; a 404 on
+				// the detail below is a cluster deleted since it was resolved.
+				if kubernetes.IsSurfaceOff(err) {
+					return notEnabledError()
+				}
+				return utils.NewExitError("Failed to retrieve the cluster: %s.", err)
+			}
 
-		utils.PrintTable(describeRows(cluster, kubernetes.ResolveGroupNames(ac, cluster.Groups), time.Local))
-	},
+			if utils.OutputFormat == utils.OutputFormatJSON {
+				body, err := kubernetes.GetClusterDetailRaw(ac, clusterID)
+				if err != nil {
+					return utils.NewExitError("Failed to retrieve the cluster: %s.", err)
+				}
+				utils.PrintJson(body)
+				return nil
+			}
+
+			cluster, err := kubernetes.GetClusterDetail(ac, clusterID)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the cluster: %s.", err)
+			}
+
+			utils.PrintTable(describeRows(cluster, kubernetes.ResolveGroupNames(ac, cluster.Groups), time.Local))
+			return nil
+		}),
+	}
 }
 
 func describeRows(cluster *kubernetes.ClusterDetail, groupNames []string, zone *time.Location) []describeRow {

@@ -1,33 +1,28 @@
 package kube
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-const kubeCommandHelperMarker = "kube-command-helper"
-
-// helperProcessTimeout bounds a child that blocks, so the suite does not wait
-// out go test's own timeout.
-const helperProcessTimeout = 60 * time.Second
 
 // logoutScene is a saved login of prod-east: its record in the store and its
 // context in the kubeconfig. Serial: it sets HOME and KUBECONFIG.
@@ -37,55 +32,45 @@ type logoutScene struct {
 	record     kubeSessionRecord
 }
 
-// TestKubeCommandHelperProcess runs KubeCmd in a child, so these tests can read
-// the exit code the command's os.Exit leaves. Run by the parent it returns at once.
-func TestKubeCommandHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_KUBE_COMMAND_HELPER") != "1" {
-		return
-	}
-	for i, arg := range os.Args {
-		if arg == kubeCommandHelperMarker {
-			utils.OutputFormat = os.Getenv("GO_KUBE_HELPER_OUTPUT")
-			KubeCmd.SetArgs(os.Args[i+1:])
-			if err := KubeCmd.Execute(); err != nil {
-				os.Exit(utils.ExitCodeUsageError)
-			}
-			os.Exit(0)
-		}
-	}
-	os.Exit(99)
-}
-
-// runKubeCommand runs the command under the HOME and KUBECONFIG the test set.
+// runKubeCommand runs a fresh kube tree in process and returns what cmd.Execute would print and exit with.
+// Serial: it swaps os.Stdout and os.Stderr and sets utils.OutputFormat.
 func runKubeCommand(t *testing.T, outputFormat string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), helperProcessTimeout)
-	defer cancel()
-	helper := kubeCommandHelper(ctx, outputFormat, args...)
-	var out, errOut bytes.Buffer
-	helper.Stdout, helper.Stderr = &out, &errOut
-	exitCode = waitHelper(t, ctx, helper.Run())
-	return out.String(), errOut.String(), exitCode
+	return runKubeCommandWith(t, client.NewAlpaconAPIClient, outputFormat, args...)
 }
 
-func kubeCommandHelper(ctx context.Context, outputFormat string, args ...string) *osexec.Cmd {
-	helper := osexec.CommandContext(ctx, os.Args[0], append([]string{"-test.run=^TestKubeCommandHelperProcess$", "--", kubeCommandHelperMarker}, args...)...)
-	helper.Env = append(os.Environ(), "GO_WANT_KUBE_COMMAND_HELPER=1", "GO_KUBE_HELPER_OUTPUT="+outputFormat)
-	return helper
-}
-
-// waitHelper turns the child's end into its exit code. Cobra's own errors
-// reach the helper as a returned error, which it maps to exit 2 the way
-// cmd.Execute does; that mapping itself is tested in package cmd.
-func waitHelper(t *testing.T, ctx context.Context, err error) int {
+func runKubeCommandWith(t *testing.T, newClient clientFactory, outputFormat string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
+	withOutputFormat(t, outputFormat)
+	cmd := newKubeCmd(newClient)
+	cmd.SilenceErrors, cmd.SilenceUsage = true, true // as RootCmd is
+	cmd.SetArgs(args)
+	var err error
+	stdout, stderr = testutil.CaptureOutput(t, func() { err = cmd.Execute() })
+	var failure strings.Builder
+	exitCode = reportExit(&failure, err)
+	return stdout, stderr + failure.String(), exitCode
+}
+
+// apiClientTo builds clients for ts, so a test needs no login in HOME.
+func apiClientTo(ts *httptest.Server) clientFactory {
+	return func() (*client.AlpaconClient, error) {
+		return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, nil
+	}
+}
+
+// reportExit prints err as cmd.Execute does and returns its exit code. An error that is no ExitError
+// is Cobra rejecting the command line, which exits 2; package cmd tests that mapping.
+func reportExit(w io.Writer, err error) int {
 	if err == nil {
 		return 0
 	}
-	require.NoError(t, ctx.Err(), "the helper did not finish within %s", helperProcessTimeout)
-	var exitErr *osexec.ExitError
-	require.ErrorAs(t, err, &exitErr)
-	return exitErr.ExitCode()
+	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+		utils.FprintExitError(w, exitErr)
+		return exitErr.Code
+	}
+	_, _ = fmt.Fprintln(w, err)
+	return utils.ExitCodeUsageError
 }
 
 func newLogoutScene(t *testing.T, workspaceURL string) logoutScene {
@@ -251,25 +236,28 @@ func TestKubeLogoutCommandFirstInterruptDuringTheClose(t *testing.T) {
 	scene := newLogoutScene(t, ts.URL)
 	require.NoError(t, config.CreateConfig(ts.URL, "ws", "token", "", "", "", "", 0, false))
 
-	ctx, cancel := context.WithTimeout(t.Context(), helperProcessTimeout)
-	defer cancel()
-	helper := kubeCommandHelper(ctx, utils.OutputFormatJSON, "logout", "prod-east")
-	var out, errOut bytes.Buffer
-	helper.Stdout, helper.Stderr = &out, &errOut
-	require.NoError(t, helper.Start())
-	select {
-	case <-asked:
-	case <-ctx.Done():
-		t.Fatalf("the close was never sent: %s", errOut.String())
-	}
-	require.NoError(t, helper.Process.Signal(os.Interrupt))
-	code := waitHelper(t, ctx, helper.Wait())
+	// The watcher has taken SIGINT by the time the close is sent, so the
+	// signal reaches it rather than ending the test binary.
+	go func() {
+		select {
+		case <-asked:
+			self, err := os.FindProcess(os.Getpid())
+			if err == nil {
+				err = self.Signal(os.Interrupt)
+			}
+			if err != nil {
+				t.Errorf("interrupt: %v", err)
+			}
+		case <-t.Context().Done():
+		}
+	}()
+	stdout, stderr, code := runKubeCommand(t, utils.OutputFormatJSON, "logout", "prod-east")
 
-	require.Equal(t, 0, code, errOut.String())
+	require.Equal(t, 0, code, stderr)
 	var result kubeLogoutResult
-	require.NoError(t, json.Unmarshal(out.Bytes(), &result), out.String())
+	require.NoError(t, json.Unmarshal([]byte(stdout), &result), stdout)
 	assert.Equal(t, []loggedOutSession{{ID: scene.record.KubeSessionID, Workspace: ts.URL, CloseError: "interrupted"}}, result.Sessions)
-	assert.Contains(t, errOut.String(), "Interrupted before closing the kube session")
+	assert.Contains(t, stderr, "Interrupted before closing the kube session")
 	assertGone(t, scene.kubeconfig, "alpacon-prod-east")
 	assert.NoFileExists(t, scene.store.recordPath(scene.record.key()))
 }
@@ -307,9 +295,8 @@ func TestKubeSessionsCommandRefusals(t *testing.T) {
 				}
 			}))
 			defer ts.Close()
-			setupKubeCommandConfig(t, ts.URL)
 
-			_, stderr, code := runKubeCommand(t, utils.OutputFormatTable, tt.args...)
+			_, stderr, code := runKubeCommandWith(t, apiClientTo(ts), utils.OutputFormatTable, tt.args...)
 
 			assert.Equal(t, tt.wantCode, code, stderr)
 			assert.Contains(t, stderr, tt.wantStderr)

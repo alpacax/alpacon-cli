@@ -99,7 +99,7 @@ func TestApplySurfaceGate_DisabledKeepsAPassThroughChild(t *testing.T) {
 	keep := &cobra.Command{Use: "credentials", Hidden: true, Run: func(*cobra.Command, []string) { ran = true }}
 	real.AddCommand(keep)
 
-	applySurfaceGate(root, real, false, keep)
+	applySurfaceGate(root, real, false, keep.Name())
 
 	found, _, err := root.Find([]string{"kube", "credentials", "--cluster", "prod-east"})
 	require.NoError(t, err)
@@ -110,28 +110,26 @@ func TestApplySurfaceGate_DisabledKeepsAPassThroughChild(t *testing.T) {
 	assert.True(t, ran, "the kept child runs instead of the not-enabled notice")
 }
 
-// Serial: it moves the package-level commands, and puts them back afterwards.
 func TestApplySurfaceGate_DisabledKeepsCredentialsAndLogout(t *testing.T) {
+	t.Parallel()
 	root := &cobra.Command{Use: "alpacon"}
-	root.AddCommand(KubeCmd)
-	t.Cleanup(func() {
-		for _, parent := range []*cobra.Command{kubeCredentialsCmd.Parent(), kubeLogoutCmd.Parent()} {
-			if parent != nil && parent != KubeCmd {
-				parent.RemoveCommand(kubeCredentialsCmd, kubeLogoutCmd)
-			}
-		}
-		KubeCmd.AddCommand(kubeCredentialsCmd, kubeLogoutCmd)
-		root.RemoveCommand(KubeCmd)
-	})
+	real := newKubeCmd(nil)
+	root.AddCommand(real)
+	kept := map[string]*cobra.Command{}
+	for _, name := range []string{"credentials", "logout", "sessions"} {
+		found, _, err := real.Find([]string{name})
+		require.NoError(t, err)
+		kept[name] = found
+	}
 
-	ApplySurfaceGate(root, false)
+	applySurfaceGate(root, real, false, gatePassThrough...)
 
-	for path, want := range map[string]*cobra.Command{"credentials": kubeCredentialsCmd, "logout": kubeLogoutCmd} {
+	for _, path := range []string{"credentials", "logout"} {
 		found, _, err := root.Find([]string{"kube", path})
 		require.NoError(t, err)
-		assert.Same(t, want, found)
+		assert.Same(t, kept[path], found)
 	}
 	found, _, err := root.Find([]string{"kube", "sessions"})
 	require.NoError(t, err)
-	assert.NotSame(t, kubeSessionsCmd, found, "sessions needs the workspace, so the stand-in answers it")
+	assert.NotSame(t, kept["sessions"], found, "sessions needs the workspace, so the stand-in answers it")
 }

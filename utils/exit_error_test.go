@@ -294,3 +294,32 @@ func TestFprintExitError_EnvelopeClassifiesItsCauseUnderItsOperation(t *testing.
 		})
 	}
 }
+
+func TestNewEnvelopeExitErrorWithCode_KeepsTheChosenExitAndDropsTheFooter(t *testing.T) {
+	t.Parallel()
+	usageCause := MarkUsageError(errors.New("bad flag"))
+	cases := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantLine string
+	}{
+		{name: "chosen code keeps its exit", err: NewEnvelopeExitErrorWithCode(ExitCodeNotApproved, "kube_login", errors.New("boom"), "not approved"), wantCode: ExitCodeNotApproved, wantLine: "not approved\n"},
+		{name: "exit one drops the footer", err: NewEnvelopeExitErrorWithCode(ExitCodeGeneralError, "kube_logout", nil, "in use"), wantCode: ExitCodeGeneralError, wantLine: "in use\n"},
+		{name: "usage cause promotes exit one to two", err: NewEnvelopeExitErrorWithCode(ExitCodeGeneralError, "kube_logout", usageCause, "%s", usageCause), wantCode: ExitCodeUsageError, wantLine: "bad flag\n"},
+		{name: "usage cause leaves a chosen code alone", err: NewEnvelopeExitErrorWithCode(ExitCodeNotApproved, "kube_login", usageCause, "%s", usageCause), wantCode: ExitCodeNotApproved, wantLine: "bad flag\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var out bytes.Buffer
+			exitErr, _ := errors.AsType[*ExitError](tc.err)
+
+			FprintExitError(&out, exitErr)
+
+			assert.Equal(t, tc.wantCode, exitErr.Code)
+			assert.Contains(t, out.String(), tc.wantLine)
+			assert.NotContains(t, out.String(), gitIssueURL)
+		})
+	}
+}
