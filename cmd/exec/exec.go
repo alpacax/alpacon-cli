@@ -81,7 +81,10 @@ container command and the whole program in one host script and run that:
   ...
   PY
   alpacon exec --upload --file /tmp/work.sh --file-from ./work.sh server -- --dry-run
-The reviewer then reads the program, and --reuse-days can make an unchanged
+Put the code that runs inside the container in the script itself, as a heredoc
+passed on stdin: a script that only calls manage.py <command> or decodes a
+base64 or compressed payload still hides what runs from the reviewer. The
+reviewer then reads the program, and --reuse-days can make an unchanged
 re-run reusable. A held docker or kubectl exec line that carries an inline
 program (-c, -e, a heredoc, manage.py shell) prints this template too.
 

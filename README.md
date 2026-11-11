@@ -351,6 +351,8 @@ PY
 $ alpacon exec --upload --file /tmp/container-work.sh --file-from ./container-work.sh root@<server> -- --dry-run
 ```
 
+Put the code that runs inside the container in the script itself, as a heredoc passed on stdin as above. A script that only calls `manage.py <command>` or decodes a base64 or compressed payload gains nothing, because the reviewer still cannot read what runs.
+
 When a `docker`, `podman`, `nerdctl` or `kubectl` `exec` line that carries an inline program (`-c`, `-e`, a heredoc, `manage.py shell`) is held for approval, the pending-approval message adds this `--upload --file` template. It is a template to fill in, not the held command rewritten, and the held command stays queued, so cancel it in the Alpacon console (Commands) before submitting the script.
 
 
