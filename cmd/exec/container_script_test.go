@@ -66,6 +66,16 @@ func TestContainerScriptAction(t *testing.T) {
 			want:   true,
 		},
 		{
+			name:   "kubectl options after the pod, then a named command",
+			parsed: RemoteExecArgs{Server: "srv", Command: "kubectl exec pod -n ns -c app -- python manage.py migrate"},
+			want:   false,
+		},
+		{
+			name:   "kubectl options after the pod, then an inline program",
+			parsed: RemoteExecArgs{Server: "srv", Command: `kubectl exec pod -n ns -c app -- python -c "print(1)"`},
+			want:   true,
+		},
+		{
 			name:   "inline program on the host, not in a container",
 			parsed: RemoteExecArgs{Server: "srv", Command: `python3 -c "print(1)"`},
 			want:   false,

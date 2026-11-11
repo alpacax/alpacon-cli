@@ -552,15 +552,23 @@ var containerExecValueFlags = map[string]bool{
 	"--pod-running-timeout": true,
 }
 
-// containerProgram returns the argv the container runs: what follows the
-// runtime's options and the target, past a `--` that ends them (kubectl exec
-// pod -- cmd). A `--` after the program starts belongs to the program.
+// containerProgram returns the argv the container runs. kubectl takes options
+// on either side of the pod and ends them with `--`, so its program is what
+// follows the first `--`. The other runtimes stop reading options at the
+// target, so theirs is what follows it, and a `--` after it is the program's.
 func containerProgram(command string) []string {
-	loc := containerExecRe.FindStringIndex(command)
+	loc := containerExecRe.FindStringSubmatchIndex(command)
 	if loc == nil {
 		return nil
 	}
 	args := strings.Fields(command[loc[1]:])
+	if command[loc[2]:loc[3]] == "kubectl" {
+		for i, arg := range args {
+			if arg == "--" {
+				return args[i+1:]
+			}
+		}
+	}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
