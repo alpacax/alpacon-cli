@@ -17,8 +17,9 @@ import (
 const commandDenialGates = "server_reach,command_preapproval,command_acl,file_acl,risk,approval,sudo,work_session,block"
 
 const (
-	ApprovalExpired   = "approval_expired"
-	ApprovalCancelled = "approval_cancelled"
+	ApprovalExpired     = "approval_expired"
+	ApprovalCancelled   = "approval_cancelled"
+	ApprovalRuleChanged = "approval_rule_changed"
 )
 
 // The command layer supplies config access without making utils import config.
@@ -241,7 +242,7 @@ func commandDenial(code, gate string) bool {
 
 // IsApprovalLapse reports an approval that ended without a denial.
 func IsApprovalLapse(code string) bool {
-	return code == ApprovalExpired || code == ApprovalCancelled
+	return code == ApprovalExpired || code == ApprovalCancelled || code == ApprovalRuleChanged
 }
 
 func responseSignalFields(err error, fields localsignal.Fields) localsignal.Fields {

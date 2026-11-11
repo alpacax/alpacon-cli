@@ -2847,6 +2847,7 @@ func TestRejectedCommandLocalSignal(t *testing.T) {
 		{"non-lapse cause overrides expired flag", CommandRejectedError{Gate: "approval", Expired: true, Cause: RejectionCauseApprovalRejected}, true},
 		{"expired cause", CommandRejectedError{Gate: "approval", Cause: RejectionCauseApprovalExpired}, false},
 		{"cancelled", CommandRejectedError{Gate: "approval", Cause: "approval_cancelled"}, false},
+		{"rule changed", CommandRejectedError{Gate: "approval", Cause: RejectionCauseApprovalRuleChanged}, false},
 		{"unknown gate", CommandRejectedError{Gate: "future_gate", Cause: RejectionCauseApprovalRejected}, true},
 		{"network gate", CommandRejectedError{Gate: "network", Cause: RejectionCauseApprovalRejected}, true},
 		{"plan gate", CommandRejectedError{Gate: "plan", Cause: RejectionCauseApprovalRejected}, true},

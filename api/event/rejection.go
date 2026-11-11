@@ -45,7 +45,7 @@ const (
 	// RejectionCauseApprovalRuleChanged closes a command held for the session's
 	// assignee when the rules no longer send it there at the moment of
 	// confirmation. Sent again, the command is judged under the rules then.
-	RejectionCauseApprovalRuleChanged = "approval_rule_changed"
+	RejectionCauseApprovalRuleChanged = utils.ApprovalRuleChanged
 )
 
 // rejectionText is what the CLI says about one cause or gate: what happened and
