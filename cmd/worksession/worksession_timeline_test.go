@@ -129,7 +129,7 @@ func TestFormatDetails_Command(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, formatDetails(&tc.item))
+			assert.Equal(t, tc.want, formatDetails(&tc.item).String())
 		})
 	}
 }
@@ -172,7 +172,7 @@ func TestFormatDetails_Sessions(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, formatDetails(&tc.item))
+			assert.Equal(t, tc.want, formatDetails(&tc.item).String())
 		})
 	}
 }
@@ -197,7 +197,7 @@ func TestFormatDetails_Files(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, formatDetails(&tc.item))
+			assert.Equal(t, tc.want, formatDetails(&tc.item).String())
 		})
 	}
 }
@@ -230,7 +230,7 @@ func TestFormatDetails_SudoGrant(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, formatDetails(&tc.item))
+			assert.Equal(t, tc.want, formatDetails(&tc.item).String())
 		})
 	}
 }
@@ -238,18 +238,18 @@ func TestFormatDetails_SudoGrant(t *testing.T) {
 func TestFormatDetails_Unknown(t *testing.T) {
 	t.Parallel()
 	item := wsapi.TimelineItem{Type: "unknown_event"}
-	assert.Empty(t, formatDetails(&item))
+	assert.Empty(t, formatDetails(&item).String())
 }
 
 func TestPrintTimelineTableTo_StripsControlSequences(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
 	printTimelineTableTo(&buf, []wsapi.TimelineAttributes{{
-		Time:    "2024-01-15 10:30:00",
+		Time:    utils.ParseLocalTimestamp("2024-01-15T10:30:00Z"),
 		Type:    "websh",
 		Server:  "web-01\x1b[2K\rdb-prod",
 		User:    "alice\nroot",
-		Details: "opened",
+		Details: utils.Truncate("opened", 6),
 	}})
 
 	got := buf.String()
@@ -455,7 +455,7 @@ func TestTimelineJSONRecordingsReadTheChunkCount(t *testing.T) {
 	assert.NotContains(t, stdout, "websh_record", "an embedded recording is not a timeline row")
 	entry := func(index int, id, timestamp, total, status string) string {
 		return fmt.Sprintf(`{"index":%d,"websh_session_id":%q,"time":%q,"server":"web-01","record_chunks_total":%s,"status":%q}`,
-			index, id, formatTimestamp(timestamp), total, status)
+			index, id, timestamp, total, status)
 	}
 	assert.JSONEq(t, "["+strings.Join([]string{
 		entry(1, "wsh-1", "2024-01-15T10:30:01Z", "3", "3 chunks"),
@@ -581,10 +581,48 @@ func TestTimelineShowsRejectionCauseAndGate(t *testing.T) {
 
 			row := projectTimelineAttributes(&item, nil)
 
-			assert.Equal(t, tc.wantDetails, row.Details)
+			assert.Equal(t, tc.wantDetails, row.Details.String())
 			raw, err := json.Marshal(row)
 			require.NoError(t, err)
-			assert.JSONEq(t, fmt.Sprintf(`{"timestamp":"","type":"command","server":"","user":"","details":%q%s}`, tc.wantDetails, tc.wantExtra), string(raw))
+			assert.JSONEq(t, fmt.Sprintf(`{"id":"","timestamp":null,"type":"command","server":"","user":"","details":%q%s}`, tc.wantDetails, tc.wantExtra), string(raw))
+		})
+	}
+}
+
+func TestProjectTimelineAttributes_JSONKeepsUTCTimeAndFullDetails(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("y", 80)
+	tests := []struct {
+		name      string
+		wire      string
+		wantTable string
+		wantJSON  string
+	}{
+		{
+			name:      "command line is whole and time is UTC",
+			wire:      `{"type":"command","id":"550e8400-e29b-41d4-a716-446655440000","line":"` + long + `","success":true,"timestamp":"2026-11-07T18:30:45+09:00"}`,
+			wantTable: "[ok] " + strings.Repeat("y", 60) + "...",
+			wantJSON:  `{"id":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2026-11-07T09:30:45Z","type":"command","server":"","user":"","details":"[ok] ` + long + `"}`,
+		},
+		{
+			name:      "sudo command is whole",
+			wire:      `{"type":"sudo_grant","grant_type":"once","status":"granted","command":"` + long + `"}`,
+			wantTable: "once: granted — " + strings.Repeat("y", 40) + "...",
+			wantJSON:  `{"id":"","timestamp":null,"type":"sudo grant","server":"","user":"","details":"once: granted — ` + long + `"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var item wsapi.TimelineItem
+			require.NoError(t, json.Unmarshal([]byte(tt.wire), &item))
+
+			row := projectTimelineAttributes(&item, nil)
+
+			raw, err := json.Marshal(row)
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.wantJSON, string(raw))
+			assert.Equal(t, tt.wantTable, row.Details.String())
 		})
 	}
 }

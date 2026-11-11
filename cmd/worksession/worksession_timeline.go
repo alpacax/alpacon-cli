@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"text/tabwriter"
+	"unicode/utf8"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
@@ -16,12 +17,12 @@ import (
 
 // recordingJSON is one Websh terminal, numbered as `recording --index` counts them.
 type recordingJSON struct {
-	Index             int    `json:"index"`
-	WebshSessionID    string `json:"websh_session_id"`
-	Time              string `json:"time"`
-	Server            string `json:"server"`
-	RecordChunksTotal *int   `json:"record_chunks_total"`
-	Status            string `json:"status"`
+	Index             int             `json:"index"`
+	WebshSessionID    string          `json:"websh_session_id"`
+	Time              utils.Timestamp `json:"time"`
+	Server            string          `json:"server"`
+	RecordChunksTotal *int            `json:"record_chunks_total"`
+	Status            string          `json:"status"`
 }
 
 var noRecords bool
@@ -125,11 +126,11 @@ func recordingCommand(sessionID string, index int) string {
 	return fmt.Sprintf("alpacon work-session recording %s --index %d", sessionID, index)
 }
 
-func resolveTimestamp(ts *string) string {
+func resolveTimestamp(ts *string) utils.Timestamp {
 	if ts == nil {
-		return ""
+		return utils.Timestamp{}
 	}
-	return formatTimestamp(*ts)
+	return utils.ParseLocalTimestamp(*ts)
 }
 
 func resolveServer(serverID *string, serverMap map[string]string) string {
@@ -150,11 +151,11 @@ func printTimelineTableTo(w io.Writer, rows []wsapi.TimelineAttributes) {
 	_, _ = fmt.Fprintln(tw, "TIME\tTYPE\tSERVER\tUSER\tDETAILS")
 	for _, row := range rows {
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
-			utils.SanitizeTerminalText(row.Time),
+			utils.SanitizeTerminalText(row.Time.String()),
 			utils.SanitizeTerminalText(row.Type),
 			utils.SanitizeTerminalText(row.Server),
 			utils.SanitizeTerminalText(row.User),
-			utils.SanitizeTerminalText(row.Details))
+			utils.SanitizeTerminalText(row.Details.String()))
 	}
 	_ = tw.Flush()
 }
@@ -170,7 +171,7 @@ func printRecordingsSectionTo(w io.Writer, terminals []wsapi.TimelineItem, sessi
 	for i := range terminals {
 		term := &terminals[i]
 		_, _ = fmt.Fprintf(w, "[%d]  %s  %s  %s\n", i+1,
-			utils.SanitizeTerminalText(resolveTimestamp(term.Timestamp)),
+			utils.SanitizeTerminalText(resolveTimestamp(term.Timestamp).String()),
 			utils.SanitizeTerminalText(resolveServer(term.ServerID, serverMap)),
 			recordingStatus(term.RecordChunksTotal))
 		if total := term.RecordChunksTotal; total == nil || *total != 0 {
@@ -205,6 +206,7 @@ func outputTimelineJSON(rows []wsapi.TimelineAttributes, terminals []wsapi.Timel
 
 func projectTimelineAttributes(item *wsapi.TimelineItem, serverMap map[string]string) wsapi.TimelineAttributes {
 	return wsapi.TimelineAttributes{
+		ID:               item.ID,
 		Time:             resolveTimestamp(item.Timestamp),
 		Type:             formatType(item.Type),
 		Server:           resolveServer(item.ServerID, serverMap),
@@ -237,7 +239,8 @@ func formatType(t string) string {
 	}
 }
 
-func formatDetails(item *wsapi.TimelineItem) string {
+// formatDetails cuts only the command text in a table; JSON gets it whole.
+func formatDetails(item *wsapi.TimelineItem) utils.TruncatedText {
 	switch item.Type {
 	case "command":
 		status := "unknown"
@@ -252,41 +255,49 @@ func formatDetails(item *wsapi.TimelineItem) string {
 				status = "failed"
 			}
 		}
-		return fmt.Sprintf("[%s] %s", status, utils.TruncateString(utils.SanitizeTerminalText(item.Line), 60))
+		return truncatedAfter(fmt.Sprintf("[%s] ", status), utils.SanitizeTerminalText(item.Line), 60)
 
 	case "websh_session":
 		state := sessionState(item.ClosedAt)
 		if item.ClientType != "" {
-			return fmt.Sprintf("%s (client: %s)", state, item.ClientType)
+			return whole(fmt.Sprintf("%s (client: %s)", state, item.ClientType))
 		}
-		return state
+		return whole(state)
 
 	case "tunnel_session":
 		state := sessionState(item.ClosedAt)
 		if item.TargetPort != nil {
-			return fmt.Sprintf("port %d %s", *item.TargetPort, state)
+			return whole(fmt.Sprintf("port %d %s", *item.TargetPort, state))
 		}
-		return state
+		return whole(state)
 
 	case "ftp_session":
-		return sessionState(item.ClosedAt)
+		return whole(sessionState(item.ClosedAt))
 
 	case "file_upload":
-		return fmt.Sprintf("↑ %s (%s)", utils.SanitizeTerminalText(item.Name), formatSize(item.Size))
+		return whole(fmt.Sprintf("↑ %s (%s)", utils.SanitizeTerminalText(item.Name), formatSize(item.Size)))
 
 	case "file_download":
-		return fmt.Sprintf("↓ %s (%s)", utils.SanitizeTerminalText(item.Name), formatSize(item.Size))
+		return whole(fmt.Sprintf("↓ %s (%s)", utils.SanitizeTerminalText(item.Name), formatSize(item.Size)))
 
 	case "sudo_grant":
 		detail := fmt.Sprintf("%s: %s", item.GrantType, item.Status)
 		if item.Command != nil && *item.Command != "" {
-			detail += fmt.Sprintf(" — %s", utils.TruncateString(utils.SanitizeTerminalText(*item.Command), 40))
+			return truncatedAfter(detail+" — ", utils.SanitizeTerminalText(*item.Command), 40)
 		}
-		return detail
+		return whole(detail)
 
 	default:
-		return ""
+		return whole("")
 	}
+}
+
+func truncatedAfter(prefix, text string, width int) utils.TruncatedText {
+	return utils.Truncate(prefix+text, utf8.RuneCountInString(prefix)+width)
+}
+
+func whole(s string) utils.TruncatedText {
+	return utils.Truncate(s, utf8.RuneCountInString(s))
 }
 
 func sessionState(closedAt *string) string {

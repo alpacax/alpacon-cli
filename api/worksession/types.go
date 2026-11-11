@@ -238,11 +238,12 @@ func (t TimelineItem) IsRejected() bool {
 }
 
 type TimelineAttributes struct {
-	Time                   string `json:"timestamp" table:"Time"`
-	Type                   string `json:"type"      table:"Type"`
-	Server                 string `json:"server"    table:"Server"`
-	User                   string `json:"user"      table:"User"`
-	Details                string `json:"details"   table:"Details"`
+	ID                     string              `json:"id"        table:"-"`
+	Time                   utils.Timestamp     `json:"timestamp" table:"Time"`
+	Type                   string              `json:"type"      table:"Type"`
+	Server                 string              `json:"server"    table:"Server"`
+	User                   string              `json:"user"      table:"User"`
+	Details                utils.TruncatedText `json:"details"   table:"Details"`
 	event.CommandRejection `table:"-"`
 }
 
