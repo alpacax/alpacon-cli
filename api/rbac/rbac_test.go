@@ -546,21 +546,39 @@ func TestAttributesFrom_RenderTimesInTheGivenZone(t *testing.T) {
 
 	roles := BindingAttributesFrom(bindings, kst)
 	require.Len(t, roles, 2)
-	assert.Equal(t, rendered, roles[0].GrantedAt)
-	assert.Empty(t, roles[1].GrantedAt, "a missing added_at must not render as year 1")
+	assert.Equal(t, rendered, roles[0].GrantedAt.String())
+	assert.Empty(t, roles[1].GrantedAt.String(), "a missing added_at must not render as year 1")
 
 	holders := HolderAttributesFrom(bindings, nil, kst)
 	require.Len(t, holders, 2)
-	assert.Equal(t, rendered, holders[0].GrantedAt)
-	assert.Empty(t, holders[1].GrantedAt)
+	assert.Equal(t, rendered, holders[0].GrantedAt.String())
+	assert.Empty(t, holders[1].GrantedAt.String())
 
 	audit := AuditAttributesFrom([]RoleAuditLogResponse{
 		{Action: "granted", RoleName: "admin", AddedAt: granted},
 		{Action: "revoked", RoleName: "admin"},
 	}, kst)
 	require.Len(t, audit, 2)
-	assert.Equal(t, rendered, audit[0].At)
-	assert.Empty(t, audit[1].At)
+	assert.Equal(t, rendered, audit[0].At.String())
+	assert.Empty(t, audit[1].At.String())
+}
+
+func TestAttributesFrom_JSONKeepsUTCTimeAndNullForMissing(t *testing.T) {
+	t.Parallel()
+	kst := time.FixedZone("KST", 9*60*60)
+	granted := time.Date(2026, 3, 4, 3, 4, 5, 0, time.UTC)
+	bindings := []UserRoleResponse{
+		{Role: RoleNested{Name: "admin"}, AddedAt: granted.In(kst)},
+		{Role: RoleNested{Name: "operator"}},
+	}
+
+	body, err := json.Marshal(BindingAttributesFrom(bindings, kst))
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{"role":"admin","scope":"workspace","granted_at":"2026-03-04T03:04:05Z"},
+		{"role":"operator","scope":"workspace","granted_at":null}
+	]`, string(body))
 }
 
 // Both translations must match what ScopeLabel prints for the same tier, or one tier reads

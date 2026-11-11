@@ -1,6 +1,10 @@
 package server
 
-import "time"
+import (
+	"time"
+
+	"github.com/alpacax/alpacon-cli/utils"
+)
 
 type ServerAttributes struct {
 	Name      string `json:"name"`
@@ -39,14 +43,13 @@ type RegistrationTokenDetails struct {
 	AddedAt       string   `json:"added_at"`
 }
 
-// RegistrationTokenAttributes is the table/JSON projection used by 'server token ls'.
-// AllowedGroups is one comma-separated string of group names, or the UUIDs that could not be
-// resolved, and ExpiresAt is the raw timestamp or "never".
+// RegistrationTokenAttributes is the 'server token ls' row. AllowedGroups joins group names, or
+// the UUIDs left unresolved; a token without ExpiresAt shows "never" in a table and null in JSON.
 type RegistrationTokenAttributes struct {
-	Name          string `json:"name"`
-	AllowedGroups string `json:"allowed_groups" table:"Allowed Groups"`
-	ExpiresAt     string `json:"expires_at" table:"Expires At"`
-	Enabled       bool   `json:"enabled"`
+	Name          string          `json:"name"`
+	AllowedGroups string          `json:"allowed_groups" table:"Allowed Groups"`
+	ExpiresAt     utils.Timestamp `json:"expires_at" table:"Expires At"`
+	Enabled       bool            `json:"enabled"`
 }
 
 // RegistrationMethodGuideRequest is the request body for the guide API.

@@ -119,11 +119,15 @@ func TestGetSessionList(t *testing.T) {
 	assert.Equal(t, "sess-1", list[0].ID)
 	assert.Equal(t, "web-server", list[0].Server)
 	assert.Equal(t, "alice", list[0].User)
-	assert.Equal(t, "-", list[0].ClosedAt)
+	assert.Equal(t, "-", list[0].ClosedAt.String())
 
 	assert.Equal(t, "sess-2", list[1].ID)
 	assert.Equal(t, "db-server", list[1].Server)
-	assert.Equal(t, closedTime, list[1].ClosedAt)
+	assert.Equal(t, closedTime, list[1].ClosedAt.String())
+
+	body, err := json.Marshal([]any{list[0].ClosedAt, list[1].ClosedAt})
+	require.NoError(t, err)
+	assert.JSONEq(t, `[null, "`+closedTime+`"]`, string(body))
 }
 
 func TestGetSessionDetail(t *testing.T) {
@@ -1723,4 +1727,29 @@ func TestReplay_OnlyReconnectingEntryPointOptsIn(t *testing.T) {
 			assert.NotContains(t, q, "replay_from")
 		})
 	}
+}
+
+func TestGetSessionList_JSONNormalizesTimesToUTC(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"count":2,"results":[
+			{"id":"550e8400-e29b-41d4-a716-446655440000","added_at":"2026-03-01T09:00:00+09:00","closed_at":"2026-03-01T18:30:45.5+09:00"},
+			{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","added_at":"","closed_at":""}
+		]}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	list, err := GetSessionList(ac, 25)
+	require.NoError(t, err)
+	body, err := json.Marshal(list)
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{"id":"550e8400-e29b-41d4-a716-446655440000","server":"","user":"","username":"","remote_ip":"","added_at":"2026-03-01T00:00:00Z","closed_at":"2026-03-01T09:30:45.5Z"},
+		{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","server":"","user":"","username":"","remote_ip":"","added_at":null,"closed_at":null}
+	]`, string(body))
+	assert.Equal(t, "2026-03-01T09:00:00+09:00", list[0].AddedAt.String())
+	assert.Empty(t, list[1].ClosedAt.String(), "an empty closed_at keeps the blank cell it had before")
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 const (
@@ -95,14 +96,14 @@ type Recommendation struct {
 type WorkSessionAttributes struct {
 	// Active is "*" on the workspace's active session and empty otherwise;
 	// cmd/worksession.MarkActive sets it.
-	Active      string `json:"-"           table:"Active"`
-	ID          string `json:"id"          table:"ID"`
-	Status      string `json:"status"      table:"Status"`
-	Scopes      string `json:"scopes"      table:"Scopes"`
-	Servers     string `json:"servers"     table:"Servers"`
-	Clusters    string `json:"clusters"    table:"Clusters"`
-	ExpiresAt   string `json:"expires_at"  table:"Expires At"`
-	Description string `json:"description" table:"Description"`
+	Active      string              `json:"-"           table:"Active"`
+	ID          string              `json:"id"          table:"ID"`
+	Status      string              `json:"status"      table:"Status"`
+	Scopes      string              `json:"scopes"      table:"Scopes"`
+	Servers     string              `json:"servers"     table:"Servers"`
+	Clusters    string              `json:"clusters"    table:"Clusters"`
+	ExpiresAt   utils.Timestamp     `json:"expires_at"  table:"Expires At"`
+	Description utils.TruncatedText `json:"description" table:"Description"`
 }
 
 // WorkSessionCreateRequest targets either Servers or Clusters, never both.

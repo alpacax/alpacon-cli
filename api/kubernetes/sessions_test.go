@@ -94,12 +94,12 @@ func TestProjectSessions(t *testing.T) {
 		{
 			name:    "open with a known cluster and named user",
 			session: KubeSessionListItem{ID: "s", Cluster: "c-1", User: &KubeSessionUser{Name: "alice", Email: "alice@example.com"}, TokenExpiredAt: &expiry},
-			want:    KubeSessionAttributes{ID: "s", Cluster: "prod", ClusterID: "c-1", User: "alice", Status: "open", ExpiresAt: "2026-11-02 20:00", TokenExpiredAt: &expiry},
+			want:    KubeSessionAttributes{ID: "s", Cluster: "prod", ClusterID: "c-1", User: "alice", Status: "open", ExpiresAt: utils.NewTimestamp(expiry, "2026-11-02 20:00"), TokenExpiredAt: utils.NewTimestamp(expiry, "")},
 		},
 		{
 			name:    "closed with an unknown cluster and email only",
 			session: KubeSessionListItem{ID: "s", Cluster: "c-2", User: &KubeSessionUser{Email: "alice@example.com"}, ClosedAt: &expiry},
-			want:    KubeSessionAttributes{ID: "s", Cluster: "c-2", ClusterID: "c-2", User: "alice@example.com", Status: "closed", ClosedAt: &expiry},
+			want:    KubeSessionAttributes{ID: "s", Cluster: "c-2", ClusterID: "c-2", User: "alice@example.com", Status: "closed", ClosedAt: utils.NewTimestamp(expiry, "")},
 		},
 		{
 			name:    "no user and no expiry",

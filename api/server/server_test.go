@@ -422,8 +422,12 @@ func TestGetRegistrationTokenAttributes_ExpiresNever(t *testing.T) {
 	if len(attrs) != 1 {
 		t.Fatalf("expected 1 attribute, got %d", len(attrs))
 	}
-	if attrs[0].ExpiresAt != "never" {
+	if attrs[0].ExpiresAt.String() != "never" {
 		t.Errorf("expected ExpiresAt %q, got %q", "never", attrs[0].ExpiresAt)
+	}
+	body, err := json.Marshal(attrs[0].ExpiresAt)
+	if err != nil || string(body) != "null" {
+		t.Errorf("expected expires_at null in JSON, got %s (err %v)", body, err)
 	}
 }
 
@@ -817,4 +821,33 @@ func TestGetServerListOutputsRowsWithoutOwner(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetRegistrationTokenAttributes_JSONNormalizesExpiry(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/api/iam/groups/") {
+			_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"count":2,"results":[
+			{"id":"tok-1","name":"offset","expires_at":"2026-11-07T18:30:45+09:00","enabled":true},
+			{"id":"tok-2","name":"blank","expires_at":"","enabled":true}
+		]}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	attrs, err := GetRegistrationTokenAttributes(ac)
+	require.NoError(t, err)
+	body, err := json.Marshal(attrs)
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{"name":"offset","allowed_groups":"","expires_at":"2026-11-07T09:30:45Z","enabled":true},
+		{"name":"blank","allowed_groups":"","expires_at":null,"enabled":true}
+	]`, string(body))
+	assert.Equal(t, "2026-11-07T18:30:45+09:00", attrs[0].ExpiresAt.String())
+	assert.Empty(t, attrs[1].ExpiresAt.String(), "an empty expires_at keeps the blank cell it had before")
 }

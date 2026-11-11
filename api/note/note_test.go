@@ -149,6 +149,7 @@ func TestGetNoteList_PassesTailAsTheLimit(t *testing.T) {
 
 func TestGetNoteList_MapsResponseFields(t *testing.T) {
 	t.Parallel()
+	addedAt := time.Now().Add(-3 * time.Hour).Truncate(time.Second)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		results := []NoteResponse{{
@@ -158,7 +159,7 @@ func TestGetNoteList_MapsResponseFields(t *testing.T) {
 			Content: "hello",
 			Private: true,
 			Pinned:  true,
-			AddedAt: time.Now().Add(-3 * time.Hour),
+			AddedAt: addedAt,
 		}}
 		_ = json.NewEncoder(w).Encode(api.ListResponse[NoteResponse]{Count: 1, Next: 0, Results: results})
 	}))
@@ -177,7 +178,7 @@ func TestGetNoteList_MapsResponseFields(t *testing.T) {
 		Content: "hello",
 		Private: true,
 		Pinned:  true,
-		AddedAt: "3 hours ago",
+		AddedAt: utils.RelativeTime(addedAt),
 	}, notes[0])
 }
 

@@ -89,3 +89,27 @@ func TestGetAuditLogList_KeepsEntriesReadBeforeAFailure(t *testing.T) {
 	require.Len(t, logs, 1)
 	assert.Equal(t, "alice", logs[0].Username)
 }
+
+func TestGetAuditLogList_JSONKeepsIDFullDescriptionAndAbsoluteTime(t *testing.T) {
+	t.Parallel()
+	description := strings.Repeat("y", 100)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[
+			{"id":"550e8400-e29b-41d4-a716-446655440000","username":"alice","description":"` + description + `","added_at":"2026-11-07T18:30:45+09:00"},
+			{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","username":"bob"}
+		]}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	logs, err := GetAuditLogList(ac, 5, "", "", "")
+	require.NoError(t, err)
+	body, err := json.Marshal(logs)
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{"id":"550e8400-e29b-41d4-a716-446655440000","username":"alice","app":"","action":"","model":"","status_code":0,"ip":"","description":"`+description+`","added_at":"2026-11-07T09:30:45Z"},
+		{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","username":"bob","app":"","action":"","model":"","status_code":0,"ip":"","description":"","added_at":null}
+	]`, string(body))
+}

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -169,10 +168,8 @@ func TestKubeSessionsJSON(t *testing.T) {
 
 	require.Equal(t, 0, code, stderr)
 
-	// The local-time format itself is pinned by TestProjectSessions.
-	expiresAt := time.Date(2026, 11, 2, 11, 0, 0, 0, time.UTC).Local().Format("2006-01-02 15:04")
-	assert.JSONEq(t, fmt.Sprintf(`[{"id":"s-1","cluster":"prod-east","cluster_id":"c-prod","user":"alice","status":"open",
-		"expires_at":%q,"token_expired_at":"2026-11-02T11:00:00Z","closed_at":null}]`, expiresAt), stdout)
+	assert.JSONEq(t, `[{"id":"s-1","cluster":"prod-east","cluster_id":"c-prod","user":"alice","status":"open",
+		"expires_at":"2026-11-02T11:00:00Z","token_expired_at":"2026-11-02T11:00:00Z","closed_at":null}]`, stdout)
 }
 
 // Serial: it swaps os.Stdout and flips utils.OutputFormat.

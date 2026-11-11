@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -691,7 +692,7 @@ func TestProjectAttributesShowsTheCluster(t *testing.T) {
 	})
 	assert.Equal(t, "prod-east", row.Clusters)
 	assert.Empty(t, row.Servers)
-	assert.Empty(t, row.ExpiresAt, "no expiry until a duration session activates")
+	assert.Empty(t, row.ExpiresAt.String(), "no expiry until a duration session activates")
 	assert.Equal(t, "kube, kube_exec", row.Scopes)
 }
 
@@ -794,6 +795,51 @@ func TestSudoPolicyInlineUnmarshalJSON(t *testing.T) {
 			err := json.Unmarshal([]byte(`{"id":"pol-1","commands":["systemctl restart nginx"],"reason":"maintenance",`+tt.fields+`}`), &policy)
 			require.NoError(t, err)
 			assert.Equal(t, SudoPolicyInline{ID: "pol-1", Commands: []string{"systemctl restart nginx"}, Reason: "maintenance", SessionAuthorized: tt.want}, policy)
+		})
+	}
+}
+
+func TestProjectAttributesKeepsRawJSON(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		expiresAt time.Time
+		want      string
+	}{
+		{"non UTC", time.Date(2026, 11, 7, 18, 30, 45, 0, time.FixedZone("UTC+9", 9*60*60)), `"2026-11-07T09:30:45Z"`},
+		{"zero", time.Time{}, `null`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ws := WorkSession{ID: "session-1", Description: strings.Repeat("x", 80), ExpiresAt: tt.expiresAt}
+			row := ProjectAttributes(&ws)
+			body, err := json.Marshal(row)
+			require.NoError(t, err)
+			assert.JSONEq(t, `{"id":"session-1","status":"","scopes":"","servers":"","clusters":"","expires_at":`+tt.want+`,"description":"`+strings.Repeat("x", 80)+`"}`, string(body))
+			assert.Equal(t, strings.Repeat("x", 70)+"...", row.Description.String())
+		})
+	}
+}
+
+func TestProjectAttributesKeepsLocalExpiryTableText(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		expiry time.Time
+		want   string
+	}{
+		{"local expiry", time.Date(2026, 11, 7, 18, 30, 45, 0, time.Local), "2026-11-07 18:30"},
+		{"zero expiry", time.Time{}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ws := WorkSession{ExpiresAt: tt.expiry}
+
+			row := ProjectAttributes(&ws)
+
+			assert.Equal(t, tt.want, row.ExpiresAt.String())
 		})
 	}
 }

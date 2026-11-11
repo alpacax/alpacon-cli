@@ -3,6 +3,8 @@ package acl
 import (
 	"slices"
 	"strings"
+
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 // PrincipalTypeServiceToken is the only principal type IssueEntries issues;
@@ -41,17 +43,17 @@ type EntryResponse struct {
 }
 
 type EntryAttributes struct {
-	AppliesToToken *bool  `json:"applies_to_token,omitempty" table:"-"`
-	ID             string `json:"id" table:"ID"`
-	Principal      string `json:"principal" table:"Service token"`
-	Command        string `json:"command_pattern" table:"Command"`
-	Username       string `json:"username" table:"User"`
-	Groupname      string `json:"groupname" table:"Group"`
-	Applies        string `json:"-" table:"Applies"`
-	Servers        string `json:"servers" table:"Servers"`
-	Enabled        bool   `json:"enabled" table:"Enabled"`
-	ExpiresAt      string `json:"expires_at" table:"Expires at"`
-	CreatedBy      string `json:"created_by" table:"Created by"`
+	AppliesToToken *bool           `json:"applies_to_token,omitempty" table:"-"`
+	ID             string          `json:"id" table:"ID"`
+	Principal      string          `json:"principal" table:"Service token"`
+	Command        string          `json:"command_pattern" table:"Command"`
+	Username       string          `json:"username" table:"User"`
+	Groupname      string          `json:"groupname" table:"Group"`
+	Applies        string          `json:"-" table:"Applies"`
+	Servers        string          `json:"servers" table:"Servers"`
+	Enabled        bool            `json:"enabled" table:"Enabled"`
+	ExpiresAt      utils.Timestamp `json:"expires_at" table:"Expires at"`
+	CreatedBy      string          `json:"created_by" table:"Created by"`
 }
 
 // EntryRequest is one entry to issue, for the service token PrincipalID names.
@@ -95,11 +97,11 @@ type AdminResponse struct {
 }
 
 type AdminAttributes struct {
-	ID        string `json:"id" table:"ID"`
-	Subject   string `json:"subject" table:"Subject"`
-	Email     string `json:"email" table:"Email"`
-	GrantedBy string `json:"granted_by" table:"Granted by"`
-	CreatedAt string `json:"created_at" table:"Granted at"`
+	ID        string          `json:"id" table:"ID"`
+	Subject   string          `json:"subject" table:"Subject"`
+	Email     string          `json:"email" table:"Email"`
+	GrantedBy string          `json:"granted_by" table:"Granted by"`
+	CreatedAt utils.Timestamp `json:"created_at" table:"Granted at"`
 }
 
 type adminGrantRequest struct {

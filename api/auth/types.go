@@ -1,6 +1,10 @@
 package auth
 
-import "time"
+import (
+	"time"
+
+	"github.com/alpacax/alpacon-cli/utils"
+)
 
 // PrincipalTypeApplication is the whoami principal_type for service/application tokens.
 const PrincipalTypeApplication = "application"
@@ -39,12 +43,12 @@ type APITokenResponse struct {
 }
 
 type APITokenAttributes struct {
-	ID        string `json:"id" table:"ID"`
-	Name      string `json:"name"`
-	Enabled   bool   `json:"enabled"`
-	UpdatedAt string `json:"updated_at" table:"Updated At"`
-	ExpiresAt string `json:"expires_at" table:"Expires At"`
-	Scopes    string `json:"scopes" table:"Scopes"`
+	ID        string          `json:"id" table:"ID"`
+	Name      string          `json:"name"`
+	Enabled   bool            `json:"enabled"`
+	UpdatedAt utils.Timestamp `json:"updated_at" table:"Updated At"`
+	ExpiresAt utils.Timestamp `json:"expires_at" table:"Expires At"`
+	Scopes    string          `json:"scopes" table:"Scopes"`
 }
 
 type TokenScopesResponse struct {
