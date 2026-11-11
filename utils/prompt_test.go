@@ -8,6 +8,7 @@ import (
 	"testing/iotest"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -127,6 +128,95 @@ func TestPromptForInputFailsWhenInputEnds(t *testing.T) {
 			assert.Empty(t, got)
 		})
 	}
+}
+
+func TestReadRequiredInput_AsksAgainUntilALineIsGiven(t *testing.T) {
+	t.Parallel()
+	reader := iotest.OneByteReader(strings.NewReader("\n  \nmy-server\n")) // a terminal hands over a line at a time
+
+	got, err := readRequiredInput(reader, "Name: ")
+
+	require.NoError(t, err)
+	assert.Equal(t, "my-server", got)
+}
+
+func TestReadRequiredInput_ReturnsTheNoInputFailure(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "empty stdin", input: ""},
+		{name: "empty lines then EOF", input: "\n\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := readRequiredInput(strings.NewReader(tt.input), "Name: ")
+
+			exitErr, ok := errors.AsType[*ExitError](err)
+			require.True(t, ok, "want an ExitError, got %v", err)
+			assert.Equal(t, ExitCodeGeneralError, exitErr.Code)
+			assert.Equal(t, "No input received.", exitErr.Error())
+			assert.True(t, exitErr.footer, "the failure keeps its report-an-issue footer")
+			assert.Empty(t, got)
+		})
+	}
+}
+
+func TestConfirm_ProceedsOnlyOnAYes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "yes", input: "y\n", want: true},
+		{name: "no", input: "n\n", want: false},
+		{name: "input ends", input: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := confirm(true, strings.NewReader(tt.input), "Delete %s?", "my-group")
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// Serial: it swaps os.Stderr to read the notice.
+func TestConfirm_PrintsThePromptAndCancelNoticeOnStderr(t *testing.T) {
+	var proceed bool
+	var err error
+
+	stdout, stderr := testutil.CaptureOutput(t, func() {
+		proceed, err = confirm(true, strings.NewReader("n\n"), "Delete %s?", "my-group")
+	})
+
+	require.NoError(t, err)
+	assert.False(t, proceed)
+	assert.NotContains(t, stdout, "Operation cancelled.")
+	assert.Contains(t, stderr, "Delete my-group?")
+	assert.Contains(t, stderr, "Info: Operation cancelled.\n")
+}
+
+func TestConfirm_RefusesWithoutATerminal(t *testing.T) {
+	t.Parallel()
+
+	got, err := confirm(false, strings.NewReader("y\n"), "Delete %s?", "my-group")
+
+	exitErr, ok := errors.AsType[*ExitError](err)
+	require.True(t, ok, "want an ExitError, got %v", err)
+	assert.Equal(t, ExitCodeUsageError, exitErr.Code)
+	assert.Equal(t, ErrorCodeConfirmationRequired, exitErr.errorCode)
+	assert.False(t, exitErr.footer, "a usage failure carries no report-an-issue footer")
+	assert.False(t, got)
 }
 
 // A confirmation names what the answer acts on; a server's value carrying an

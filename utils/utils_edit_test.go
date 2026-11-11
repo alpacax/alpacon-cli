@@ -248,3 +248,26 @@ func TestPendingSignalReturnsNilWhenDoneWithNoSignal(t *testing.T) {
 
 	assert.Nil(t, got)
 }
+
+func TestReportNoChanges_AnswersOnlyForNoChanges(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"no changes", ErrNoChanges, true},
+		{"wrapped no changes", fmt.Errorf("failed to update: %w", ErrNoChanges), true},
+		{"another failure", errors.New("server refused the edit"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := ReportNoChanges(tt.err)
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

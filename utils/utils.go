@@ -170,19 +170,30 @@ func ExtractWorkspaceName(workspaceURL string) string {
 }
 
 func SplitAndParseInt(input string) []int {
+	intValues, err := ParseIntList(input)
+	if err != nil {
+		exitWithError(notIntegersError())
+	}
+	return intValues
+}
+
+func notIntegersError() *ExitError {
+	return newExitError(ExitCodeGeneralError, true, "Invalid input: only integers allowed.", nil)
+}
+
+// ParseIntList is SplitAndParseInt for a RunE command: it returns the failure SplitAndParseInt exits with.
+func ParseIntList(input string) ([]int, error) {
 	var intValues []int
 
 	for stringValue := range strings.SplitSeq(input, ",") {
-		trimmedString := strings.TrimSpace(stringValue)
-
-		intValue, err := strconv.Atoi(trimmedString)
+		intValue, err := strconv.Atoi(strings.TrimSpace(stringValue))
 		if err != nil {
-			CliErrorWithExit("Invalid input: only integers allowed.")
+			return nil, notIntegersError()
 		}
 		intValues = append(intValues, intValue)
 	}
 
-	return intValues
+	return intValues, nil
 }
 
 // FormatTimestamp renders a server timestamp in the local zone.
@@ -636,9 +647,19 @@ func SanitizeTerminalBlockKeepingTabs(s string) string {
 
 // ExitIfNoChanges prints the no-change notice and exits 0 when err is ErrNoChanges.
 func ExitIfNoChanges(err error) {
-	if errors.Is(err, ErrNoChanges) {
-		CliInfoWithExit("No changes made. Aborting update.")
+	if ReportNoChanges(err) {
+		os.Exit(0)
 	}
+}
+
+// ReportNoChanges is ExitIfNoChanges for a RunE command: it prints the notice and returns true when
+// err is ErrNoChanges, and the caller ends on exit 0.
+func ReportNoChanges(err error) bool {
+	if !errors.Is(err, ErrNoChanges) {
+		return false
+	}
+	CliInfo("No changes made. Aborting update.")
+	return true
 }
 
 // ProcessEditedData opens originalData as pretty JSON in the editor and returns the edited JSON,
