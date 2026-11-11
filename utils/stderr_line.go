@@ -11,6 +11,8 @@ var stderrMidLine atomic.Bool
 
 type stderrTracker struct{}
 
+func (stderrTracker) Fd() uintptr { return os.Stderr.Fd() }
+
 func (stderrTracker) Write(p []byte) (int, error) {
 	n, err := os.Stderr.Write(p)
 	if n > 0 {

@@ -245,7 +245,6 @@ func TestLogsCommandOutcomeSanitizesServerText(t *testing.T) {
 // there leaves Result empty and nothing to print, and exit 0 tells the caller
 // the command finished having produced no output.
 func TestExecLogsChunkFetchFailureExitsNonZero(t *testing.T) {
-	t.Parallel()
 	const jobID = "a1b2c3d4-5678-abcd-ef01-234567890abc"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -276,7 +275,6 @@ func TestExecLogsChunkFetchFailureExitsNonZero(t *testing.T) {
 // take its place. A status-only failure prints no output at all, so it is never
 // fetched for.
 func TestExecLogsChunkFetchFailureYieldsToTheCommandsOwnFailure(t *testing.T) {
-	t.Parallel()
 	const jobID = "a1b2c3d4-5678-abcd-ef01-234567890abc"
 	tests := []struct {
 		name          string
@@ -301,7 +299,6 @@ func TestExecLogsChunkFetchFailureYieldsToTheCommandsOwnFailure(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var chunkReads atomic.Int32
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
@@ -336,7 +333,6 @@ func TestExecLogsChunkFetchFailureYieldsToTheCommandsOwnFailure(t *testing.T) {
 }
 
 func TestExecLogsSuccessfulCompletionLine(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name      string
 		status    string
@@ -352,7 +348,6 @@ func TestExecLogsSuccessfulCompletionLine(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]any{
@@ -373,6 +368,49 @@ func TestExecLogsSuccessfulCompletionLine(t *testing.T) {
 					assert.Empty(t, stderr)
 				}
 			}
+		})
+	}
+}
+
+func TestExecLogsPendingSudoApprovalSignals(t *testing.T) {
+	const jobID = "a1b2c3d4-5678-abcd-ef01-234567890abc"
+	const output = "Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED)."
+	for _, tc := range []struct {
+		name, grantStatus string
+		success           bool
+		exitCode          int
+		wantSignal        bool
+	}{
+		{name: "successful with pending grant", success: true, grantStatus: "pending_approval", wantSignal: true},
+		{name: "failed with pending grant", exitCode: 23, grantStatus: "pending_approval", wantSignal: true},
+		{name: "failed without grant", exitCode: 23},
+		{name: "failed with denied grant", exitCode: 23, grantStatus: "denied"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if strings.Contains(r.URL.Path, "/chunks/") {
+					_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"id": jobID, "status": "completed", "success": tc.success, "exit_code": tc.exitCode,
+					"result": output, "line": "sudo id", "username": "alice",
+					"server":       map[string]string{"name": "my-server"},
+					"work_session": map[string]string{"id": "ses-1"}, "sudo_grant_status": tc.grantStatus,
+				})
+			}))
+			t.Cleanup(ts.Close)
+
+			stdout, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, jobID)
+
+			assert.Equal(t, tc.exitCode, exitCode)
+			assert.Equal(t, output+"\n", strings.TrimSuffix(stdout, "PASS\n"))
+			wantStderr := ""
+			if tc.wantSignal {
+				wantStderr = "==== ALPACON: APPROVAL PENDING ====\nsudo on my-server as alice is waiting for approval. Session ses-1. Open the approval or wait for an approver.\n================================\n"
+			}
+			assert.Equal(t, wantStderr, stderr)
 		})
 	}
 }

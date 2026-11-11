@@ -63,11 +63,7 @@ func retryAfterSeconds(d time.Duration) int {
 // CliErrorEnvelopeWithExit reports a failure and exits 1, or 2 when err or an argument is a usage error;
 // json mode carries err's code.
 func CliErrorEnvelopeWithExit(operation string, err error, format string, args ...any) {
-	ExitIfUsageError(ExitCodeGeneralError, operation, err, format, args...)
-	ExitWithFailureJSON(Failure{ExitCode: ExitCodeGeneralError, Operation: operation, Err: err, Message: fmt.Sprintf(format, args...), NextActions: RefusalNextActions(refusalGuidance(err, args))})
-	printCliError(refusalGuidance(err, args), format, args...)
-	reportCLIError(append([]any{err}, args...)...)
-	os.Exit(ExitCodeGeneralError)
+	exitWithError(newEnvelopeExitError(operation, err, format, args))
 }
 
 // refusalGuidance is the error whose server hints an envelope helper shows:
@@ -85,13 +81,16 @@ func refusalGuidance(err error, args []any) error {
 // code, for refusals a script branches on (e.g. ExitCodeNotApproved).
 func CliErrorEnvelopeWithExitCode(code int, operation string, err error, format string, args ...any) {
 	ExitIfUsageError(code, operation, err, format, args...)
+	if err == nil && OutputFormat == OutputFormatJSON {
+		signalErrorsIn(args)
+	}
 	ExitWithFailureJSON(Failure{ExitCode: code, Operation: operation, Err: err, Message: fmt.Sprintf(format, args...), NextActions: RefusalNextActions(refusalGuidance(err, args))})
 	printCliError(refusalGuidance(err, args), format, args...)
 	os.Exit(code)
 }
 
-// ExitIfUsageError is the one place a report that would exit 1 exits 2 instead: when err, or an error
-// among args, answers IsUsageError, it reports through CliUsageErrorEnvelopeWithExit. Otherwise it returns.
+// ExitIfUsageError exits 2 for a report that would exit 1 when err, or an error among args, answers
+// IsUsageError, as newExitError and newEnvelopeExitError do for an ExitError. Otherwise it returns.
 func ExitIfUsageError(code int, operation string, err error, format string, args ...any) {
 	if code == ExitCodeGeneralError && (IsUsageError(err) || usageErrorIn(args)) {
 		CliUsageErrorEnvelopeWithExit(operation, format, args...)
@@ -101,6 +100,5 @@ func ExitIfUsageError(code int, operation string, err error, format string, args
 // CliUsageErrorEnvelopeWithExit reports a bad flag or argument and exits 2 with error_code usage_error.
 // The envelope keeps no error from args, so a server refusal must not go through it.
 func CliUsageErrorEnvelopeWithExit(operation string, format string, args ...any) {
-	ExitWithFailureJSON(Failure{ExitCode: ExitCodeUsageError, ErrorCode: ErrorCodeUsage, Operation: operation, Message: fmt.Sprintf(format, args...)})
-	CliErrorWithExitCode(ExitCodeUsageError, format, args...)
+	exitWithError(newUsageExitError(operation, format, args))
 }

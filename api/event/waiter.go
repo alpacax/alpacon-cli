@@ -1,9 +1,11 @@
 package event
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
@@ -34,7 +36,8 @@ type Outcome int
 // CatchUpFunc reads the target's current state over REST and returns it in the event
 // channel's sub_type vocabulary. It closes the window between subscribing and the
 // server's next publish, which is otherwise unrecoverable: the channel has no history.
-type CatchUpFunc func() (subType string, err error)
+// ctx is cancelled when the wait ends, so a read still in flight stops with it.
+type CatchUpFunc func(ctx context.Context) (subType string, err error)
 
 // WaitOptions carries everything type-specific about a wait. Keeping it injected is why
 // this package needs no knowledge of any event type.
@@ -52,6 +55,7 @@ type Waiter struct {
 	*Watcher
 	opts          WaitOptions
 	catchUpFailed chan error
+	catchUps      sync.WaitGroup // reads startCatchUp began; Wait joins them before returning
 }
 
 // waitFrame reads only the field that decides a wait; the frame reaches the caller
@@ -90,9 +94,14 @@ func (w *Waiter) CatchUpFailed() <-chan error { return w.catchUpFailed }
 // Wait blocks until an event matches, the timeout elapses, or Stop is called. The
 // returned frame is the server's bytes verbatim, except on a catch-up hit where it is
 // synthesized. A non-nil error means the wait could not run; Outcome is meaningless then.
+//
+// Wait returns only once the listener and any catch-up read have stopped (see Close).
 func (w *Waiter) Wait() ([]byte, Outcome, error) {
 	w.Start()
-	defer w.Stop()
+	defer func() {
+		w.Close()
+		w.catchUps.Wait()
+	}()
 
 	if !w.WaitConnected(waitConnectTimeout) {
 		// A rejected subscription is not retried, so its message is the useful one.
@@ -142,16 +151,15 @@ func (w *Waiter) isStopped() bool {
 }
 
 // startCatchUp runs the read off the wait loop because the REST call has no deadline
-// of its own: inline, a server that never answers would outlast Timeout and ignore
-// Stop. It returns nil when there is nothing to read, which blocks forever in a select.
+// of its own: inline, a server that never answers would outlast Timeout. Stop cancels it. It returns nil when there is nothing to read, which blocks forever in a select.
 func (w *Waiter) startCatchUp() <-chan string {
 	if w.opts.CatchUp == nil {
 		return nil
 	}
 
 	result := make(chan string, 1)
-	go func() {
-		subType, err := w.opts.CatchUp()
+	w.catchUps.Go(func() {
+		subType, err := w.opts.CatchUp(w.ctx)
 		if err != nil {
 			select {
 			case w.catchUpFailed <- err:
@@ -160,7 +168,7 @@ func (w *Waiter) startCatchUp() <-chan string {
 			return
 		}
 		result <- subType
-	}()
+	})
 	return result
 }
 

@@ -3,7 +3,7 @@ package utils
 import (
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"slices"
 	"strings"
 
@@ -15,6 +15,7 @@ const (
 	OperationCommand = "command"
 	OperationWebFTP  = "webftp"
 	OperationWebsh   = "websh"
+	OperationTunnel  = "tunnel"
 	// OperationKube targets a cluster rather than a server: it needs a session
 	// that holds the kube scope and targets that cluster.
 	OperationKube = "kube"
@@ -84,24 +85,46 @@ type deniedCommand interface {
 // HandleWorkSessionError prints a WorkSession gate diagnostic and exits(3); no-op for other errors.
 // target is what the operation names: a cluster for OperationKube, a server otherwise.
 func HandleWorkSessionError(err error, operation, target, authMethod, activeWS string) {
+	if exitErr, ok := errors.AsType[*ExitError](WorkSessionExitError(err, operation, target, authMethod, activeWS)); ok {
+		exitWithError(exitErr)
+	}
+}
+
+// WorkSessionExitError is the failure HandleWorkSessionError reports, exit 3 with the gate diagnostic,
+// or nil when err is not a WorkSession gate refusal.
+func WorkSessionExitError(err error, operation, target, authMethod, activeWS string) error {
 	if err == nil {
-		return
+		return nil
 	}
 	var denied deniedCommand
 	if errors.As(err, &denied) && denied.SubmittedCommandDenied() {
-		return
+		return nil
 	}
 	code, _ := ParseErrorResponse(err)
 	if !isWorkSessionCode(code) {
-		return
+		return nil
 	}
+	fields := SignalFields(err)
+	if fields.Server == "" && operation != OperationKube {
+		fields.Server = target
+	}
+	if fields.Session == "" {
+		fields.Session = activeWS
+	}
+	SignalPaused(WithSignalFields(err, fields))
 	hint := RefusalHint(err)
-	if OutputFormat == OutputFormatJSON {
-		PrintJSONError(os.Stderr, buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS, hint))
-	} else {
-		fmt.Fprintln(os.Stderr, buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS, hint))
+	return &ExitError{
+		Code: ExitCodeWorkSessionDenied,
+		msg:  "%s: %s",
+		args: []any{workSessionMessage(operation), err},
+		print: func(text, envelope io.Writer) {
+			if OutputFormat == OutputFormatJSON {
+				PrintJSONError(envelope, buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS, hint))
+				return
+			}
+			_, _ = fmt.Fprintln(text, buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS, hint))
+		},
 	}
-	os.Exit(ExitCodeWorkSessionDenied)
 }
 
 func buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS, hint string) string {
@@ -159,6 +182,8 @@ func workSessionTokenNote(operation string) string {
 	switch operation {
 	case OperationWebsh:
 		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open an interactive terminal; it needs " + LoginWithoutTokenHint + "."
+	case OperationTunnel:
+		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open a tunnel; it needs " + LoginWithoutTokenHint + "."
 	case OperationKube:
 		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open a kube session; it needs " + LoginWithoutTokenHint + "."
 	}
@@ -261,8 +286,12 @@ func workSessionNextActions(code, operation, target, activeWS string) []NextActi
 		if aiagent.FromEnvironment().Detected() {
 			accountCreate = agentCreateCmd + " --account <account>"
 		}
+		retry := "alpacon exec" + workSessionFlag(activeWS) + " -u <approved account> " + serverArg + " -- <command>"
+		if operation == OperationTunnel {
+			retry = "alpacon tunnel" + workSessionFlag(activeWS) + " -u <approved account> " + serverArg + " -l <LOCAL_PORT> -r <REMOTE_PORT>"
+		}
 		return []NextAction{
-			{Command: "alpacon exec" + workSessionFlag(activeWS) + " -u <approved account> " + serverArg + " -- <command>", Description: "pass -u with the session's account (shown by 'alpacon work-session current')"},
+			{Command: retry, Description: "pass -u with the session's account (shown by 'alpacon work-session current')"},
 			{Command: accountCreate, Description: accountSessionCreateDescription},
 		}
 	case WorkSessionAgentSessionRequired:

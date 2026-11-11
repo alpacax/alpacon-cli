@@ -280,7 +280,7 @@ func TestWorkSessionCreate_PendingFollowUpMatchesRequesterType(t *testing.T) {
 // check 'work-session create' runs, or following the recovery fails locally.
 func TestAgentSessionScope_PassesValidateAgentScopes(t *testing.T) {
 	t.Parallel()
-	for _, operation := range []string{utils.OperationCommand, utils.OperationWebFTP, utils.OperationWebsh} {
+	for _, operation := range []string{utils.OperationCommand, utils.OperationWebFTP, utils.OperationWebsh, utils.OperationTunnel} {
 		t.Run(operation, func(t *testing.T) {
 			t.Parallel()
 			scope := utils.AgentSessionScope(operation)

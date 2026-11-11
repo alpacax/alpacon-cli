@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1036,6 +1037,35 @@ func TestLoginVerificationFailure_ServerHintReplacesTheLocalSentence(t *testing.
 			assert.Equal(t, hint, utils.RefusalHint(utils.Reword(hinted, got)))
 
 			assert.Contains(t, tt.message(plain), "Please try logging in again.")
+		})
+	}
+}
+
+func TestIsWorkspaceNotFound_DecidesOnTheStatusNotTheText(t *testing.T) {
+	t.Parallel()
+	notFound := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(notFound.Close)
+	closed := httptest.NewServer(http.NotFoundHandler())
+	unreachable := closed.URL + "/team404"
+	closed.Close()
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{name: "workspace answers 404", url: notFound.URL, want: true},
+		{name: "unreachable workspace with 404 in its URL", url: unreachable, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := auth0.FetchAuthEnv(tt.url, notFound.Client())
+			require.Error(t, err)
+
+			got := isWorkspaceNotFound(err)
+
+			assert.Equal(t, tt.want, got, "error: %q", err.Error())
 		})
 	}
 }

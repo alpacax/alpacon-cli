@@ -111,19 +111,3 @@ func TestResolveServiceTokenID_RefusesABlankName(t *testing.T) {
 	require.ErrorIs(t, err, api.ErrBlankName)
 	assert.Equal(t, 0, *requests)
 }
-
-func TestGetServiceTokenNames_WalksEveryPage(t *testing.T) {
-	t.Parallel()
-	ac, requests := serviceTokenServer(t, func(r *http.Request) (int, string) {
-		if r.URL.Query().Get("page") == "1" {
-			return http.StatusOK, page(`[{"id": "a", "name": "deploy"}]`, "2")
-		}
-		return http.StatusOK, page(`[{"id": "b", "name": "backup"}]`, "null")
-	})
-
-	names, err := GetServiceTokenNames(ac)
-
-	require.NoError(t, err)
-	assert.Equal(t, map[string]string{"a": "deploy", "b": "backup"}, names)
-	assert.Equal(t, 2, *requests)
-}

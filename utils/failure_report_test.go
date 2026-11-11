@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -30,4 +31,13 @@ func TestFailureEnvelopeClassifiesAnEmptyCodeFromErr(t *testing.T) {
 
 	assert.Equal(t, "rbac_permission_required", env.ErrorCode)
 	assert.Equal(t, 403, env.HTTPStatus)
+}
+
+func TestFprintFailureJSONWritesTheEnvelopeToTheWriter(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+
+	FprintFailureJSON(&buf, Failure{ExitCode: 6, Operation: "command", Message: "m."})
+
+	assert.JSONEq(t, `{"ok":false,"exit_code":6,"error_code":"not_approved","message":"m.","context":{"operation":"command"}}`, buf.String())
 }

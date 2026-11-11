@@ -813,6 +813,9 @@ func TestFetchFromURL_ClientErrorNoRetry(t *testing.T) {
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				requestCount.Add(1)
 				w.WriteHeader(tt.status)
+				if tt.status == http.StatusForbidden {
+					_, _ = w.Write([]byte(`{"code":"refused","gate":"risk","console_url":"https://console.example/transfers/1"}`))
+				}
 			}))
 			defer ts.Close()
 
@@ -821,6 +824,12 @@ func TestFetchFromURL_ClientErrorNoRetry(t *testing.T) {
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantErr)
+			if tt.status == http.StatusForbidden {
+				var refusal fetchStatusError
+				require.ErrorAs(t, err, &refusal)
+				assert.Equal(t, "risk", refusal.ErrorGate())
+				assert.Equal(t, "https://console.example/transfers/1", refusal.ErrorFields()["console_url"])
+			}
 			assert.Equal(t, int32(1), requestCount.Load(), "a fatal client error fails the same way on retry")
 			_, statErr := os.Stat(dest)
 			assert.True(t, os.IsNotExist(statErr))

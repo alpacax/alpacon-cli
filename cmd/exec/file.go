@@ -162,10 +162,10 @@ func newFileExecution(spec FileExecArgs, content string) event.FileExecution {
 	}
 }
 
-// uploadFileOrExit writes file.Content to its --file path on the server as the run-as account and
-// group, so what lands there is what the reviewer sees. It exits on failure, since a script that
+// uploadFile writes file.Content to its --file path on the server as the run-as account and group,
+// so what lands there is what the reviewer sees. It returns the failure's exit, since a script that
 // was not written must not be submitted.
-func uploadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, file event.FileExecution, workSessionID, authMethod string) {
+func uploadFile(stderr io.Writer, ac *client.AlpaconClient, parsed RemoteExecArgs, file event.FileExecution, workSessionID, authMethod string) error {
 	upload := func() error {
 		return ftpapi.UploadContentAs(ac, parsed.Server, file.Path, []byte(file.Content),
 			parsed.Username, parsed.Groupname, workSessionID, parsed.File.Overwrite)
@@ -175,44 +175,53 @@ func uploadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, file even
 		err = utils.HandleCommonErrors(err, parsed.Server, mfa.ErrorCallbacks(ac, upload))
 	}
 	if err == nil {
-		return
+		return nil
 	}
-	utils.HandleWorkSessionError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID)
+	signalArgs := parsed
+	signalArgs.WorkSessionID = workSessionID
+	err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), ac)
+	utils.SignalRefusal(err)
+	if wsErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID); wsErr != nil {
+		return wsErr
+	}
 	var hint string
 	// The agent answers "PATH already exists." for an existing file.
 	if !parsed.File.Overwrite && strings.Contains(err.Error(), "already exists") {
 		hint = denialHintLine("pass --overwrite to replace the file on the server, or use --from-server instead of --upload (and drop --file-from) to submit the copy already there.\n")
 	}
-	// reportCodedRefusal writes raw and appends its own period; drop the one the
+	// codedRefusal writes raw and appends its own period; drop the one the
 	// agent's message ends with.
 	msg := strings.TrimSuffix(utils.SanitizeTerminalText(fmt.Sprintf("failed to upload the script to '%s:%s': %s", parsed.Server, file.Path, err)), ".")
-	reportCodedRefusal(utils.OperationWebFTP, err, msg, hint)
+	return codedRefusal(stderr, utils.OperationWebFTP, err, msg, hint)
 }
 
-// downloadFileOrExit reads the script from its --file path on the server as the run-as account and
-// group, and builds the submission from those bytes. It exits on failure, since a script that could
-// not be read must not be submitted.
-func downloadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, workSessionID, authMethod string) event.FileExecution {
+// downloadFile reads the script from its --file path on the server as the run-as account and
+// group, and builds the submission from those bytes. It returns the failure's exit, since a script
+// that could not be read must not be submitted.
+func downloadFile(stderr io.Writer, ac *client.AlpaconClient, parsed RemoteExecArgs, workSessionID, authMethod string) (event.FileExecution, error) {
 	label := parsed.Server + ":" + parsed.File.Path
 	content, msg, err := fetchServerScript(ac, parsed, label, workSessionID)
 	if err != nil {
-		utils.HandleWorkSessionError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID)
+		signalArgs := parsed
+		signalArgs.WorkSessionID = workSessionID
+		err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), ac)
+		utils.SignalRefusal(err)
+		if wsErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID); wsErr != nil {
+			return event.FileExecution{}, wsErr
+		}
 		var rejected *event.CommandRejectedError
 		if errors.As(err, &rejected) {
-			reportCommandRejection(err, rejected)
-			return event.FileExecution{}
+			return event.FileExecution{}, commandRejectionFailure(stderr, err, rejected)
 		}
-		// reportCodedRefusal writes raw and appends its own period; drop one the
+		// codedRefusal writes raw and appends its own period; drop one the
 		// agent's message ends with.
 		msg = strings.TrimSuffix(utils.SanitizeTerminalText(fmt.Sprintf("cannot read the script from '%s' on the server: %s", label, err)), ".")
-		reportCodedRefusal(utils.OperationWebFTP, err, msg, "")
-		return event.FileExecution{}
+		return event.FileExecution{}, codedRefusal(stderr, utils.OperationWebFTP, err, msg, "")
 	}
 	if msg != "" {
-		utils.CliErrorWithExit("%s", msg)
-		return event.FileExecution{}
+		return event.FileExecution{}, utils.NewExitError("%s", msg)
 	}
-	return newFileExecution(*parsed.File, content)
+	return newFileExecution(*parsed.File, content), nil
 }
 
 // fetchServerScript reads the --file path from the server into memory, at
@@ -322,7 +331,7 @@ func fileExecRefusal(err error, serverName string) (message, hint string, ok boo
 		}
 		message, hint = r.message, r.hint
 		if r.needsServer {
-			server := utils.SanitizeTerminalText(serverName) // reportCodedRefusal writes raw
+			server := utils.SanitizeTerminalText(serverName) // codedRefusal writes raw
 			message = fmt.Sprintf(message, server)
 			if hint != "" {
 				hint = fmt.Sprintf(hint, server)
@@ -354,30 +363,28 @@ func fileExecInlineCredentialRefusal(err error) (message, hint string, ok bool) 
 	return fileExecInlineCredentialMessage, denialHintLine(fileExecInlineCredentialHint), true
 }
 
-// HandleFileExecRefusal reports a file-lane refusal and exits 1, or returns
-// false when err is something else. Under --output json the envelope carries the
+// fileExecFailure reports a file-lane refusal and returns exit 1, or nil
+// when err is something else. Under --output json the envelope carries the
 // server's code; table mode prints the message and the hint. It runs before
-// HandleCommandResult, which knows no server name and would print the raw code.
-func HandleFileExecRefusal(err error, serverName string) bool {
+// commandResultFailure, which knows no server name and would print the raw code.
+func fileExecFailure(stderr io.Writer, err error, serverName string) error {
 	message, hint, ok := fileExecRefusal(err, serverName)
 	if !ok {
-		return false
+		return nil
 	}
-	reportCodedRefusal("command", err, message, hint)
-	return true
+	return codedRefusal(stderr, "command", err, message, hint)
 }
 
-// HandleFileExecInlineCredential reports command_inline_credential with the
-// file lane's hint and exits 1, or returns false when err is something else.
+// fileExecInlineCredentialFailure reports command_inline_credential with the
+// file lane's hint and returns exit 1, or nil when err is something else.
 // Call it only on the file lane: the shell lane shares the code and answers it
-// in HandleCommandResult with --env.
-func HandleFileExecInlineCredential(err error) bool {
+// in commandResultFailure with --env.
+func fileExecInlineCredentialFailure(stderr io.Writer, err error) error {
 	message, hint, ok := fileExecInlineCredentialRefusal(err)
 	if !ok {
-		return false
+		return nil
 	}
-	reportCodedRefusal("command", err, message, hint)
-	return true
+	return codedRefusal(stderr, "command", err, message, hint)
 }
 
 // useFileExecutionRefusal renders a use_file_execution rejection as a message and the file-lane
@@ -447,24 +454,23 @@ func runAsFlags(parsed RemoteExecArgs) []string {
 	return flags
 }
 
-// HandleUseFileExecutionRefusal reports a use_file_execution refusal with the
-// file lane guidance and exits 6, or returns false when err is something else.
-// It runs ahead of HandleCommandResult, which knows neither the server nor the
+// useFileExecutionFailure reports a use_file_execution refusal with the
+// file lane guidance and returns exit 6, or nil when err is something else.
+// It runs ahead of commandResultFailure, which knows neither the server nor the
 // account flags the guidance repeats.
-func HandleUseFileExecutionRefusal(err error, parsed RemoteExecArgs) bool {
+func useFileExecutionFailure(stderr io.Writer, err error, parsed RemoteExecArgs) error {
 	var rejected *event.CommandRejectedError
 	if !errors.As(err, &rejected) || !rejected.WantsFileExecution() {
-		return false
+		return nil
 	}
-	reportUseFileExecution(rejected, parsed.Server, runAsFlags(parsed), len(parsed.Env) > 0, "")
-	return true
+	return reportUseFileExecution(stderr, rejected, parsed.Server, runAsFlags(parsed), len(parsed.Env) > 0, "")
 }
 
-// reportUseFileExecution prints the use_file_execution refusal and exits 6, the
+// reportUseFileExecution prints the use_file_execution refusal and returns exit 6, the
 // code every settled-without-a-grant command exits with: running the same line
 // again is refused the same way. Under --output json the envelope carries the
 // code as error_code and the replacement commands as next_actions.
-func reportUseFileExecution(rejected *event.CommandRejectedError, server string, accountFlags []string, withEnv bool, accountNote string) {
+func reportUseFileExecution(stderr io.Writer, rejected *event.CommandRejectedError, server string, accountFlags []string, withEnv bool, accountNote string) error {
 	message, actions := useFileExecutionRefusal(rejected.CommandID, server, accountFlags, withEnv, accountNote)
 	var hint strings.Builder
 	for i, action := range actions {
@@ -477,5 +483,5 @@ func reportUseFileExecution(rejected *event.CommandRejectedError, server string,
 		}
 		hint.WriteString(line)
 	}
-	reportCodedRefusalWithExit(utils.ExitCodeNotApproved, "command", rejected, message, hint.String(), actions)
+	return codedRefusalWithExit(stderr, utils.ExitCodeNotApproved, "command", rejected, message, hint.String(), actions)
 }

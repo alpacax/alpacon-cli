@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"io"
 	"os"
 	"time"
 )
@@ -46,6 +47,13 @@ func ExitWithFailureJSON(f Failure) {
 	if OutputFormat != OutputFormatJSON {
 		return
 	}
-	PrintJSONError(os.Stderr, f.envelope())
+	SignalPaused(f.Err)
+	FprintFailureJSON(os.Stderr, f)
 	os.Exit(f.ExitCode)
+}
+
+// FprintFailureJSON writes f's envelope to w whatever the output format, for a caller that has
+// checked for --output json and returns the exit rather than taking it.
+func FprintFailureJSON(w io.Writer, f Failure) {
+	PrintJSONError(w, f.envelope())
 }

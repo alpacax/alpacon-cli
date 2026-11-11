@@ -11,13 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/pkg/configdir"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/xtaci/smux"
 )
 
 const (
 	ConfigFileName = "config.json"
-	ConfigFileDir  = ".alpacon"
+	ConfigFileDir  = configdir.Name
 	// KubeSessionDir, under ConfigFileDir, holds the kube sessions
 	// 'alpacon kube login' opened; logout removes it with the config.
 	KubeSessionDir = "kube"
@@ -307,11 +308,7 @@ func WhileLoggedIn(login Config, fn func() error) error {
 }
 
 func configDir() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get user home directory: %w", err)
-	}
-	return filepath.Join(homeDir, ConfigFileDir), nil
+	return configdir.Dir()
 }
 
 func LoadConfig() (Config, error) {

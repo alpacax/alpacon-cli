@@ -19,6 +19,10 @@ const (
 )
 
 func reportCLIError(args ...any) {
+	printIssueFooter(TrackedStderr(), args...)
+}
+
+func printIssueFooter(w io.Writer, args ...any) {
 	for _, arg := range args {
 		if err, ok := arg.(error); ok {
 			status := HTTPStatusCode(err)
@@ -27,7 +31,7 @@ func reportCLIError(args ...any) {
 			}
 		}
 	}
-	_, _ = fmt.Fprintln(TrackedStderr(), "For issues, check the latest version or report on", gitIssueURL)
+	_, _ = fmt.Fprintln(w, "For issues, check the latest version or report on", gitIssueURL)
 }
 
 // cliMessage sanitizes because the server's error detail reaches every Cli* helper through %s. \n and
@@ -53,25 +57,14 @@ func CliError(msg string, args ...any) {
 // CliErrorWithExit handles all error messages in the CLI and exits 1, or 2 when an argument is a usage
 // error. Under --output json it prints one envelope instead, classified from the first error in args, and no footer.
 func CliErrorWithExit(msg string, args ...any) {
-	ExitIfUsageError(ExitCodeGeneralError, "", nil, msg, args...)
-	if OutputFormat == OutputFormatJSON {
-		exitWithEnvelope(1, "", msg, args)
-	}
-	printCliError(refusalErrorIn(args), msg, args...)
-	reportCLIError(args...)
-	os.Exit(1)
+	exitWithError(newExitError(ExitCodeGeneralError, true, msg, args))
 }
 
 // CliErrorWithExitCode prints an error message to stderr and exits with the given code.
 // Unlike CliErrorWithExit it omits the "report an issue" footer—use it for expected,
 // machine-distinguishable refusals (e.g. a busy server) that scripts branch on by exit code.
 func CliErrorWithExitCode(code int, msg string, args ...any) {
-	ExitIfUsageError(code, "", nil, msg, args...)
-	if OutputFormat == OutputFormatJSON {
-		exitWithEnvelope(code, "", msg, args)
-	}
-	printCliError(refusalErrorIn(args), msg, args...)
-	os.Exit(code)
+	exitWithError(newExitError(code, false, msg, args))
 }
 
 // CliErrorWithCode names the json error_code (an ErrorCode* constant); table mode follows the
@@ -95,16 +88,30 @@ func CliUsageErrorWithExit(msg string, args ...any) {
 // CliParseErrorWithExit reports a command line cmd could not parse and exits 2 in format, the --output
 // value its caller found before the parse stopped; table mode points to cmd's help.
 func CliParseErrorWithExit(cmd *cobra.Command, format, msg string) {
+	exitWithError(newParseExitError(cmd, format, msg))
+}
+
+// NewParseExitError is the failure CliParseErrorWithExit reports. It applies format, as that does.
+func NewParseExitError(cmd *cobra.Command, format, msg string) error {
+	return newParseExitError(cmd, format, msg)
+}
+
+func newParseExitError(cmd *cobra.Command, format, msg string) *ExitError {
 	if format != "" {
 		_ = SetOutputFormat(format) // an invalid value keeps the current format
 	}
 	if OutputFormat == OutputFormatJSON {
-		CliUsageErrorWithExit("%s", msg)
+		return newUsageExitError("", "%s", []any{msg})
 	}
-	CliUsageErrorWithExit("%s\nRun '%s --help' for usage.", msg, cmd.CommandPath())
+	return newUsageExitError("", "%s\nRun '%s --help' for usage.", []any{msg, cmd.CommandPath()})
 }
 
 func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {
+	ExitWithFailureJSON(envelopeFailure(exitCode, errorCode, msg, args))
+}
+
+// envelopeFailure classifies the envelope from the first error in args.
+func envelopeFailure(exitCode int, errorCode, msg string, args []any) Failure {
 	var cause error
 	for _, arg := range args {
 		if e, ok := arg.(error); ok && e != nil {
@@ -112,7 +119,7 @@ func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {
 			break
 		}
 	}
-	ExitWithFailureJSON(Failure{ExitCode: exitCode, ErrorCode: errorCode, Err: cause, Message: fmt.Sprintf(msg, args...)})
+	return Failure{ExitCode: exitCode, ErrorCode: errorCode, Err: cause, Message: fmt.Sprintf(msg, args...)}
 }
 
 // printCliError writes the red Error line and, under it, the server's guidance
@@ -120,8 +127,22 @@ func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {
 // among their own arguments, so every call site that formats a server error
 // into its message prints the server's hint without naming it.
 func printCliError(err error, msg string, args ...any) {
-	_, _ = fmt.Fprintf(TrackedStderr(), "%s: %s\n", Red("Error"), cliMessage(msg, args...))
-	printRefusalNextActions(TrackedStderr(), err)
+	signalCliError(err, args)
+	printCliErrorTo(TrackedStderr(), err, msg, args...)
+}
+
+// signalCliError signals the refusal an error line reports, as printCliError does before printing it.
+func signalCliError(err error, args []any) {
+	if err != nil {
+		SignalPaused(err)
+	} else {
+		signalErrorsIn(args)
+	}
+}
+
+func printCliErrorTo(w io.Writer, err error, msg string, args ...any) {
+	_, _ = fmt.Fprintf(w, "%s: %s\n", Red("Error"), cliMessage(msg, args...))
+	printRefusalNextActions(w, err)
 }
 
 // DebugEnabled reports whether diagnostic output is turned on.

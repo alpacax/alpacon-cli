@@ -82,8 +82,11 @@ func (l *CommandOutputListener) Err() error {
 }
 
 func (l *CommandOutputListener) provisionSession() (*EventSessionResponse, error) {
-	session, err := CreateEventSession(l.ac)
+	session, err := CreateEventSession(l.ctx, l.ac)
 	if err != nil {
+		if l.stopping() {
+			return nil, err
+		}
 		l.stateMu.Lock()
 		l.err = err
 		// Before the first subscribe a fatal 4xx gives up, since the caller falls back to polling
@@ -133,14 +136,14 @@ func (l *CommandOutputListener) subscribe() error {
 	channelID := l.channelID
 	l.stateMu.Unlock()
 
-	if err := SubscribeEvent(l.ac, channelID, EventTypeCommandOutput, commandID); err != nil {
+	if err := SubscribeEvent(l.ctx, l.ac, channelID, EventTypeCommandOutput, commandID); err != nil {
 		return err
 	}
 
 	// Chunks carry no end marker, so without this the exit waits for the poll to
 	// notice. Best effort: on failure that poll stays the only terminal signal.
 	if serverID != "" {
-		_ = SubscribeEvent(l.ac, channelID, EventTypeCommandFin, serverID)
+		_ = SubscribeEvent(l.ctx, l.ac, channelID, EventTypeCommandFin, serverID)
 	}
 
 	if err := l.halted(); err != nil {

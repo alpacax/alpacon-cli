@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/types"
@@ -559,4 +562,42 @@ func TestParseWebshArgsRefusalCarriesTheOutputReadBeforeIt(t *testing.T) {
 			assert.Equal(t, tt.want, parsed.OutputFormat)
 		})
 	}
+}
+
+func TestRunInBackground_StopsWhatStartReturnsEvenAfterTheGrace(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		startIn time.Duration
+	}{
+		{name: "start finishes within the grace", startIn: time.Second},
+		{name: "start finishes after the grace", startIn: 5 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				var stopped atomic.Bool
+				stop := runInBackground(func() func() {
+					time.Sleep(tc.startIn)
+					return func() { stopped.Store(true) }
+				}, 3*time.Second)
+
+				stop()
+				time.Sleep(10 * time.Second)
+				synctest.Wait()
+
+				assert.True(t, stopped.Load(), "a listener set up after %s must still be stopped", tc.startIn)
+			})
+		})
+	}
+}
+
+func TestRunInBackground_AcceptsANilStop(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		stop := runInBackground(func() func() { return nil }, 3*time.Second)
+
+		assert.NotPanics(t, stop)
+	})
 }

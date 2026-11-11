@@ -91,9 +91,13 @@ func Execute() {
 	markHookErrors(RootCmd)
 	keepWithOwnParser(RootCmd, os.Args[1:])
 	cmd, err := RootCmd.ExecuteC()
+	exitErr, isExitErr := errors.AsType[*utils.ExitError](err)
 	switch {
 	case err == nil:
 		return
+	case isExitErr: // a converted command's failure, printed after its deferred calls ran
+		utils.PrintExitError(exitErr)
+		os.Exit(exitErr.Code)
 	case !errors.As(err, new(hookError)):
 		utils.CliParseErrorWithExit(cmd, utils.OutputFormatIn(os.Args[1:]), err.Error())
 	case utils.IsUsageError(err):
@@ -182,6 +186,13 @@ func kubernetesSurfaceEnabled() bool {
 }
 
 func init() {
+	utils.LocalSignalConsoleOrigin = func() (string, string) {
+		cfg, err := config.LoadConfig()
+		if err != nil {
+			return "", ""
+		}
+		return cfg.WorkspaceURL, cfg.BaseDomain
+	}
 	RootCmd.PersistentFlags().StringVar(
 		&utils.OutputFormat, "output", utils.OutputFormatTable,
 		"Output format: table or json",

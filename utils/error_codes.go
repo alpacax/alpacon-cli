@@ -12,6 +12,11 @@ import (
 	"slices"
 )
 
+const (
+	ServiceTokenAccountNotOwn     = "service_token_account_not_own"
+	ApplicationSystemUserNotFound = "application_system_user_not_found"
+)
+
 // Synthetic error_code values: the CLI's own, for failures the server sent no code for.
 const (
 	ErrorCodeUsage                = "usage_error" // local validation that never reached the server
@@ -155,4 +160,12 @@ func serverErrorFields(err error) map[string]any {
 		}
 	}
 	return nil
+}
+
+// ServiceTokenAccountMessage describes the fixed account on a service token's ACL.
+func ServiceTokenAccountMessage(field string) string {
+	if field == "groupname" {
+		return "the group must be the token's application account's own group (code: " + ServiceTokenAccountNotOwn + ")"
+	}
+	return "the account must be the token's application account (code: " + ServiceTokenAccountNotOwn + ")"
 }

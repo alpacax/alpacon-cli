@@ -99,7 +99,7 @@ func (sl *SudoListener) Err() error {
 }
 
 func (sl *SudoListener) provisionSession() (*EventSessionResponse, error) {
-	session, err := CreateEventSession(sl.ac)
+	session, err := CreateEventSession(sl.ctx, sl.ac)
 	if err != nil {
 		return nil, sl.fail(err)
 	}
@@ -116,7 +116,7 @@ func (sl *SudoListener) subscribe() error {
 	channelID := sl.channelID
 	sl.stateMu.Unlock()
 
-	if err := SubscribeEvent(sl.ac, channelID, EventTypeSudo, sl.sessionID); err != nil {
+	if err := SubscribeEvent(sl.ctx, sl.ac, channelID, EventTypeSudo, sl.sessionID); err != nil {
 		return sl.fail(err)
 	}
 
@@ -140,6 +140,9 @@ func (sl *SudoListener) announceOutage(cause error) {
 // for the raw-mode terminal, and left to the reconnect loop. Every cause is recorded, so
 // Err() after a timeout gives the transport's own words.
 func (sl *SudoListener) fail(cause error) error {
+	if sl.stopping() {
+		return cause
+	}
 	sl.stateMu.Lock()
 	sl.err = cause
 	fatal := !sl.subscribed && isFatalRequestError(cause)
@@ -157,8 +160,7 @@ func (sl *SudoListener) fail(cause error) error {
 	if announce {
 		select {
 		case <-sl.done:
-			// Stop cancels neither an in-flight dial nor a session create, so a
-			// failure landing after it must not claim anything is still retrying.
+			// Stop can land after the check above, and a stopped listener is not retrying.
 		default:
 			_, _ = fmt.Fprintf(os.Stderr, "\r\n%s\r\n", utils.Yellow(sudoOutageWarning))
 		}

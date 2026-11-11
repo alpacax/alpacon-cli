@@ -35,6 +35,7 @@ one of them never exits 0, whether or not the rest of the edit was applied.`,
 
 		userID, edit, err := iam.PrepareUserUpdate(alpaconClient, userName)
 		if err != nil {
+			utils.ExitIfNoChanges(err)
 			utils.CliErrorWithExit("Failed to update the user info: %s.", err)
 		}
 
@@ -46,9 +47,6 @@ one of them never exits 0, whether or not the rest of the edit was applied.`,
 		}
 
 		if len(edit.Changes) == 0 {
-			if len(edit.Privileges) == 0 {
-				utils.CliInfoWithExit("No changes made. Aborting update.")
-			}
 			utils.CliErrorWithExit("Nothing was applied: the only edits were to read-only privilege flags.")
 		}
 

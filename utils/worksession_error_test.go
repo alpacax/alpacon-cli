@@ -88,6 +88,7 @@ func TestBuildWorkSessionDiagnostic_TokenNoteMatchesOperation(t *testing.T) {
 		notWant   string
 	}{
 		{"interactive Websh needs a login without a token", OperationWebsh, "cannot open an interactive terminal; it needs 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device)", "bypass this check"},
+		{"tunnel needs a login without a token", OperationTunnel, "cannot open a tunnel; it needs 'alpacon login' without -t", "bypass this check"},
 		{"command is bypassed by a token", OperationCommand, "bypass this check", "cannot open an interactive terminal"},
 		{"webftp is bypassed by a token", OperationWebFTP, "bypass this check", "cannot open an interactive terminal"},
 	}
@@ -405,7 +406,7 @@ func TestWorkSessionNextActions_AgentRecoveryAvoidsForbiddenScope(t *testing.T) 
 
 func TestWorkSessionNextActions_AgentRecoveryKeepsAllowedScope(t *testing.T) {
 	t.Parallel()
-	for _, operation := range []string{OperationCommand, OperationWebFTP} {
+	for _, operation := range []string{OperationCommand, OperationWebFTP, OperationTunnel} {
 		t.Run(operation, func(t *testing.T) {
 			t.Parallel()
 			actions := workSessionNextActions(WorkSessionAgentSessionRequired, operation, "prod-1", "")
@@ -540,4 +541,13 @@ func TestWorkSessionGuidance_ServerHintComesFirst(t *testing.T) {
 	// A code with no matching description keeps every description.
 	required := workSessionGuidance(WorkSessionRequired, OperationCommand, "web-01", "", hint)
 	assert.Equal(t, append([]NextAction{{Description: hint}}, workSessionNextActions(WorkSessionRequired, OperationCommand, "web-01", "")...), required)
+}
+
+func TestWorkSessionNextActions_AccountNotApprovedRetriesTheTunnel(t *testing.T) {
+	t.Setenv("AI_AGENT", "")
+
+	actions := workSessionNextActions(WorkSessionAccountNotApproved, OperationTunnel, "prod-1", "550e8400-e29b-41d4-a716-446655440000")
+
+	require.NotEmpty(t, actions)
+	assert.Equal(t, "alpacon tunnel --work-session 550e8400-e29b-41d4-a716-446655440000 -u <approved account> prod-1 -l <LOCAL_PORT> -r <REMOTE_PORT>", actions[0].Command)
 }

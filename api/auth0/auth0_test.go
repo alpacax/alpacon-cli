@@ -887,3 +887,45 @@ func TestPollForToken_CarriesWidenedIntervalIntoNextPoll(t *testing.T) {
 		assert.Equal(t, []time.Duration{5 * time.Second}, gaps(times))
 	})
 }
+
+func TestFetchAuthEnv_ErrorCarriesTheStatus(t *testing.T) {
+	t.Parallel()
+	notFound := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(notFound.Close)
+	unavailable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(unavailable.Close)
+	closed := httptest.NewServer(http.NotFoundHandler())
+	unreachable := closed.URL + "/team404"
+	closed.Close()
+	tests := []struct {
+		name       string
+		url        string
+		wantStatus int
+	}{
+		{name: "404 response", url: notFound.URL, wantStatus: http.StatusNotFound},
+		{name: "503 response", url: unavailable.URL, wantStatus: http.StatusServiceUnavailable},
+		{name: "unreachable workspace with 404 in its URL", url: unreachable, wantStatus: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := FetchAuthEnv(tt.url, notFound.Client())
+
+			require.Error(t, err)
+			assert.Equal(t, tt.wantStatus, utils.HTTPStatusCode(err))
+		})
+	}
+}
+
+func TestRevokeToken_RefusesAnAuth0DomainThatDoesNotParse(t *testing.T) {
+	t.Parallel()
+	env := &AuthEnvResponse{Auth0: Auth0Config{Method: "auth0", Domain: "[::1"}}
+
+	err := RevokeToken(http.DefaultClient, env, "refresh")
+
+	assert.ErrorContains(t, err, "invalid Auth0 domain")
+}
