@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -218,6 +219,57 @@ func TestFindCommandApprovalRequestIDEarlyStop(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, "apr-1", id)
 			assert.EqualValues(t, 2, pages.Load())
+		})
+	}
+}
+
+func TestProjectAttributesKeepsRawJSON(t *testing.T) {
+	t.Parallel()
+	r := ApprovalRequest{ID: "approval-1", RequestData: strings.Repeat("x", 80), AddedAt: time.Date(2026, 11, 7, 18, 30, 45, 0, time.FixedZone("UTC+9", 9*60*60))}
+
+	row := projectAttributes(&r)
+	body, err := json.Marshal(row)
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"id":"approval-1","request_type":"","status":"","requested_by":"","added_at":"2026-11-07T09:30:45Z","request_data":"`+strings.Repeat("x", 80)+`","reviewed_by":"","reviewed_at":null,"rejection_note":""}`, string(body))
+	assert.Equal(t, strings.Repeat("x", 50)+"...", row.RequestData.String())
+}
+
+func TestProjectAttributesKeepsLocalAddedAtTableText(t *testing.T) {
+	t.Parallel()
+	r := ApprovalRequest{AddedAt: time.Date(2026, 11, 7, 18, 30, 45, 0, time.Local)}
+
+	row := projectAttributes(&r)
+
+	assert.Equal(t, "2026-11-07 18:30", row.AddedAt.String())
+}
+
+func TestProjectAttributesKeepsReviewOutcome(t *testing.T) {
+	t.Parallel()
+	reviewedAt := time.Date(2026, 11, 7, 18, 30, 45, 0, time.FixedZone("UTC+9", 9*60*60))
+	tests := []struct {
+		name    string
+		request ApprovalRequest
+		want    string
+	}{
+		{
+			name:    "rejected request keeps reviewer and note",
+			request: ApprovalRequest{ID: "approval-1", Status: "rejected", ReviewedBy: &types.UserSummary{Name: "alice"}, ReviewedAt: &reviewedAt, RejectionNote: "use a maintenance window"},
+			want:    `{"id":"approval-1","request_type":"","status":"rejected","requested_by":"","added_at":null,"request_data":"","reviewed_by":"alice","reviewed_at":"2026-11-07T09:30:45Z","rejection_note":"use a maintenance window"}`,
+		},
+		{
+			name:    "pending request has no review",
+			request: ApprovalRequest{ID: "approval-2", Status: "pending"},
+			want:    `{"id":"approval-2","request_type":"","status":"pending","requested_by":"","added_at":null,"request_data":"","reviewed_by":"","reviewed_at":null,"rejection_note":""}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			body, err := json.Marshal(projectAttributes(&tt.request))
+
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.want, string(body))
 		})
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 type WebFTPLogEntry struct {
@@ -19,12 +20,13 @@ type WebFTPLogEntry struct {
 }
 
 type WebFTPLogAttributes struct {
-	Server   string `json:"server"`
-	FileName string `json:"file_name" table:"File Name"`
-	Action   string `json:"action"`
-	Size     int64  `json:"size"`
-	Success  bool   `json:"success"`
-	User     string `json:"user"`
-	RemoteIP string `json:"remote_ip" table:"Remote IP"`
-	AddedAt  string `json:"added_at" table:"Added At"`
+	Server   string          `json:"server"`
+	FileName string          `json:"file_name" table:"File Name"`
+	Action   string          `json:"action"`
+	Size     int64           `json:"size"`
+	Success  bool            `json:"success"`
+	User     string          `json:"user"`
+	RemoteIP string          `json:"remote_ip" table:"Remote IP"`
+	Message  string          `json:"message" table:"-"`
+	AddedAt  utils.Timestamp `json:"added_at" table:"Added At"`
 }

@@ -4,13 +4,15 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 type LogAttributes struct {
-	Program string `json:"program"`
-	Level   string `json:"level"`
-	Message string `json:"message"`
-	Date    string `json:"date"`
+	ID      int             `json:"id" table:"-"`
+	Program string          `json:"program"`
+	Level   string          `json:"level"`
+	Message string          `json:"message"`
+	Date    utils.Timestamp `json:"date"`
 }
 
 type LogEntry struct {

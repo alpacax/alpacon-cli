@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 type ApprovalRequest struct {
@@ -114,10 +115,13 @@ type FileExecution struct {
 }
 
 type ApprovalRequestAttributes struct {
-	ID          string `json:"id"           table:"ID"`
-	Type        string `json:"request_type" table:"Type"`
-	Status      string `json:"status"       table:"Status"`
-	RequestData string `json:"request_data" table:"Request"`
-	RequestedBy string `json:"requested_by" table:"Requested By"`
-	AddedAt     string `json:"added_at"     table:"Added At"`
+	ID            string              `json:"id"           table:"ID"`
+	Type          string              `json:"request_type" table:"Type"`
+	Status        string              `json:"status"       table:"Status"`
+	RequestData   utils.TruncatedText `json:"request_data" table:"Request"`
+	RequestedBy   string              `json:"requested_by" table:"Requested By"`
+	AddedAt       utils.Timestamp     `json:"added_at"     table:"Added At"`
+	ReviewedBy    string              `json:"reviewed_by"    table:"-"`
+	ReviewedAt    utils.Timestamp     `json:"reviewed_at"    table:"-"`
+	RejectionNote string              `json:"rejection_note" table:"-"`
 }

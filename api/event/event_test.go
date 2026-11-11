@@ -3003,7 +3003,7 @@ func TestEventAttributesJSONKeepsStatusAndSentNulls(t *testing.T) {
 				StatusCell:       "rejected: risk_denied, gate risk",
 				CommandRejection: rejectionOf(types.SentString{Value: "risk_denied", Sent: true}, types.SentString{Value: "risk", Sent: true}),
 			},
-			want: `{"server":"","shell":"","command":"","result":"","status":"null","operator":"","requested_at":"","rejection_cause":"risk_denied","rejection_gate":"risk"}`,
+			want: `{"id":"","server":"","shell":"","command":"","result":"","status":"null","exit_code":null,"error_phase":null,"operator":"","requested_at":null,"rejection_cause":"risk_denied","rejection_gate":"risk"}`,
 		},
 		{
 			name: "denied row keeps its denial code",
@@ -3012,7 +3012,7 @@ func TestEventAttributesJSONKeepsStatusAndSentNulls(t *testing.T) {
 				StatusCell: "denied: account_not_resolved",
 				DenialCode: types.SentString{Value: "account_not_resolved", Sent: true},
 			},
-			want: `{"server":"","shell":"","command":"","result":"","status":"null","operator":"","requested_at":"","denial_code":"account_not_resolved"}`,
+			want: `{"id":"","server":"","shell":"","command":"","result":"","status":"null","exit_code":null,"error_phase":null,"operator":"","requested_at":null,"denial_code":"account_not_resolved"}`,
 		},
 		{
 			name: "sent nulls stay null",
@@ -3021,12 +3021,12 @@ func TestEventAttributesJSONKeepsStatusAndSentNulls(t *testing.T) {
 				StatusCell:       "true",
 				CommandRejection: rejectionOf(types.SentString{Sent: true}, types.SentString{Sent: true}),
 			},
-			want: `{"server":"","shell":"","command":"","result":"","status":"true","operator":"","requested_at":"","rejection_cause":null,"rejection_gate":null}`,
+			want: `{"id":"","server":"","shell":"","command":"","result":"","status":"true","exit_code":null,"error_phase":null,"operator":"","requested_at":null,"rejection_cause":null,"rejection_gate":null}`,
 		},
 		{
 			name: "older server row has no rejection keys",
 			row:  EventAttributes{Status: "false", StatusCell: "false"},
-			want: `{"server":"","shell":"","command":"","result":"","status":"false","operator":"","requested_at":""}`,
+			want: `{"id":"","server":"","shell":"","command":"","result":"","status":"false","exit_code":null,"error_phase":null,"operator":"","requested_at":null}`,
 		},
 	}
 	for _, tc := range cases {
@@ -3047,8 +3047,8 @@ func rejectionOf(cause, gate types.SentString) CommandRejection {
 func TestEventAttributesTableKeepsItsColumns(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
 		utils.PrintTable([]EventAttributes{{
-			Server: "prod", Shell: "bash", Command: "uptime", Result: "ok", Status: "null", StatusCell: "rejected: risk_denied, gate risk",
-			Operator: "alice", RequestedAt: "now",
+			Server: "prod", Shell: "bash", Command: "uptime", Result: utils.Truncate("ok", 70), Status: "null", StatusCell: "rejected: risk_denied, gate risk",
+			Operator: "alice", RequestedAt: utils.NewTimestamp(time.Time{}, "now"),
 			CommandRejection: CommandRejection{
 				RejectionCause: types.SentString{Value: "risk_denied", Sent: true},
 				RejectionGate:  types.SentString{Value: "risk", Sent: true},
@@ -3086,4 +3086,27 @@ func TestDeniedCommandDoesNotPrintRefusalAsRemoteOutput(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestGetEventList_JSONKeepsCommandIDAndFailureDetail(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[
+			{"id":"550e8400-e29b-41d4-a716-446655440000","line":"uptime","success":false,"exit_code":127,"error_phase":"exec"},
+			{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","line":"uptime"}
+		]}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	events, err := GetEventList(ac, 2, "", "")
+
+	require.NoError(t, err)
+	body, err := json.Marshal(events)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{"id":"550e8400-e29b-41d4-a716-446655440000","server":"","shell":"","command":"uptime","result":"","status":"false","exit_code":127,"error_phase":"exec","operator":"","requested_at":null},
+		{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","server":"","shell":"","command":"uptime","result":"","status":"null","exit_code":null,"error_phase":null,"operator":"","requested_at":null}
+	]`, string(body))
 }
