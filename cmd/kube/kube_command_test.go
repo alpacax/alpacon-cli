@@ -32,11 +32,8 @@ type logoutScene struct {
 	record     kubeSessionRecord
 }
 
-// runKubeCommand runs a fresh kube tree in process under the HOME and
-// KUBECONFIG the test set, and reads the exit code cmd.Execute would leave.
-// stderr holds what the command printed and then its failure, printed as
-// cmd.Execute prints it. Serial: it swaps os.Stdout and os.Stderr and sets
-// utils.OutputFormat.
+// runKubeCommand runs a fresh kube tree in process and returns what cmd.Execute would print and exit with.
+// Serial: it swaps os.Stdout and os.Stderr and sets utils.OutputFormat.
 func runKubeCommand(t *testing.T, outputFormat string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
 	return runKubeCommandWith(t, client.NewAlpaconAPIClient, outputFormat, args...)
@@ -62,9 +59,8 @@ func apiClientTo(ts *httptest.Server) clientFactory {
 	}
 }
 
-// reportExit prints err the way cmd.Execute does and returns its exit code.
-// An error that is no ExitError is Cobra rejecting the command line, which
-// cmd.Execute exits 2 on; that mapping itself is tested in package cmd.
+// reportExit prints err as cmd.Execute does and returns its exit code. An error that is no ExitError
+// is Cobra rejecting the command line, which exits 2; package cmd tests that mapping.
 func reportExit(w io.Writer, err error) int {
 	if err == nil {
 		return 0

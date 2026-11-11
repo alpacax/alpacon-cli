@@ -159,10 +159,8 @@ type heldKubeconfig struct {
 	release   func()
 }
 
-// holdKubeconfig opens and locks the kubeconfig at path and watches for
-// Ctrl+C. A second Ctrl+C ends the process from the watcher's goroutine, where
-// no deferred done runs, so it releases the lock before quit exits with
-// interruptedMessage: a lock left behind would block kubectl's own writes.
+// holdKubeconfig opens and locks the kubeconfig and watches for Ctrl+C. A second Ctrl+C exits from the
+// watcher, where no deferred done runs, so it releases the lock first, which kubectl's own writes wait on.
 func holdKubeconfig(path string, quit func(msg string)) (*heldKubeconfig, error) {
 	editor, err := kubeconfig.Open(path)
 	if err != nil {
@@ -235,9 +233,8 @@ func kubeConfigError(err error, clusterName, workSessionID string) error {
 	})
 }
 
-// kubeSessionError is the failure of openKubeSession, built by fail: a
-// WorkSession gate refusal exits 3 on its own, a refusal the server names gets
-// its hint, and anything else says the kubeconfig was not written.
+// kubeSessionError is openKubeSession's failure, built by fail: a gate refusal exits 3, a refusal the
+// server names gets its hint, and anything else says the kubeconfig was not written.
 func kubeSessionError(err error, clusterName, workSessionID string, fail func(err error, format string, args ...any) error) error {
 	var createErr *sessionCreateError
 	if errors.As(err, &createErr) {

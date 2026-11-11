@@ -436,7 +436,7 @@ func chooseWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clusterID st
 			return workSessionChoice{id: in.workSession}, nil
 		}
 		if want.waitable(ws, now) {
-			return chosen(waitForWorkSession(ac, in, ws), false), nil
+			return waitForWorkSession(ac, in, ws, false)
 		}
 		return chosen(ws, false), nil
 	}
@@ -450,7 +450,7 @@ func chooseWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clusterID st
 			utils.CliInfo("Using WorkSession %s from %s.", utils.SanitizeTerminalText(ws.ID), worksession.WorkSessionEnvVar)
 			return chosen(ws, false), nil
 		case err == nil && want.waitable(ws, now):
-			return chosen(waitForWorkSession(ac, in, ws), false), nil
+			return waitForWorkSession(ac, in, ws, false)
 		default:
 			utils.CliInfo("%s names a WorkSession that does not serve %s; looking for one that does.", worksession.WorkSessionEnvVar, utils.SanitizeTerminalText(in.cluster))
 		}
@@ -471,7 +471,7 @@ func chooseWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clusterID st
 			utils.CliInfo("Using WorkSession %s.", utils.SanitizeTerminalText(ws.ID))
 			return chosen(ws, false), nil
 		}
-		return chosen(waitForWorkSession(ac, in, ws), false), nil
+		return waitForWorkSession(ac, in, ws, false)
 	}
 
 	return createClusterWorkSession(ac, in, clusterID)
@@ -553,23 +553,23 @@ func createClusterWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clust
 	if session.Status == wsapi.StatusActive {
 		return chosen(session, true), nil
 	}
-	return chosen(waitForWorkSession(ac, in, session), true), nil
+	return waitForWorkSession(ac, in, session, true)
 }
 
 // waitForWorkSession waits for ws to activate, saying first how to come back
 // to it, since Ctrl+C or the timeout leaves it waiting on approval.
-func waitForWorkSession(ac *client.AlpaconClient, in kubeLoginInput, ws *wsapi.WorkSession) *wsapi.WorkSession {
+func waitForWorkSession(ac *client.AlpaconClient, in kubeLoginInput, ws *wsapi.WorkSession, created bool) (workSessionChoice, error) {
 	resume := resumeAction(in, ws.ID)
 	utils.CliInfo("WorkSession %s is %s; waiting up to %s for it to become active. To stop and come back later, press Ctrl+C and run '%s'.",
 		utils.SanitizeTerminalText(ws.ID), utils.SanitizeTerminalText(ws.Status), in.waitTimeout, utils.SanitizeTerminalText(resume.Command))
 	final, err := worksession.WaitForApproval(ac, ws.ID, true, worksession.ApprovalPollInterval, in.waitTimeout)
 	if err != nil {
-		worksession.ExitOnWaitError(opKubeLogin, ws, resume, err)
+		return workSessionChoice{}, worksession.WaitExitError(opKubeLogin, ws, resume, err)
 	}
 	if utils.OutputFormat != utils.OutputFormatJSON {
 		worksession.PrintSessionAdvisories(final)
 	}
-	return final
+	return chosen(final, created), nil
 }
 
 // resumeAction is the command that comes back to the WorkSession id, writing

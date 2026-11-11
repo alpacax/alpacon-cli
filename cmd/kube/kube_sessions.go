@@ -44,9 +44,8 @@ after its token has expired.`,
 
 			rows, err := listKubeSessions(ac, cluster, all)
 			if err != nil {
-				// The cluster list and the session list answer 404 only when the
-				// surface is off. The exit code is named so the refusal, an
-				// expected one, leaves out the "report an issue" footer.
+				// Both lists answer 404 only when the surface is off. A named exit code keeps that
+				// expected refusal free of the "report an issue" footer.
 				if kubernetes.IsSurfaceOff(err) {
 					return utils.NewEnvelopeExitErrorWithCode(utils.ExitCodeGeneralError, opKubeSessions, err, "%s", kubernetes.SurfaceNotEnabledMessage)
 				}

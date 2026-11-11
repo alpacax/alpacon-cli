@@ -8,7 +8,6 @@ import (
 
 var KubeCmd = newKubeCmd(client.NewAlpaconAPIClient)
 
-// clientFactory builds the workspace client a command calls the server with.
 type clientFactory func() (*client.AlpaconClient, error)
 
 func newKubeCmd(newClient clientFactory) *cobra.Command {

@@ -344,7 +344,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 		// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
 		finalSession, err := waitForApproval(ac, session.ID, useAfterCreate, ApprovalPollInterval, waitTimeout, approvalSignaled)
 		if err != nil {
-			ExitOnWaitError(opCreate, session, afterApproval, err, createUpdateNextActions(clusterName, session)...)
+			exitOnWaitError(opCreate, session, afterApproval, err, createUpdateNextActions(clusterName, session)...)
 		}
 
 		if !useAfterCreate {
@@ -377,22 +377,30 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 	},
 }
 
-// ExitOnWaitError ends the process for a wait on session that did not reach
-// its goal. Both outcomes match 'alpacon event wait': a settled negative
-// outcome exits 6, and a wait that ran out with the outcome still open exits
-// 4 and offers next, the step to take once the session is approved. Only a
-// polling failure falls through to the general-error code.
-func ExitOnWaitError(operation string, session *wsapi.WorkSession, next utils.NextAction, err error, pendingNext ...utils.NextAction) {
+// exitOnWaitError ends the process with WaitExitError's outcome, for a command still on Run.
+func exitOnWaitError(operation string, session *wsapi.WorkSession, next utils.NextAction, err error, pendingNext ...utils.NextAction) {
+	var exitErr *utils.ExitError
+	if errors.As(WaitExitError(operation, session, next, err, pendingNext...), &exitErr) {
+		utils.PrintExitError(exitErr)
+		os.Exit(exitErr.Code)
+	}
+}
+
+// WaitExitError is a failed wait on session, as 'alpacon event wait' exits: 6 settled, 4 still open
+// (printed here, offering next), 1 for a polling failure, which the caller prints.
+func WaitExitError(operation string, session *wsapi.WorkSession, next utils.NextAction, err error, pendingNext ...utils.NextAction) error {
 	var terminal *terminalWaitError
 	if errors.As(err, &terminal) {
-		exitTerminalWait(operation, terminal, err)
+		printTerminalWait(operation, terminal, err)
+		return utils.NewSilentExitError(utils.ExitCodeNotApproved)
 	}
 	var pending *pendingWaitError
 	if errors.As(err, &pending) {
 		// The refusal a timed-out wait ended on, if any, adds its hint.
-		exitPending(session, next, fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err), append(utils.RefusalNextActions(err), pendingNext...)...)
+		utils.PrintPendingApproval(fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err), session.ApprovalRequestID, next, append(utils.RefusalNextActions(err), pendingNext...)...)
+		return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 	}
-	utils.CliErrorEnvelopeWithExit(operation, err, "%s", err)
+	return utils.NewEnvelopeExitError(operation, err, "%s", err)
 }
 
 func exitPending(session *wsapi.WorkSession, next utils.NextAction, message string, extra ...utils.NextAction) {
@@ -401,12 +409,16 @@ func exitPending(session *wsapi.WorkSession, next utils.NextAction, message stri
 }
 
 func exitTerminalWait(operation string, terminal *terminalWaitError, err error) {
+	printTerminalWait(operation, terminal, err)
+	os.Exit(utils.ExitCodeNotApproved)
+}
+
+func printTerminalWait(operation string, terminal *terminalWaitError, err error) {
 	if utils.OutputFormat == utils.OutputFormatJSON {
 		printTerminalWaitErrorJSON(operation, terminal, err)
 	} else {
 		printTerminalWaitError(terminal, err)
 	}
-	os.Exit(utils.ExitCodeNotApproved)
 }
 
 // settledNegatively is the refusal a status stands for once the session can no longer

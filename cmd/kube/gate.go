@@ -30,7 +30,6 @@ func ApplySurfaceGate(root *cobra.Command, enabled bool) {
 	applySurfaceGate(root, KubeCmd, enabled, gatePassThrough...)
 }
 
-// gatePassThrough names the children of kube the stand-in keeps.
 var gatePassThrough = []string{"credentials", "logout"}
 
 // applySurfaceGate moves the children of real named keep under the stand-in.
