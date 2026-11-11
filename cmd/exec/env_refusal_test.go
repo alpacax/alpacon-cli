@@ -11,7 +11,6 @@ import (
 )
 
 func TestExecEnvironmentRefusalOutput(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		code     string
 		sentence string
@@ -32,7 +31,6 @@ func TestExecEnvironmentRefusalOutput(t *testing.T) {
 			for _, topLevel := range []bool{false, true} {
 				for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 					t.Run(fmt.Sprintf("%s/%s/top_level_%t/message_%s", code, format, topLevel, server.name), func(t *testing.T) {
-						t.Parallel()
 						message := serverMessage
 						if message == "" || message == "Invalid input." {
 							message = tc.sentence
