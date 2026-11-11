@@ -42,10 +42,16 @@ const (
 	// RejectionCauseSignatureInvalid comes with status completed, since the agent
 	// refuses the file after delivery, and IsRejected still counts it a rejection.
 	RejectionCauseSignatureInvalid = "signature_invalid"
+	// RejectionCauseApprovalRuleChanged closes a command held for the session's
+	// assignee when the rules no longer send it there at the moment of
+	// confirmation. Sent again, the command is judged under the rules then.
+	RejectionCauseApprovalRuleChanged = utils.ApprovalRuleChanged
 )
 
 // rejectionText is what the CLI says about one cause or gate: what happened and
-// one step, never to submit the same command again.
+// one step, never to submit the same command again. approval_rule_changed is the
+// one exception: nobody refused that command, and sending it again is how it is
+// judged under the rule that holds now.
 type rejectionText struct {
 	what string
 	next utils.NextAction
@@ -54,18 +60,19 @@ type rejectionText struct {
 const workSessionCurrent = "alpacon work-session current"
 
 var causeTexts = map[string]rejectionText{
-	"command_acl_denied":            {"the command ACL did not admit it", utils.NextAction{Description: "The command needs a pre-approved command entry in this workspace; without one it is refused the same way."}},
-	"command_acl_unavailable":       {"the command ACL's verdict could not be obtained", utils.NextAction{Description: "The command pre-approval ledger gave no verdict; the command did not run."}},
-	"risk_denied":                   {"the risk assessor refused it", utils.NextAction{Description: "The workspace risk policy refuses this command; the same command is refused the same way."}},
-	"risk_unavailable":              {"the risk assessor was unavailable", utils.NextAction{Description: "The risk assessor gave no verdict; the command did not run."}},
-	"approval_policy_denied":        {"an approval policy refused it, or no one but the requester could decide it", utils.NextAction{Description: "The approval policy needs an approver other than the requester, or refuses the command outright."}},
-	RejectionCauseApprovalRejected:  {"an approver rejected it", utils.NextAction{Description: "Ask the approver why; the decision is in the Alpacon console (web)."}},
-	RejectionCauseApprovalExpired:   {"its approval request expired with no decision", utils.NextAction{Description: "Ask an approver why the request went undecided."}},
-	"approval_cancelled":            {"the requester cancelled its approval request", utils.NextAction{Description: "Ask the requester why the approval request was withdrawn."}},
-	"work_session_terminated":       {"its work session ended while it was held", utils.NextAction{Command: workSessionCurrent, Description: "the work session it was held under has ended; this shows the one in use now"}},
-	"account_bound_to_other_person": {"the account it would run as was linked to another person before it was delivered", utils.NextAction{Description: "Only the person the account is linked to can run commands as it."}},
-	"unsigned_file":                 {"the file command reached the agent without a signature", utils.NextAction{Description: "The file needs a signature; the agent runs only signed files."}},
-	RejectionCauseSignatureInvalid:  {"the agent could not verify the file's signature", utils.NextAction{Description: "The file's signature has to verify; the agent refuses one that does not."}},
+	"command_acl_denied":              {"the command ACL did not admit it", utils.NextAction{Description: "The command needs a pre-approved command entry in this workspace; without one it is refused the same way."}},
+	"command_acl_unavailable":         {"the command ACL's verdict could not be obtained", utils.NextAction{Description: "The command pre-approval ledger gave no verdict; the command did not run."}},
+	"risk_denied":                     {"the risk assessor refused it", utils.NextAction{Description: "The workspace risk policy refuses this command; the same command is refused the same way."}},
+	"risk_unavailable":                {"the risk assessor was unavailable", utils.NextAction{Description: "The risk assessor gave no verdict; the command did not run."}},
+	"approval_policy_denied":          {"an approval policy refused it, or no one but the requester could decide it", utils.NextAction{Description: "The approval policy needs an approver other than the requester, or refuses the command outright."}},
+	RejectionCauseApprovalRejected:    {"an approver rejected it", utils.NextAction{Description: "Ask the approver why; the decision is in the Alpacon web console."}},
+	RejectionCauseApprovalExpired:     {"its approval request expired with no decision", utils.NextAction{Description: "Ask an approver why the request went undecided."}},
+	RejectionCauseApprovalRuleChanged: {"the approval rule changed while it waited", utils.NextAction{Description: "Sending the command again applies the rule that holds now."}},
+	"approval_cancelled":              {"the requester cancelled its approval request", utils.NextAction{Description: "Ask the requester why the approval request was withdrawn."}},
+	"work_session_terminated":         {"its work session ended while it was held", utils.NextAction{Command: workSessionCurrent, Description: "the work session it was held under has ended; this shows the one in use now"}},
+	"account_bound_to_other_person":   {"the account it would run as was linked to another person before it was delivered", utils.NextAction{Description: "Only the person the account is linked to can run commands as it."}},
+	"unsigned_file":                   {"the file command reached the agent without a signature", utils.NextAction{Description: "The file needs a signature; the agent runs only signed files."}},
+	RejectionCauseSignatureInvalid:    {"the agent could not verify the file's signature", utils.NextAction{Description: "The file's signature has to verify; the agent refuses one that does not."}},
 }
 
 // gateTexts answers a cause this CLI does not know yet from the gate that

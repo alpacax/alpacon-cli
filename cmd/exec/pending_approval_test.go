@@ -576,7 +576,7 @@ func TestExecLogsApprovalLookupFallback(t *testing.T) {
 
 			_, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, rejectedCommandID)
 			assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
-			assert.Contains(t, stderr, "awaiting human approval in the Alpacon console")
+			assert.Contains(t, stderr, "awaiting human approval in the Alpacon web console")
 			assert.NotContains(t, stderr, "(approval request:")
 			if tc.warning {
 				assert.Contains(t, stderr, "failed to read approval request")

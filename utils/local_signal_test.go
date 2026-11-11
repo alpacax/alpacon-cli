@@ -66,6 +66,8 @@ func TestSignalRefusalClassification(t *testing.T) {
 		{"cancelled approval envelope code", &signalRefusalStub{gate: "approval", payload: map[string]any{"code": "approval_cancelled"}}, "", ""},
 		{"expired approval envelope error_code", &signalRefusalStub{gate: "approval", payload: map[string]any{"error_code": "approval_expired"}}, "", ""},
 		{"cancelled approval envelope error_code", &signalRefusalStub{gate: "approval", payload: map[string]any{"error_code": "approval_cancelled"}}, "", ""},
+		{"rule changed approval code", &signalRefusalStub{code: "approval_rule_changed", gate: "approval"}, "", ""},
+		{"rule changed approval envelope code", &signalRefusalStub{gate: "approval", payload: map[string]any{"code": "approval_rule_changed"}}, "", ""},
 		{"paused wins over gate", &signalRefusalStub{code: "session_paused", gate: "session"}, "", ""},
 		{"paused without gate", &signalRefusalStub{code: "session_paused"}, "", ""},
 		{"response session", &signalRefusalStub{gate: "risk", payload: map[string]any{"work_session_id": "ses-2"}}, localsignal.Denied, "ses-2"},

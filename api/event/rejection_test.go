@@ -56,7 +56,7 @@ func TestRejectionNamesEachCause(t *testing.T) {
 		{"risk_denied", "risk", "the risk assessor refused it", utils.NextAction{Description: "The workspace risk policy refuses this command; the same command is refused the same way."}},
 		{"risk_unavailable", "risk", "the risk assessor was unavailable", utils.NextAction{Description: "The risk assessor gave no verdict; the command did not run."}},
 		{"approval_policy_denied", "approval", "an approval policy refused it, or no one but the requester could decide it", utils.NextAction{Description: "The approval policy needs an approver other than the requester, or refuses the command outright."}},
-		{"approval_rejected", "approval", "an approver rejected it", utils.NextAction{Description: "Ask the approver why; the decision is in the Alpacon console (web)."}},
+		{"approval_rejected", "approval", "an approver rejected it", utils.NextAction{Description: "Ask the approver why; the decision is in the Alpacon web console."}},
 		{"approval_expired", "approval", "its approval request expired with no decision", utils.NextAction{Description: "Ask an approver why the request went undecided."}},
 		{"approval_cancelled", "approval", "the requester cancelled its approval request", utils.NextAction{Description: "Ask the requester why the approval request was withdrawn."}},
 		{"work_session_terminated", "work_session", "its work session ended while it was held", utils.NextAction{Command: "alpacon work-session current", Description: "the work session it was held under has ended; this shows the one in use now"}},
