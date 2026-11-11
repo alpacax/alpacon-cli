@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -168,4 +171,32 @@ func TestExecLogsRuleChangedRejection(t *testing.T) {
 	for _, judgment := range []string{"score", "reasoning", "confidence"} {
 		assert.NotContains(t, stderr, judgment)
 	}
+}
+
+// TestExecLogsRuleChangedRejectionSendsNoDeniedSignal pins approval_rule_changed
+// as a lapse: nobody refused the command, so no command-denied banner or
+// desktop notification goes out.
+func TestExecLogsRuleChangedRejectionSendsNoDeniedSignal(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/"+assigneeJobID+"/" {
+			_, _ = fmt.Fprintf(w, `{"id":%q,"status":"rejected","rejection_cause":"approval_rule_changed","rejection_gate":"approval","approval_lane":null}`, assigneeJobID)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+	logPath := filepath.Join(t.TempDir(), "notifications")
+	require.NoError(t, os.WriteFile(logPath, nil, 0600))
+	origNotifier := localsignal.NewNotifier
+	t.Cleanup(func() { localsignal.NewNotifier = origNotifier })
+	localsignal.NewNotifier = func() localsignal.Notifier { return approvalWaitNotifier{path: logPath} }
+
+	_, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, assigneeJobID)
+	assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
+	assert.Contains(t, stderr, "the approval rule changed while it waited")
+	assert.NotContains(t, stderr, "==== ALPACON: COMMAND DENIED ====")
+	notifications, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	assert.NotContains(t, string(notifications), "Alpacon: command denied")
 }
