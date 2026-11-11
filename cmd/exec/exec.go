@@ -188,7 +188,9 @@ LOCAL_PATH, which writes it to PATH and runs it in one step, or with --file
 PATH --from-server when the script is already at PATH on the server. Add
 --interpreter ABSOLUTE_PATH for a script /bin/bash does not run, such as a perl
 -e body.
-Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
+Browser login and personal API tokens require an active, approved WorkSession
+for command execution. Service tokens use endpoint-specific authorization.
+This is client guidance; personal-token enforcement depends on the server version.`,
 		Example: `  # Simple command execution
   alpacon exec prod-docker docker ps
   alpacon exec root@prod-docker docker ps

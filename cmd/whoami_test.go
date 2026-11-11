@@ -368,9 +368,9 @@ func TestIsWorksessionRequired(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "Token only → not required",
+			name: "Token only → required",
 			cfg:  config.Config{Token: "abc123"},
-			want: false,
+			want: true,
 		},
 		{
 			name: "no tokens → not required",

@@ -166,9 +166,10 @@ workspace approval policy blocks script bodies, with exit code 6 and the code
 use_file_execution. Save the script to a file and run it with
 'alpacon exec --file', as the printed commands show; --output json carries them
 in next_actions.
-Requires an active WorkSession when using Browser login (Auth0). Token auth (API
-token or Service token) bypasses this requirement for 'websh SERVER COMMAND',
-but cannot open an interactive terminal or watch, join, or invite to a session—those
+'websh SERVER COMMAND' requires an active, approved WorkSession for browser login
+and personal API tokens. Service tokens use endpoint-specific authorization.
+This is client guidance; personal-token enforcement depends on the server version.
+Tokens cannot open an interactive terminal or watch, join, or invite to a session—those
 need 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device).`,
 		Example: `  # Open a websh terminal
   alpacon websh my-server

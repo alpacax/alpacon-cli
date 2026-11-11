@@ -234,8 +234,11 @@ func isTokenAuth(cfg config.Config) bool {
 	return cfg.Token != "" && cfg.AccessToken == ""
 }
 
+// isWorksessionRequired describes command and REST transfer creation, not reads
+// or the approval state of the selected session. The server decides admission.
 func isWorksessionRequired(cfg config.Config) bool {
-	return cfg.AccessToken != ""
+	method := config.GetAuthMethod(cfg)
+	return method == "Browser login" || method == "Token"
 }
 
 func warnIfExpiringSoon(cfg config.Config) {

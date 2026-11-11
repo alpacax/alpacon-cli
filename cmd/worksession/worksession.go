@@ -41,7 +41,7 @@ var WorkSessionCmd = &cobra.Command{
 
 Work sessions are approval-gated units that authorize access-path operations on Alpacon.
 
-Gated operations (require an active WorkSession under interactive auth):
+Gated operations:
   websh—'alpacon websh' (browser-based terminal)
   command—'alpacon exec' (remote command execution)
   webftp—'alpacon cp' (file transfer)
@@ -50,8 +50,12 @@ Gated operations (require an active WorkSession under interactive auth):
   kube—'alpacon kube login' and 'kube config' (Kubernetes API; needs a session that
     targets the cluster with --cluster); kube_exec adds exec, attach and port-forward
 
-Bypass: Token auth (API token or Service token) skips the requirement for 'exec', 'cp',
-'edit', and 'websh SERVER COMMAND', but cannot run an interactive 'websh' terminal,
+'exec', 'cp', 'edit', and 'websh SERVER COMMAND' require an active, approved WorkSession
+for browser login and personal API tokens. Service tokens use endpoint-specific authorization.
+This is client guidance; personal-token enforcement depends on the server version.
+Ordinary reads and Work Session requests do not require an active WorkSession.
+
+Tokens cannot run an interactive 'websh' terminal,
 'websh watch', 'websh join', 'websh invite', or 'tunnel'—those need 'alpacon login'
 without -t (on a machine without a browser, open the printed URL on another device).
 

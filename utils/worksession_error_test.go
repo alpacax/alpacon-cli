@@ -89,8 +89,8 @@ func TestBuildWorkSessionDiagnostic_TokenNoteMatchesOperation(t *testing.T) {
 	}{
 		{"interactive Websh needs a login without a token", OperationWebsh, "cannot open an interactive terminal; it needs 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device)", "bypass this check"},
 		{"tunnel needs a login without a token", OperationTunnel, "cannot open a tunnel; it needs 'alpacon login' without -t", "bypass this check"},
-		{"command is bypassed by a token", OperationCommand, "bypass this check", "cannot open an interactive terminal"},
-		{"webftp is bypassed by a token", OperationWebFTP, "bypass this check", "cannot open an interactive terminal"},
+		{"command requires a session for personal tokens", OperationCommand, "personal API tokens require an active, approved WorkSession", "cannot open an interactive terminal"},
+		{"webftp requires a session for personal tokens", OperationWebFTP, "personal API tokens require an active, approved WorkSession", "cannot open an interactive terminal"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
