@@ -24,7 +24,7 @@ func TestFormatAssigneeConfirmation(t *testing.T) {
 			"assignee command",
 			Fields{Command: true, Argv0: f.Argv0, Server: f.Server, Account: f.Account, Session: f.Session, Assignee: true},
 			"Alpacon: confirmation pending",
-			"sudo on my-server as alice is waiting for your own confirmation, not an approver's. Session ses-1. Confirm or reject it in the Alpacon web console.",
+			"sudo on my-server as alice needs your own confirmation. Session ses-1. Confirm or reject it in the Alpacon web console.",
 		},
 		{
 			"approver command",
@@ -69,5 +69,45 @@ func TestAssigneeConfirmationSharesTheApprovalLimitAndLink(t *testing.T) {
 	assert.Equal(t, []string{
 		"Alpacon: approval pending|id is waiting for approval. Session ses-1. Open the approval or wait for an approver. " + link + "|" + link,
 	}, notified, "the second signal of the same kind inside the window is folded")
-	assert.Contains(t, output.String(), "==== ALPACON: CONFIRMATION PENDING ====\nid is waiting for your own confirmation, not an approver's. Session ses-1. Confirm or reject it in the Alpacon web console.\n"+link+"\n")
+	assert.Contains(t, output.String(), "==== ALPACON: CONFIRMATION PENDING ====\nid needs your own confirmation. Session ses-1. Confirm or reject it in the Alpacon web console.\n"+link+"\n")
+}
+
+// Ordinary server, account and session identifiers leave room for the console
+// link on both lanes: the banner and the notification always carry it.
+func TestHeldCommandSignalKeepsConsoleLinkWithOrdinaryIdentifiers(t *testing.T) {
+	t.Parallel()
+	const (
+		workspace = "https://my-workspace.ap1.alpacon.io"
+		session   = "550e8400-e29b-41d4-a716-446655440000"
+		link      = workspace + "/commands/6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+	)
+	for _, tc := range []struct {
+		name     string
+		assignee bool
+	}{
+		{"assignee", true},
+		{"approver", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var output bytes.Buffer
+			emitter := New(&output, nil, nil)
+			emitter.WorkspaceURL = workspace
+			path := filepath.Join(t.TempDir(), "state", "signals.json")
+			emitter.statePath = func() (string, error) { return path, nil }
+			emitter.headless = func() bool { return false }
+			var notifiedBody, notifiedLink string
+			emitter.notifier = notifyFunc(func(_ context.Context, _, body, link string) error {
+				notifiedBody, notifiedLink = body, link
+				return nil
+			})
+			emitter.Emit(ApprovalPending, Fields{
+				Command: true, Argv0: "sudo", Server: "prod-web-01", Account: "ubuntu",
+				Session: session, ConsoleURL: link, Assignee: tc.assignee,
+			})
+			assert.Contains(t, output.String(), "\n"+link+"\n")
+			assert.Equal(t, link, notifiedLink)
+			assert.Contains(t, notifiedBody, " "+link)
+		})
+	}
 }

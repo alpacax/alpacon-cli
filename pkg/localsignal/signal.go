@@ -294,7 +294,7 @@ func Format(kind Kind, f Fields, folded int) (title, body string) {
 		case f.Assignee:
 			// Only a held command can be the session assignee's own to confirm.
 			title = "Alpacon: confirmation pending"
-			body = command + " is waiting for your own confirmation, not an approver's."
+			body = command + " needs your own confirmation."
 			if session != "" {
 				body += " Session " + session + "."
 			}

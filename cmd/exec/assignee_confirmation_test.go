@@ -68,7 +68,7 @@ func TestExecHeldCommandNamesWhoConfirms(t *testing.T) {
 			_, stderr, exitCode := runExecHelper(t, ts.URL, "prod", "--", "sudo", "reboot")
 			assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
 			if tc.wantAssignee {
-				assert.Contains(t, stderr, assigneeBannerTitle+"\nsudo on prod is waiting for your own confirmation, not an approver's. Confirm or reject it in the Alpacon web console.\n"+ts.URL+"/commands/cmd-1\n")
+				assert.Contains(t, stderr, assigneeBannerTitle+"\nsudo on prod needs your own confirmation. Confirm or reject it in the Alpacon web console.\n"+ts.URL+"/commands/cmd-1\n")
 				assert.Contains(t, stderr, "Confirmation required—this command is held for your own confirmation as the session's assignee, not for an approver.")
 				assert.NotContains(t, stderr, "Approval required")
 				assert.NotContains(t, stderr, approverBannerTitle)
