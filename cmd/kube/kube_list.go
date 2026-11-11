@@ -26,7 +26,7 @@ connected. A version or node count the agent has not reported yet is blank.`,
 			clusterList, err := kubernetes.GetClusterList(ac)
 			if err != nil {
 				if kubernetes.IsSurfaceOff(err) {
-					return errNotEnabled()
+					return notEnabledError()
 				}
 				return utils.NewExitError("Failed to retrieve the clusters: %s.", err)
 			}

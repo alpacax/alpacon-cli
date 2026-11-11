@@ -8,9 +8,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// errNotEnabled ends the command with exit 1. The refusal is expected, not a
-// CLI fault, so it leaves out the "report an issue" footer NewExitError adds.
-func errNotEnabled() error {
+var gatePassThrough = []string{"credentials", "logout"}
+
+// notEnabledError is exit 1 without NewExitError's "report an issue" footer: the refusal is
+// expected, not a CLI fault.
+func notEnabledError() error {
 	return utils.NewExitErrorWithCode(utils.ExitCodeGeneralError, kubernetes.SurfaceNotEnabledMessage)
 }
 
@@ -29,8 +31,6 @@ func errNotEnabled() error {
 func ApplySurfaceGate(root *cobra.Command, enabled bool) {
 	applySurfaceGate(root, KubeCmd, enabled, gatePassThrough...)
 }
-
-var gatePassThrough = []string{"credentials", "logout"}
 
 // applySurfaceGate moves the children of real named keep under the stand-in.
 func applySurfaceGate(root, real *cobra.Command, enabled bool, keep ...string) {
@@ -66,7 +66,7 @@ func newDisabledKubeCmd(real *cobra.Command) *cobra.Command {
 		Args:               cobra.ArbitraryArgs,
 		ValidArgsFunction:  cobra.NoFileCompletions,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return errNotEnabled()
+			return notEnabledError()
 		}),
 	}
 	// 'alpacon help kube' reaches the command through Find and calls its help,

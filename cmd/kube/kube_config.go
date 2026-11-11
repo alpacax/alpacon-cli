@@ -225,7 +225,7 @@ func kubeConfigError(err error, clusterName, workSessionID string) error {
 	if errors.As(err, &lookupErr) {
 		// The cluster list answers 404 only when the surface is off.
 		if kubernetes.IsSurfaceOff(lookupErr.err) {
-			return errNotEnabled()
+			return notEnabledError()
 		}
 		return utils.NewExitError("Failed to find the cluster: %s.", lookupErr.err)
 	}
