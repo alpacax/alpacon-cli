@@ -3,7 +3,9 @@ package ftp
 import (
 	"io"
 
+	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 // readOnly wraps an io.Reader to hide io.ReadCloser so that
@@ -106,4 +108,14 @@ type BulkDownloadResponse struct {
 	UploadURL   string              `json:"upload_url"`
 	DownloadURL string              `json:"download_url"`
 	Command     string              `json:"command"`
+}
+
+// remoteFile is one remote path and its last element, split by the server's rules.
+type remoteFile struct {
+	path string
+	name string
+}
+
+func newRemoteFile(remotePath string, srv server.ServerRef) remoteFile {
+	return remoteFile{path: remotePath, name: utils.RemotePathBase(remotePath, srv.Windows())}
 }
