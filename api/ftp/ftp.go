@@ -816,6 +816,11 @@ func saveDownloadedURL(httpClient *http.Client, url, dest string, src remoteFile
 }
 
 func downloadSingleFileWithResult(ac *client.AlpaconClient, src remoteFile, dest, serverID, username, groupname, resourceType, workSessionID string, recursive bool) (DownloadedFile, error) {
+	if !recursive { // refuse a name with nowhere to land before the server runs the download
+		if _, err := downloadedFilePath(dest, src); err != nil {
+			return DownloadedFile{}, err
+		}
+	}
 	spinner := utils.NewSpinner(fmt.Sprintf("Downloading %s...", src.name))
 	spinner.Start()
 	defer spinner.Stop()

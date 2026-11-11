@@ -1051,6 +1051,49 @@ func TestDownloadFile_SendsTheLastRemoteElementByTheServersRules(t *testing.T) {
 	}
 }
 
+func TestDownloadFile_RefusesANameThatLeavesDestBeforeAskingTheServer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		platform   string
+		remotePath string
+	}{
+		{name: "windows drive root", platform: "windows", remotePath: `C:\`},
+		{name: "windows parent element", platform: "windows", remotePath: `C:\Users\alice\..`},
+		{name: "linux parent element", platform: "debian", remotePath: "/home/alice/.."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			serverResp := api.ListResponse[server.ServerDetails]{
+				Count:   1,
+				Results: []server.ServerDetails{{ID: "srv-123", Name: "my-server", Platform: tt.platform}},
+			}
+			var downloads atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.Contains(r.URL.Path, "/api/servers/servers"):
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(serverResp)
+				case strings.HasPrefix(r.URL.Path, "/api/webftp/downloads/"):
+					downloads.Add(1)
+					w.WriteHeader(http.StatusBadRequest)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := DownloadFile(ac, []string{"my-server:" + tt.remotePath}, t.TempDir(), "", "", false, "")
+
+			require.ErrorContains(t, err, "names no file to save")
+			assert.True(t, utils.IsUsageError(err), "want a usage error, got %v", err)
+			assert.Zero(t, downloads.Load())
+		})
+	}
+}
+
 func TestDownloadFile_InputValidation(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
