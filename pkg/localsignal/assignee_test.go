@@ -24,7 +24,7 @@ func TestFormatAssigneeConfirmation(t *testing.T) {
 			"assignee command",
 			Fields{Command: true, Argv0: f.Argv0, Server: f.Server, Account: f.Account, Session: f.Session, Assignee: true},
 			"Alpacon: confirmation pending",
-			"sudo on my-server as alice is waiting for your own confirmation, not an approver's. Session ses-1. Confirm or reject it in the Alpacon console.",
+			"sudo on my-server as alice is waiting for your own confirmation, not an approver's. Session ses-1. Confirm or reject it in the Alpacon web console.",
 		},
 		{
 			"approver command",
@@ -69,5 +69,5 @@ func TestAssigneeConfirmationSharesTheApprovalLimitAndLink(t *testing.T) {
 	assert.Equal(t, []string{
 		"Alpacon: approval pending|id is waiting for approval. Session ses-1. Open the approval or wait for an approver. " + link + "|" + link,
 	}, notified, "the second signal of the same kind inside the window is folded")
-	assert.Contains(t, output.String(), "==== ALPACON: CONFIRMATION PENDING ====\nid is waiting for your own confirmation, not an approver's. Session ses-1. Confirm or reject it in the Alpacon console.\n"+link+"\n")
+	assert.Contains(t, output.String(), "==== ALPACON: CONFIRMATION PENDING ====\nid is waiting for your own confirmation, not an approver's. Session ses-1. Confirm or reject it in the Alpacon web console.\n"+link+"\n")
 }

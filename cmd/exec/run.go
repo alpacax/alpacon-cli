@@ -592,7 +592,7 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 		announced = true
 		waiting := "Waiting for approval in the Alpacon console (output streams once approved)..."
 		if pendingErr.AssigneeConfirms() {
-			waiting = "Waiting for your confirmation in the Alpacon console (output streams once confirmed)..."
+			waiting = "Waiting for your confirmation in the Alpacon web console (output streams once confirmed)..."
 		}
 		spinner := utils.NewSpinner(waiting)
 		spinner.Start()
@@ -815,7 +815,7 @@ func pendingApprovalFailure(stderr io.Writer, err error, parsed RemoteExecArgs) 
 			"It runs automatically once approved; pass --wait (or --wait-approval DURATION for a longer wait) to block until then."
 		if pendingErr.AssigneeConfirms() {
 			message = "Confirmation required—this command is held for your own confirmation as the session's assignee, not for an approver. " +
-				"Confirm or reject it in the Alpacon console (web) through the console link. " +
+				"Confirm or reject it in the Alpacon web console through the console link. " +
 				"It runs automatically once confirmed; pass --wait (or --wait-approval DURATION for a longer wait) to block until then."
 		}
 		utils.PrintPendingApproval(

@@ -154,7 +154,7 @@ func heldCommandMessage(assignee bool, requestID, status string) string {
 		request = fmt.Sprintf(" (approval request: %s)", utils.SanitizeTerminalText(requestID))
 	}
 	if assignee {
-		return fmt.Sprintf("Confirmation required—this command is awaiting your own confirmation as the session's assignee, not an approver's%s, in the Alpacon console (web); status %s. It runs automatically once confirmed.", request, status)
+		return fmt.Sprintf("Confirmation required—this command is awaiting your own confirmation as the session's assignee, not an approver's%s, in the Alpacon web console; status %s. It runs automatically once confirmed.", request, status)
 	}
 	return fmt.Sprintf("Approval required—this command is awaiting human approval%s in the Alpacon console (web); status %s. It runs automatically once approved.", request, status)
 }

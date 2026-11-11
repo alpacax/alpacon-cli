@@ -298,7 +298,7 @@ func Format(kind Kind, f Fields, folded int) (title, body string) {
 			if session != "" {
 				body += " Session " + session + "."
 			}
-			body += " Confirm or reject it in the Alpacon console."
+			body += " Confirm or reject it in the Alpacon web console."
 		default:
 			body = command + " is waiting for approval."
 			if session != "" {
