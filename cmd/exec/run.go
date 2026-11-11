@@ -50,7 +50,7 @@ const (
 	WebshInvocation Invocation = "alpacon websh"
 )
 
-const approvalWaitMessage = "Waiting for approval in the Alpacon console..."
+const approvalWaitMessage = "Waiting for approval in the Alpacon web console..."
 
 const (
 	// outcomePending covers every status that is not a decision, the absent
@@ -590,7 +590,7 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 		}
 		utils.SignalApprovalPending(err, utils.SignalFields(err))
 		announced = true
-		waiting := "Waiting for approval in the Alpacon console (output streams once approved)..."
+		waiting := "Waiting for approval in the Alpacon web console (output streams once approved)..."
 		if pendingErr.AssigneeConfirms() {
 			waiting = "Waiting for your confirmation in the Alpacon web console (output streams once confirmed)..."
 		}
@@ -811,7 +811,7 @@ func pendingApprovalFailure(stderr io.Writer, err error, parsed RemoteExecArgs) 
 		if action, ok := fileSuggestionAction(parsed, pendingErr.FileSuggestion); ok {
 			extra = append(extra, action)
 		}
-		message := "Approval required—this command is held for human approval in the Alpacon console (web). " +
+		message := "Approval required—this command is held for human approval in the Alpacon web console. " +
 			"It runs automatically once approved; pass --wait (or --wait-approval DURATION for a longer wait) to block until then."
 		if pendingErr.AssigneeConfirms() {
 			message = "Confirmation required—this command is held for your own confirmation as the session's assignee, not for an approver. " +
@@ -845,7 +845,7 @@ func pendingApprovalFailure(stderr io.Writer, err error, parsed RemoteExecArgs) 
 		}
 	}
 	utils.PrintPendingApproval(
-		"Approval required—a human must approve this sudo command in the Alpacon console (web). "+
+		"Approval required—a human must approve this sudo command in the Alpacon web console. "+
 			"Re-run after approval, or use --wait (or --wait-approval DURATION for a longer wait) to block until it is approved.",
 		requestID,
 		reRunHint(parsed),

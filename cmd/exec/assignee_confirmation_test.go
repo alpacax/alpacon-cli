@@ -75,7 +75,7 @@ func TestExecHeldCommandNamesWhoConfirms(t *testing.T) {
 				return
 			}
 			assert.Contains(t, stderr, approverBannerTitle)
-			assert.Contains(t, stderr, "Approval required—this command is held for human approval in the Alpacon console (web).")
+			assert.Contains(t, stderr, "Approval required—this command is held for human approval in the Alpacon web console.")
 			assert.NotContains(t, stderr, "your own confirmation")
 		})
 	}
@@ -103,7 +103,7 @@ func TestExecLogsHeldCommandNamesWhoConfirms(t *testing.T) {
 				return
 			}
 			assert.Contains(t, stderr, approverBannerTitle)
-			assert.Contains(t, stderr, "Approval required—this command is awaiting human approval in the Alpacon console (web); status awaiting_approval.")
+			assert.Contains(t, stderr, "Approval required—this command is awaiting human approval in the Alpacon web console; status awaiting_approval.")
 			assert.NotContains(t, stderr, "your own confirmation")
 		})
 	}
