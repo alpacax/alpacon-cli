@@ -51,6 +51,21 @@ func TestContainerScriptAction(t *testing.T) {
 			want:   true,
 		},
 		{
+			name:   "a -- among the program's own arguments",
+			parsed: RemoteExecArgs{Server: "srv", Command: `docker exec app python -c 'print(1)' -- --dry-run`},
+			want:   true,
+		},
+		{
+			name:   "exec inside the program body",
+			parsed: RemoteExecArgs{Server: "srv", Command: `docker exec app python -c 'exec("print(1)")'`},
+			want:   true,
+		},
+		{
+			name:   "kubectl options, the pod, then --",
+			parsed: RemoteExecArgs{Server: "srv", Command: `kubectl exec -c app pod -- python -c "print(1)"`},
+			want:   true,
+		},
+		{
 			name:   "inline program on the host, not in a container",
 			parsed: RemoteExecArgs{Server: "srv", Command: `python3 -c "print(1)"`},
 			want:   false,

@@ -540,7 +540,7 @@ func fileSuggestionAction(parsed RemoteExecArgs, s *event.FileExecutionSuggestio
 
 // containerExecRe matches a command line that runs something inside a
 // container or pod.
-var containerExecRe = regexp.MustCompile(`\b(docker|podman|nerdctl|kubectl)\b[^|;&]*\bexec\b`)
+var containerExecRe = regexp.MustCompile(`\b(docker|podman|nerdctl|kubectl)\b[^|;&]*?\bexec\b`)
 
 // containerExecValueFlags are the runtime exec options that take the next
 // argument as their value, so that argument is neither the target nor the
@@ -552,25 +552,27 @@ var containerExecValueFlags = map[string]bool{
 	"--pod-running-timeout": true,
 }
 
-// containerProgram returns the argv the container runs: what follows `--`
-// when present, else what follows the runtime's options and the target.
+// containerProgram returns the argv the container runs: what follows the
+// runtime's options and the target, past a `--` that ends them (kubectl exec
+// pod -- cmd). A `--` after the program starts belongs to the program.
 func containerProgram(command string) []string {
 	loc := containerExecRe.FindStringIndex(command)
 	if loc == nil {
 		return nil
 	}
 	args := strings.Fields(command[loc[1]:])
-	for i, arg := range args {
-		if arg == "--" {
-			return args[i+1:]
-		}
-	}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if !strings.HasPrefix(arg, "-") {
+		switch {
+		case arg == "--":
 			return args[i+1:]
-		}
-		if containerExecValueFlags[arg] {
+		case !strings.HasPrefix(arg, "-"):
+			rest := args[i+1:]
+			if len(rest) > 0 && rest[0] == "--" {
+				rest = rest[1:]
+			}
+			return rest
+		case containerExecValueFlags[arg]:
 			i++
 		}
 	}
