@@ -30,29 +30,32 @@ second group says the user holds the permission somewhere without saying on what
   alpacon user permission ls john
   alpacon user permission ls john --patterns --output json`,
 	Args: cobra.MaximumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		patternsOnly, _ := cmd.Flags().GetBool("patterns")
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		subj := resolveSubject(alpaconClient, args)
+		subj, err := resolveSubject(alpaconClient, args)
+		if err != nil {
+			return err
+		}
 
 		if patternsOnly {
 			patterns, err := rbac.GetPermissionPatterns(alpaconClient, subj.PK)
 			if err != nil {
-				utils.CliErrorWithExit("Failed to retrieve %s's permissions: %s.", subj.Label, describeRBACError(alpaconClient, gatePermissionIntrospect, err))
+				return utils.NewExitError("Failed to retrieve %s's permissions: %s.", subj.Label, describeRBACError(alpaconClient, gatePermissionIntrospect, err))
 			}
 
 			utils.PrintTable(rbac.PermissionPatternAttributesFrom(patterns))
-			return
+			return nil
 		}
 
 		effective, err := rbac.GetEffectivePermissions(alpaconClient, subj.PK)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve %s's permissions: %s.", subj.Label, describeRBACError(alpaconClient, gateUserRead, err))
+			return utils.NewExitError("Failed to retrieve %s's permissions: %s.", subj.Label, describeRBACError(alpaconClient, gateUserRead, err))
 		}
 
 		roleRows := rbac.EffectiveRoleAttributesFrom(effective.Roles)
@@ -67,16 +70,17 @@ second group says the user holds the permission somewhere without saying on what
 				"permissions": jsonSlice(capabilityRows),
 			}
 			if err = utils.PrintJSONValue(os.Stdout, combined); err != nil {
-				utils.CliErrorWithExit("Failed to render the permissions: %s.", err)
+				return utils.NewExitError("Failed to render the permissions: %s.", err)
 			}
-			return
+			return nil
 		}
 
 		utils.PrintHeader("Roles in effect")
 		utils.PrintTable(roleRows)
 		utils.PrintHeader("Permissions")
 		utils.PrintTable(capabilityRows)
-	},
+		return nil
+	}),
 }
 
 func init() {

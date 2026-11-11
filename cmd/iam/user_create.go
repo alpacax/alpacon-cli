@@ -24,41 +24,42 @@ var userCreateCmd = &cobra.Command{
 	Example: ` 
 	alpacon user create
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 
 		isSaaS, err := config.IsSaaS()
 		if err != nil {
-			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+			return utils.NewExitError("Not logged in. Run 'alpacon login' first.")
 		}
 		if isSaaS {
-			utils.CliErrorWithExit("This command is only available for self-hosted workspaces. Use 'alpacon user invite' instead.")
+			return utils.NewExitError("This command is only available for self-hosted workspaces. Use 'alpacon user invite' instead.")
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if err := alpaconClient.LoadCurrentUser(); err != nil {
-			utils.CliErrorWithExit("Failed to load current user: %s", err)
+			return utils.NewExitError("Failed to load current user: %s", err)
 		}
 
 		if alpaconClient.Privileges == "general" {
-			utils.CliErrorWithExit("Insufficient permissions to create users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
+			return utils.NewExitError("Insufficient permissions to create users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
 		}
 
 		userRequest := promptForUser(alpaconClient)
 
 		password, err := iam.CreateUser(alpaconClient, userRequest)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to create the new user: %s", err)
+			return utils.NewExitError("Failed to create the new user: %s", err)
 		}
 
 		utils.CliSuccess("User created: %s", userRequest.Username)
 		if err := printGeneratedPassword(os.Stdout, utils.CliInfo, password); err != nil {
-			utils.CliErrorWithExit("The user was created, but %s. Set a new password for the user before they can log in.", err)
+			return utils.NewExitError("The user was created, but %s. Set a new password for the user before they can log in.", err)
 		}
-	},
+		return nil
+	}),
 }
 
 // promptForUser offers the privilege fields only to a superuser, so the caller must run

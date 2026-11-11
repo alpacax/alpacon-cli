@@ -21,38 +21,42 @@ var groupCreateCmd = &cobra.Command{
 	Example: ` 
 	alpacon group create
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if err := alpaconClient.LoadCurrentUser(); err != nil {
-			utils.CliErrorWithExit("Failed to load current user: %s", err)
+			return utils.NewExitError("Failed to load current user: %s", err)
 		}
 
 		if alpaconClient.Privileges == "general" {
-			utils.CliErrorWithExit("You do not have the permission to create groups.")
+			return utils.NewExitError("You do not have the permission to create groups.")
 		}
 
 		serverList, err := server.GetServerList(alpaconClient)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the server list: %s", err)
+			return utils.NewExitError("Failed to retrieve the server list: %s", err)
 		}
 
-		groupRequest := promptForGroup(alpaconClient, serverList)
+		groupRequest, err := promptForGroup(alpaconClient, serverList)
+		if err != nil {
+			return err
+		}
 
 		err = iam.CreateGroup(alpaconClient, groupRequest)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to create the new group: %s", err)
+			return utils.NewExitError("Failed to create the new group: %s", err)
 		}
 
 		utils.CliSuccess("Group created: %s", groupRequest.Name)
-	},
+		return nil
+	}),
 }
 
-func promptForGroup(ac *client.AlpaconClient, serverList []server.ServerAttributes) iam.GroupCreateRequest {
+func promptForGroup(ac *client.AlpaconClient, serverList []server.ServerAttributes) (iam.GroupCreateRequest, error) {
 	var groupRequest iam.GroupCreateRequest
 
 	groupRequest.Name = utils.PromptForRequiredInput("Name(required): ")
@@ -61,11 +65,15 @@ func promptForGroup(ac *client.AlpaconClient, serverList []server.ServerAttribut
 	groupRequest.Description = utils.PromptForInput("Description(optional): ")
 
 	displayServers(serverList)
-	groupRequest.Servers = selectAndConvertServers(ac, serverList)
+	servers, err := selectAndConvertServers(ac, serverList)
+	if err != nil {
+		return groupRequest, err
+	}
+	groupRequest.Servers = servers
 
 	groupRequest.IsLdapGroup = utils.PromptForBool("LDAP status: ")
 
-	return groupRequest
+	return groupRequest, nil
 }
 
 func displayServers(serverList []server.ServerAttributes) {
@@ -75,7 +83,7 @@ func displayServers(serverList []server.ServerAttributes) {
 	}
 }
 
-func selectAndConvertServers(ac *client.AlpaconClient, serverList []server.ServerAttributes) []string {
+func selectAndConvertServers(ac *client.AlpaconClient, serverList []server.ServerAttributes) ([]string, error) {
 	chosenServers := utils.PromptForInput("Select servers (e.g., 1,2): ")
 	intServers := utils.SplitAndParseInt(chosenServers)
 
@@ -83,16 +91,16 @@ func selectAndConvertServers(ac *client.AlpaconClient, serverList []server.Serve
 
 	for _, serverIndex := range intServers {
 		if serverIndex < 1 || serverIndex > len(serverList) {
-			utils.CliErrorWithExit("Invalid server index: %d", serverIndex)
+			return nil, utils.NewExitError("Invalid server index: %d", serverIndex)
 		}
 
 		serverID, err := server.GetServerIDByName(ac, serverList[serverIndex-1].Name)
 		if err != nil {
-			utils.CliErrorWithExit("No server found with the given name")
+			return nil, utils.NewExitError("No server found with the given name")
 		}
 
 		serverIDs = append(serverIDs, serverID)
 	}
 
-	return serverIDs
+	return serverIDs, nil
 }

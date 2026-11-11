@@ -20,21 +20,22 @@ var groupUpdateCmd = &cobra.Command{
 	alpacon group update my-group
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		groupName := args[0]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		groupDetail, err := iam.UpdateGroup(alpaconClient, groupName)
 		if err != nil {
 			utils.ExitIfNoChanges(err)
-			utils.CliErrorWithExit("Failed to update the group info: %s.", err)
+			return utils.NewExitError("Failed to update the group info: %s.", err)
 		}
 
 		utils.CliSuccess("Group updated: %s", groupName)
 		utils.PrintJson(groupDetail)
-	},
+		return nil
+	}),
 }

@@ -17,7 +17,7 @@ var memberDeleteCmd = &cobra.Command{
 	This command removes an existing member from the specified group. 
 	It's useful for managing group membership and ensuring only current members have access.
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if memberDeleteRequest.Group == "" || memberDeleteRequest.User == "" {
 			promptForDeleteMembers()
 		}
@@ -29,16 +29,17 @@ var memberDeleteCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = iam.DeleteMember(alpaconClient, memberDeleteRequest)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to remove the member from group: %s.", err)
+			return utils.NewExitError("Failed to remove the member from group: %s.", err)
 		}
 
 		utils.CliSuccess("Member %s removed from group %s", memberDeleteRequest.User, memberDeleteRequest.Group)
-	},
+		return nil
+	}),
 }
 
 func init() {

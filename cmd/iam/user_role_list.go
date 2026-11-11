@@ -26,19 +26,23 @@ narrows the answer to your own rather than refusing, so an empty table can mean
   alpacon user role ls john
   alpacon user role ls john --output json`,
 	Args: cobra.MaximumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		subj := resolveSubject(alpaconClient, args)
+		subj, err := resolveSubject(alpaconClient, args)
+		if err != nil {
+			return err
+		}
 
 		bindings, err := rbac.GetUserBindings(alpaconClient, subj.ID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the role bindings: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
+			return utils.NewExitError("Failed to retrieve the role bindings: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		utils.PrintTable(rbac.BindingAttributesFrom(bindings, time.Local))
-	},
+		return nil
+	}),
 }

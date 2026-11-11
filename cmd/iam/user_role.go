@@ -73,26 +73,26 @@ func init() {
 	userRoleCmd.AddCommand(userRoleHistoryCmd)
 }
 
-func resolveSubject(ac *client.AlpaconClient, args []string) subject {
+func resolveSubject(ac *client.AlpaconClient, args []string) (subject, error) {
 	if len(args) == 0 {
 		current, err := iam.GetCurrentUser(ac)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to identify the current user: %s.", err)
+			return subject{}, utils.NewExitError("Failed to identify the current user: %s.", err)
 		}
-		return subject{PK: selfUserPK, ID: current.ID, Label: current.Username}
+		return subject{PK: selfUserPK, ID: current.ID, Label: current.Username}, nil
 	}
 
 	if utils.IsUUID(args[0]) {
 		id := canonicalUUID(args[0])
-		return subject{PK: id, ID: id, Label: args[0]}
+		return subject{PK: id, ID: id, Label: args[0]}, nil
 	}
 
 	userID, err := iam.GetUserIDByName(ac, args[0])
 	if err != nil {
-		utils.CliErrorWithExit("Failed to resolve the user %q: %s.", args[0], err)
+		return subject{}, utils.NewExitError("Failed to resolve the user %q: %s.", args[0], err)
 	}
 
-	return subject{PK: userID, ID: userID, Label: args[0]}
+	return subject{PK: userID, ID: userID, Label: args[0]}, nil
 }
 
 // canonicalUUID dashes and lowercases what IsUUID also accepts un-dashed and in either

@@ -136,7 +136,8 @@ func TestSplitCanIArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			subject, permission := splitCanIArgs(tt.args)
+			subject, permission, err := splitCanIArgs(tt.args)
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantSubject, subject)
 			assert.Equal(t, tt.wantPermission, permission)
 		})
@@ -414,7 +415,8 @@ func TestResolveSubject(t *testing.T) {
 			}))
 			defer ts.Close()
 
-			got := resolveSubject(&client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, tt.args)
+			got, err := resolveSubject(&client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, tt.args)
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantPK, got.PK)
 			assert.Equal(t, tt.wantID, got.ID)
 			assert.Equal(t, tt.wantLabel, got.Label)
@@ -582,7 +584,8 @@ func TestResolveSubjectCanonicalizesAUUID(t *testing.T) {
 		t.Run(typed, func(t *testing.T) {
 			require.True(t, utils.IsUUID(typed), "the fast path only fires for what IsUUID accepts: %q", typed)
 
-			got := resolveSubject(nil, []string{typed})
+			got, err := resolveSubject(nil, []string{typed})
+			require.NoError(t, err)
 			assert.Equal(t, canonical, got.PK)
 			assert.Equal(t, canonical, got.ID)
 			assert.Equal(t, typed, got.Label, "the label echoes what the operator typed")

@@ -31,24 +31,30 @@ scope.`,
   alpacon user role history john
   alpacon user role history john --tail 100`,
 	Args: cobra.MaximumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		tail, _ := cmd.Flags().GetInt("tail")
-		utils.RequirePositiveInt("tail", tail)
+		if err := utils.CheckPositiveInt("tail", tail); err != nil {
+			return err
+		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		subj := resolveSubject(alpaconClient, args)
+		subj, err := resolveSubject(alpaconClient, args)
+		if err != nil {
+			return err
+		}
 
 		entries, err := rbac.GetRoleHistory(alpaconClient, subj.ID, tail)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the role history: %s.", describeRBACError(alpaconClient, gateAuditRead, err))
+			return utils.NewExitError("Failed to retrieve the role history: %s.", describeRBACError(alpaconClient, gateAuditRead, err))
 		}
 
 		utils.PrintTable(rbac.AuditAttributesFrom(entries, time.Local))
-	},
+		return nil
+	}),
 }
 
 func init() {

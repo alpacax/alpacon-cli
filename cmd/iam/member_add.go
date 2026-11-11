@@ -18,23 +18,24 @@ var memberAddCmd = &cobra.Command{
 	This command adds a new member to the specified group and assigns a role to them. 
 	It's used for managing group memberships and roles within the group.
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if memberRequest.Group == "" || memberRequest.User == "" || memberRequest.Role == "" {
 			promptForMembers()
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = iam.AddMember(alpaconClient, memberRequest)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to add the member to group: %s.", err)
+			return utils.NewExitError("Failed to add the member to group: %s.", err)
 		}
 
 		utils.CliSuccess("Member %s added to group %s", memberRequest.User, memberRequest.Group)
-	},
+		return nil
+	}),
 }
 
 func init() {

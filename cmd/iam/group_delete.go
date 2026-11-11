@@ -22,7 +22,7 @@ var groupDeleteCmd = &cobra.Command{
 	alpacon group delete developers -y
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		groupName := args[0]
 
 		yes, _ := cmd.Flags().GetBool("yes")
@@ -32,24 +32,25 @@ var groupDeleteCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if err := alpaconClient.LoadCurrentUser(); err != nil {
-			utils.CliErrorWithExit("Failed to load current user: %s", err)
+			return utils.NewExitError("Failed to load current user: %s", err)
 		}
 
 		if alpaconClient.Privileges == "general" {
-			utils.CliErrorWithExit("You do not have the permission to delete groups.")
+			return utils.NewExitError("You do not have the permission to delete groups.")
 		}
 
 		err = iam.DeleteGroup(alpaconClient, groupName)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to delete the group: %s", err)
+			return utils.NewExitError("Failed to delete the group: %s", err)
 		}
 
 		utils.CliSuccess("Group deleted: %s", groupName)
-	},
+		return nil
+	}),
 }
 
 func init() {

@@ -31,25 +31,25 @@ list was narrowed.`,
   alpacon user role describe superuser
   alpacon user role describe security_admin --output json`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		role, err := rbac.ResolveRole(alpaconClient, args[0])
 		if err != nil {
-			utils.CliErrorWithExit("Failed to resolve the role: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
+			return utils.NewExitError("Failed to resolve the role: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		scopes, err := rbac.GetRoleScopes(alpaconClient, role.ID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the role's permissions: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
+			return utils.NewExitError("Failed to retrieve the role's permissions: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		holders, err := rbac.GetRoleHolders(alpaconClient, role.ID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the role's holders: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
+			return utils.NewExitError("Failed to retrieve the role's holders: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		// GetUsernamesByID walks every page of the user list, so skip it when there is
@@ -58,7 +58,7 @@ list was narrowed.`,
 		if noResolve, _ := cmd.Flags().GetBool("no-resolve-names"); !noResolve && len(holders) > 0 {
 			usernames, err = iam.GetUsernamesByID(alpaconClient)
 			if err != nil {
-				utils.CliErrorWithExit("Failed to resolve the holders' usernames: %s.", err)
+				return utils.NewExitError("Failed to resolve the holders' usernames: %s.", err)
 			}
 		}
 
@@ -72,16 +72,17 @@ list was narrowed.`,
 				"holders":     jsonSlice(holderRows),
 			}
 			if err = utils.PrintJSONValue(os.Stdout, combined); err != nil {
-				utils.CliErrorWithExit("Failed to render the role: %s.", err)
+				return utils.NewExitError("Failed to render the role: %s.", err)
 			}
-			return
+			return nil
 		}
 
 		utils.PrintHeader("Permissions")
 		utils.PrintTable(permissionRows)
 		utils.PrintHeader("Holders")
 		utils.PrintTable(holderRows)
-	},
+		return nil
+	}),
 }
 
 func init() {

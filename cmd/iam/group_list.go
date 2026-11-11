@@ -19,17 +19,18 @@ var groupListCmd = &cobra.Command{
 	alpacon group ls
 	alpacon group list
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		groupList, err := iam.GetGroupList(alpaconClient)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the group list: %s.", err)
+			return utils.NewExitError("Failed to retrieve the group list: %s.", err)
 		}
 
 		utils.PrintTable(groupList)
-	},
+		return nil
+	}),
 }

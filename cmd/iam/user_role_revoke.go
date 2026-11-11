@@ -33,7 +33,7 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
   alpacon user role revoke john superuser --cascade --reason "rotated off on-call"
   alpacon user role revoke john admin --dry-run`,
 	Args: cobra.ExactArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		reason := reasonFlag(cmd)
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		yes, _ := cmd.Flags().GetBool("yes")
@@ -41,31 +41,37 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		role := resolveRoleForBinding(alpaconClient, "revoke", args[0], args[1])
-		subj := resolveSubject(alpaconClient, args[:1])
+		role, err := resolveRoleForBinding(alpaconClient, "revoke", args[0], args[1])
+		if err != nil {
+			return err
+		}
+		subj, err := resolveSubject(alpaconClient, args[:1])
+		if err != nil {
+			return err
+		}
 
 		if cascade && role.Name != rbac.RoleSuperuser {
-			utils.CliUsageErrorWithExit("--cascade only applies to the superuser role, which is the only grant that creates a second binding.")
+			return utils.NewUsageExitError("--cascade only applies to the superuser role, which is the only grant that creates a second binding.")
 		}
 
 		bindings, err := rbac.GetUserBindings(alpaconClient, subj.ID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to read %s's current roles: %s.", subj.Label, describeRBACError(alpaconClient, gateRoleRead, err))
+			return utils.NewExitError("Failed to read %s's current roles: %s.", subj.Label, describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		// Nothing-to-do is checked before the invariant guard: revoking an unheld role must succeed.
 		targets := plannedRevocations(bindings, role.Name, cascade)
 		if len(targets) == 0 {
 			utils.CliInfo("%s does not hold %s workspace-wide. Nothing to do.", subj.Label, role.Name)
-			return
+			return nil
 		}
 
 		if wouldStrandThePlatformFlags(bindings, role.Name, targets) {
 			next := utils.NextAction{Command: fmt.Sprintf("alpacon user role revoke %s superuser --cascade", args[0])}
-			utils.CliErrorWithExit("%s still holds the superuser role, and superuser implies admin. Revoking admin alone would delete the binding and leave every platform flag set. Revoke superuser first: %s",
+			return utils.NewExitError("%s still holds the superuser role, and superuser implies admin. Revoking admin alone would delete the binding and leave every platform flag set. Revoke superuser first: %s",
 				subj.Label, next.PlainText())
 		}
 
@@ -81,7 +87,7 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 			for _, target := range targets {
 				utils.CliInfo("Would revoke %s from %s (binding %s).", target.Role.Name, subj.Label, target.ID)
 			}
-			return
+			return nil
 		}
 
 		if rbac.IsPlatformTier(role.Name) && !yes {
@@ -103,7 +109,7 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 					utils.CliWarning("Revoked %s, but %s was left in place.", targets[index-1].Role.Name, target.Role.Name)
 					utils.CliInfo("To finish: %s", resume.PlainText())
 				}
-				utils.CliErrorWithExit("Failed to revoke %s from %s: %s.", target.Role.Name, subj.Label, describeRBACError(alpaconClient, gateRoleWrite, err))
+				return utils.NewExitError("Failed to revoke %s from %s: %s.", target.Role.Name, subj.Label, describeRBACError(alpaconClient, gateRoleWrite, err))
 			}
 		}
 
@@ -113,7 +119,8 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 			utils.CliInfo("The companion admin binding remains, so %s is still a workspace administrator. To remove it too: %s", subj.Label, next.PlainText())
 		}
 		reportWorkspaceRoles(alpaconClient, subj.ID, subj.Label)
-	},
+		return nil
+	}),
 }
 
 func init() {

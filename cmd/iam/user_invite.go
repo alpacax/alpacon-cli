@@ -23,26 +23,26 @@ This command requires staff or superuser privileges.`,
   # Invite a user interactively
   alpacon user invite`,
 	Args: cobra.MaximumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		isSaaS, err := config.IsSaaS()
 		if err != nil {
-			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+			return utils.NewExitError("Not logged in. Run 'alpacon login' first.")
 		}
 		if !isSaaS {
-			utils.CliErrorWithExit("This command is only available on Alpacon Cloud workspaces.")
+			return utils.NewExitError("This command is only available on Alpacon Cloud workspaces.")
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if err := alpaconClient.LoadCurrentUser(); err != nil {
-			utils.CliErrorWithExit("Failed to load current user: %s", err)
+			return utils.NewExitError("Failed to load current user: %s", err)
 		}
 
 		if alpaconClient.Privileges == "general" {
-			utils.CliErrorWithExit("Insufficient permissions to invite users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
+			return utils.NewExitError("Insufficient permissions to invite users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
 		}
 
 		var email string
@@ -50,23 +50,24 @@ This command requires staff or superuser privileges.`,
 			email = args[0]
 		} else {
 			if !utils.IsInteractiveShell() {
-				utils.CliUsageErrorWithExit("email argument is required in non-interactive mode")
+				return utils.NewUsageExitError("email argument is required in non-interactive mode")
 			}
 			email = utils.PromptForRequiredInput("Email: ")
 		}
 
 		if !strings.Contains(email, "@") {
 			if len(args) > 0 {
-				utils.CliUsageErrorWithExit("invalid email address: %s", email)
+				return utils.NewUsageExitError("invalid email address: %s", email)
 			}
-			utils.CliErrorWithExit("invalid email address: %s", email)
+			return utils.NewExitError("invalid email address: %s", email)
 		}
 
 		err = iam.InviteUser(alpaconClient, iam.UserInviteRequest{Email: email})
 		if err != nil {
-			utils.CliErrorWithExit("Failed to invite user: %s", err)
+			return utils.NewExitError("Failed to invite user: %s", err)
 		}
 
 		utils.CliSuccess("Invitation sent to %s", email)
-	},
+		return nil
+	}),
 }
