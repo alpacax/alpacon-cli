@@ -21,64 +21,62 @@ Subsequent exec/websh/cp/tunnel commands attach to this session unless overridde
 Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 	Example: `  alpacon work-session use 550e8400-e29b-41d4-a716-446655440000
   alpacon work-session use --unset`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if unsetActiveWorkSession {
 			if len(args) > 0 {
-				utils.CliUsageErrorEnvelopeWithExit(opUnset, "--unset cannot be combined with a SESSION_ID argument")
+				return utils.NewUsageEnvelopeExitError(opUnset, "--unset cannot be combined with a SESSION_ID argument")
 			}
 			// A missing config, workspace, or entry counts as already unset, so --unset never fails
 			// on it.
 			if cur, err := config.GetActiveWorkSession(); err != nil || cur == "" {
 				if utils.OutputFormat == utils.OutputFormatJSON {
-					printWorkSessionMutationJSON(workSessionMutationOutput{
+					return printWorkSessionMutationJSON(workSessionMutationOutput{
 						OK:                true,
 						Operation:         opUnset,
 						Message:           "No active work-session to unset.",
 						ActiveWorksession: nil,
 					})
-					return
 				}
 				utils.CliInfo("No active work-session to unset.")
-				return
+				return nil
 			}
 			if err := RunUnset(); err != nil {
-				utils.CliErrorEnvelopeWithExit(opUnset, err, "%s", err)
+				return utils.NewEnvelopeExitError(opUnset, err, "%s", err)
 			}
 			if utils.OutputFormat == utils.OutputFormatJSON {
-				printWorkSessionMutationJSON(workSessionMutationOutput{
+				return printWorkSessionMutationJSON(workSessionMutationOutput{
 					OK:                true,
 					Operation:         opUnset,
 					Message:           "Active work-session cleared.",
 					ActiveWorksession: nil,
 				})
-				return
 			}
 			utils.CliSuccess("Active work-session cleared.")
-			return
+			return nil
 		}
 
 		if len(args) != 1 {
-			utils.CliUsageErrorEnvelopeWithExit(opUse, "SESSION_ID argument is required (or pass --unset)")
+			return utils.NewUsageEnvelopeExitError(opUse, "SESSION_ID argument is required (or pass --unset)")
 		}
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opUse, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewEnvelopeExitError(opUse, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 		ws, err := RunUseSession(ac, args[0])
 		if errors.Is(err, ErrClusterSessionNotAttachable) {
-			utils.CliUsageErrorEnvelopeWithExit(opUse, "%s", err)
+			return utils.NewUsageEnvelopeExitError(opUse, "%s", err)
 		}
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opUse, err, "%s", err)
+			return utils.NewEnvelopeExitError(opUse, err, "%s", err)
 		}
 		message := activeWorkSessionSetMessage("", ws.ID, ws.Description)
 		if utils.OutputFormat == utils.OutputFormatJSON {
 			active := ws.ID
-			printWorkSessionMutationJSON(newWorkSessionMutationOutput(opUse, message, ws, &active))
-			return
+			return printWorkSessionMutationJSON(newWorkSessionMutationOutput(opUse, message, ws, &active))
 		}
 		utils.CliSuccess("%s", message)
-	},
+		return nil
+	}),
 }
 
 // ErrClusterSessionNotAttachable refuses to set a cluster session as the

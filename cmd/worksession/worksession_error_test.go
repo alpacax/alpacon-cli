@@ -1,25 +1,23 @@
 package worksession
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// helperSetupExitCode marks a helper that failed before reaching the command, so a
-// broken harness is never read as the command's own exit 2.
-const helperSetupExitCode = 99
 
 type errorEnvelope struct {
 	OK        bool   `json:"ok"`
@@ -32,7 +30,6 @@ type errorEnvelope struct {
 }
 
 func TestExtendJSONErrorEnvelope_ServerCode(t *testing.T) {
-	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/ses-1/extend/" {
@@ -60,9 +57,8 @@ func TestExtendJSONErrorEnvelope_ServerCode(t *testing.T) {
 }
 
 func TestExtendJSONErrorEnvelope_UsageError(t *testing.T) {
-	t.Parallel()
 	// Flag validation fails before any HTTP call; no live server needed.
-	// The subprocess has no TTY, so IsInteractiveShell() is false.
+	// The runner's stdin is a pipe, so IsInteractiveShell() is false.
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, "http://127.0.0.1:1",
 		"extend", "ses-1")
 
@@ -78,7 +74,6 @@ func TestExtendJSONErrorEnvelope_UsageError(t *testing.T) {
 }
 
 func TestExtendTableUsageError_ExitsTwo(t *testing.T) {
-	t.Parallel()
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, "http://127.0.0.1:1",
 		"extend", "ses-1")
 
@@ -89,7 +84,6 @@ func TestExtendTableUsageError_ExitsTwo(t *testing.T) {
 }
 
 func TestUseJSONErrorEnvelope_LocalStateError(t *testing.T) {
-	t.Parallel()
 	// GET succeeds but the session is expired: a local refusal with no server code.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -114,15 +108,15 @@ func TestUseJSONErrorEnvelope_LocalStateError(t *testing.T) {
 	assert.Contains(t, env.Message, "cannot be used")
 }
 
-// runWorkSessionHelper re-runs the test binary as a subprocess executing the given
-// work-session subcommand in the given output mode; returns (stdout, stderr, exitCode).
+// runWorkSessionHelper runs the given work-session subcommand in process, as cmd.Execute would, in
+// the given output mode; returns (stdout, stderr, exitCode).
 func runWorkSessionHelper(t *testing.T, outputFormat, serverURL string, args ...string) (string, string, int) {
 	t.Helper()
 	return runWorkSessionHelperWithEnv(t, nil, outputFormat, serverURL, args...)
 }
 
-// runWorkSessionHelperWithEnv is runWorkSessionHelper with extra environment
-// entries ("KEY=value") appended last, so they override the inherited ones.
+// runWorkSessionHelperWithEnv is runWorkSessionHelper with env ("KEY=value") set last, overriding HOME.
+// It sets process-wide state (env, utils.OutputFormat, stdin, stdout and stderr), so its callers stay serial.
 func runWorkSessionHelperWithEnv(t *testing.T, env []string, outputFormat, serverURL string, args ...string) (string, string, int) {
 	t.Helper()
 	// outputFormat and serverURL are adjacent strings: a transposed call site
@@ -131,61 +125,55 @@ func runWorkSessionHelperWithEnv(t *testing.T, env []string, outputFormat, serve
 
 	home := t.TempDir()
 	writeWorkSessionTestConfig(t, home, serverURL)
+	t.Setenv("HOME", home)
+	for _, entry := range env {
+		name, value, _ := strings.Cut(entry, "=")
+		t.Setenv(name, value)
+	}
+	origFormat, origStdin := utils.OutputFormat, os.Stdin
+	stdin, stdinWriter, err := os.Pipe()
+	require.NoError(t, err)
+	require.NoError(t, stdinWriter.Close()) // a prompt reads EOF, as in a run with no input
+	t.Cleanup(func() {
+		utils.OutputFormat, os.Stdin = origFormat, origStdin
+		_ = stdin.Close()
+		resetWorkSessionFlags(WorkSessionCmd)
+	})
+	utils.OutputFormat, os.Stdin = outputFormat, stdin
+	resetWorkSessionFlags(WorkSessionCmd)
 
-	helperArgs := append(
-		[]string{"-test.run=^TestWorkSessionErrorHelperProcess$", "--", "worksession-error-helper"},
-		args...,
-	)
-	helper := osexec.Command(os.Args[0], helperArgs...)
-	helper.Env = append(os.Environ(),
-		"GO_WANT_WORKSESSION_ERROR_HELPER=1",
-		"GO_WORKSESSION_HELPER_OUTPUT="+outputFormat,
-		"HOME="+home,
-	)
-	helper.Env = append(helper.Env, env...)
-	var stdout, stderr bytes.Buffer
-	helper.Stdout = &stdout
-	helper.Stderr = &stderr
-
-	err := helper.Run()
-	exitCode := 0
-	if err != nil {
-		var exitErr *osexec.ExitError
-		require.ErrorAs(t, err, &exitErr)
-		exitCode = exitErr.ExitCode()
-	}
-	return stdout.String(), stderr.String(), exitCode
-}
-
-func TestWorkSessionErrorHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_WORKSESSION_ERROR_HELPER") != "1" {
-		return
-	}
-	args, ok := workSessionHelperArgs(os.Args)
-	if !ok {
-		fmt.Fprintln(os.Stderr, "missing worksession-error-helper marker")
-		os.Exit(helperSetupExitCode)
-	}
-	outputFormat := os.Getenv("GO_WORKSESSION_HELPER_OUTPUT")
-	if outputFormat != utils.OutputFormatTable && outputFormat != utils.OutputFormatJSON {
-		fmt.Fprintf(os.Stderr, "unset or unknown GO_WORKSESSION_HELPER_OUTPUT: %q\n", outputFormat)
-		os.Exit(helperSetupExitCode)
-	}
-	utils.OutputFormat = outputFormat
 	WorkSessionCmd.SetArgs(args)
-	if err := WorkSessionCmd.Execute(); err != nil {
-		os.Exit(1)
+	var runErr error
+	stdout, stderr := testutil.CaptureOutput(t, func() {
+		runErr = WorkSessionCmd.Execute()
+		if exitErr, ok := errors.AsType[*utils.ExitError](runErr); ok {
+			utils.FprintExitError(os.Stderr, exitErr)
+		}
+	})
+	if runErr == nil {
+		return stdout, stderr, 0
 	}
-	os.Exit(0)
+	if exitErr, ok := errors.AsType[*utils.ExitError](runErr); ok {
+		return stdout, stderr, exitErr.Code
+	}
+	return stdout, stderr, utils.ExitCodeUsageError // a Cobra error, which Cobra printed itself and cmd.Execute exits 2 on
 }
 
-func workSessionHelperArgs(args []string) ([]string, bool) {
-	for i := range args {
-		if args[i] == "worksession-error-helper" {
-			return args[i+1:], true
+// resetWorkSessionFlags restores every flag in cmd's tree to its unchanged default and un-silences Cobra:
+// the commands and their flag variables are package-level, so one run's state would reach the next.
+func resetWorkSessionFlags(cmd *cobra.Command) {
+	cmd.SilenceErrors, cmd.SilenceUsage = false, false
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		if slice, ok := f.Value.(pflag.SliceValue); ok {
+			_ = slice.Replace(nil)
+		} else {
+			_ = f.Value.Set(f.DefValue)
 		}
+		f.Changed = false
+	})
+	for _, sub := range cmd.Commands() {
+		resetWorkSessionFlags(sub)
 	}
-	return nil, false
 }
 
 func writeWorkSessionTestConfig(t *testing.T, home, workspaceURL string) {

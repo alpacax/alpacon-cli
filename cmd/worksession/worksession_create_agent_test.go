@@ -16,8 +16,8 @@ import (
 )
 
 // agentHelperEnv clears every variable agent detection reads, then sets the
-// given "KEY=value" entries, for a helper process whose result must not depend
-// on the shell the tests run in.
+// given "KEY=value" entries, so a run's result does not depend on the shell
+// the tests run in.
 func agentHelperEnv(set ...string) []string {
 	var env []string
 	for _, name := range aiagent.Variables() {
@@ -81,7 +81,6 @@ func createArgs(extra ...string) []string {
 }
 
 func TestWorkSessionCreate_RequesterTypeUserRefusedUnderDetectedAgent(t *testing.T) {
-	t.Parallel()
 	env := agentHelperEnv(
 		"AI_AGENT=claude-code",
 		"CLAUDE_CODE_CHILD_SESSION=1",
@@ -89,7 +88,6 @@ func TestWorkSessionCreate_RequesterTypeUserRefusedUnderDetectedAgent(t *testing
 	)
 	for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 		t.Run(outputFormat, func(t *testing.T) {
-			t.Parallel()
 			ts, rec := newCreateRecorderServer(t)
 
 			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, env, outputFormat, ts.URL,
@@ -115,7 +113,6 @@ func TestWorkSessionCreate_RequesterTypeUserRefusedUnderDetectedAgent(t *testing
 }
 
 func TestWorkSessionCreate_DetectedAgentGetsAgentSession(t *testing.T) {
-	t.Parallel()
 	ts, rec := newCreateRecorderServer(t)
 
 	_, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv("CODEX_THREAD_ID=thread-1"),
@@ -129,7 +126,6 @@ func TestWorkSessionCreate_DetectedAgentGetsAgentSession(t *testing.T) {
 }
 
 func TestWorkSessionCreate_NoAgentKeepsUserSession(t *testing.T) {
-	t.Parallel()
 	ts, rec := newCreateRecorderServer(t)
 
 	_, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(),
@@ -143,7 +139,6 @@ func TestWorkSessionCreate_NoAgentKeepsUserSession(t *testing.T) {
 }
 
 func TestWorkSessionCreate_AccountReachesRequestBody(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name  string
 		extra []string
@@ -155,7 +150,6 @@ func TestWorkSessionCreate_AccountReachesRequestBody(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			ts, rec := newCreateRecorderServer(t)
 
 			_, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(),
@@ -174,10 +168,8 @@ func TestWorkSessionCreate_AccountReachesRequestBody(t *testing.T) {
 }
 
 func TestWorkSessionCreate_BlankAccountRefused(t *testing.T) {
-	t.Parallel()
 	for _, value := range []string{"", "   "} {
 		t.Run("value="+value, func(t *testing.T) {
-			t.Parallel()
 			ts, rec := newCreateRecorderServer(t)
 
 			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(),
@@ -220,7 +212,6 @@ func newCreateServerAnswering(t *testing.T, createStatus, pollStatus string) *ht
 // follow-up for a pending agent session names --work-session <ID> instead,
 // whether the agent was detected or declared and whether or not it waited.
 func TestWorkSessionCreate_PendingFollowUpMatchesRequesterType(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		env     []string
@@ -242,7 +233,6 @@ func TestWorkSessionCreate_PendingFollowUpMatchesRequesterType(t *testing.T) {
 	for _, tt := range tests {
 		for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 			t.Run(tt.name+"/"+outputFormat, func(t *testing.T) {
-				t.Parallel()
 				ts := newCreateServerAnswering(t, "pending", "pending")
 
 				stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, tt.env, outputFormat, ts.URL,

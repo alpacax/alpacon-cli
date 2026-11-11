@@ -7,6 +7,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWorkSessionDescribePrintsAdvisories(t *testing.T) {
@@ -26,9 +27,11 @@ func TestWorkSessionDescribePrintsAdvisories(t *testing.T) {
 
 	setupWorkSessionCommandConfig(t, ts.URL)
 
+	var runErr error
 	stdout, _ := testutil.CaptureOutput(t, func() {
-		workSessionDescribeCmd.Run(workSessionDescribeCmd, []string{"ses-x"})
+		runErr = workSessionDescribeCmd.RunE(workSessionDescribeCmd, []string{"ses-x"})
 	})
+	require.NoError(t, runErr)
 
 	assert.Contains(t, stdout, "Adjustments:")
 	assert.Contains(t, stdout, "servers: web-01, db-01 → web-01")
@@ -54,9 +57,11 @@ func TestWorkSessionDescribeShowsAClusterSession(t *testing.T) {
 
 	setupWorkSessionCommandConfig(t, ts.URL)
 
+	var runErr error
 	stdout, _ := testutil.CaptureOutput(t, func() {
-		workSessionDescribeCmd.Run(workSessionDescribeCmd, []string{"ses-k"})
+		runErr = workSessionDescribeCmd.RunE(workSessionDescribeCmd, []string{"ses-k"})
 	})
+	require.NoError(t, runErr)
 
 	assert.Regexp(t, `(?m)^Clusters\s+prod-east$`, stdout)
 	assert.Regexp(t, `(?m)^Expires at\s*$`, stdout)

@@ -129,9 +129,11 @@ func TestWorkSessionCreateCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	expiresAt = "2026-06-01T12:00:00Z"
 	requesterType = "user"
 
+	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
+		runErr = workSessionCreateCmd.RunE(workSessionCreateCmd, nil)
 	})
+	require.NoError(t, runErr)
 
 	assert.Empty(t, stderr)
 	assert.NotContains(t, stdout, "Success:")
@@ -173,9 +175,11 @@ func TestWorkSessionUseCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	unsetActiveWorkSession = false
 	t.Cleanup(func() { unsetActiveWorkSession = false })
 
+	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		workSessionUseCmd.Run(workSessionUseCmd, []string{"ses-active"})
+		runErr = workSessionUseCmd.RunE(workSessionUseCmd, []string{"ses-active"})
 	})
+	require.NoError(t, runErr)
 
 	assert.Empty(t, stderr)
 	assert.NotContains(t, stdout, "Success:")
@@ -206,9 +210,11 @@ func TestWorkSessionUnsetCommandJSONOutput_OperationIsUnset(t *testing.T) {
 	unsetActiveWorkSession = true
 	t.Cleanup(func() { unsetActiveWorkSession = false })
 
+	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		workSessionUseCmd.Run(workSessionUseCmd, nil)
+		runErr = workSessionUseCmd.RunE(workSessionUseCmd, nil)
 	})
+	require.NoError(t, runErr)
 
 	assert.Empty(t, stderr)
 
@@ -245,9 +251,11 @@ func TestWorkSessionExtendCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 		extendExpiresAt = ""
 	})
 
+	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		workSessionExtendCmd.Run(workSessionExtendCmd, []string{"ses-active"})
+		runErr = workSessionExtendCmd.RunE(workSessionExtendCmd, []string{"ses-active"})
 	})
+	require.NoError(t, runErr)
 
 	assert.True(t, sawExtend)
 	assert.Empty(t, stderr)
@@ -283,9 +291,11 @@ func TestWorkSessionCancelCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
 
+	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		workSessionCancelCmd.Run(workSessionCancelCmd, []string{"ses-pending"})
+		runErr = workSessionCancelCmd.RunE(workSessionCancelCmd, []string{"ses-pending"})
 	})
+	require.NoError(t, runErr)
 
 	assert.True(t, sawCancel)
 	assert.Empty(t, stderr)

@@ -42,10 +42,10 @@ section out.`,
   alpacon work-session timeline 550e8400-e29b-41d4-a716-446655440000 --no-records
   alpacon work-session tl 550e8400-e29b-41d4-a716-446655440000 --output json
   alpacon work-session recording 550e8400-e29b-41d4-a716-446655440000 --index 2`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opTimeline, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewEnvelopeExitError(opTimeline, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		id := args[0]
@@ -65,7 +65,7 @@ section out.`,
 		wg.Wait()
 
 		if timelineErr != nil {
-			utils.CliErrorEnvelopeWithExit(opTimeline, timelineErr, "Failed to retrieve work session timeline: %s.", timelineErr)
+			return utils.NewEnvelopeExitError(opTimeline, timelineErr, "Failed to retrieve work session timeline: %s.", timelineErr)
 		}
 
 		serverMap := map[string]string{}
@@ -90,8 +90,7 @@ section out.`,
 		}
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
-			outputTimelineJSON(rows, terminals, id, serverMap)
-			return
+			return outputTimelineJSON(rows, terminals, id, serverMap)
 		}
 
 		writer, cleanup := utils.WriteToPager()
@@ -100,7 +99,8 @@ section out.`,
 		if len(terminals) > 0 {
 			printRecordingsSectionTo(writer, terminals, id, serverMap)
 		}
-	},
+		return nil
+	}),
 }
 
 func init() {
@@ -179,7 +179,7 @@ func printRecordingsSectionTo(w io.Writer, terminals []wsapi.TimelineItem, sessi
 	}
 }
 
-func outputTimelineJSON(rows []wsapi.TimelineAttributes, terminals []wsapi.TimelineItem, sessionID string, serverMap map[string]string) {
+func outputTimelineJSON(rows []wsapi.TimelineAttributes, terminals []wsapi.TimelineItem, sessionID string, serverMap map[string]string) error {
 	recEntries := make([]recordingJSON, len(terminals))
 	for i := range terminals {
 		term := &terminals[i]
@@ -199,8 +199,9 @@ func outputTimelineJSON(rows []wsapi.TimelineAttributes, terminals []wsapi.Timel
 	// Not a plain Marshal: the shared writer escapes the format and C1 runes that
 	// encoding/json leaves alone, and this output is read in a terminal too.
 	if err := utils.PrintJSONValue(os.Stdout, out); err != nil {
-		utils.CliErrorEnvelopeWithExit(opTimeline, err, "Failed to serialize timeline: %s.", err)
+		return utils.NewEnvelopeExitError(opTimeline, err, "Failed to serialize timeline: %s.", err)
 	}
+	return nil
 }
 
 func projectTimelineAttributes(item *wsapi.TimelineItem, serverMap map[string]string) wsapi.TimelineAttributes {

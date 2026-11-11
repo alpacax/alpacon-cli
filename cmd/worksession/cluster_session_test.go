@@ -164,9 +164,11 @@ func TestWorkSessionCreateClusterSendsOnlyTheCluster(t *testing.T) {
 	createCluster = "prod-east"
 	expiresIn = "1h"
 
+	var runErr error
 	_, stderr := testutil.CaptureOutput(t, func() {
-		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
+		runErr = workSessionCreateCmd.RunE(workSessionCreateCmd, nil)
 	})
+	require.NoError(t, runErr)
 
 	body, _ := srv.sent()
 	require.NotNil(t, body)
@@ -180,7 +182,6 @@ func TestWorkSessionCreateClusterSendsOnlyTheCluster(t *testing.T) {
 }
 
 func TestWorkSessionCreateClusterPendingPointsAtKubeLogin(t *testing.T) {
-	t.Parallel()
 	srv := &clusterCreateServer{status: "pending"}
 	ts := srv.start(t)
 
@@ -194,7 +195,6 @@ func TestWorkSessionCreateClusterPendingPointsAtKubeLogin(t *testing.T) {
 }
 
 func TestWorkSessionCreateClusterRefusesFlagsBeforeAnyRequest(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -238,7 +238,6 @@ func TestWorkSessionCreateClusterRefusesFlagsBeforeAnyRequest(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			srv := &clusterCreateServer{status: "active"}
 			ts := srv.start(t)
 			args := append([]string{"create", "--purpose", "debug", "--expires-in", "1h"}, tt.args...)
@@ -253,23 +252,21 @@ func TestWorkSessionCreateClusterRefusesFlagsBeforeAnyRequest(t *testing.T) {
 	}
 }
 
-// Cobra refuses the pair itself, so it exits 1 like any other flag error.
+// Cobra refuses the pair itself, so it exits 2 like any other flag error.
 func TestWorkSessionCreateRefusesServerWithCluster(t *testing.T) {
-	t.Parallel()
 	srv := &clusterCreateServer{status: "active"}
 	ts := srv.start(t)
 
 	_, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), utils.OutputFormatTable, ts.URL,
 		"create", "--purpose", "debug", "--expires-in", "1h", "--scope", "kube", "--server", "web-01", "--cluster", "prod-east")
 
-	assert.NotZero(t, exitCode, "stderr: %s", stderr)
+	assert.Equal(t, utils.ExitCodeUsageError, exitCode, "stderr: %s", stderr)
 	assert.Contains(t, stderr, "[cluster server]")
 	_, requests := srv.sent()
 	assert.Zero(t, requests)
 }
 
 func TestWorkSessionCreateClusterLookupFailures(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		srv     *clusterCreateServer
@@ -280,7 +277,6 @@ func TestWorkSessionCreateClusterLookupFailures(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			ts := tt.srv.start(t)
 
 			_, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), utils.OutputFormatTable, ts.URL,
@@ -298,7 +294,6 @@ func TestWorkSessionCreateClusterLookupFailures(t *testing.T) {
 // update cannot turn a server session into a cluster one, so a kube scope
 // sent with --server is refused before any request.
 func TestWorkSessionUpdateRefusesAKubeScopeWithServers(t *testing.T) {
-	t.Parallel()
 	srv := &clusterCreateServer{status: "active"}
 	ts := srv.start(t)
 
@@ -312,7 +307,6 @@ func TestWorkSessionUpdateRefusesAKubeScopeWithServers(t *testing.T) {
 }
 
 func TestWorkSessionUseRefusesAClusterSessionAsAUsageError(t *testing.T) {
-	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/work-sessions/sessions/ses-k/" {
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)

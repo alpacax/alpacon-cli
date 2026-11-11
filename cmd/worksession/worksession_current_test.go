@@ -184,3 +184,85 @@ func TestPrintCurrent_PrintsNullWhenTheClientsWorkspaceHasNoSession(t *testing.T
 	require.NoError(t, err)
 	assert.Equal(t, "null\n", stdout)
 }
+
+func currentSessionServer(t *testing.T, id string, status int, body string) *httptest.Server {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/work-sessions/sessions/"+id+"/" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.Error(w, "unexpected", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestWorkSessionCurrentCmd_NoActiveSessionSendsNoRequest(t *testing.T) {
+	tests := []struct {
+		format, wantStdout, wantStderrContains string
+	}{
+		{format: utils.OutputFormatTable, wantStdout: "", wantStderrContains: "No active work-session."},
+		{format: utils.OutputFormatJSON, wantStdout: "null\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.format, func(t *testing.T) {
+			ts := testutil.NewNoRequestServer(t)
+
+			stdout, stderr, exitCode := runWorkSessionHelper(t, tt.format, ts.URL, "current")
+
+			assert.Equal(t, 0, exitCode)
+			assert.Equal(t, tt.wantStdout, stdout)
+			if tt.wantStderrContains == "" {
+				assert.Empty(t, stderr)
+			} else {
+				assert.Contains(t, stderr, tt.wantStderrContains)
+			}
+		})
+	}
+}
+
+func TestWorkSessionCurrentCmd_PrintsTheActiveSession(t *testing.T) {
+	body := `{"id":"ses-1","description":"incident-response","status":"active"}`
+	t.Run("table", func(t *testing.T) {
+		ts := currentSessionServer(t, "ses-1", http.StatusOK, body)
+		home := completeHomeWithActiveSessions(t, ts.URL, map[string]string{"test": "ses-1"})
+
+		stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, []string{"HOME=" + home},
+			utils.OutputFormatTable, ts.URL, "current")
+
+		assert.Equal(t, 0, exitCode, "stderr: %s", stderr)
+		assert.Contains(t, stdout, "ses-1")
+		assert.Contains(t, stdout, "incident-response")
+	})
+	t.Run("json", func(t *testing.T) {
+		ts := currentSessionServer(t, "ses-1", http.StatusOK, body)
+		home := completeHomeWithActiveSessions(t, ts.URL, map[string]string{"test": "ses-1"})
+
+		stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, []string{"HOME=" + home},
+			utils.OutputFormatJSON, ts.URL, "current")
+
+		assert.Equal(t, 0, exitCode, "stderr: %s", stderr)
+		assert.JSONEq(t, body, stdout)
+	})
+}
+
+func TestWorkSessionCurrentCmd_StaleSessionFails(t *testing.T) {
+	for _, format := range completeFormats {
+		t.Run(format, func(t *testing.T) {
+			ts := currentSessionServer(t, "ses-1", http.StatusNotFound, `{"detail":"Not found."}`)
+			home := completeHomeWithActiveSessions(t, ts.URL, map[string]string{"test": "ses-1"})
+
+			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, []string{"HOME=" + home},
+				format, ts.URL, "current")
+
+			assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
+			assertCommandFailure(t, format, opCurrent, stdout, stderr, utils.ExitCodeGeneralError,
+				"http_404", "active work-session ses-1 no longer accessible")
+			assert.Contains(t, stderr, "alpacon work-session use --unset")
+		})
+	}
+}
