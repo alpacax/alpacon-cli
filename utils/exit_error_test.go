@@ -299,11 +299,10 @@ func TestNewEnvelopeExitErrorWithCode_KeepsTheChosenExitAndDropsTheFooter(t *tes
 	t.Parallel()
 	usageCause := MarkUsageError(errors.New("bad flag"))
 	cases := []struct {
-		name       string
-		err        error
-		wantCode   int
-		wantLine   string
-		wantFooter bool
+		name     string
+		err      error
+		wantCode int
+		wantLine string
 	}{
 		{name: "chosen code keeps its exit", err: NewEnvelopeExitErrorWithCode(ExitCodeNotApproved, "kube_login", errors.New("boom"), "not approved"), wantCode: ExitCodeNotApproved, wantLine: "not approved\n"},
 		{name: "exit one drops the footer", err: NewEnvelopeExitErrorWithCode(ExitCodeGeneralError, "kube_logout", nil, "in use"), wantCode: ExitCodeGeneralError, wantLine: "in use\n"},

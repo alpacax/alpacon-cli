@@ -63,7 +63,7 @@ func retryAfterSeconds(d time.Duration) int {
 // CliErrorEnvelopeWithExit reports a failure and exits 1, or 2 when err or an argument is a usage error;
 // json mode carries err's code.
 func CliErrorEnvelopeWithExit(operation string, err error, format string, args ...any) {
-	exitWithError(newEnvelopeExitError(operation, err, format, args))
+	exitWithError(newEnvelopeExitError(ExitCodeGeneralError, true, operation, err, format, args))
 }
 
 // refusalGuidance is the error whose server hints an envelope helper shows:

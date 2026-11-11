@@ -69,16 +69,13 @@ func NewUsageExitError(msg string, args ...any) error {
 // NewEnvelopeExitError is the failure CliErrorEnvelopeWithExit reports: exit 1 with the footer, or 2
 // when err or an argument is a usage error; json mode classifies err under operation.
 func NewEnvelopeExitError(operation string, err error, msg string, args ...any) error {
-	return newEnvelopeExitError(operation, err, msg, args)
+	return newEnvelopeExitError(ExitCodeGeneralError, true, operation, err, msg, args)
 }
 
 // NewEnvelopeExitErrorWithCode is the failure CliErrorEnvelopeWithExitCode reports: the given exit and no
 // footer, or exit 2 when code is 1 and err or an argument is a usage error.
 func NewEnvelopeExitErrorWithCode(code int, operation string, err error, msg string, args ...any) error {
-	if code == ExitCodeGeneralError && (IsUsageError(err) || usageErrorIn(args)) {
-		return newUsageExitError(operation, msg, args)
-	}
-	return &ExitError{Code: code, envelope: true, operation: operation, cause: err, msg: msg, args: args}
+	return newEnvelopeExitError(code, false, operation, err, msg, args)
 }
 
 // NewUsageEnvelopeExitError is the failure CliUsageErrorEnvelopeWithExit reports.
@@ -86,11 +83,11 @@ func NewUsageEnvelopeExitError(operation, msg string, args ...any) error {
 	return newUsageExitError(operation, msg, args)
 }
 
-func newEnvelopeExitError(operation string, err error, msg string, args []any) *ExitError {
-	if IsUsageError(err) || usageErrorIn(args) {
+func newEnvelopeExitError(code int, footer bool, operation string, err error, msg string, args []any) *ExitError {
+	if code == ExitCodeGeneralError && (IsUsageError(err) || usageErrorIn(args)) {
 		return newUsageExitError(operation, msg, args)
 	}
-	return &ExitError{Code: ExitCodeGeneralError, footer: true, envelope: true, operation: operation, cause: err, msg: msg, args: args}
+	return &ExitError{Code: code, footer: footer, envelope: true, operation: operation, cause: err, msg: msg, args: args}
 }
 
 func newExitError(code int, footer bool, msg string, args []any) *ExitError {
