@@ -187,7 +187,7 @@ func workSessionTokenNote(operation string) string {
 	case OperationKube:
 		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open a kube session; it needs " + LoginWithoutTokenHint + "."
 	}
-	return "Note: Tokens issued by Alpacon (service or personal API token) bypass this check."
+	return "Note: Browser login and personal API tokens require an active, approved WorkSession. Service tokens use endpoint-specific authorization."
 }
 
 func buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS, hint string) workSessionErrorJSON {

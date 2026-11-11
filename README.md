@@ -140,7 +140,7 @@ $ alpacon
 # 2. Confirm identity and whether a work session is required.
 $ alpacon whoami
 
-# 3. Open a scoped work session (interactive auth only).
+# 3. Open a scoped work session (browser login or personal API token).
 $ alpacon work-session create \
     --purpose "describe the task" \
     --scope command,websh \
@@ -149,9 +149,11 @@ $ alpacon work-session create \
     --use --wait          # --wait-approval 30m waits longer (default 5m)
 
 # 4. Operate within the session.
-$ alpacon websh <server>
 $ alpacon exec <server> "uptime"
 $ alpacon cp ./file.txt <server>:/tmp/
+
+# Browser login also supports interactive Websh and tunnels.
+$ alpacon websh <server>
 $ alpacon tunnel <server> -l 9000 -r 8082
 
 # An AI agent replaces steps 3 and 4: it drops --use and websh, which an agent session
@@ -166,12 +168,14 @@ $ alpacon work-session create \
 $ alpacon exec --work-session <SESSION_ID> <server> "uptime"
 ```
 
-CI/CD and API automation use token auth, which bypasses work sessions for `exec`, `cp`, `edit`, and `websh <server> "<command>"`:
+CI/CD and API automation use service tokens with endpoint-specific authorization for `exec`, `cp`, `edit`, and `websh <server> "<command>"`:
 
 ```bash
 $ alpacon login <URL> -t <TOKEN_KEY>
 $ alpacon exec <server> "..."
 ```
+
+For browser login and personal API tokens, the CLI recommends an active, approved work session before command execution or REST file-transfer creation. Personal-token enforcement depends on the server version; the server decides admission.
 
 A token cannot open an interactive `websh` terminal, run `websh watch`, `websh join`, or `websh invite`, or open a `tunnel`; those need `alpacon login` without `-t` (on a machine without a browser, open the printed URL on another device).
 
@@ -532,7 +536,7 @@ A submitted command the server answers with `status: denied` did not run. The CL
 
 Under `--output json`, `error_code` is the server's `denial_code`, falling back to `rejection_cause`, then `not_approved`; `server.denial_code` and `server.result` keep the server's own values. Text shown in the terminal has control characters removed. A WorkSession refusal at submission time still exits `3`.
 
-Under interactive auth (browser login), `websh`, `exec`, `cp`, `edit`, and `tunnel` require an active work session. Without one, the command is refused with a diagnostic and exit code `3`:
+The CLI recommends an active, approved work session for browser login and personal API tokens before command execution or REST file-transfer creation. Personal-token enforcement depends on the server version. Interactive Websh and tunnels require browser login and an active work session; service tokens retain their endpoint-specific authorization. When the server requires a session, a request without one is refused with a diagnostic and exit code `3`:
 
 ```
 Error: the command operation requires an active WorkSession on this authentication.
@@ -548,7 +552,7 @@ Next:
   alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose "<intent>" --use  # none active? create a new one (human)
   alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose "<intent>" --requester-type agent  # none active? create a new one (AI agent; prefix the gated command with --work-session <ID>)
 
-Note: Tokens issued by Alpacon (service or personal API token) bypass this check.
+Note: Browser login and personal API tokens require an active, approved WorkSession. Service tokens use endpoint-specific authorization.
 ```
 
 With `--output json`, the same refusal is a structured envelope on stderr—scripts and AI agents branch on `error_code` and exec each `next_actions[].command` directly (the human hint, when present, is a separate `description` field):
@@ -591,7 +595,7 @@ What each refusal code means and what to do next:
 | `work_session_agent_session_required` | the CLI runs under an AI agent, and the session is a user session | create an agent session and pass its ID with `--work-session`; not an AI agent? unset the variables the diagnostic names, or run from your own terminal |
 | `work_session_not_usable` | session is no longer usable | `work-session create --use` |
 
-`work-session` subcommand failures (`create`, `use`, `extend`, ...), `event wait` / `event watch` failures, the inline-credential refusal below, and any command's usage error (exit `2`) also emit a JSON error envelope under `--output json`, with `error_code` carrying the server code when available, and `exit_code` matching the process exit code—`1` for a failed request, `2` with `error_code` `usage_error` for a flag or argument the command rejected (`confirmation_required` for a missing `--yes`). These envelopes may share an `error_code` with the gate-denial envelopes above—distinguish a subcommand failure (`exit_code: 1` or `2`) from a gate denial (`exit_code: 3`) via `exit_code`, not `error_code` alone. Run `alpacon whoami` to check upfront whether a work session is required for your auth. The JSON fields `worksession_required_for_access` and its legacy alias `work_session_required` report this guidance for command execution and REST file-transfer creation: browser login and personal tokens need an active, approved session; service tokens retain their endpoint-specific authorization rules. This does not require a session for ordinary reads or Work Session requests, and the flag does not prove that the selected session is approved. Older CLI releases report the flag only for browser login, so a false value is not permission to execute without a session. The server decides admission.
+`work-session` subcommand failures (`create`, `use`, `extend`, ...), `event wait` / `event watch` failures, the inline-credential refusal below, and any command's usage error (exit `2`) also emit a JSON error envelope under `--output json`, with `error_code` carrying the server code when available, and `exit_code` matching the process exit code—`1` for a failed request, `2` with `error_code` `usage_error` for a flag or argument the command rejected (`confirmation_required` for a missing `--yes`). These envelopes may share an `error_code` with the gate-denial envelopes above—distinguish a subcommand failure (`exit_code: 1` or `2`) from a gate denial (`exit_code: 3`) via `exit_code`, not `error_code` alone. Run `alpacon whoami` to check upfront whether a work session is required for your auth. The JSON fields `worksession_required_for_access` and its legacy alias `work_session_required` report this guidance for command execution and REST file-transfer creation: browser login and personal tokens need an active, approved session; service tokens retain their endpoint-specific authorization rules. This does not require a session for ordinary reads or Work Session requests, and the flag does not prove that the selected session is approved. Older CLI releases report the flag only for browser login, so a false value is not permission to execute without a session. The server decides admission; personal-token enforcement depends on its version.
 
 Separately from the work session gate, `exec` (and `websh` when running a command) is refused before the command runs if the command line itself carries a credential—a `-p`/`--password` flag, a `KEY=VALUE` secret such as `PGPASSWORD=...`, or a `user:pass@host` connection string. Pass the secret with `--env="KEY"` instead: its value is read from your shell, so it never lands on the command line the server stores. A script run with `--file` gets the same refusal when the script carries the credential, but `--env` does not combine with `--file`: take the secret out of the script and have the script read it from a file or the environment on the host at run time. The refusal is permanent—a retry submits the same command line or script—so rewrite rather than retry.
 
