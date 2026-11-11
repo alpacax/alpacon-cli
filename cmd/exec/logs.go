@@ -146,12 +146,6 @@ Run the command again later to check for completion.`,
 	}
 }
 
-// logsAccountFlags repeats the refused run's -u, -g and --work-session flags
-// from the command detail. A detail with no username (an older server, or a
-// field the viewer cannot see) gets an -u ACCOUNT placeholder and a note to
-// fill it in: a command without -u would run as the server's default account.
-// -g gets a placeholder too unless the detail names the group, since the
-// original may have carried one.
 // heldCommandMessage words a held command for exec logs: the session assignee's
 // own confirmation on the assignee lane, an approver's decision on any other.
 func heldCommandMessage(assignee bool, requestID, status string) string {
@@ -165,6 +159,12 @@ func heldCommandMessage(assignee bool, requestID, status string) string {
 	return fmt.Sprintf("Approval required—this command is awaiting human approval%s in the Alpacon console (web); status %s. It runs automatically once approved.", request, status)
 }
 
+// logsAccountFlags repeats the refused run's -u, -g and --work-session flags
+// from the command detail. A detail with no username (an older server, or a
+// field the viewer cannot see) gets an -u ACCOUNT placeholder and a note to
+// fill it in: a command without -u would run as the server's default account.
+// -g gets a placeholder too unless the detail names the group, since the
+// original may have carried one.
 func logsAccountFlags(details event.EventDetails) (flags []string, note string) {
 	original := RemoteExecArgs{Username: details.Username, Groupname: details.Groupname}
 	if details.WorkSession != nil {
