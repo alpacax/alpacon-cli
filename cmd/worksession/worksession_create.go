@@ -384,6 +384,7 @@ func exitOnWaitError(operation string, session *wsapi.WorkSession, next utils.Ne
 		utils.PrintExitError(exitErr)
 		os.Exit(exitErr.Code)
 	}
+	utils.CliErrorEnvelopeWithExit(operation, err, "%s", err) // never returns, whatever WaitExitError yields
 }
 
 // WaitExitError is a failed wait on session, as 'alpacon event wait' exits: 6 settled, 4 still open

@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1097,7 +1098,7 @@ func TestWaitExitErrorReturnsTheExitInsteadOfTakingIt(t *testing.T) {
 	}{
 		{name: "settled", err: &terminalWaitError{message: "work session was rejected", sessionID: session.ID}, wantCode: utils.ExitCodeNotApproved, wantText: "work session was rejected"},
 		{name: "still_pending", err: &pendingWaitError{message: "timed out waiting for approval after 1s"}, wantCode: utils.ExitCodePendingApproval, wantText: "The outcome is still open"},
-		{name: "polling_failed", err: fmt.Errorf("polling failed: %w", os.ErrDeadlineExceeded), wantCode: utils.ExitCodeGeneralError},
+		{name: "polling_failed", err: fmt.Errorf("polling failed: %w", os.ErrDeadlineExceeded), wantCode: utils.ExitCodeGeneralError, wantText: "polling failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1108,10 +1109,10 @@ func TestWaitExitErrorReturnsTheExitInsteadOfTakingIt(t *testing.T) {
 
 			var exitErr *utils.ExitError
 			require.ErrorAs(t, err, &exitErr)
+			var rendered bytes.Buffer
+			utils.FprintExitError(&rendered, exitErr)
 			assert.Equal(t, tc.wantCode, exitErr.Code)
-			if tc.wantText != "" {
-				assert.Contains(t, stderr, tc.wantText) // printed here, so the exit itself stays silent
-			}
+			assert.Contains(t, stderr+rendered.String(), tc.wantText) // printed here or by the caller, never lost
 		})
 	}
 }
