@@ -147,7 +147,7 @@ func printExitError(text, envelope io.Writer, e *ExitError) {
 	}
 	printCliErrorTo(text, refusalGuidance(e.cause, e.args), e.msg, e.args...)
 	if e.footer {
-		printIssueFooter(text)
+		printIssueFooter(text, append([]any{e.cause}, e.args...)...)
 	}
 }
 

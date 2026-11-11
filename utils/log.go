@@ -18,11 +18,19 @@ const (
 	DebugEnvVar = "ALPACON_DEBUG"
 )
 
-func reportCLIError() {
-	printIssueFooter(TrackedStderr())
+func reportCLIError(args ...any) {
+	printIssueFooter(TrackedStderr(), args...)
 }
 
-func printIssueFooter(w io.Writer) {
+func printIssueFooter(w io.Writer, args ...any) {
+	for _, arg := range args {
+		if err, ok := arg.(error); ok {
+			status := HTTPStatusCode(err)
+			if status >= 400 && status < 500 && StructuredErrorCode(err) != "" {
+				return
+			}
+		}
+	}
 	_, _ = fmt.Fprintln(w, "For issues, check the latest version or report on", gitIssueURL)
 }
 
@@ -43,7 +51,7 @@ func WarnTerminalTextAltered(w io.Writer, indent string) {
 // CliError handles all error messages in the CLI.
 func CliError(msg string, args ...any) {
 	printCliError(refusalErrorIn(args), msg, args...)
-	reportCLIError()
+	reportCLIError(args...)
 }
 
 // CliErrorWithExit handles all error messages in the CLI and exits 1, or 2 when an argument is a usage

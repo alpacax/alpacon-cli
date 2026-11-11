@@ -186,6 +186,20 @@ func TestDeniedCommandReportsARefusalOnEveryExecSurface(t *testing.T) {
 		wantServer map[string]any
 	}{
 		{
+			name:       "command_invalid_env",
+			extra:      map[string]any{"status": "denied", "denial_code": "command_invalid_env", "result": "The command environment policy refuses `PATH`: remove it."},
+			wantCode:   "command_invalid_env",
+			wantReason: "(denial_code: command_invalid_env). The command environment policy refuses `PATH`: remove it.",
+			wantServer: map[string]any{"denial_code": "command_invalid_env", "result": "The command environment policy refuses `PATH`: remove it."},
+		},
+		{
+			name:       "command_dangerous_env",
+			extra:      map[string]any{"status": "denied", "denial_code": "command_dangerous_env", "result": "The command environment policy refuses `PATH`: remove it."},
+			wantCode:   "command_dangerous_env",
+			wantReason: "(denial_code: command_dangerous_env). The command environment policy refuses `PATH`: remove it.",
+			wantServer: map[string]any{"denial_code": "command_dangerous_env", "result": "The command environment policy refuses `PATH`: remove it."},
+		},
+		{
 			name: "known denial code",
 			extra: map[string]any{
 				"status":      "denied",
