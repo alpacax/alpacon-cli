@@ -144,6 +144,8 @@ func runKubeConfig(cmd *cobra.Command, cluster string, flags kubeConfigFlagValue
 	if err != nil {
 		return kubeConfigError(err, clusterName, workSessionID)
 	}
+	// A write to a closed pipe ends the process with SIGPIPE, skipping the defer and leaving the lock file.
+	held.done()
 
 	return printKubeConfigResult(cmd.OutOrStdout(), result, ac.Insecure)
 }

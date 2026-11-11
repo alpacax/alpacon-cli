@@ -16,6 +16,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/kubeconfig"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -522,4 +523,38 @@ func TestOpenKubeConfigStopsAtAnInterrupt(t *testing.T) {
 			assert.NoFileExists(t, path)
 		})
 	}
+}
+
+// lockProbe records whether the kubeconfig lock file existed when the result was written.
+type lockProbe struct {
+	lockPath   string
+	wrote      bool
+	lockedSeen bool
+}
+
+func (p *lockProbe) Write(b []byte) (int, error) {
+	p.wrote = true
+	if _, err := os.Stat(p.lockPath); err == nil {
+		p.lockedSeen = true
+	}
+	return len(b), nil
+}
+
+func TestKubeConfigReleasesTheLockBeforePrintingTheResult(t *testing.T) {
+	// Serial: it sets ALPACON_WORK_SESSION and utils.OutputFormat and swaps os.Stderr.
+	t.Setenv("ALPACON_WORK_SESSION", "")
+	withOutputFormat(t, utils.OutputFormatJSON) // the result goes to stdout only as JSON
+	ac := newSessionServer().start(t)
+	path := filepath.Join(t.TempDir(), "config")
+	probe := &lockProbe{lockPath: path + ".lock"}
+	cmd := newKubeCmd(func() (*client.AlpaconClient, error) { return ac, nil })
+	cmd.SetArgs([]string{"config", "prod-east", "--kubeconfig", path})
+	cmd.SetOut(probe)
+
+	var err error
+	testutil.CaptureOutput(t, func() { err = cmd.Execute() })
+
+	require.NoError(t, err)
+	require.True(t, probe.wrote, "the result never reached stdout")
+	assert.False(t, probe.lockedSeen, "a stdout write that kills the process would leave %s behind", probe.lockPath)
 }
