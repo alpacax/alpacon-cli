@@ -78,7 +78,9 @@ catalog' to see the names this workspace defines.`,
 		}
 
 		if rbac.IsPlatformTier(role.Name) && !yes {
-			utils.ConfirmAction("Grant %s the %s role?", subj.Label, role.Name)
+			if proceed, err := utils.Confirm("Grant %s the %s role?", subj.Label, role.Name); err != nil || !proceed {
+				return err
+			}
 		}
 
 		grant := func() error {

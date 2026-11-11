@@ -20,7 +20,9 @@ var memberAddCmd = &cobra.Command{
 	`,
 	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if memberRequest.Group == "" || memberRequest.User == "" || memberRequest.Role == "" {
-			promptForMembers()
+			if err := promptForMembers(); err != nil {
+				return err
+			}
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
@@ -44,23 +46,34 @@ func init() {
 	memberAddCmd.Flags().StringVarP(&memberRequest.Role, "role", "r", "", "Role of member within the group (owner, manager, member). Not an RBAC workspace role—for those see 'alpacon user role'")
 }
 
-func promptForMembers() {
+func promptForMembers() error {
+	var err error
 	if memberRequest.Group == "" {
-		memberRequest.Group = utils.PromptForRequiredInput("Group: ")
+		if memberRequest.Group, err = utils.ReadRequiredInput("Group: "); err != nil {
+			return err
+		}
 	}
 	if memberRequest.User == "" {
-		memberRequest.User = utils.PromptForRequiredInput("User: ")
+		if memberRequest.User, err = utils.ReadRequiredInput("User: "); err != nil {
+			return err
+		}
 	}
 	if memberRequest.Role == "" {
-		memberRequest.Role = promptForRole()
+		if memberRequest.Role, err = promptForRole(); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func promptForRole() string {
+func promptForRole() (string, error) {
 	for {
-		role := utils.PromptForRequiredInput("Role(owner, manager, member): ")
+		role, err := utils.ReadRequiredInput("Role(owner, manager, member): ")
+		if err != nil {
+			return "", err
+		}
 		if strings.ToLower(role) == "owner" || strings.ToLower(role) == "manager" || strings.ToLower(role) == "member" {
-			return role
+			return role, nil
 		}
 		utils.CliWarning("Invalid role. Please choose 'owner', 'manager', or 'member'.")
 	}

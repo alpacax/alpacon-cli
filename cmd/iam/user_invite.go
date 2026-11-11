@@ -52,7 +52,9 @@ This command requires staff or superuser privileges.`,
 			if !utils.IsInteractiveShell() {
 				return utils.NewUsageExitError("email argument is required in non-interactive mode")
 			}
-			email = utils.PromptForRequiredInput("Email: ")
+			if email, err = utils.ReadRequiredInput("Email: "); err != nil {
+				return err
+			}
 		}
 
 		if !strings.Contains(email, "@") {

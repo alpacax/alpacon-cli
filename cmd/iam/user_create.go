@@ -47,7 +47,10 @@ var userCreateCmd = &cobra.Command{
 			return utils.NewExitError("Insufficient permissions to create users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
 		}
 
-		userRequest := promptForUser(alpaconClient)
+		userRequest, err := promptForUser(alpaconClient)
+		if err != nil {
+			return err
+		}
 
 		password, err := iam.CreateUser(alpaconClient, userRequest)
 		if err != nil {
@@ -64,17 +67,34 @@ var userCreateCmd = &cobra.Command{
 
 // promptForUser offers the privilege fields only to a superuser, so the caller must run
 // LoadCurrentUser first.
-func promptForUser(ac *client.AlpaconClient) iam.UserCreateRequest {
+func promptForUser(ac *client.AlpaconClient) (iam.UserCreateRequest, error) {
 	var userRequest iam.UserCreateRequest
 
-	userRequest.Username = utils.PromptForRequiredInput("Username(required): ")
-	userRequest.FirstName = utils.PromptForRequiredInput("First name(required): ")
-	userRequest.LastName = utils.PromptForRequiredInput("Last name(required): ")
-	userRequest.Email = utils.PromptForRequiredInput("Email(required): ")
-	userRequest.Phone = utils.PromptForInput("Phone number(optional): ")
-	userRequest.Tags = utils.PromptForInput("Tags (optional, comma-separated, e.g., #dev, #ops): ")
-	userRequest.Description = utils.PromptForInput("Description(optional): ")
-	userRequest.Shell = utils.PromptForInput("Shell(optional, An absolute path for a shell of choice. default: /bin/bash): ")
+	fields := []struct {
+		value    *string
+		prompt   string
+		required bool
+	}{
+		{&userRequest.Username, "Username(required): ", true},
+		{&userRequest.FirstName, "First name(required): ", true},
+		{&userRequest.LastName, "Last name(required): ", true},
+		{&userRequest.Email, "Email(required): ", true},
+		{&userRequest.Phone, "Phone number(optional): ", false},
+		{&userRequest.Tags, "Tags (optional, comma-separated, e.g., #dev, #ops): ", false},
+		{&userRequest.Description, "Description(optional): ", false},
+		{&userRequest.Shell, "Shell(optional, An absolute path for a shell of choice. default: /bin/bash): ", false},
+	}
+	for _, f := range fields {
+		read := utils.ReadInput
+		if f.required {
+			read = utils.ReadRequiredInput
+		}
+		input, err := read(f.prompt)
+		if err != nil {
+			return userRequest, err
+		}
+		*f.value = input
+	}
 
 	userRequest.IsLdapUser = utils.PromptForBool("LDAP status")
 
@@ -83,7 +103,7 @@ func promptForUser(ac *client.AlpaconClient) iam.UserCreateRequest {
 		userRequest.IsSuperuser = utils.PromptForBool("Superuser status")
 	}
 
-	return userRequest
+	return userRequest, nil
 }
 
 // printGeneratedPassword keeps stdout to the password line alone so a script can capture it.

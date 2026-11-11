@@ -91,7 +91,9 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 		}
 
 		if rbac.IsPlatformTier(role.Name) && !yes {
-			utils.ConfirmAction("Revoke %s from %s?", describeTargets(targets), subj.Label)
+			if proceed, err := utils.Confirm("Revoke %s from %s?", describeTargets(targets), subj.Label); err != nil || !proceed {
+				return err
+			}
 		}
 
 		// Superuser first: the reverse order fails open, leaving superuser standing once admin is gone.

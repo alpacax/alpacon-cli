@@ -21,6 +21,7 @@ const modulePath = "github.com/alpacax/alpacon-cli"
 var (
 	_ = utils.ProcessEditedData
 	_ = utils.ExitIfNoChanges
+	_ = utils.ReportNoChanges
 )
 
 // An edit that changes nothing exits 0, but only when the command checks for ErrNoChanges
@@ -36,13 +37,17 @@ func TestEditorCommandsExitZeroWhenNothingChanged(t *testing.T) {
 		eachFuncBody(file.ast, func(body *ast.BlockStmt) {
 			var editorCall *ast.CallExpr
 			handled := false
+			guards := returningIfConds(body)
 			directCalls(body, func(call *ast.CallExpr) {
 				path, name, ok := calledFunc(call, imports)
 				switch {
 				case !ok:
 				case editors[path+"."+name]:
 					editorCall = call
-				case path == modulePath+"/utils" && name == "ExitIfNoChanges":
+				case path != modulePath+"/utils":
+				case name == "ExitIfNoChanges":
+					handled = true
+				case name == "ReportNoChanges" && guards[call]: // its answer only helps when it ends the command
 					handled = true
 				}
 			})
@@ -50,7 +55,7 @@ func TestEditorCommandsExitZeroWhenNothingChanged(t *testing.T) {
 				return
 			}
 			checked++
-			assert.True(t, handled, "%s calls an editor function without utils.ExitIfNoChanges",
+			assert.True(t, handled, "%s calls an editor function without utils.ExitIfNoChanges or an if utils.ReportNoChanges(err) { return nil } guard",
 				file.fset.Position(editorCall.Pos()))
 		})
 	}
@@ -174,6 +179,35 @@ func eachFuncBody(f *ast.File, visit func(*ast.BlockStmt)) {
 		}
 		return true
 	})
+}
+
+// returningIfConds returns the calls in body that are an if condition whose branch is only `return nil`.
+func returningIfConds(body *ast.BlockStmt) map[*ast.CallExpr]bool {
+	conds := map[*ast.CallExpr]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		if _, ok := n.(*ast.FuncLit); ok {
+			return false
+		}
+		stmt, ok := n.(*ast.IfStmt)
+		if !ok || len(stmt.Body.List) != 1 { // a second statement could return a failure first
+			return true
+		}
+		call, isCall := stmt.Cond.(*ast.CallExpr)
+		if ret, returns := stmt.Body.List[0].(*ast.ReturnStmt); isCall && returns && returnsOnlyNil(ret) {
+			conds[call] = true
+		}
+		return true
+	})
+	return conds
+}
+
+// returnsOnlyNil reports whether ret is a literal `return nil`; a bare return could hand back a named err.
+func returnsOnlyNil(ret *ast.ReturnStmt) bool {
+	if len(ret.Results) != 1 {
+		return false
+	}
+	id, ok := ret.Results[0].(*ast.Ident)
+	return ok && id.Name == "nil"
 }
 
 // directCalls visits the calls in body that are not inside a nested function literal.

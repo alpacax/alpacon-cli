@@ -30,7 +30,9 @@ var groupUpdateCmd = &cobra.Command{
 
 		groupDetail, err := iam.UpdateGroup(alpaconClient, groupName)
 		if err != nil {
-			utils.ExitIfNoChanges(err)
+			if utils.ReportNoChanges(err) {
+				return nil
+			}
 			return utils.NewExitError("Failed to update the group info: %s.", err)
 		}
 

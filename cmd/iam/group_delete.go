@@ -27,7 +27,9 @@ var groupDeleteCmd = &cobra.Command{
 
 		yes, _ := cmd.Flags().GetBool("yes")
 		if !yes {
-			utils.ConfirmAction("Delete group '%s'?", groupName)
+			if proceed, err := utils.Confirm("Delete group '%s'?", groupName); err != nil || !proceed {
+				return err
+			}
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()

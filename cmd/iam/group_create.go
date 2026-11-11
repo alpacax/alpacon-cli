@@ -58,11 +58,20 @@ var groupCreateCmd = &cobra.Command{
 
 func promptForGroup(ac *client.AlpaconClient, serverList []server.ServerAttributes) (iam.GroupCreateRequest, error) {
 	var groupRequest iam.GroupCreateRequest
+	var err error
 
-	groupRequest.Name = utils.PromptForRequiredInput("Name(required): ")
-	groupRequest.DisplayName = utils.PromptForRequiredInput("Display name(required): ")
-	groupRequest.Tags = utils.PromptForInput("Tags(optional, Add tags for this group so that people can find easily. Tags should start with \"#\" and be comma-separated.): ")
-	groupRequest.Description = utils.PromptForInput("Description(optional): ")
+	if groupRequest.Name, err = utils.ReadRequiredInput("Name(required): "); err != nil {
+		return groupRequest, err
+	}
+	if groupRequest.DisplayName, err = utils.ReadRequiredInput("Display name(required): "); err != nil {
+		return groupRequest, err
+	}
+	if groupRequest.Tags, err = utils.ReadInput("Tags(optional, Add tags for this group so that people can find easily. Tags should start with \"#\" and be comma-separated.): "); err != nil {
+		return groupRequest, err
+	}
+	if groupRequest.Description, err = utils.ReadInput("Description(optional): "); err != nil {
+		return groupRequest, err
+	}
 
 	displayServers(serverList)
 	servers, err := selectAndConvertServers(ac, serverList)
@@ -84,8 +93,14 @@ func displayServers(serverList []server.ServerAttributes) {
 }
 
 func selectAndConvertServers(ac *client.AlpaconClient, serverList []server.ServerAttributes) ([]string, error) {
-	chosenServers := utils.PromptForInput("Select servers (e.g., 1,2): ")
-	intServers := utils.SplitAndParseInt(chosenServers)
+	chosenServers, err := utils.ReadInput("Select servers (e.g., 1,2): ")
+	if err != nil {
+		return nil, err
+	}
+	intServers, err := utils.ParseIntList(chosenServers)
+	if err != nil {
+		return nil, err
+	}
 
 	var serverIDs []string
 

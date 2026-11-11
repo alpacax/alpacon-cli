@@ -26,7 +26,9 @@ var userDeleteCmd = &cobra.Command{
 
 		yes, _ := cmd.Flags().GetBool("yes")
 		if !yes {
-			utils.ConfirmAction("Delete user '%s'?", userName)
+			if proceed, err := utils.Confirm("Delete user '%s'?", userName); err != nil || !proceed {
+				return err
+			}
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()

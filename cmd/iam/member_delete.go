@@ -19,12 +19,16 @@ var memberDeleteCmd = &cobra.Command{
 	`,
 	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if memberDeleteRequest.Group == "" || memberDeleteRequest.User == "" {
-			promptForDeleteMembers()
+			if err := promptForDeleteMembers(); err != nil {
+				return err
+			}
 		}
 
 		yes, _ := cmd.Flags().GetBool("yes")
 		if !yes {
-			utils.ConfirmAction("Remove member '%s' from group '%s'?", memberDeleteRequest.User, memberDeleteRequest.Group)
+			if proceed, err := utils.Confirm("Remove member '%s' from group '%s'?", memberDeleteRequest.User, memberDeleteRequest.Group); err != nil || !proceed {
+				return err
+			}
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
@@ -48,11 +52,17 @@ func init() {
 	memberDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 }
 
-func promptForDeleteMembers() {
+func promptForDeleteMembers() error {
+	var err error
 	if memberDeleteRequest.Group == "" {
-		memberDeleteRequest.Group = utils.PromptForRequiredInput("Group: ")
+		if memberDeleteRequest.Group, err = utils.ReadRequiredInput("Group: "); err != nil {
+			return err
+		}
 	}
 	if memberDeleteRequest.User == "" {
-		memberDeleteRequest.User = utils.PromptForRequiredInput("User: ")
+		if memberDeleteRequest.User, err = utils.ReadRequiredInput("User: "); err != nil {
+			return err
+		}
 	}
+	return nil
 }
