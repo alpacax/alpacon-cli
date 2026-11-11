@@ -149,7 +149,7 @@ func TestGetNoteList_PassesTailAsTheLimit(t *testing.T) {
 
 func TestGetNoteList_MapsResponseFields(t *testing.T) {
 	t.Parallel()
-	addedAt := time.Now().Add(-3 * time.Hour).Truncate(time.Second)
+	addedAt := time.Now().UTC().Add(-3 * time.Hour).Truncate(time.Second) // UTC so the decoded time compares equal in any zone
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		results := []NoteResponse{{
