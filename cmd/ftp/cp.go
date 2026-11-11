@@ -3,13 +3,13 @@ package ftp
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/ftp"
 	"github.com/alpacax/alpacon-cli/api/mfa"
+	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
@@ -329,6 +329,13 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 	return serverName, nil
 }
 
+// remoteDirHint names the directory holding remotePath by the server's path rules; a failed
+// lookup falls back to Linux rules, since the hint is only advice.
+func remoteDirHint(ac *client.AlpaconClient, serverName, remotePath string) string {
+	srv, err := server.GetServerByName(ac, serverName)
+	return utils.RemotePathDir(remotePath, err == nil && srv.Windows())
+}
+
 // downloadObject returns the source server name so the caller can report errors
 // against it without parsing sources a second time.
 func downloadObject(client *client.AlpaconClient, sources []string, dest, username, groupname string, recursive bool, workSessionID string) (string, error) {
@@ -352,7 +359,7 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 				"  • File exists: alpacon exec %s 'ls -la %s'\n"+
 				"  • You have read permissions for the file\n"+
 				"  • For folders, use -r flag: alpacon cp -r %s %s",
-				remotePath, serverName, remotePath, serverName, filepath.Dir(remotePath), srcDisplay, dest)
+				remotePath, serverName, remotePath, serverName, remoteDirHint(client, serverName, remotePath), srcDisplay, dest)
 		} else if wantsPermissionAdvice(err) {
 			utils.CliErrorWithExit("Permission denied downloading '%s' from server '%s'.\n\n"+
 				"Try these solutions:\n"+

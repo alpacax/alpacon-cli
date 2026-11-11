@@ -104,7 +104,21 @@ func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, err
 	return pathID.String(), nil
 }
 
+// GetServerByName resolves a server's ID and platform in one request.
+func GetServerByName(ac *client.AlpaconClient, serverName string) (ServerRef, error) {
+	pathID, result, err := resolveServer(ac, serverName)
+	if err != nil {
+		return ServerRef{}, err
+	}
+	return ServerRef{ID: pathID.String(), Platform: result.Platform}, nil
+}
+
 func serverPathIDByName(ac *client.AlpaconClient, serverName string) (api.PathID, error) {
+	pathID, _, err := resolveServer(ac, serverName)
+	return pathID, err
+}
+
+func resolveServer(ac *client.AlpaconClient, serverName string) (api.PathID, ServerDetails, error) {
 	result, err := api.ResolveByName[ServerDetails](ac, api.ResolveByNameOptions{
 		Endpoint:    serverURL,
 		FilterKey:   "name",
@@ -113,10 +127,10 @@ func serverPathIDByName(ac *client.AlpaconClient, serverName string) (api.PathID
 		NotFoundMsg: "no server found with the given name",
 	})
 	if err != nil {
-		return api.PathID{}, err
+		return api.PathID{}, ServerDetails{}, err
 	}
-
-	return api.RequireResponseID(result.ID, "server")
+	pathID, err := api.RequireResponseID(result.ID, "server")
+	return pathID, *result, err
 }
 
 // ResolveServerNames converts server names to their UUIDs, one request per name.

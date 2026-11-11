@@ -689,6 +689,45 @@ func TestGetServerIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 	}
 }
 
+func TestGetServerByName_ReturnsTheIDAndWhetherPathsFollowWindowsRules(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		id          string
+		platform    string
+		wantWindows bool
+		wantErr     bool
+	}{
+		{name: "windows server", id: "id-1", platform: "windows", wantWindows: true},
+		{name: "linux server", id: "id-1", platform: "debian"},
+		{name: "no platform reported", id: "id-1"},
+		{name: "padded id", id: " id-1 ", platform: "windows", wantWindows: true},
+		{name: "parent traversal id", id: "../x", platform: "windows", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.ListResponse[ServerDetails]{Count: 1, Results: []ServerDetails{{ID: tt.id, Name: "my-server", Platform: tt.platform}}})
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			srv, err := GetServerByName(ac, "my-server")
+
+			if tt.wantErr {
+				require.ErrorIs(t, err, api.ErrUnusableID)
+				assert.Empty(t, srv.ID)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, "id-1", srv.ID)
+			assert.Equal(t, tt.wantWindows, srv.Windows())
+		})
+	}
+}
+
 func TestDeleteRegistrationToken_DeletesOnlyAOneSegmentTokenID(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ name, id, wantDelete string }{

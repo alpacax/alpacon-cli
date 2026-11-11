@@ -904,7 +904,7 @@ func TestSaveDownloadedURL_RecursiveUsesTempArchive(t *testing.T) {
 	existingArchive := filepath.Join(dest, "folder.zip")
 	require.NoError(t, os.WriteFile(existingArchive, []byte("existing-archive"), 0644))
 
-	savedPath, written, err := saveDownloadedURL(ts.Client(), ts.URL, dest, "/remote/folder", true, 1)
+	savedPath, written, err := saveDownloadedURL(ts.Client(), ts.URL, dest, remoteFile{path: "/remote/folder", name: "folder"}, true, 1)
 	require.NoError(t, err)
 	assert.Equal(t, dest, savedPath)
 	assert.Equal(t, int64(len(zipContent)), written)
@@ -920,6 +920,178 @@ func TestSaveDownloadedURL_RecursiveUsesTempArchive(t *testing.T) {
 	matches, globErr := filepath.Glob(filepath.Join(dest, ".alpacon-download-*.zip"))
 	require.NoError(t, globErr)
 	assert.Empty(t, matches)
+}
+
+func TestSaveDownloadedURL_NamesTheFileAfterTheLastRemoteElement(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		remotePath string
+		platform   string
+		wantName   string
+		unixOnly   bool // a Windows client splits a backslash and a drive in any name
+	}{
+		{name: "windows backslash path", remotePath: `C:\Users\alice\report.txt`, platform: "windows", wantName: "report.txt"},
+		{name: "windows forward slash path", remotePath: "C:/Users/alice/report.txt", platform: "windows", wantName: "report.txt"},
+		{name: "windows lowercase drive", remotePath: `d:\logs\app.log`, platform: "windows", wantName: "app.log"},
+		{name: "windows unc path", remotePath: `\\fileserver\share\docs\report.txt`, platform: "windows", wantName: "report.txt"},
+		{name: "windows drive relative path", remotePath: "C:report.txt", platform: "windows", wantName: "report.txt"},
+		{name: "windows rooted path without a drive", remotePath: `\Users\alice\report.txt`, platform: "windows", wantName: "report.txt"},
+		{name: "windows relative path", remotePath: `Documents\report.txt`, platform: "windows", wantName: "report.txt"},
+		{name: "linux path", remotePath: "/home/alice/report.txt", platform: "debian", wantName: "report.txt"},
+		{name: "linux file name holding a backslash", remotePath: `/home/alice/a\b.txt`, platform: "debian", wantName: `a\b.txt`, unixOnly: true},
+		{name: "linux file name with a drive-like colon", remotePath: "a:notes.txt", platform: "debian", wantName: "a:notes.txt", unixOnly: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if tt.unixOnly && runtime.GOOS == "windows" {
+				t.Skip("a Windows client cannot keep a backslash or a drive in a file name")
+			}
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("downloaded"))
+			}))
+			defer ts.Close()
+			dest := t.TempDir()
+			src := newRemoteFile(tt.remotePath, server.ServerRef{Platform: tt.platform})
+
+			savedPath, _, err := saveDownloadedURL(ts.Client(), ts.URL, dest, src, false, 1)
+
+			require.NoError(t, err)
+			assert.Equal(t, filepath.Join(dest, tt.wantName), savedPath)
+			content, readErr := os.ReadFile(filepath.Join(dest, tt.wantName))
+			require.NoError(t, readErr)
+			assert.Equal(t, "downloaded", string(content))
+		})
+	}
+}
+
+func TestSaveDownloadedURL_RefusesARemoteNameThatLeavesDest(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		remotePath string
+		platform   string
+	}{
+		{name: "linux parent element", remotePath: "/home/alice/..", platform: "debian"},
+		{name: "linux root", remotePath: "/", platform: "debian"},
+		{name: "windows parent element", remotePath: `C:\Users\..`, platform: "windows"},
+		{name: "windows drive root", remotePath: `C:\`, platform: "windows"},
+		{name: "windows unc share root", remotePath: `\\fileserver\share`, platform: "windows"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("downloaded"))
+			}))
+			defer ts.Close()
+			parent := t.TempDir()
+			dest := filepath.Join(parent, "missing", "dl") + string(filepath.Separator)
+			src := newRemoteFile(tt.remotePath, server.ServerRef{Platform: tt.platform})
+
+			_, _, err := saveDownloadedURL(ts.Client(), ts.URL, dest, src, false, 1)
+
+			require.ErrorContains(t, err, "names no file to save")
+			assert.True(t, utils.IsUsageError(err), "want a usage error, got %v", err)
+			entries, readErr := os.ReadDir(parent)
+			require.NoError(t, readErr)
+			assert.Empty(t, entries)
+		})
+	}
+}
+
+func TestDownloadFile_SendsTheLastRemoteElementByTheServersRules(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		platform   string
+		remotePath string
+		wantName   string
+		unixOnly   bool // a Windows client splits a backslash and a drive in any name
+	}{
+		{name: "windows drive path", platform: "windows", remotePath: `C:\Users\alice\report.txt`, wantName: "report.txt"},
+		{name: "windows rooted path without a drive", platform: "windows", remotePath: `\Users\alice\report.txt`, wantName: "report.txt"},
+		{name: "linux file name with a drive-like colon", platform: "debian", remotePath: "a:notes.txt", wantName: "a:notes.txt", unixOnly: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if tt.unixOnly && runtime.GOOS == "windows" {
+				t.Skip("a Windows client cannot keep a backslash or a drive in a file name")
+			}
+			serverResp := api.ListResponse[server.ServerDetails]{
+				Count:   1,
+				Results: []server.ServerDetails{{ID: "srv-123", Name: "my-server", Platform: tt.platform}},
+			}
+			var gotName atomic.Value
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.Contains(r.URL.Path, "/api/servers/servers"):
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(serverResp)
+				case r.URL.Path == "/api/webftp/downloads/" && r.Method == http.MethodPost:
+					var req DownloadRequest
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						t.Errorf("decode download request: %v", err)
+					}
+					gotName.Store(req.Name)
+					w.WriteHeader(http.StatusBadRequest)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			_ = DownloadFile(ac, []string{"my-server:" + tt.remotePath}, t.TempDir(), "", "", false, "") // the mock refuses the create
+
+			assert.Equal(t, tt.wantName, gotName.Load())
+		})
+	}
+}
+
+func TestDownloadFile_RefusesANameThatLeavesDestBeforeAskingTheServer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		platform   string
+		remotePath string
+	}{
+		{name: "windows drive root", platform: "windows", remotePath: `C:\`},
+		{name: "windows parent element", platform: "windows", remotePath: `C:\Users\alice\..`},
+		{name: "linux parent element", platform: "debian", remotePath: "/home/alice/.."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			serverResp := api.ListResponse[server.ServerDetails]{
+				Count:   1,
+				Results: []server.ServerDetails{{ID: "srv-123", Name: "my-server", Platform: tt.platform}},
+			}
+			var downloads atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.Contains(r.URL.Path, "/api/servers/servers"):
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(serverResp)
+				case strings.HasPrefix(r.URL.Path, "/api/webftp/downloads/"):
+					downloads.Add(1)
+					w.WriteHeader(http.StatusBadRequest)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := DownloadFile(ac, []string{"my-server:" + tt.remotePath}, t.TempDir(), "", "", false, "")
+
+			require.ErrorContains(t, err, "names no file to save")
+			assert.True(t, utils.IsUsageError(err), "want a usage error, got %v", err)
+			assert.Zero(t, downloads.Load())
+		})
+	}
 }
 
 func TestDownloadFile_InputValidation(t *testing.T) {
@@ -1907,7 +2079,7 @@ func TestCompleteDownload_RefusesAServerIDThatIsNotOneSegment(t *testing.T) {
 			t.Parallel()
 			ac := noDownloadRequestClient(t)
 
-			_, err := completeSingleDownload(ac, "server-1", []byte(tc.body), "/remote/file", t.TempDir(), false)
+			_, err := completeSingleDownload(ac, "server-1", []byte(tc.body), remoteFile{path: "/remote/file", name: "file"}, t.TempDir(), false)
 
 			require.ErrorIs(t, err, api.ErrUnusableID)
 			assert.NotErrorIs(t, err, utils.ErrInvalidID)

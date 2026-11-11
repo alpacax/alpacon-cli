@@ -106,7 +106,17 @@ type ServerDetails struct {
 	PhysicalMemory   int64     `json:"physical_memory"`
 	OSName           string    `json:"os_name"`
 	OSVersion        string    `json:"os_version"`
+	Platform         string    `json:"platform"`
 	Load             float64   `json:"load"`
 	BootTime         time.Time `json:"boot_time"`
 	Groups           []string  `json:"groups"`
 }
+
+// ServerRef is a resolved server: its ID and the platform its Alpamon registered with.
+type ServerRef struct {
+	ID       string
+	Platform string
+}
+
+// Windows reports whether the server's paths follow Windows rules.
+func (s ServerRef) Windows() bool { return s.Platform == "windows" }
