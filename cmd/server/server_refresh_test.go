@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -75,9 +76,11 @@ func TestRefreshServer_RetriesOnlyAnMFARefusal(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			t.Setenv("ALPACON_NO_BROWSER", "1")
 			require.NoError(t, config.CreateConfig(ts.URL, "my-workspace", "api-token", "", "", "", "", 0, false))
+			ac, err := client.NewAlpaconAPIClient()
+			require.NoError(t, err)
 
 			// When
-			err := refreshServer("my-server")
+			err = refreshServer(ac, "my-server")
 
 			// Then
 			if tt.wantErrCode == "" {

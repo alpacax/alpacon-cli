@@ -27,7 +27,7 @@ func RunDisruptiveServerAction(serverName, action, confirmMsg, successMsg, failM
 		utils.ConfirmAction(confirmMsg, serverName)
 	}
 
-	if err := requestServerActionWithMFA(serverName, action, force); err != nil {
+	if err := requestServerActionWithMFA(newActionClient(), serverName, action, force); err != nil {
 		if code, _ := utils.ParseErrorResponse(err); code == utils.ServerBusyWithUserWork {
 			utils.CliErrorWithExitCode(utils.ExitCodeServerBusy, "%s", busyGuardMessage(serverName, force))
 		}
@@ -44,22 +44,27 @@ func RunServerAction(serverName, action, confirmMsg, successMsg, failMsg string,
 		utils.ConfirmAction(confirmMsg, serverName)
 	}
 
-	if err := requestServerActionWithMFA(serverName, action, false); err != nil {
+	if err := requestServerActionWithMFA(newActionClient(), serverName, action, false); err != nil {
 		utils.CliErrorWithExit("%s: %s.", failMsg, err)
 	}
 
 	utils.CliSuccess("%s", successMsg)
 }
 
-// requestServerActionWithMFA submits the action and, when the workspace asks
-// for MFA, walks the user through it and retries until the step-up clears.
-func requestServerActionWithMFA(serverName, action string, force bool) error {
+// newActionClient exits in place for RunDisruptiveServerAction and RunServerAction, which cmd/agent
+// still calls from Run.
+func newActionClient() *client.AlpaconClient {
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
 		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
+	return alpaconClient
+}
 
-	err = server.RequestServerAction(alpaconClient, serverName, action, force)
+// requestServerActionWithMFA submits the action and, when the workspace asks
+// for MFA, walks the user through it and retries until the step-up clears.
+func requestServerActionWithMFA(alpaconClient *client.AlpaconClient, serverName, action string, force bool) error {
+	err := server.RequestServerAction(alpaconClient, serverName, action, force)
 	if err != nil {
 		err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
 			OnMFARequired: func(srv string) error {

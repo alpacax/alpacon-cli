@@ -20,19 +20,20 @@ var csrDetailCmd = &cobra.Command{
 	alpacon csr desc 550e8400-e29b-41d4-a716-446655440000
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		csrId := args[0]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		csrDetail, err := cert.GetCSRDetail(alpaconClient, csrId)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the csr details: %s.", err)
+			return utils.NewExitError("Failed to retrieve the csr details: %s.", err)
 		}
 
 		utils.PrintJson(csrDetail)
-	},
+		return nil
+	}),
 }

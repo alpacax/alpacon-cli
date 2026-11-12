@@ -21,26 +21,29 @@ var csrDeleteCmd = &cobra.Command{
 	alpacon csr delete 550e8400-e29b-41d4-a716-446655440000 -y
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		csrId := args[0]
 
 		yes, _ := cmd.Flags().GetBool("yes")
 		if !yes {
-			utils.ConfirmAction("Delete CSR '%s'?", csrId)
+			if proceed, err := utils.Confirm("Delete CSR '%s'?", csrId); err != nil || !proceed {
+				return err
+			}
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = cert.DeleteCSR(alpaconClient, csrId)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to delete the CSR: %s.", err)
+			return utils.NewExitError("Failed to delete the CSR: %s.", err)
 		}
 
 		utils.CliSuccess("CSR deleted: %s", csrId)
-	},
+		return nil
+	}),
 }
 
 func init() {

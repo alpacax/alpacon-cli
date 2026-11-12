@@ -16,19 +16,20 @@ var csrApproveCmd = &cobra.Command{
 	`,
 	Example: `alpacon csr approve 550e8400-e29b-41d4-a716-446655440000`,
 	Args:    cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		csrId := args[0]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		_, err = cert.ApproveCSR(alpaconClient, csrId)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to approve the csr: %s.", err)
+			return utils.NewExitError("Failed to approve the csr: %s.", err)
 		}
 
 		utils.CliSuccess("CSR approved. Run 'alpacon csr ls' to verify status.")
-	},
+		return nil
+	}),
 }

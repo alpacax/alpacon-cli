@@ -6,9 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -185,8 +183,9 @@ func TestResolvePlatform_AcceptsSuseFromFlag(t *testing.T) {
 	cmd.Flags().StringVarP(&createPlatform, "platform", "p", "", "")
 	require.NoError(t, cmd.Flags().Parse([]string{"--platform", "suse"}))
 
-	got := resolvePlatform(cmd, "token-install")
+	got, err := resolvePlatform(cmd, "token-install")
 
+	require.NoError(t, err)
 	assert.Equal(t, "suse", got)
 }
 
@@ -260,39 +259,24 @@ func TestPromptPlatform(t *testing.T) {
 			t.Parallel()
 			var prompts []string
 			i := 0
-			got := promptPlatform(tt.allowed, strings.Join(tt.allowed, ", "), func(p string) string {
+			got, err := promptPlatform(tt.allowed, strings.Join(tt.allowed, ", "), func(p string) (string, error) {
 				prompts = append(prompts, p)
 				in := tt.inputs[i]
 				i++
-				return in
+				return in, nil
 			})
 
+			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 			assert.Len(t, prompts, len(tt.inputs))
 		})
 	}
 }
 
-const serverCreateHelperMarker = "--server-create-helper--"
-
-func TestServerCreateHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_SERVER_CREATE_HELPER") != "1" {
-		return
-	}
-	i := slices.Index(os.Args, serverCreateHelperMarker)
-	if i < 0 {
-		t.Fatal("missing " + serverCreateHelperMarker + " marker")
-	}
-	if err := serverCreateCmd.ParseFlags(os.Args[i+1:]); err != nil {
-		t.Fatal(err)
-	}
-	serverCreateCmd.Run(serverCreateCmd, nil)
-}
-
 // An expired access token makes NewAlpaconAPIClient refresh over the network,
 // so a pair the CLI can reject on its own must be rejected before that.
+// Serial: it points HOME at a temp config and sets the package-level flag variables.
 func TestServerCreate_RejectsAnsibleSuseBeforeAnyRequest(t *testing.T) {
-	t.Parallel()
 	var requests atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -312,18 +296,36 @@ func TestServerCreate_RejectsAnsibleSuseBeforeAnyRequest(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config.json"), cfg, 0600))
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cmd := newServerCreateCommand(t)
+	require.NoError(t, cmd.ParseFlags([]string{"-m", "ansible", "-p", "suse", "-t", "prod-token"}))
 
-	helper := osexec.Command(os.Args[0], "-test.run=^TestServerCreateHelperProcess$", "--",
-		serverCreateHelperMarker, "-m", "ansible", "-p", "suse", "-t", "prod-token")
-	helper.Env = append(os.Environ(), "GO_WANT_SERVER_CREATE_HELPER=1", "HOME="+home, "USERPROFILE="+home)
-	var stderr bytes.Buffer
-	helper.Stderr = &stderr
+	err = cmd.RunE(cmd, nil)
 
-	err = helper.Run()
-
-	var exitErr *osexec.ExitError
+	var exitErr *utils.ExitError
 	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode())
+	assert.Equal(t, utils.ExitCodeUsageError, exitErr.Code)
+	var stderr bytes.Buffer
+	utils.FprintExitError(&stderr, exitErr)
 	assert.Contains(t, stderr.String(), `"suse" is not supported with the ansible method`)
 	assert.Zero(t, requests.Load())
+}
+
+// newServerCreateCommand runs serverCreateCmd's RunE on its own flag set, bound to the same
+// package-level variables, which it restores when the test ends.
+func newServerCreateCommand(t *testing.T) *cobra.Command {
+	t.Helper()
+	method, platform, name, token, newToken, asJSON := createMethod, createPlatform, createName, createTokenName, createNewTokenName, createJSON
+	t.Cleanup(func() {
+		createMethod, createPlatform, createName, createTokenName, createNewTokenName, createJSON = method, platform, name, token, newToken, asJSON
+	})
+	cmd := &cobra.Command{Use: "create", RunE: serverCreateCmd.RunE}
+	cmd.Flags().StringVarP(&createMethod, "method", "m", "token-install", "")
+	cmd.Flags().StringVarP(&createPlatform, "platform", "p", "", "")
+	cmd.Flags().StringVarP(&createName, "name", "n", "", "")
+	cmd.Flags().StringVarP(&createTokenName, "token", "t", "", "")
+	cmd.Flags().StringVar(&createNewTokenName, "new-token", "", "")
+	cmd.Flags().BoolVar(&createJSON, "json", false, "")
+	return cmd
 }

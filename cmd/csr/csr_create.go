@@ -47,11 +47,11 @@ var csrCreateCmd = &cobra.Command{
 	alpacon csr create --domain test-cli.alpacax.lab     # non-interactive
 	alpacon csr create -d "a.com,b.com" --valid-days 90
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		var signRequest certApi.SignRequest
@@ -59,15 +59,17 @@ var csrCreateCmd = &cobra.Command{
 
 		nonInteractive := cmd.Flags().Changed("domain") || cmd.Flags().Changed("ip")
 		if !nonInteractive && (cmd.Flags().Changed("valid-days") || cmd.Flags().Changed("key") || cmd.Flags().Changed("out")) {
-			utils.CliUsageErrorWithExit("--valid-days, --key, and --out require --domain or --ip to be specified.")
+			return utils.NewUsageExitError("--valid-days, --key, and --out require --domain or --ip to be specified.")
 		}
 		if nonInteractive {
 			if cmd.Flags().Changed("valid-days") {
-				utils.RequirePositiveInt("valid-days", csrFlags.validDays)
+				if err := utils.CheckPositiveInt("valid-days", csrFlags.validDays); err != nil {
+					return err
+				}
 			}
 			signRequest = newSignRequest(csrFlags.domains, csrFlags.ips, csrFlags.validDays)
 			if len(signRequest.DomainList) == 0 && len(signRequest.IpList) == 0 {
-				utils.CliUsageErrorWithExit("You must provide at least one valid domain or IP address.")
+				return utils.NewUsageExitError("You must provide at least one valid domain or IP address.")
 			}
 			commonName := firstOf(signRequest.DomainList, signRequest.IpList)
 			certPath.PrivateKeyPath = csrFlags.keyPath
@@ -79,28 +81,34 @@ var csrCreateCmd = &cobra.Command{
 				certPath.CSRPath = filepath.Join(defaultCSRDir, commonName+".csr")
 			}
 		} else {
-			signRequest, certPath = promptForCert()
+			signRequest, certPath, err = promptForCert()
+			if err != nil {
+				return err
+			}
 		}
 
-		EnsureSecureConnection(alpaconClient)
+		if err := EnsureSecureConnection(alpaconClient); err != nil {
+			return err
+		}
 
 		response, err := certApi.CreateSignRequest(alpaconClient, signRequest)
 		if err != nil {
-			utils.CliErrorWithExit("%s", utils.Reword(err, createSignRequestErrorText(err, signRequest.ValidDays)))
+			return utils.NewExitError("%s", utils.Reword(err, createSignRequestErrorText(err, signRequest.ValidDays)))
 		}
 
 		csr, err := cert.CreateCSR(response, certPath)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to create CSR file: %s.", err)
+			return utils.NewExitError("Failed to create CSR file: %s.", err)
 		}
 
 		err = certApi.SubmitCSR(alpaconClient, csr, response)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to submit CSR file to server: %s.", err)
+			return utils.NewExitError("Failed to submit CSR file to server: %s.", err)
 		}
 
 		utils.CliSuccess("CSR created (ID: %s). After approval, run: alpacon csr download-crt %s", response.ID, response.ID)
-	},
+		return nil
+	}),
 }
 
 func init() {
@@ -119,19 +127,31 @@ func init() {
 	csrCreateCmd.Flags().StringVarP(&csrFlags.csrPath, "out", "o", "", "Path for the CSR output file")
 }
 
-func promptForCert() (certApi.SignRequest, cert.CertificatePath) {
+func promptForCert() (certApi.SignRequest, cert.CertificatePath, error) {
 	var signRequest certApi.SignRequest
 	var certPath cert.CertificatePath
 
-	signRequest.DomainList = splitAndTrim(utils.PromptForInput("Domain list (e.g., domain1.com, domain2.com): "))
-	signRequest.IpList = splitAndTrim(utils.PromptForInput("IP list (e.g., 192.168.1.1, 10.0.0.1): "))
+	domains, err := utils.ReadInput("Domain list (e.g., domain1.com, domain2.com): ")
+	if err != nil {
+		return signRequest, certPath, err
+	}
+	signRequest.DomainList = splitAndTrim(domains)
+	ips, err := utils.ReadInput("IP list (e.g., 192.168.1.1, 10.0.0.1): ")
+	if err != nil {
+		return signRequest, certPath, err
+	}
+	signRequest.IpList = splitAndTrim(ips)
 
 	if (len(signRequest.DomainList) == 0) && (len(signRequest.IpList) == 0) {
-		utils.CliErrorWithExit("You must enter at least a domain list or an IP list.")
+		return signRequest, certPath, utils.NewExitError("You must enter at least a domain list or an IP list.")
 	}
 
 	for {
-		validDays, err := parseValidDaysInput(utils.PromptForInput("Valid days (default: the CA's default validity): "))
+		input, err := utils.ReadInput("Valid days (default: the CA's default validity): ")
+		if err != nil {
+			return signRequest, certPath, err
+		}
+		validDays, err := parseValidDaysInput(input)
 		if err == nil {
 			signRequest.ValidDays = validDays
 			break
@@ -151,17 +171,21 @@ func promptForCert() (certApi.SignRequest, cert.CertificatePath) {
 
 	utils.CliInfo(infoMessage)
 
-	certPath.PrivateKeyPath = utils.PromptForInput(fmt.Sprintf("Path for the Private Key file (default: %s): ", defaultKeyPath))
+	if certPath.PrivateKeyPath, err = utils.ReadInput(fmt.Sprintf("Path for the Private Key file (default: %s): ", defaultKeyPath)); err != nil {
+		return signRequest, certPath, err
+	}
 	if certPath.PrivateKeyPath == "" {
 		certPath.PrivateKeyPath = defaultKeyPath
 	}
 
-	certPath.CSRPath = utils.PromptForInput(fmt.Sprintf("Path for the CSR file (default: %s): ", defaultCSRPath))
+	if certPath.CSRPath, err = utils.ReadInput(fmt.Sprintf("Path for the CSR file (default: %s): ", defaultCSRPath)); err != nil {
+		return signRequest, certPath, err
+	}
 	if certPath.CSRPath == "" {
 		certPath.CSRPath = defaultCSRPath
 	}
 
-	return signRequest, certPath
+	return signRequest, certPath, nil
 }
 
 func newSignRequest(domains, ips string, validDays int) certApi.SignRequest {
@@ -206,24 +230,24 @@ func createSignRequestErrorText(err error, validDays int) string {
 
 // EnsureSecureConnection checks if the server uses HTTPS and prompts the user
 // to confirm proceeding with an insecure connection if necessary.
-func EnsureSecureConnection(client *client.AlpaconClient) {
+func EnsureSecureConnection(client *client.AlpaconClient) error {
 	isTLS, err := client.IsUsingHTTPS()
 	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 	if !isTLS {
 		utils.CliWarning("The connection to %s might not be secure.", client.BaseURL)
 
 		if !utils.IsInteractiveShell() {
-			utils.CliErrorWithExit("Cannot confirm insecure connection in a non-interactive environment. Configure the Alpacon API endpoint to use HTTPS.")
+			return utils.NewExitError("Cannot confirm insecure connection in a non-interactive environment. Configure the Alpacon API endpoint to use HTTPS.")
 		}
 
 		proceed := utils.PromptForBool("Do you want to proceed with the CSR submission?")
 		if !proceed {
-			utils.CliErrorWithExit("CSR submission cancelled by user.")
+			return utils.NewExitError("CSR submission cancelled by user.")
 		}
-
 	}
+	return nil
 }
 
 func splitAndTrim(s string) []string {

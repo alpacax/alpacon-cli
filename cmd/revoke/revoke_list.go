@@ -19,22 +19,23 @@ var revokeListCmd = &cobra.Command{
 	alpacon revoke ls --status=requested
 	alpacon revoke ls --certificate=550e8400-e29b-41d4-a716-446655440000
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		status, _ := cmd.Flags().GetString("status")
 		certificate, _ := cmd.Flags().GetString("certificate")
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		requestList, err := cert.GetRevokeRequestList(alpaconClient, status, certificate)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to get revoke requests: %s.", err)
+			return utils.NewExitError("Failed to get revoke requests: %s.", err)
 		}
 
 		utils.PrintTable(requestList)
-	},
+		return nil
+	}),
 }
 
 func init() {

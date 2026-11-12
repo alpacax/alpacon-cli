@@ -20,21 +20,24 @@ var serverUpdateCmd = &cobra.Command{
 	alpacon server update my-server
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		serverName := args[0]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		serverDetail, err := server.UpdateServer(alpaconClient, serverName)
 		if err != nil {
-			utils.ExitIfNoChanges(err)
-			utils.CliErrorWithExit("Failed to update the server info: %s.", err)
+			if utils.ReportNoChanges(err) {
+				return nil
+			}
+			return utils.NewExitError("Failed to update the server info: %s.", err)
 		}
 
 		utils.CliSuccess("Server updated: %s", serverName)
 		utils.PrintJson(serverDetail)
-	},
+		return nil
+	}),
 }

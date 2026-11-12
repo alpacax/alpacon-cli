@@ -19,30 +19,34 @@ var authorityDownloadCmd = &cobra.Command{
 	alpacon authority download-crt "Root CA" --out=/path/to/root.crt
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		authorityName := args[0]
 		filePath, _ := cmd.Flags().GetString("out")
 		if filePath == "" {
-			filePath = promptForCertificate()
+			var err error
+			if filePath, err = promptForCertificate(); err != nil {
+				return err
+			}
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		authorityID, err := cert.GetAuthorityIDByName(alpaconClient, authorityName)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to find authority: %s.", err)
+			return utils.NewExitError("Failed to find authority: %s.", err)
 		}
 
 		err = cert.DownloadRootCertificate(alpaconClient, authorityID, filePath)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to download the root certificate from authority: %s.", err)
+			return utils.NewExitError("Failed to download the root certificate from authority: %s.", err)
 		}
 
 		utils.CliSuccess("Root certificate downloaded: %s", filePath)
-	},
+		return nil
+	}),
 }
 
 func init() {
@@ -51,6 +55,6 @@ func init() {
 
 }
 
-func promptForCertificate() string {
-	return utils.PromptForRequiredInput("Path to root certificate (e.g., /path/to/root.crt, recommended extension: .crt): ")
+func promptForCertificate() (string, error) {
+	return utils.ReadRequiredInput("Path to root certificate (e.g., /path/to/root.crt, recommended extension: .crt): ")
 }

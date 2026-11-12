@@ -22,26 +22,29 @@ var serverDeleteCmd = &cobra.Command{
 	alpacon server delete my-server -y
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		serverName := args[0]
 
 		yes, _ := cmd.Flags().GetBool("yes")
 		if !yes {
-			utils.ConfirmAction("Delete server '%s'?", serverName)
+			if proceed, err := utils.Confirm("Delete server '%s'?", serverName); err != nil || !proceed {
+				return err
+			}
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = server.DeleteServer(alpaconClient, serverName)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to delete the server: %s.", err)
+			return utils.NewExitError("Failed to delete the server: %s.", err)
 		}
 
 		utils.CliSuccess("Server deleted: %s", serverName)
-	},
+		return nil
+	}),
 }
 
 func init() {
