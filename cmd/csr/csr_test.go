@@ -1,10 +1,12 @@
 package csr
 
 import (
+	"bytes"
 	"net/http"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -198,4 +200,24 @@ func TestEnsureSecureConnection_HTTPS(t *testing.T) {
 	err := EnsureSecureConnection(ac)
 
 	assert.NoError(t, err)
+}
+
+func TestEnsureSecureConnection_RefusesHTTPWithoutTerminal(t *testing.T) {
+	t.Parallel()
+	if utils.IsInteractiveShell() {
+		t.Skip("stdin is a terminal, so the command would prompt instead of refusing")
+	}
+	ac := &client.AlpaconClient{
+		HTTPClient: &http.Client{},
+		BaseURL:    "http://plain.example.com",
+	}
+
+	err := EnsureSecureConnection(ac)
+
+	var exitErr *utils.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
+	var stderr bytes.Buffer
+	utils.FprintExitError(&stderr, exitErr)
+	assert.Contains(t, stderr.String(), "Cannot confirm insecure connection in a non-interactive environment")
 }

@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -273,6 +274,21 @@ func TestPromptPlatform(t *testing.T) {
 	}
 }
 
+func TestPromptPlatform_ReturnsPromptFailureInsteadOfAskingAgain(t *testing.T) {
+	t.Parallel()
+	noInput := errors.New("no input received")
+	calls := 0
+
+	got, err := promptPlatform(validPlatforms, strings.Join(validPlatforms, ", "), func(string) (string, error) {
+		calls++
+		return "", noInput
+	})
+
+	require.ErrorIs(t, err, noInput)
+	assert.Empty(t, got)
+	assert.Equal(t, 1, calls)
+}
+
 // An expired access token makes NewAlpaconAPIClient refresh over the network,
 // so a pair the CLI can reject on its own must be rejected before that.
 // Serial: it points HOME at a temp config and sets the package-level flag variables.
@@ -312,7 +328,7 @@ func TestServerCreate_RejectsAnsibleSuseBeforeAnyRequest(t *testing.T) {
 	assert.Zero(t, requests.Load())
 }
 
-// newServerCreateCommand runs serverCreateCmd's RunE on its own flag set, bound to the same
+// newServerCreateCommand returns a command running serverCreateCmd's RunE on its own flag set, bound to the same
 // package-level variables, which it restores when the test ends.
 func newServerCreateCommand(t *testing.T) *cobra.Command {
 	t.Helper()
