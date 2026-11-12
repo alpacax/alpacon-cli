@@ -267,7 +267,6 @@ func TestWorkSessionCurrentCmd_StaleSessionFails(t *testing.T) {
 	}
 }
 
-// The raw body is printed as it came, so a 200 that is not JSON fails in the printer, which names no operation.
 func TestWorkSessionCurrentCmd_NonJSONBodyFailsWithNoOperationInTheEnvelope(t *testing.T) {
 	ts := currentSessionServer(t, "ses-1", http.StatusOK, "<html>bad gateway</html>")
 	home := completeHomeWithActiveSessions(t, ts.URL, map[string]string{"test": "ses-1"})

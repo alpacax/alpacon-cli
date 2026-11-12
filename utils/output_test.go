@@ -259,7 +259,6 @@ func TestPrintJson_TableOutput(t *testing.T) {
 	assert.Contains(t, got, "\"id\": 1")
 }
 
-// Serial: it swaps os.Stdout and OutputFormat.
 func TestPrintJson_ReturnsTheNotJSONFailureAndPrintsNothing(t *testing.T) {
 	tests := []struct {
 		name   string
