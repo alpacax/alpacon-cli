@@ -17,28 +17,30 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 	Example: `
 	alpacon workspace authentication update
 	alpacon ws auth update`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if !utils.IsInteractiveShell() {
-			utils.CliErrorWithExit("This command requires an interactive terminal.")
+			return utils.NewExitError("This command requires an interactive terminal.")
 		}
 
 		cfg, err := config.LoadConfig()
 		if err != nil {
-			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+			return utils.NewExitError("Not logged in. Run 'alpacon login' first.")
 		}
 		if !cfg.IsSaaS() {
-			utils.CliErrorWithExit("This command is only available on Alpacon Cloud workspaces.")
+			return utils.NewExitError("This command is only available on Alpacon Cloud workspaces.")
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		data, err := workspace.EditAuthentication(alpaconClient)
 		if err != nil {
-			utils.ExitIfNoChanges(err)
-			utils.CliErrorWithExit("Failed to prepare authentication update: %s.", err)
+			if utils.ReportNoChanges(err) {
+				return nil
+			}
+			return utils.NewExitError("Failed to prepare authentication update: %s.", err)
 		}
 
 		var authenticationDetail []byte
@@ -49,11 +51,12 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 				return err
 			}))
 			if err != nil {
-				utils.CliErrorWithExit("Failed to update authentication settings: %s.", err)
+				return utils.NewExitError("Failed to update authentication settings: %s.", err)
 			}
 		}
 
 		utils.CliSuccess("Authentication settings updated.")
 		utils.PrintJson(authenticationDetail)
-	},
+		return nil
+	}),
 }

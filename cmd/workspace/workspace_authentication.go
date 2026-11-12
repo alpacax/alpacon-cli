@@ -16,28 +16,28 @@ var workspaceAuthenticationCmd = &cobra.Command{
 	Example: `
 	alpacon workspace authentication
 	alpacon ws auth`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		isSaaS, err := config.IsSaaS()
 		if err != nil {
-			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+			return utils.NewExitError("Not logged in. Run 'alpacon login' first.")
 		}
 		if !isSaaS {
-			utils.CliErrorWithExit("This command is only available on Alpacon Cloud workspaces.")
+			return utils.NewExitError("This command is only available on Alpacon Cloud workspaces.")
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		authenticationDetail, err := workspace.GetAuthentication(alpaconClient)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve authentication settings: %s.", err)
+			return utils.NewExitError("Failed to retrieve authentication settings: %s.", err)
 		}
 
 		utils.PrintJson(authenticationDetail)
 		return nil
-	},
+	}),
 }
 
 func init() {
