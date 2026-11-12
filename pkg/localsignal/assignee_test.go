@@ -153,13 +153,13 @@ func TestHeldCommandSignalTrimsBodyToKeepConsoleLink(t *testing.T) {
 
 			text, found := strings.CutSuffix(bannerBody, "\n"+link)
 			require.True(t, found, "banner keeps the link: %q", bannerBody)
-			assert.True(t, strings.HasPrefix(full, text))
+			assert.True(t, strings.HasPrefix(full, text), "banner text must prefix the body: %q", text)
 			assert.LessOrEqual(t, utf8.RuneCountInString(bannerBody), 256)
 
 			assert.Equal(t, link, notifyLink)
 			text, found = strings.CutSuffix(notifyBody, suffix+" "+link)
 			require.True(t, found, "notification keeps the fold suffix and the link: %q", notifyBody)
-			assert.True(t, strings.HasPrefix(full, text))
+			assert.True(t, strings.HasPrefix(full, text), "notification text must prefix the body: %q", text)
 			assert.LessOrEqual(t, utf8.RuneCountInString(notifyBody), 256)
 			if utf8.RuneCountInString(full+suffix)+1+len(link) > 256 {
 				assert.Equal(t, 256, utf8.RuneCountInString(notifyBody))

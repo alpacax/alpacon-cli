@@ -113,7 +113,7 @@ func (e *Emitter) Emit(kind Kind, fields Fields) {
 	}
 	link := consoleLink(fields.ConsoleURL, e.WorkspaceURL, e.BaseDomain)
 	bannerBody, _ := withLink(body, "", "\n", link)
-	banner := fmt.Sprintf("==== %s ====\n%s\n================================\n", strings.ToUpper(title), capText(bannerBody, 256))
+	banner := fmt.Sprintf("==== %s ====\n%s\n================================\n", strings.ToUpper(title), bannerBody)
 	if e.red != nil {
 		banner = e.red(banner)
 	}

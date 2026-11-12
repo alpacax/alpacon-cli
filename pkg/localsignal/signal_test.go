@@ -468,6 +468,7 @@ func consoleLinkCases() []struct {
 		{"control", cloud, "alpacon.io", "https://alpacon.io/\x01", false},
 		{"too long", cloud, "alpacon.io", "https://alpacon.io/" + strings.Repeat("a", 2048), false},
 		{"at length limit", cloud, "alpacon.io", "https://alpacon.io/" + strings.Repeat("a", 2048-len("https://alpacon.io/")), true},
+		{"medium length", cloud, "alpacon.io", "https://alpacon.io/" + strings.Repeat("m", 200-len("https://alpacon.io/")), true},
 		{"relative", cloud, "alpacon.io", "/commands/1", false},
 		{"no host", cloud, "alpacon.io", "https:///commands/1", false},
 		{"invalid escape", cloud, "alpacon.io", "https://alpacon.io/%zz", false},
@@ -487,10 +488,13 @@ func TestConsoleURLValidation(t *testing.T) {
 				want = tc.link
 			}
 			assert.Equal(t, want, consoleLink(tc.link, tc.workspace, tc.base))
-			_, bannerBody := Format(ApprovalPending, Fields{}, 0)
-			if utf8.RuneCountInString(bannerBody+"\n"+want) > 256 {
+			// The body text yields to the link; the link is dropped only when no
+			// body text could remain beside it.
+			if 1+utf8.RuneCountInString(want) >= 256 {
 				want = ""
 			}
+			_, fullBody := Format(ApprovalPending, Fields{}, 0)
+			bodyText := capText(fullBody, 256-1-utf8.RuneCountInString(want))
 			var output bytes.Buffer
 			e := New(&output, nil, nil)
 			e.WorkspaceURL, e.BaseDomain = tc.workspace, tc.base
@@ -498,11 +502,11 @@ func TestConsoleURLValidation(t *testing.T) {
 			e.headless = func() bool { return false }
 			e.notifier = notifyFunc(func(ctx context.Context, title, body, link string) error {
 				assert.Equal(t, want, link)
-				_, wantBody := Format(ApprovalPending, Fields{}, 0)
+				wantBody := fullBody
 				if want != "" {
-					wantBody += " " + want
+					wantBody = bodyText + " " + want
 				}
-				assert.Equal(t, capText(wantBody, 256), body)
+				assert.Equal(t, wantBody, body)
 				args := platformNotificationArguments(ctx, title, body, link)
 				if want == "" {
 					for _, arg := range args {
@@ -516,8 +520,7 @@ func TestConsoleURLValidation(t *testing.T) {
 			if want == "" {
 				assert.NotContains(t, output.String(), tc.link)
 			} else {
-				_, bannerBody := Format(ApprovalPending, Fields{}, 0)
-				assert.Contains(t, output.String(), capText(bannerBody+"\n"+want, 256)+"\n")
+				assert.Contains(t, output.String(), "\n"+bodyText+"\n"+want+"\n")
 			}
 		})
 	}
@@ -664,7 +667,6 @@ func TestConsoleLinkBannerBodyLimit(t *testing.T) {
 			link := fields.ConsoleURL
 			fold := foldSuffix(tc.folded)
 			notifyText := capText(body, 256-utf8.RuneCountInString(fold)-1-utf8.RuneCountInString(link))
-			assert.True(t, strings.HasPrefix(body, notifyText))
 			wantNotifyBody := notifyText + fold + " " + link
 			assert.Equal(t, 256, utf8.RuneCountInString(wantNotifyBody))
 			calls := 0
@@ -677,7 +679,6 @@ func TestConsoleLinkBannerBodyLimit(t *testing.T) {
 			e.Emit(Denied, fields)
 			assert.Equal(t, 1, calls)
 			bannerText := capText(body, 256-1-utf8.RuneCountInString(link))
-			assert.True(t, strings.HasPrefix(body, bannerText))
 			wantBody := bannerText + "\n" + link
 			assert.Equal(t, min(tc.size, 256), utf8.RuneCountInString(wantBody))
 			assert.Equal(t, "==== ALPACON: COMMAND DENIED ====\n"+wantBody+"\n================================\n", output.String())
