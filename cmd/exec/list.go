@@ -1,9 +1,6 @@
 package exec
 
 import (
-	"errors"
-	"os"
-
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -30,7 +27,7 @@ and --user to filter by the requesting user.`,
 	return cmd
 }
 
-// AddListFlags and RunListFromFlags are exported for the deprecated 'alpacon event', which
+// AddListFlags and ListFromFlags are exported for the deprecated 'alpacon event', which
 // delegates here. Both live in this file so the flag names exist in exactly one place.
 func AddListFlags(cmd *cobra.Command) {
 	cmd.Flags().IntP("tail", "t", 25, "Number of command entries to show, newest first")
@@ -38,19 +35,9 @@ func AddListFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("user", "u", "", "Filter by requesting user")
 }
 
-// RunListFromFlags requires the flag set registered by AddListFlags. It prints the failure and
-// exits, for a command that has not moved to RunE yet.
-func RunListFromFlags(cmd *cobra.Command) {
-	err := listFromFlags(cmd, client.NewAlpaconAPIClient)
-	if err == nil {
-		return
-	}
-	exitErr, ok := errors.AsType[*utils.ExitError](err)
-	if !ok {
-		utils.CliErrorWithExit("%s", err)
-	}
-	utils.PrintExitError(exitErr)
-	os.Exit(exitErr.Code)
+// ListFromFlags requires the flag set registered by AddListFlags.
+func ListFromFlags(cmd *cobra.Command) error {
+	return listFromFlags(cmd, client.NewAlpaconAPIClient)
 }
 
 func listFromFlags(cmd *cobra.Command, newClient clientFactory) error {

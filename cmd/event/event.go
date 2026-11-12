@@ -26,15 +26,15 @@ The 'event' name is being repurposed for the Alpacon event channel—see
   alpacon event --tail 10 --server my-server --user admin`,
 	// Deprecated is deliberately unused: it makes IsAvailableCommand() false, dropping
 	// 'event' from root help and with it the event-channel subcommands landing here.
-	Run: runEvent,
+	RunE: utils.WithExitError(runEvent),
 }
 
 func init() {
 	exec.AddListFlags(EventCmd)
 }
 
-func runEvent(cmd *cobra.Command, _ []string) {
+func runEvent(cmd *cobra.Command, _ []string) error {
 	utils.CliWarning("'alpacon event' has moved to 'alpacon exec ls' and will be removed in a future release. 'alpacon event watch' streams the event channel.")
 
-	exec.RunListFromFlags(cmd)
+	return exec.ListFromFlags(cmd)
 }

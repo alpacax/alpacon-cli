@@ -18,20 +18,21 @@ var pythonPackageDownloadCmd = &cobra.Command{
 	alpacon package python download alpamon-1.1.0-py3-none-any.whl .
 	`,
 	Args: cobra.ExactArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		file := args[0]
 		dest := args[1]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = packages.DownloadPackage(alpaconClient, file, dest, "python")
 		if err != nil {
-			utils.CliErrorWithExit("Failed to download the Python package from Alpacon: %s.", err)
+			return utils.NewExitError("Failed to download the Python package from Alpacon: %s.", err)
 		}
 
 		utils.CliSuccess("Package downloaded: %s", file)
-	},
+		return nil
+	}),
 }

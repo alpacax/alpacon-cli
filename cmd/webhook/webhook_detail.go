@@ -20,24 +20,25 @@ var webhookDetailCmd = &cobra.Command{
 	alpacon webhook desc my-webhook
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		webhookName := args[0]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		webhookID, err := webhook.GetWebhookIDByName(alpaconClient, webhookName)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to find the webhook: %s.", err)
+			return utils.NewExitError("Failed to find the webhook: %s.", err)
 		}
 
 		webhookDetail, err := webhook.GetWebhookDetail(alpaconClient, webhookID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the webhook details: %s.", err)
+			return utils.NewExitError("Failed to retrieve the webhook details: %s.", err)
 		}
 
 		utils.PrintJson(webhookDetail)
-	},
+		return nil
+	}),
 }

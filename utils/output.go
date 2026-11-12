@@ -3,6 +3,7 @@ package utils
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -251,17 +252,25 @@ func PartialTableExitError(rows any, msg string, args ...any) error {
 	return NewSilentExitError(ExitCodeGeneralError)
 }
 
-// PrintListOrExit prints a list a paginated read returned with err. On a nil err it
-// is PrintTable; otherwise it prints the rows as partial through PartialTableWithExit,
-// or fails with failMsg when there are none.
+// PrintListOrExit prints a list a paginated read returned with err and exits on the failure PrintList
+// returns.
 func PrintListOrExit[T any](rows []T, err error, failMsg string) {
+	if exitErr, ok := errors.AsType[*ExitError](PrintList(rows, err, failMsg)); ok {
+		exitWithError(exitErr)
+	}
+}
+
+// PrintList prints a list a paginated read returned with err. On a nil err it is PrintTable; otherwise
+// it prints the rows as partial through PartialTableExitError, or fails with failMsg when there are none.
+func PrintList[T any](rows []T, err error, failMsg string) error {
 	switch {
 	case err != nil && len(rows) > 0:
-		PartialTableWithExit(rows, "Showing only the %d entries read before the request failed: %s.", len(rows), err)
+		return PartialTableExitError(rows, "Showing only the %d entries read before the request failed: %s.", len(rows), err)
 	case err != nil:
-		CliErrorWithExit("%s: %s.", failMsg, err)
+		return NewExitError("%s: %s.", failMsg, err)
 	}
 	PrintTable(rows)
+	return nil
 }
 
 func PrintJson(body []byte) {

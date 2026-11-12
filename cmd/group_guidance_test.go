@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/cmd/approval"
+	"github.com/alpacax/alpacon-cli/cmd/event"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/cmd/workspace"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -22,9 +23,9 @@ func TestGroupNoSubcommandErrorPointsToHelpInsteadOfListingSubcommands(t *testin
 		for _, sub := range c.Commands() {
 			walk(sub)
 		}
-		// workspace and its groups do real work in their RunE rather than printing help, and so do exec
-		// and websh, which parse their own arguments.
-		if c.RunE == nil || !c.HasSubCommands() || c == RootCmd || c == workspace.WorkspaceCmd || c.Parent() == workspace.WorkspaceCmd || c.DisableFlagParsing {
+		// workspace and its groups and the deprecated event list do real work in their RunE rather than
+		// printing help, and so do exec and websh, which parse their own arguments.
+		if c.RunE == nil || !c.HasSubCommands() || c == RootCmd || c == workspace.WorkspaceCmd || c.Parent() == workspace.WorkspaceCmd || c == event.EventCmd || c.DisableFlagParsing {
 			return
 		}
 		t.Run(c.CommandPath(), func(t *testing.T) {

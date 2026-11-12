@@ -461,7 +461,7 @@ func GetUserMemberships(ac *client.AlpaconClient, userID string) ([]GroupMembers
 	return groups, nil
 }
 
-func HandleUsernameRequired() (*SetUsernameResponse, error) {
+func HandleUsernameRequired(ac *client.AlpaconClient) (*SetUsernameResponse, error) {
 	if !utils.IsInteractiveShell() {
 		return nil, errors.New("username is not set for your account; run 'alpacon username set <name>' to set it (lowercase letters, digits, '-', '_'; must start with a letter)")
 	}
@@ -472,7 +472,7 @@ func HandleUsernameRequired() (*SetUsernameResponse, error) {
 	for {
 		username := utils.PromptForRequiredInput("Please enter your username: ")
 
-		response, err := SetUsername(username)
+		response, err := SetUsername(ac, username)
 		if err == nil {
 			utils.CliSuccess(UsernameSetSuccessFmt, response.Username)
 			return response, nil
@@ -515,12 +515,7 @@ func usernameFailure(err error) (warning string, alreadySet bool, stop error) {
 	}
 }
 
-func SetUsername(username string) (*SetUsernameResponse, error) {
-	ac, err := client.NewAlpaconAPIClient()
-	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-	}
-
+func SetUsername(ac *client.AlpaconClient, username string) (*SetUsernameResponse, error) {
 	request := SetUsernameRequest{
 		Username: username,
 	}

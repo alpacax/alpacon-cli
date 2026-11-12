@@ -90,7 +90,7 @@ func ErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHan
 			return HandleMFAError(ac, serverName)
 		},
 		OnUsernameRequired: func() error {
-			_, err := iam.HandleUsernameRequired()
+			_, err := iam.HandleUsernameRequired(ac)
 			return err
 		},
 		RetryOperation: retry,

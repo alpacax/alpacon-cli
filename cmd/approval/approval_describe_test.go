@@ -373,7 +373,7 @@ func TestApprovalDescribeJSONPreservesSudoRunAs(t *testing.T) {
 	t.Cleanup(func() { utils.OutputFormat = previousFormat })
 
 	stdout := testutil.CaptureStdout(t, func() {
-		approvalDescribeCmd.Run(approvalDescribeCmd, []string{"apr-abc"})
+		assert.NoError(t, approvalDescribeCmd.RunE(approvalDescribeCmd, []string{"apr-abc"}))
 	})
 	assert.JSONEq(t, response, stdout)
 }

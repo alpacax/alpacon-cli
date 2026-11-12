@@ -62,7 +62,7 @@ func TestHandleUsernameRequired_NonTTY(t *testing.T) {
 	})
 	os.Stdin = r
 
-	_, err = HandleUsernameRequired()
+	_, err = HandleUsernameRequired(nil)
 	if assert.Error(t, err) {
 		assert.Contains(t, err.Error(), "alpacon username set")
 		assert.NotContains(t, err.Error(), "Please enter")

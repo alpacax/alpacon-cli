@@ -18,17 +18,18 @@ var webhookListCmd = &cobra.Command{
 	alpacon webhook list
 	alpacon webhook ls
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		webhookList, err := webhook.GetWebhookList(alpaconClient)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to get webhooks: %s.", err)
+			return utils.NewExitError("Failed to get webhooks: %s.", err)
 		}
 
 		utils.PrintTable(webhookList)
-	},
+		return nil
+	}),
 }
