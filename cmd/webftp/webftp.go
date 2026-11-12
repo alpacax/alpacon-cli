@@ -21,7 +21,7 @@ var WebFTPCmd = &cobra.Command{
 	alpacon webftp-log --tail 10 --server my-server
 	alpacon webftp-log --tail=50 --user=admin --action=upload
 	`,
-	Run: runWebFTP,
+	RunE: utils.WithExitError(runWebFTP),
 }
 
 func init() {
@@ -36,18 +36,20 @@ func init() {
 	WebFTPCmd.Flags().StringVarP(&action, "action", "a", "", "Filter by action (e.g., upload, download)")
 }
 
-func runWebFTP(cmd *cobra.Command, args []string) {
+func runWebFTP(cmd *cobra.Command, args []string) error {
 	tail, _ := cmd.Flags().GetInt("tail")
-	utils.RequirePositiveInt("tail", tail)
+	if err := utils.CheckPositiveInt("tail", tail); err != nil {
+		return err
+	}
 	serverName, _ := cmd.Flags().GetString("server")
 	userName, _ := cmd.Flags().GetString("user")
 	action, _ := cmd.Flags().GetString("action")
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 
 	logList, err := webftp.GetWebFTPLogList(alpaconClient, tail, serverName, userName, action)
-	utils.PrintListOrExit(logList, err, "Failed to get WebFTP logs")
+	return utils.PrintList(logList, err, "Failed to get WebFTP logs")
 }

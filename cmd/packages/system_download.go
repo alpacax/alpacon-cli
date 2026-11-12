@@ -18,20 +18,21 @@ var systemPackageDownloadCmd = &cobra.Command{
 	alpacon package system download osquery_5.8.2-1.linux_amd64.deb .
 	`,
 	Args: cobra.ExactArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		file := args[0]
 		dest := args[1]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = packages.DownloadPackage(alpaconClient, file, dest, "system")
 		if err != nil {
-			utils.CliErrorWithExit("Failed to download the system package from Alpacon: %s.", err)
+			return utils.NewExitError("Failed to download the system package from Alpacon: %s.", err)
 		}
 
 		utils.CliSuccess("Package downloaded: %s", file)
-	},
+		return nil
+	}),
 }

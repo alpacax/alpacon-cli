@@ -22,19 +22,21 @@ var LogCmd = &cobra.Command{
 	alpacon logs my-server --tail=10
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		serverName := args[0]
 		tail, _ := cmd.Flags().GetInt("tail")
-		utils.RequirePositiveInt("tail", tail)
+		if err := utils.CheckPositiveInt("tail", tail); err != nil {
+			return err
+		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		logList, err := log.GetSystemLogList(alpaconClient, serverName, tail)
-		utils.PrintListOrExit(logList, err, "Failed to get logs")
-	},
+		return utils.PrintList(logList, err, "Failed to get logs")
+	}),
 }
 
 func init() {

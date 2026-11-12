@@ -19,13 +19,13 @@ and --pinned to show only pinned notes.`,
   alpacon note ls --tail 100
   alpacon note ls --server my-server
   alpacon note ls --pinned`,
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, _ []string) error {
 		tail, _ := cmd.Flags().GetInt("tail")
 		serverName, _ := cmd.Flags().GetString("server")
 		pinnedOnly, _ := cmd.Flags().GetBool("pinned")
 
-		runNoteList(tail, serverName, pinnedOnly)
-	},
+		return runNoteList(tail, serverName, pinnedOnly)
+	}),
 }
 
 func init() {
@@ -34,18 +34,21 @@ func init() {
 	noteListCmd.Flags().Bool("pinned", false, "Show only pinned notes")
 }
 
-func runNoteList(tail int, serverName string, pinnedOnly bool) {
-	utils.RequirePositiveInt("tail", tail)
+func runNoteList(tail int, serverName string, pinnedOnly bool) error {
+	if err := utils.CheckPositiveInt("tail", tail); err != nil {
+		return err
+	}
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 
 	noteList, err := note.GetNoteList(alpaconClient, serverName, tail, pinnedOnly)
 	if err != nil {
-		utils.CliErrorWithExit("Failed to retrieve the notes: %s.", err)
+		return utils.NewExitError("Failed to retrieve the notes: %s.", err)
 	}
 
 	utils.PrintTable(noteList)
+	return nil
 }

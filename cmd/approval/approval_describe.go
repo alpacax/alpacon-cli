@@ -28,24 +28,24 @@ requested changes. Use --output json to print the full raw response.`,
 	Args: cobra.ExactArgs(1),
 	Example: `  alpacon approval describe 550e8400-e29b-41d4-a716-446655440000
   alpacon approval desc 550e8400-e29b-41d4-a716-446655440000`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
 			body, err := approvalapi.GetApprovalRequestRaw(ac, args[0])
 			if err != nil {
-				utils.CliErrorWithExit("Failed to retrieve approval request: %s.", err)
+				return utils.NewExitError("Failed to retrieve approval request: %s.", err)
 			}
 			utils.PrintJson(body)
-			return
+			return nil
 		}
 
 		req, err := approvalapi.GetApprovalRequest(ac, args[0])
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve approval request: %s.", err)
+			return utils.NewExitError("Failed to retrieve approval request: %s.", err)
 		}
 
 		fe := fileExecutionOf(req)
@@ -60,7 +60,8 @@ requested changes. Use --output json to print the full raw response.`,
 			fmt.Println()
 			fmt.Println(script)
 		}
-	},
+		return nil
+	}),
 }
 
 func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecution) []describeRow {

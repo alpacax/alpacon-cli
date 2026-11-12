@@ -3,6 +3,7 @@ package agent
 import (
 	"github.com/alpacax/alpacon-cli/api/server"
 	servercmd "github.com/alpacax/alpacon-cli/cmd/server"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -22,9 +23,9 @@ var installPAMCmd = &cobra.Command{
 	alpacon agent install-pam myserver -y
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		yes, _ := cmd.Flags().GetBool("yes")
-		servercmd.RunServerAction(
+		return servercmd.RunServerAction(
 			args[0],
 			server.ActionInstallPAM,
 			"Install alpamon-pam on server '%s'?",
@@ -32,7 +33,7 @@ var installPAMCmd = &cobra.Command{
 			"Failed to install alpamon-pam",
 			yes,
 		)
-	},
+	}),
 }
 
 func init() {

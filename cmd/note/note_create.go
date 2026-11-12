@@ -22,34 +22,40 @@ var noteCreateCmd = &cobra.Command{
 	alpacon note create
 	alpacon note create -s my-server -c "hello world!" -p true
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+		var err error
 		if noteRequest.Server == "" {
-			noteRequest.Server = utils.PromptForRequiredInput("Server Name: ")
+			if noteRequest.Server, err = utils.ReadRequiredInput("Server Name: "); err != nil {
+				return err
+			}
 		}
 		if noteRequest.Content == "" {
-			noteRequest.Content = utils.PromptForRequiredInput("Content(max 512 characters): ")
+			if noteRequest.Content, err = utils.ReadRequiredInput("Content(max 512 characters): "); err != nil {
+				return err
+			}
 		}
 
 		if len(noteRequest.Content) > 512 {
 			const tooLong = "Note content exceeds the 512 character limit (current length: %d). Please shorten your note and try again"
 			if cmd.Flags().Changed("content") {
-				utils.CliUsageErrorWithExit(tooLong, len(noteRequest.Content))
+				return utils.NewUsageExitError(tooLong, len(noteRequest.Content))
 			}
-			utils.CliErrorWithExit(tooLong, len(noteRequest.Content))
+			return utils.NewExitError(tooLong, len(noteRequest.Content))
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = note.CreateNote(alpaconClient, noteRequest)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to create the new note: %s.", err)
+			return utils.NewExitError("Failed to create the new note: %s.", err)
 		}
 
 		utils.CliSuccess("Note created on server %s", noteRequest.Server)
-	},
+		return nil
+	}),
 }
 
 func init() {

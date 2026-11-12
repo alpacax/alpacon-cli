@@ -23,8 +23,8 @@ the CLI credential channel. Use 'alpacon approval ls' to track status.`,
 	Args: cobra.ArbitraryArgs,
 	Example: `  # Approve in the Alpacon console (web), then track status here:
   alpacon approval ls --status approved`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		// Non-zero exit: a script that expected the approval must not read this as success.
-		utils.CliErrorWithExit("%s", approveRejectExcludedMessage)
-	},
+		return utils.NewExitError("%s", approveRejectExcludedMessage)
+	}),
 }

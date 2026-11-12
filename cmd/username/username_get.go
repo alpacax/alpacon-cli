@@ -18,28 +18,29 @@ var usernameGetCmd = &cobra.Command{
 	alpacon username get --output json
 	`,
 	Args: cobra.NoArgs,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opGet, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewEnvelopeExitError(opGet, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		user, err := iam.GetCurrentUser(alpaconClient)
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opGet, err, "Failed to retrieve the current user: %s.", err)
+			return utils.NewEnvelopeExitError(opGet, err, "Failed to retrieve the current user: %s.", err)
 		}
 
 		if user.Username == "" {
-			utils.CliErrorEnvelopeWithExit(opGet, nil, "Username is not set. Run 'alpacon username set <name>' to set it.")
+			return utils.NewEnvelopeExitError(opGet, nil, "Username is not set. Run 'alpacon username set <name>' to set it.")
 		}
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
 			if err := utils.PrintJSONValue(os.Stdout, map[string]string{"username": user.Username}); err != nil {
-				utils.CliErrorEnvelopeWithExit(opGet, err, "Failed to encode username: %s.", err)
+				return utils.NewEnvelopeExitError(opGet, err, "Failed to encode username: %s.", err)
 			}
-			return
+			return nil
 		}
 
 		fmt.Println(utils.SanitizeTerminalText(user.Username))
-	},
+		return nil
+	}),
 }

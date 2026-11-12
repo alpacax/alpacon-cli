@@ -40,26 +40,27 @@ requests you submitted.`,
   alpacon approval ls --type work_session --status pending
   alpacon approval ls --my
   alpacon approval ls --my --status approved`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if err := validateStatusFilter(statusFilter); err != nil {
-			utils.CliUsageErrorWithExit("%s.", err)
+			return utils.NewUsageExitError("%s.", err)
 		}
 		if err := validateTypeFilter(typeFilter); err != nil {
-			utils.CliUsageErrorWithExit("%s.", err)
+			return utils.NewUsageExitError("%s.", err)
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		requests, err := listRequests(ac, myRequests, statusFilter, typeFilter)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to list approval requests: %s.", err)
+			return utils.NewExitError("Failed to list approval requests: %s.", err)
 		}
 
 		utils.PrintTable(requests)
-	},
+		return nil
+	}),
 }
 
 func init() {

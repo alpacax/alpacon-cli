@@ -24,18 +24,23 @@ Webhook creation requires an Alpacon API that accepts requests without an owner 
   alpacon webhook create --name=my-webhook --url=https://hooks.slack.com/services/xxx
   alpacon webhook create --name=my-webhook --url=https://example.com/hook --provider=custom
   alpacon webhook create --name=my-webhook --url=https://example.com/hook --ssl-verify=false`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
 		webhookURL, _ := cmd.Flags().GetString("url")
 		provider, _ := cmd.Flags().GetString("provider")
 		sslVerify, _ := cmd.Flags().GetBool("ssl-verify")
 		enabled, _ := cmd.Flags().GetBool("enabled")
 
+		var err error
 		if name == "" {
-			name = utils.PromptForRequiredInput("Webhook name: ")
+			if name, err = utils.ReadRequiredInput("Webhook name: "); err != nil {
+				return err
+			}
 		}
 		if webhookURL == "" {
-			webhookURL = utils.PromptForRequiredInput("Webhook URL: ")
+			if webhookURL, err = utils.ReadRequiredInput("Webhook URL: "); err != nil {
+				return err
+			}
 		}
 
 		if provider == "" {
@@ -54,7 +59,7 @@ Webhook creation requires an Alpacon API that accepts requests without an owner 
 		} else {
 			provider = strings.ToLower(strings.TrimSpace(provider))
 			if !isValidProvider(provider) {
-				utils.CliUsageErrorWithExit("Invalid provider %q. Supported: slack, discord, teams, telegram, custom.", provider)
+				return utils.NewUsageExitError("Invalid provider %q. Supported: slack, discord, teams, telegram, custom.", provider)
 			}
 		}
 
@@ -76,7 +81,7 @@ Webhook creation requires an Alpacon API that accepts requests without an owner 
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		request := webhook.WebhookCreateRequest{
@@ -89,11 +94,12 @@ Webhook creation requires an Alpacon API that accepts requests without an owner 
 
 		err = webhook.CreateWebhook(alpaconClient, request)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to create webhook: %s.", err)
+			return utils.NewExitError("Failed to create webhook: %s.", err)
 		}
 
 		utils.CliSuccess("Webhook created: %s", name)
-	},
+		return nil
+	}),
 }
 
 func init() {

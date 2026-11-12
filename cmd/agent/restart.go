@@ -3,6 +3,7 @@ package agent
 import (
 	"github.com/alpacax/alpacon-cli/api/server"
 	servercmd "github.com/alpacax/alpacon-cli/cmd/server"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -20,10 +21,10 @@ var restartAgentCmd = &cobra.Command{
 	alpacon agent restart myserver --force
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		yes, _ := cmd.Flags().GetBool("yes")
 		force, _ := cmd.Flags().GetBool("force")
-		servercmd.RunDisruptiveServerAction(
+		return servercmd.RunDisruptiveServerAction(
 			args[0],
 			server.ActionRestartAgent,
 			"Restart the agent on server '%s'?",
@@ -31,7 +32,7 @@ var restartAgentCmd = &cobra.Command{
 			"Failed to restart the agent",
 			yes, force,
 		)
-	},
+	}),
 }
 
 func init() {

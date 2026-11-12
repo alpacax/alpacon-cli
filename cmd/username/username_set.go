@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -19,16 +20,22 @@ var usernameSetCmd = &cobra.Command{
 	alpacon username set alice
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		response, err := iam.SetUsername(name)
+		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("%s", utils.Reword(err, setUsernameErrorText(err)))
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		}
+
+		response, err := iam.SetUsername(alpaconClient, name)
+		if err != nil {
+			return utils.NewExitError("%s", utils.Reword(err, setUsernameErrorText(err)))
 		}
 
 		utils.CliSuccess(iam.UsernameSetSuccessFmt, response.Username)
-	},
+		return nil
+	}),
 }
 
 func setUsernameErrorText(err error) string {

@@ -19,21 +19,24 @@ var noteUpdateCmd = &cobra.Command{
 	alpacon note update 550e8400-e29b-41d4-a716-446655440000
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		noteID := args[0]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		noteDetail, err := note.UpdateNote(alpaconClient, noteID)
 		if err != nil {
-			utils.ExitIfNoChanges(err)
-			utils.CliErrorWithExit("Failed to update the note: %s.", err)
+			if utils.ReportNoChanges(err) {
+				return nil
+			}
+			return utils.NewExitError("Failed to update the note: %s.", err)
 		}
 
 		utils.CliSuccess("Note updated: %s", noteID)
 		utils.PrintJson(noteDetail)
-	},
+		return nil
+	}),
 }
