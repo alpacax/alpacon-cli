@@ -56,7 +56,6 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 		}
 
 		utils.CliSuccess("Authentication settings updated.")
-		utils.PrintJson(authenticationDetail)
-		return nil
+		return utils.PrintJson(authenticationDetail)
 	}),
 }

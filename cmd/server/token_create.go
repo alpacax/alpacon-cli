@@ -74,8 +74,7 @@ The token key is displayed once at creation time and cannot be retrieved again.`
 			if err != nil {
 				return utils.NewExitError("Failed to marshal response: %s.", err)
 			}
-			utils.PrintJson(data)
-			return nil
+			return utils.PrintJson(data)
 		}
 
 		utils.CliSuccess("Registration token created: %s", resp.Name)

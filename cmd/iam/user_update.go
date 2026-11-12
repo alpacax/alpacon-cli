@@ -57,7 +57,9 @@ one of them never exits 0, whether or not the rest of the edit was applied.`,
 			return utils.NewExitError("Failed to update the user info: %s.", err)
 		}
 
-		utils.PrintJson(userDetail)
+		if err := utils.PrintJson(userDetail); err != nil {
+			return err
+		}
 
 		// Non-zero exit: a wrapper reading 0 would carry on as though the promotion had landed.
 		if len(edit.Privileges) > 0 {

@@ -61,8 +61,7 @@ tell them apart in a script, drop -q and read the allowed field of --output json
 					return utils.NewExitError("Failed to explain the decision: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 				}
 
-				utils.PrintJson(explanation)
-				return nil
+				return utils.PrintJson(explanation)
 			}
 
 			allowed, err := rbac.CheckPermission(alpaconClient, subj.PK, permission)

@@ -26,8 +26,7 @@ var workspaceAccessControlCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve access control settings: %s.", err)
 		}
 
-		utils.PrintJson(accessControlDetail)
-		return nil
+		return utils.PrintJson(accessControlDetail)
 	}),
 }
 

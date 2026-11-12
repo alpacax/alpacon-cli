@@ -33,7 +33,6 @@ var noteDetailCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the note details: %s.", err)
 		}
 
-		utils.PrintJson(noteDetail)
-		return nil
+		return utils.PrintJson(noteDetail)
 	}),
 }

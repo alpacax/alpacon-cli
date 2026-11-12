@@ -34,7 +34,6 @@ var serverDetailCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the server details: %s.", err)
 		}
 
-		utils.PrintJson(serverDetail)
-		return nil
+		return utils.PrintJson(serverDetail)
 	}),
 }

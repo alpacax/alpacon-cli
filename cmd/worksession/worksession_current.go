@@ -2,6 +2,7 @@ package worksession
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -30,6 +31,9 @@ var workSessionCurrentCmd = &cobra.Command{
 			return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
 		}
 		if err := printCurrent(ac); err != nil {
+			if exitErr, ok := errors.AsType[*utils.ExitError](err); ok { // PrintJson's failure names no operation
+				return exitErr
+			}
 			return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
 		}
 		return nil
@@ -88,8 +92,7 @@ func WriteCurrentRaw(ac *client.AlpaconClient, uuid string) error {
 	if json.Unmarshal(body, &session) == nil {
 		warnIfEnded(uuid, session.Status)
 	}
-	utils.PrintJson(body)
-	return nil
+	return utils.PrintJson(body)
 }
 
 // WriteCurrentTable projects the session through ProjectAttributes so the columns match

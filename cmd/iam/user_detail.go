@@ -38,7 +38,6 @@ var userDetailCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the user details: %s.", err)
 		}
 
-		utils.PrintJson(userDetail)
-		return nil
+		return utils.PrintJson(userDetail)
 	}),
 }

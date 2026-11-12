@@ -60,7 +60,6 @@ from the CLI; edits that tighten these settings or leave them unchanged are save
 		}
 
 		utils.CliSuccess("Access control settings updated.")
-		utils.PrintJson(accessControlDetail)
-		return nil
+		return utils.PrintJson(accessControlDetail)
 	}),
 }

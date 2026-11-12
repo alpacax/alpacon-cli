@@ -273,26 +273,32 @@ func PrintList[T any](rows []T, err error, failMsg string) error {
 	return nil
 }
 
-func PrintJson(body []byte) {
+// PrintJson prints body to stdout as indented JSON, or returns the exit-1 failure when body is not JSON.
+func PrintJson(body []byte) error {
 	if OutputFormat == OutputFormatJSON {
 		var buf bytes.Buffer
 		if err := json.Indent(&buf, body, "", "  "); err != nil {
-			CliErrorWithExit("Parsing data: Expected a JSON format.")
+			return notJSONError()
 		}
 		_, _ = fmt.Fprintln(os.Stdout, string(escapeJSONControls(buf.Bytes())))
-		return
+		return nil
 	}
 
 	var prettyJSON bytes.Buffer
 	err := json.Indent(&prettyJSON, body, "", "    ")
 	if err != nil {
-		CliErrorWithExit("Parsing data: Expected a JSON format.")
+		return notJSONError()
 	}
 
 	formattedJson := strings.ReplaceAll(string(escapeJSONControls(prettyJSON.Bytes())), "\\n", "\n")
 	formattedJson = strings.ReplaceAll(formattedJson, "\\t", "\t")
 
 	fmt.Println(formattedJson)
+	return nil
+}
+
+func notJSONError() error {
+	return NewExitError("Parsing data: Expected a JSON format.")
 }
 
 func PrintHeader(header string) {

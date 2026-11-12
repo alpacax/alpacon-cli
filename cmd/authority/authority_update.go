@@ -42,7 +42,6 @@ var authorityUpdateCmd = &cobra.Command{
 		}
 
 		utils.CliSuccess("Authority updated: %s", authorityName)
-		utils.PrintJson(authorityDetail)
-		return nil
+		return utils.PrintJson(authorityDetail)
 	}),
 }

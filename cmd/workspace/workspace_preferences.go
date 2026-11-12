@@ -26,8 +26,7 @@ var workspacePreferencesCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve workspace preferences: %s.", err)
 		}
 
-		utils.PrintJson(preferencesDetail)
-		return nil
+		return utils.PrintJson(preferencesDetail)
 	}),
 }
 

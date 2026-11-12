@@ -33,7 +33,6 @@ var certDetailCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the certificate details: %s.", err)
 		}
 
-		utils.PrintJson(certDetail)
-		return nil
+		return utils.PrintJson(certDetail)
 	}),
 }

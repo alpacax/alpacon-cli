@@ -37,7 +37,6 @@ var webhookUpdateCmd = &cobra.Command{
 		}
 
 		utils.CliSuccess("Webhook updated: %s", webhookName)
-		utils.PrintJson(webhookDetail)
-		return nil
+		return utils.PrintJson(webhookDetail)
 	}),
 }

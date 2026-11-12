@@ -34,7 +34,6 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 		}
 
 		utils.CliSuccess("Workspace preferences updated.")
-		utils.PrintJson(preferencesDetail)
-		return nil
+		return utils.PrintJson(preferencesDetail)
 	}),
 }

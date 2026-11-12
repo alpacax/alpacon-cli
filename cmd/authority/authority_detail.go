@@ -38,7 +38,6 @@ var authorityDetailCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the authority details: %s.", err)
 		}
 
-		utils.PrintJson(authorityDetail)
-		return nil
+		return utils.PrintJson(authorityDetail)
 	}),
 }

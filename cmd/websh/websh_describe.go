@@ -27,8 +27,7 @@ func newDescribeCommand(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve websh session details: %s.", err)
 			}
 
-			utils.PrintJson(detail)
-			return nil
+			return utils.PrintJson(detail)
 		}),
 	}
 }
