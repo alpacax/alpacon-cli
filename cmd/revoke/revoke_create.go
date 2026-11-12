@@ -25,19 +25,24 @@ var revokeCreateCmd = &cobra.Command{
 	alpacon revoke create
 	alpacon revoke create --certificate=550e8400-e29b-41d4-a716-446655440000 --reason=1 --requested-reason="Key was compromised"
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		certificate, _ := cmd.Flags().GetString("certificate")
 		reason, _ := cmd.Flags().GetInt("reason")
 		requestedReason, _ := cmd.Flags().GetString("requested-reason")
 
+		var err error
 		if certificate == "" {
-			certificate = utils.PromptForRequiredInput("Certificate ID: ")
+			if certificate, err = utils.ReadRequiredInput("Certificate ID: "); err != nil {
+				return err
+			}
 		}
 		if !cmd.Flags().Changed("reason") {
 			reason = utils.PromptForRequiredIntInput("Reason code (0=Unspecified, 1=Key Compromise, 2=CA Compromise, 3=Affiliation Changed, 4=Superseded, 5=Cessation Of Operation): ")
 		}
 		if requestedReason == "" {
-			requestedReason = utils.PromptForInput("Requested reason (description, optional): ")
+			if requestedReason, err = utils.ReadInput("Requested reason (description, optional): "); err != nil {
+				return err
+			}
 		}
 
 		request := cert.RevokeRequestCreate{
@@ -48,16 +53,17 @@ var revokeCreateCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		response, err := cert.CreateRevokeRequest(alpaconClient, request)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to create revoke request: %s.", err)
+			return utils.NewExitError("Failed to create revoke request: %s.", err)
 		}
 
 		utils.CliSuccess("Revoke request created: %s", response.ID)
-	},
+		return nil
+	}),
 }
 
 func init() {

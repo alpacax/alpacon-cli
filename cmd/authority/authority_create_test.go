@@ -24,7 +24,8 @@ func TestAuthorityCreationNeedsNoOwner(t *testing.T) {
 	args := flag.Args()
 	if len(args) == 2 && args[0] == "authority-create-helper" {
 		ac := &client.AlpaconClient{HTTPClient: httpclient.New(false), BaseURL: args[1]}
-		request := promptForAuthority(ac)
+		request, err := promptForAuthority(ac)
+		require.NoError(t, err)
 		response, err := cert.CreateAuthority(ac, request)
 		require.NoError(t, err)
 		require.Equal(t, "ca-1", response.ID)

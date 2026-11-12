@@ -20,24 +20,25 @@ var authorityDetailCmd = &cobra.Command{
 	alpacon authority desc my-authority
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		authorityName := args[0]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		authorityID, err := cert.GetAuthorityIDByName(alpaconClient, authorityName)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to find authority: %s.", err)
+			return utils.NewExitError("Failed to find authority: %s.", err)
 		}
 
 		authorityDetail, err := cert.GetAuthorityDetail(alpaconClient, authorityID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the authority details: %s.", err)
+			return utils.NewExitError("Failed to retrieve the authority details: %s.", err)
 		}
 
 		utils.PrintJson(authorityDetail)
-	},
+		return nil
+	}),
 }

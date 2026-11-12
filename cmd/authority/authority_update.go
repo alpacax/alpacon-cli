@@ -20,26 +20,29 @@ var authorityUpdateCmd = &cobra.Command{
 	alpacon authority update "Root CA"
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		authorityName := args[0]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		authorityID, err := cert.GetAuthorityIDByName(alpaconClient, authorityName)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to find authority: %s.", err)
+			return utils.NewExitError("Failed to find authority: %s.", err)
 		}
 
 		authorityDetail, err := cert.UpdateAuthority(alpaconClient, authorityID)
 		if err != nil {
-			utils.ExitIfNoChanges(err)
-			utils.CliErrorWithExit("Failed to update the authority info: %s.", err)
+			if utils.ReportNoChanges(err) {
+				return nil
+			}
+			return utils.NewExitError("Failed to update the authority info: %s.", err)
 		}
 
 		utils.CliSuccess("Authority updated: %s", authorityName)
 		utils.PrintJson(authorityDetail)
-	},
+		return nil
+	}),
 }

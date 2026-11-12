@@ -19,17 +19,18 @@ var serverListCmd = &cobra.Command{
 	alpacon server ls
 	alpacon server list
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		serverList, err := server.GetServerList(alpaconClient)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the servers: %s.", err)
+			return utils.NewExitError("Failed to retrieve the servers: %s.", err)
 		}
 
 		utils.PrintTable(serverList)
-	},
+		return nil
+	}),
 }

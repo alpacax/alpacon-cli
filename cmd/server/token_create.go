@@ -21,32 +21,39 @@ The token key is displayed once at creation time and cannot be retrieved again.`
 	Example: `
     alpacon server token create --name k8s-nodes --groups infra --expires-in-days 365
     alpacon server token create  # interactive mode`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
 		groups, _ := cmd.Flags().GetStringSlice("groups")
 		expiresInDays, _ := cmd.Flags().GetInt("expires-in-days")
 
 		if expiresInDays < 0 {
-			utils.CliUsageErrorWithExit("--expires-in-days must be 0 (the workspace maximum) or a positive number, got %d.", expiresInDays)
+			return utils.NewUsageExitError("--expires-in-days must be 0 (the workspace maximum) or a positive number, got %d.", expiresInDays)
 		}
 
 		interactive := name == ""
 
 		if name == "" {
-			name = utils.PromptForRequiredInput("Token name: ")
+			var err error
+			if name, err = utils.ReadRequiredInput("Token name: "); err != nil {
+				return err
+			}
 		}
 		if interactive && len(groups) == 0 {
-			groups = utils.PromptForListInput("Allowed group names or UUIDs (comma-separated, optional): ")
+			input, err := utils.ReadInput("Allowed group names or UUIDs (comma-separated, optional): ")
+			if err != nil {
+				return err
+			}
+			groups = utils.SplitAndTrim(input, ",")
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		groupIDs, err := resolveGroupIDs(alpaconClient, groups)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to resolve groups: %s.", err)
+			return utils.NewExitError("Failed to resolve groups: %s.", err)
 		}
 
 		req := serverAPI.RegistrationTokenRequest{
@@ -59,16 +66,16 @@ The token key is displayed once at creation time and cannot be retrieved again.`
 
 		resp, err := serverAPI.CreateRegistrationToken(alpaconClient, req)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to create registration token: %s.", err)
+			return utils.NewExitError("Failed to create registration token: %s.", err)
 		}
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
 			data, err := json.Marshal(resp)
 			if err != nil {
-				utils.CliErrorWithExit("Failed to marshal response: %s.", err)
+				return utils.NewExitError("Failed to marshal response: %s.", err)
 			}
 			utils.PrintJson(data)
-			return
+			return nil
 		}
 
 		utils.CliSuccess("Registration token created: %s", resp.Name)
@@ -76,7 +83,8 @@ The token key is displayed once at creation time and cannot be retrieved again.`
 		if resp.ExpiresAt != nil {
 			utils.CliInfo("Token expires at: %s", *resp.ExpiresAt)
 		}
-	},
+		return nil
+	}),
 }
 
 func init() {

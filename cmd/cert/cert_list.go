@@ -19,17 +19,18 @@ var certListCmd = &cobra.Command{
 	alpacon cert ls
 	alpacon cert list
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		certList, err := cert.GetCertificateList(alpaconClient)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the certificate list: %s.", err)
+			return utils.NewExitError("Failed to retrieve the certificate list: %s.", err)
 		}
 
 		utils.PrintTable(certList)
-	},
+		return nil
+	}),
 }

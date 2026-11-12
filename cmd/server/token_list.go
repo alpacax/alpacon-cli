@@ -17,17 +17,18 @@ Tokens are used by Alpamon to self-register servers without manual intervention.
     alpacon server token ls
     alpacon server token list
     alpacon server token ls --output json`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		tokens, err := serverAPI.GetRegistrationTokenAttributes(alpaconClient)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the registration tokens: %s.", err)
+			return utils.NewExitError("Failed to retrieve the registration tokens: %s.", err)
 		}
 
 		utils.PrintTable(tokens)
-	},
+		return nil
+	}),
 }
