@@ -318,6 +318,9 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 		err = ftp.UploadFile(client, src, dest, username, groupname, allowOverwrite, workSessionID)
 	}
 	if err != nil {
+		if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+			return serverName, exitErr // the MFA failure's text is not an upload failure to classify
+		}
 		errStr := err.Error()
 		if strings.Contains(errStr, "no such file or directory") {
 			return serverName, utils.NewExitError("Source file(s) not found: %s\n\n"+
@@ -368,6 +371,9 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 		return serverName, err // its reason is server text the checklists below would misread
 	}
 	if err != nil {
+		if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+			return serverName, exitErr // the MFA failure's text is not a download failure to classify
+		}
 		errStr := err.Error()
 		if strings.Contains(errStr, "no such file or directory") || strings.Contains(errStr, "file not found") {
 			return serverName, utils.NewExitError("Source file not found: '%s' on server '%s'.\n\n"+

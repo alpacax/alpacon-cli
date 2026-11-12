@@ -383,6 +383,9 @@ func RemoteExec(newClient clientFactory, stdout, stderr io.Writer, parsed Remote
 	} else {
 		err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
 	}
+	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+		return exitErr // the MFA failure carries the lookup's error, which the classifiers below would read as a refusal
+	}
 	if file == nil && isLineTooLong(err) {
 		return lineTooLongFailure(stderr, err, parsed)
 	}

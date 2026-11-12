@@ -199,6 +199,9 @@ func executeTunnelCommand(ac *client.AlpaconClient, flags tunnelFlagValues, cmd 
 
 func handleTunnelStartError(ac *client.AlpaconClient, flags tunnelFlagValues, err error, serverName string, retry func() error) error {
 	err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(ac, retry))
+	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+		return exitErr // the MFA failure carries the lookup's error, which must not be read as a gate refusal
+	}
 	if utils.StructuredErrorCode(err) != "" { // a code quoted in an agent's open-failure text is not a gate refusal
 		if gateErr := utils.WorkSessionExitError(err, utils.OperationTunnel, serverName, flags.authMethod, flags.workSessionID); gateErr != nil {
 			return gateErr

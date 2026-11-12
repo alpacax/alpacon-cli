@@ -166,8 +166,10 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 					return retryErr
 				}))
 			}
-			err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
-			utils.SignalRefusal(err)
+			if _, mfaFailed := errors.AsType[*utils.ExitError](err); !mfaFailed { // its cause is the MFA lookup's, not a refusal of this request
+				err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
+				utils.SignalRefusal(err)
+			}
 			return downloaded, err
 		},
 		upload: func(target editTarget, localPath, workSessionID string) error {
@@ -177,8 +179,10 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 					return ftpapi.UploadLocalFileAs(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, workSessionID)
 				}))
 			}
-			err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
-			utils.SignalRefusal(err)
+			if _, mfaFailed := errors.AsType[*utils.ExitError](err); !mfaFailed { // its cause is the MFA lookup's, not a refusal of this request
+				err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
+				utils.SignalRefusal(err)
+			}
 			return err
 		},
 		runEditor:    runLocalEditor,

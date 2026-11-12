@@ -572,6 +572,9 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 	err = utils.WithSignalFields(err, utils.SignalFields(err), ac)
 	announced := false
 	defer func() {
+		if _, mfaFailed := errors.AsType[*utils.ExitError](result); mfaFailed { // its cause is the MFA lookup's, not a refusal of this command
+			return
+		}
 		fields := utils.SignalFields(err)
 		result = utils.WithSignalFields(result, fields, ac)
 		utils.SignalRefusal(result)
