@@ -481,6 +481,26 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 	return action
 }
 
+// heldNote ends a hint that offers a resubmission of a held command. The CLI
+// cannot cancel the held command, which runs if approved, so submitting the
+// resubmission as well would file a second approval request for the same work.
+const heldNote = "; the held command stays queued and runs if approved, so cancel it in the Alpacon console (Commands) before submitting this"
+
+// scriptBodyAction answers the server's script_body_suggestion: the held line
+// carries a script body, so the hint is to save that body to a local file and
+// run it as a verified file, whose content the reviewer reads. The command is a
+// template to fill in, never the held command rewritten. It answers false when
+// there is no suggestion or the command was already on the file lane.
+func scriptBodyAction(parsed RemoteExecArgs, s *event.ScriptBodySuggestion) (utils.NextAction, bool) {
+	if s == nil || parsed.File != nil {
+		return utils.NextAction{}, false
+	}
+	action := uploadScriptAction(runAsFlags(parsed), parsed.Server)
+	action.Description = "to have the reviewer read the script body, save it to a local file and run it as a verified file " +
+		"(for code that runs inside a container, put the container command and the program in that one script; see 'alpacon exec --help'), adding " + interpreterNote + heldNote
+	return action, true
+}
+
 // fileSuggestionAction renders the server's file_execution_suggestion for a
 // held command line as the --file --from-server command that submits the same
 // script on the verified file lane, keeping the account, group and work
@@ -499,9 +519,6 @@ func fileSuggestionAction(parsed RemoteExecArgs, s *event.FileExecutionSuggestio
 	if slices.ContainsFunc(append([]string{s.Path, s.Interpreter}, s.Args...), hasControlChar) {
 		return utils.NextAction{}, false
 	}
-	// The CLI cannot cancel the held command, which runs if approved, so submitting this as well
-	// would file a second approval request for the same script.
-	const heldNote = "; the held command stays queued and runs if approved, so cancel it in the Alpacon console (Commands) before submitting this"
 	description := "to run the script as a verified file instead, whose content the reviewer reads and whose approval an unchanged re-run can reuse" + heldNote
 	interpreter := s.Interpreter
 	switch {

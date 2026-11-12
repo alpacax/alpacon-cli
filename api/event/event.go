@@ -677,6 +677,7 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 				if details, err := getCommandByPathID(ac, cmdID); err == nil {
 					pending.Username = details.Username
 					pending.FileSuggestion = details.FileExecutionSuggestion
+					pending.ScriptBodySuggestion = details.ScriptBodySuggestion
 					pending.ConsoleURL = details.ConsoleURL
 					pending.WorkSessionID = details.WorkSessionID()
 					pending.ApprovalLane = details.ApprovalLane
@@ -802,7 +803,7 @@ func errorFromDetails(id api.PathID, d EventDetails) error {
 		return &AwaitingPurposeError{CommandID: id.String(), ExpiresAt: d.PurposeExpiresAt}
 	}
 	if IsAwaitingApprovalStatus(d.Status) {
-		return &PendingApprovalError{Username: d.Username, CommandID: id.String(), FileSuggestion: d.FileExecutionSuggestion, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID(), ApprovalLane: d.ApprovalLane}
+		return &PendingApprovalError{Username: d.Username, CommandID: id.String(), FileSuggestion: d.FileExecutionSuggestion, ScriptBodySuggestion: d.ScriptBodySuggestion, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID(), ApprovalLane: d.ApprovalLane}
 	}
 	if d.IsRejected() {
 		rejected := d.Rejection()

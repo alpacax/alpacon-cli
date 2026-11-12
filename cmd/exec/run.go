@@ -801,7 +801,8 @@ func purposeDemandFailure(err error) error {
 // The approval request id is reported only when a --wait poll picked one up
 // (pendingWithRequestID). The sudo-denial path repeats the invoked command (reRunHint), and a held
 // command line the server reads as a script also gets its --file --from-server form
-// (fileSuggestionAction).
+// (fileSuggestionAction), or, when the server sent none and says the line carries a script
+// body, the --upload --file template (scriptBodyAction).
 func pendingApprovalFailure(stderr io.Writer, err error, parsed RemoteExecArgs) error {
 	// Status-hold: held job runs automatically once approved, so point at exec logs.
 	var pendingErr *event.PendingApprovalError
@@ -810,6 +811,11 @@ func pendingApprovalFailure(stderr io.Writer, err error, parsed RemoteExecArgs) 
 		var extra []utils.NextAction
 		if action, ok := fileSuggestionAction(parsed, pendingErr.FileSuggestion); ok {
 			extra = append(extra, action)
+		} else if pendingErr.FileSuggestion == nil {
+			// A file suggestion this CLI cannot render is still the server's answer.
+			if action, ok := scriptBodyAction(parsed, pendingErr.ScriptBodySuggestion); ok {
+				extra = append(extra, action)
+			}
 		}
 		message := "Approval required—this command is held for human approval in the Alpacon web console. " +
 			"It runs automatically once approved; pass --wait (or --wait-approval DURATION for a longer wait) to block until then."
