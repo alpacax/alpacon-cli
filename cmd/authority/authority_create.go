@@ -55,9 +55,15 @@ func promptForAuthority(ac *client.AlpaconClient) (cert.AuthorityRequest, error)
 	if authorityRequest.Domain, err = utils.ReadRequiredInput("Domain name of the root certificate: "); err != nil {
 		return cert.AuthorityRequest{}, err
 	}
-	authorityRequest.RootValidDays = utils.PromptForIntInput("Root certificate validity in days (default: 3650): ", 365*10)
-	authorityRequest.DefaultValidDays = utils.PromptForIntInput("Child certificate validity in days (default: 365): ", 365)
-	authorityRequest.MaxValidDays = utils.PromptForIntInput("Maximum valid days that users can request (default: 730): ", 365*2)
+	if authorityRequest.RootValidDays, err = utils.ReadIntInput("Root certificate validity in days (default: 3650): ", 365*10); err != nil {
+		return cert.AuthorityRequest{}, err
+	}
+	if authorityRequest.DefaultValidDays, err = utils.ReadIntInput("Child certificate validity in days (default: 365): ", 365); err != nil {
+		return cert.AuthorityRequest{}, err
+	}
+	if authorityRequest.MaxValidDays, err = utils.ReadIntInput("Maximum valid days that users can request (default: 730): ", 365*2); err != nil {
+		return cert.AuthorityRequest{}, err
+	}
 
 	agent, err := utils.ReadRequiredInput("Name of server to run this CA on: ")
 	if err != nil {

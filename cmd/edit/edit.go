@@ -94,6 +94,9 @@ redirections, or '&&' will not work.`,
 			WorkSessionID: workSessionID,
 		}, deps)
 		if err != nil {
+			if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+				return exitErr
+			}
 			printPreservedTempPath(result)
 			if exitErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID); exitErr != nil {
 				return exitErr

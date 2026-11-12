@@ -46,10 +46,13 @@ Webhook creation requires an Alpacon API that accepts requests without an owner 
 		if provider == "" {
 			detected := detectProviderFromURL(webhookURL)
 			for {
-				provider = utils.PromptForInputWithDefault(
+				provider, err = utils.ReadInputWithDefault(
 					fmt.Sprintf("Provider (slack, discord, teams, telegram, custom) [%s]: ", detected),
 					detected,
 				)
+				if err != nil {
+					return err
+				}
 				provider = strings.ToLower(strings.TrimSpace(provider))
 				if isValidProvider(provider) {
 					break
@@ -65,7 +68,10 @@ Webhook creation requires an Alpacon API that accepts requests without an owner 
 
 		if !cmd.Flags().Changed("ssl-verify") {
 			for {
-				input := utils.PromptForInputWithDefault("SSL verification (y/n) [y]: ", "y")
+				input, err := utils.ReadInputWithDefault("SSL verification (y/n) [y]: ", "y")
+				if err != nil {
+					return err
+				}
 				value := strings.ToLower(strings.TrimSpace(input))
 				if value == "y" || value == "yes" {
 					sslVerify = true

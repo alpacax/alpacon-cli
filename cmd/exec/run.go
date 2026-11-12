@@ -894,6 +894,10 @@ func runWithRetry(ac *client.AlpaconClient, serverName string, run commandRun) e
 // here only to surface the sudo-denial hint (not re-printed). invokedAs names the command the user
 // ran so a hint can quote it; empty falls back to exec.
 func commandResultFailure(stderr io.Writer, err error, invokedAs Invocation) error {
+	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+		return exitErr
+	}
+
 	if err == nil {
 		return nil
 	}
@@ -1024,10 +1028,12 @@ func codedRefusalHint(err error, local string) string {
 	return local
 }
 
-// propagateCommandError reports errors RunCommandWithRetry must return unchanged (never
-// MFA-retried or wrapped): phased errors, a status-hold PendingApprovalError, an
-// AwaitingPurposeError and a CommandPollError.
+// propagateCommandError preserves completed diagnostics and command states
+// that the caller must handle without retrying the submission.
 func propagateCommandError(err error) (error, bool) {
+	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+		return exitErr, true
+	}
 	if phased, ok := asPhasedError(err); ok {
 		return phased, true
 	}

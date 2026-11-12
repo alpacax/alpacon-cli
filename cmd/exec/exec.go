@@ -3,6 +3,7 @@ package exec
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -337,6 +338,9 @@ func RemoteExec(newClient clientFactory, stdout, stderr io.Writer, parsed Remote
 			}))
 		}
 		if err != nil {
+			if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+				return exitErr
+			}
 			signalArgs := parsed
 			signalArgs.WorkSessionID = workSessionID
 			err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), alpaconClient)

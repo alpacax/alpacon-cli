@@ -470,7 +470,10 @@ func HandleUsernameRequired(ac *client.AlpaconClient) (*SetUsernameResponse, err
 	utils.CliInfo("You can also set it anytime with 'alpacon username set <name>'.")
 
 	for {
-		username := utils.PromptForRequiredInput("Please enter your username: ")
+		username, err := utils.ReadRequiredInput("Please enter your username: ")
+		if err != nil {
+			return nil, err
+		}
 
 		response, err := SetUsername(ac, username)
 		if err == nil {

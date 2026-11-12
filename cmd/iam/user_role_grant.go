@@ -92,6 +92,9 @@ catalog' to see the names this workspace defines.`,
 		}
 		// A duplicate means another writer won the race; the asked-for end state holds.
 		if err != nil && !rbac.IsDuplicateBinding(err) {
+			if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+				return exitErr
+			}
 			return utils.NewExitError("Failed to grant %s to %s: %s.", role.Name, subj.Label, describeRBACError(alpaconClient, gateRoleWrite, err))
 		}
 

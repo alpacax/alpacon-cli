@@ -1,6 +1,7 @@
 package iam
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -106,6 +107,9 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 				err = utils.HandleCommonErrors(err, "", mfa.WorkspaceErrorCallbacks(alpaconClient, revoke))
 			}
 			if err != nil {
+				if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+					return exitErr
+				}
 				if index > 0 {
 					resume := utils.NextAction{Command: fmt.Sprintf("alpacon user role revoke %s %s", args[0], target.Role.Name)}
 					utils.CliWarning("Revoked %s, but %s was left in place.", targets[index-1].Role.Name, target.Role.Name)

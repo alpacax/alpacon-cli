@@ -37,7 +37,9 @@ var revokeCreateCmd = &cobra.Command{
 			}
 		}
 		if !cmd.Flags().Changed("reason") {
-			reason = utils.PromptForRequiredIntInput("Reason code (0=Unspecified, 1=Key Compromise, 2=CA Compromise, 3=Affiliation Changed, 4=Superseded, 5=Cessation Of Operation): ")
+			if reason, err = utils.ReadRequiredIntInput("Reason code (0=Unspecified, 1=Key Compromise, 2=CA Compromise, 3=Affiliation Changed, 4=Superseded, 5=Cessation Of Operation): "); err != nil {
+				return err
+			}
 		}
 		if requestedReason == "" {
 			if requestedReason, err = utils.ReadInput("Requested reason (description, optional): "); err != nil {

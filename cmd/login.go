@@ -216,20 +216,23 @@ func persistWorkspaceEnv(workspaceURL string, envInfo *auth0.AuthEnvResponse) {
 }
 
 func promptForLoginTarget(cfg config.Config) (workspaceURL, workspaceName, baseDomain string, err error) {
-	return promptForLoginTargetWithPrompts(cfg, utils.PromptForInputWithDefault, utils.ReadRequiredInput)
+	return promptForLoginTargetWithPrompts(cfg, utils.ReadInputWithDefault, utils.ReadRequiredInput)
 }
 
 func promptForLoginTargetWithPrompts(
 	cfg config.Config,
-	promptWithDefault func(promptText, defaultValue string) string,
+	promptWithDefault func(promptText, defaultValue string) (string, error),
 	promptRequired func(promptText string) (string, error),
 ) (workspaceURL, workspaceName, baseDomain string, err error) {
 	if cfg.WorkspaceURL != "" && !isCloudWorkspaceURL(cfg.WorkspaceURL) {
 		savedURL := formatHostURL(cfg.WorkspaceURL)
-		host := promptWithDefault(
+		host, err := promptWithDefault(
 			fmt.Sprintf("Host [%s]: ", savedURL),
 			savedURL,
 		)
+		if err != nil {
+			return "", "", "", err
+		}
 		if err := validateHostTarget(host); err != nil {
 			return "", "", "", err
 		}
@@ -251,16 +254,22 @@ func promptForLoginTargetWithPrompts(
 			return "", "", "", err
 		}
 	} else {
-		workspaceName = promptWithDefault(
+		workspaceName, err = promptWithDefault(
 			fmt.Sprintf("Workspace name [%s]: ", defaultWorkspace),
 			defaultWorkspace,
 		)
+		if err != nil {
+			return "", "", "", err
+		}
 	}
 
-	region := promptWithDefault(
+	region, err := promptWithDefault(
 		fmt.Sprintf("Region [%s] (%s): ", defaultRegion, cloudRegionsHint()),
 		defaultRegion,
 	)
+	if err != nil {
+		return "", "", "", err
+	}
 	workspaceName = strings.TrimSpace(workspaceName)
 	region = strings.TrimSpace(region)
 	if err := validateCloudTargetParts(workspaceName, region); err != nil {

@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"errors"
+
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/client"
@@ -51,6 +53,9 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 				return err
 			}))
 			if err != nil {
+				if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+					return exitErr
+				}
 				return utils.NewExitError("Failed to update authentication settings: %s.", err)
 			}
 		}
