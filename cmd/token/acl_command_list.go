@@ -15,26 +15,27 @@ var aclCommandListCmd = &cobra.Command{
 	Example: `  alpacon token acl command ls my-api-token
   alpacon token acl command list my-api-token`,
 	Args: cobra.ExactArgs(1),
-	Run:  runCommandAclList,
+	RunE: utils.WithExitError(runCommandAclList),
 }
 
-func runCommandAclList(_ *cobra.Command, args []string) {
+func runCommandAclList(_ *cobra.Command, args []string) error {
 	tokenID := args[0]
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %v. Consider re-logging.", err)
+		return utils.NewExitError("Connection to Alpacon API failed: %v. Consider re-logging.", err)
 	}
 
 	tokenID, err = auth.ResolveTokenID(alpaconClient, tokenID)
 	if err != nil {
-		utils.CliErrorWithExit("Failed to resolve token: %v.", err)
+		return utils.NewExitError("Failed to resolve token: %v.", err)
 	}
 
 	acls, err := security.GetCommandAclList(alpaconClient, tokenID)
 	if err != nil {
-		utils.CliErrorWithExit("Failed to retrieve command ACLs: %v.", err)
+		return utils.NewExitError("Failed to retrieve command ACLs: %v.", err)
 	}
 
 	utils.PrintTable(acls)
+	return nil
 }

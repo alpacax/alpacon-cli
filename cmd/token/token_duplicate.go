@@ -20,30 +20,31 @@ var tokenDuplicateCmd = &cobra.Command{
 	alpacon token duplicate 550e8400-e29b-41d4-a716-446655440000
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		tokenID := args[0]
 		name, _ := cmd.Flags().GetString("name")
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if !utils.IsUUID(tokenID) {
 			tokenID, err = auth.GetAPITokenIDByName(alpaconClient, tokenID)
 			if err != nil {
-				utils.CliErrorWithExit("Failed to duplicate the API token: %s.", err)
+				return utils.NewExitError("Failed to duplicate the API token: %s.", err)
 			}
 		}
 
 		key, err := auth.DuplicateAPIToken(alpaconClient, tokenID, name)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to duplicate the API token: %s.", err)
+			return utils.NewExitError("Failed to duplicate the API token: %s.", err)
 		}
 
 		utils.CliSuccess("API token duplicated: %s", key)
 		utils.CliWarning("This token cannot be retrieved again after you exit.")
-	},
+		return nil
+	}),
 }
 
 func init() {

@@ -22,7 +22,7 @@ Use --server for a single server or --servers for bulk operations.`,
 	Example: `  alpacon token acl server add my-api-token --server my-server
   alpacon token acl server add my-api-token --servers web-01,web-02,web-03`,
 	Args: cobra.ExactArgs(1),
-	Run:  runServerAclAdd,
+	RunE: utils.WithExitError(runServerAclAdd),
 }
 
 func init() {
@@ -30,58 +30,59 @@ func init() {
 	aclServerAddCmd.Flags().String("servers", "", "Comma-separated server names (bulk)")
 }
 
-func runServerAclAdd(cmd *cobra.Command, args []string) {
+func runServerAclAdd(cmd *cobra.Command, args []string) error {
 	tokenArg := args[0]
 	serverName, _ := cmd.Flags().GetString("server")
 	serversCSV, _ := cmd.Flags().GetString("servers")
 
 	serverName, serversCSV, err := validateServerAclFlags(serverName, serversCSV)
 	if err != nil {
-		utils.CliUsageErrorWithExit("%s.", err)
+		return utils.NewUsageExitError("%s.", err)
 	}
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %v. Consider re-logging.", err)
+		return utils.NewExitError("Connection to Alpacon API failed: %v. Consider re-logging.", err)
 	}
 
 	tokenID, err := auth.ResolveTokenID(alpaconClient, tokenArg)
 	if err != nil {
-		utils.CliErrorWithExit("Failed to resolve token: %v.", err)
+		return utils.NewExitError("Failed to resolve token: %v.", err)
 	}
 
 	if serverName != "" {
 		serverID, err := serverapi.GetServerIDByName(alpaconClient, serverName)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to resolve server '%s': %v.", serverName, err)
+			return utils.NewExitError("Failed to resolve server '%s': %v.", serverName, err)
 		}
 		if err = security.AddServerAcl(alpaconClient, security.ServerAclRequest{
 			Token:  tokenID,
 			Server: serverID,
 		}); err != nil {
-			utils.CliErrorWithExit("Failed to add server ACL: %v.", err)
+			return utils.NewExitError("Failed to add server ACL: %v.", err)
 		}
 		utils.CliSuccess("Server ACL added: token %s can access %s", tokenArg, serverName)
-		return
+		return nil
 	}
 
 	names := utils.SplitAndTrim(serversCSV, ",")
 	if len(names) == 0 {
-		utils.CliUsageErrorWithExit("--servers must contain at least one server name.")
+		return utils.NewUsageExitError("--servers must contain at least one server name.")
 	}
 
 	serverIDs, err := resolveServerIDs(alpaconClient, names)
 	if err != nil {
-		utils.CliErrorWithExit("%v.", err)
+		return utils.NewExitError("%v.", err)
 	}
 
 	if err = security.BulkAddServerAcl(alpaconClient, security.ServerAclBulkRequest{
 		Token:   tokenID,
 		Servers: serverIDs,
 	}); err != nil {
-		utils.CliErrorWithExit("Failed to bulk-add server ACLs: %v.", err)
+		return utils.NewExitError("Failed to bulk-add server ACLs: %v.", err)
 	}
 	utils.CliSuccess("Server ACLs added: token %s can access [%s]", tokenArg, strings.Join(names, ", "))
+	return nil
 }
 
 // validateServerAclFlags trims both values so a whitespace-only flag counts as absent, and
