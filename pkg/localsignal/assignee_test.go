@@ -3,11 +3,17 @@ package localsignal
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // A command held for the session's assignee is that person's own to confirm, so
@@ -110,4 +116,124 @@ func TestHeldCommandSignalKeepsConsoleLinkWithOrdinaryIdentifiers(t *testing.T) 
 			assert.Contains(t, notifiedBody, " "+link)
 		})
 	}
+}
+
+// A body that leaves no room for the console link yields to it: the body text is
+// trimmed, the fold suffix stays, and the link is dropped only when no body text
+// could remain beside it.
+func TestHeldCommandSignalTrimsBodyToKeepConsoleLink(t *testing.T) {
+	t.Parallel()
+	const (
+		workspace = "https://my-workspace.ap1.alpacon.io"
+		session   = "550e8400-e29b-41d4-a716-446655440000"
+		link      = workspace + "/commands/6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+	)
+	for _, tc := range []struct {
+		name     string
+		assignee bool
+		folded   int
+	}{
+		{"assignee", true, 0},
+		{"assignee folded", true, 12},
+		{"approver", false, 0},
+		{"approver folded", false, 12},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fields := Fields{
+				Command: true, Argv0: "systemctl", Server: "production-web-server-0001", Account: "www-data",
+				Session: session, ConsoleURL: link, Assignee: tc.assignee,
+			}
+			bannerBody, notifyBody, notifyLink := emitHeld(t, workspace, fields, tc.folded)
+			_, full := Format(ApprovalPending, fields, 0)
+			suffix := ""
+			if tc.folded > 0 {
+				suffix = " +" + strconv.Itoa(tc.folded) + " more."
+			}
+
+			text, found := strings.CutSuffix(bannerBody, "\n"+link)
+			require.True(t, found, "banner keeps the link: %q", bannerBody)
+			assert.True(t, strings.HasPrefix(full, text))
+			assert.LessOrEqual(t, utf8.RuneCountInString(bannerBody), 256)
+
+			assert.Equal(t, link, notifyLink)
+			text, found = strings.CutSuffix(notifyBody, suffix+" "+link)
+			require.True(t, found, "notification keeps the fold suffix and the link: %q", notifyBody)
+			assert.True(t, strings.HasPrefix(full, text))
+			assert.LessOrEqual(t, utf8.RuneCountInString(notifyBody), 256)
+			if utf8.RuneCountInString(full+suffix)+1+len(link) > 256 {
+				assert.Equal(t, 256, utf8.RuneCountInString(notifyBody))
+			}
+		})
+	}
+}
+
+// A link that would leave no body text is dropped; one rune shorter, it is kept
+// beside a single rune of body text.
+func TestConsoleLinkDroppedOnlyWhenNoBodyTextRemains(t *testing.T) {
+	t.Parallel()
+	const workspace = "https://console.example"
+	fields := Fields{Command: true, Argv0: "id", Session: "ses-1"}
+	_, full := Format(ApprovalPending, fields, 0)
+	for _, tc := range []struct {
+		name  string
+		size  int
+		keep  bool
+		first string
+	}{
+		{"leaves no body text", 255, false, ""},
+		{"leaves one rune", 254, true, full[:1]},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := fields
+			f.ConsoleURL = workspace + "/" + strings.Repeat("x", tc.size-len(workspace)-1)
+			bannerBody, notifyBody, notifyLink := emitHeld(t, workspace, f, 0)
+			if !tc.keep {
+				assert.Equal(t, full, bannerBody)
+				assert.Equal(t, full, notifyBody)
+				assert.Empty(t, notifyLink)
+				return
+			}
+			assert.Equal(t, tc.first+"\n"+f.ConsoleURL, bannerBody)
+			assert.Equal(t, tc.first+" "+f.ConsoleURL, notifyBody)
+			assert.Equal(t, f.ConsoleURL, notifyLink)
+		})
+	}
+}
+
+// emitHeld emits one approval pending signal, seeding the limiter so the
+// notification carries a fold suffix when folded is positive, and returns the
+// banner body, the notification body and the notification link.
+func emitHeld(t *testing.T, workspace string, fields Fields, folded int) (string, string, string) {
+	t.Helper()
+	var output bytes.Buffer
+	emitter := New(&output, nil, nil)
+	emitter.WorkspaceURL = workspace
+	now := time.Unix(1700000000, 0)
+	path := filepath.Join(t.TempDir(), "signals.json")
+	if folded > 0 {
+		host := strings.TrimPrefix(workspace, "https://")
+		data, err := json.Marshal(map[string]entry{
+			host + "|" + string(ApprovalPending) + ":" + fields.Session: {Last: now.Add(-time.Hour), Folded: folded},
+		})
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(path, data, 0600))
+	}
+	emitter.statePath = func() (string, error) { return path, nil }
+	emitter.now = func() time.Time { return now }
+	emitter.headless = func() bool { return false }
+	calls := 0
+	var notifyBody, notifyLink string
+	emitter.notifier = notifyFunc(func(_ context.Context, _, body, link string) error {
+		calls++
+		notifyBody, notifyLink = body, link
+		return nil
+	})
+	emitter.Emit(ApprovalPending, fields)
+	require.Equal(t, 1, calls)
+	lines := strings.SplitN(output.String(), "\n", 2)
+	bannerBody, found := strings.CutSuffix(lines[1], "\n================================\n")
+	require.True(t, found, "banner frame: %q", output.String())
+	return bannerBody, notifyBody, notifyLink
 }

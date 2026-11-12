@@ -634,11 +634,10 @@ func TestConsoleLinkBannerBodyLimit(t *testing.T) {
 		name   string
 		size   int
 		folded int
-		keep   bool
 	}{
-		{"fits exactly", 256, 0, true},
-		{"exceeds by one", 257, 0, false},
-		{"folded notification exceeds limit", 256, 3, true},
+		{"fits exactly", 256, 0},
+		{"exceeds by one", 257, 0},
+		{"folded notification exceeds limit", 256, 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -661,27 +660,26 @@ func TestConsoleLinkBannerBodyLimit(t *testing.T) {
 			const suffix = "/end42"
 			fields.ConsoleURL = prefix + strings.Repeat("x", tc.size-utf8.RuneCountInString(body)-1-len(prefix)-len(suffix)) + suffix
 			assert.Equal(t, tc.size, utf8.RuneCountInString(body+"\n"+fields.ConsoleURL))
-			wantLink := ""
-			if tc.keep && tc.folded == 0 {
-				wantLink = fields.ConsoleURL
-			}
-			_, wantNotifyBody := Format(Denied, fields, tc.folded)
-			if wantLink != "" {
-				wantNotifyBody += " " + wantLink
-			}
+			// The link is kept and the body text yields to it; the fold suffix stays.
+			link := fields.ConsoleURL
+			fold := foldSuffix(tc.folded)
+			notifyText := capText(body, 256-utf8.RuneCountInString(fold)-1-utf8.RuneCountInString(link))
+			assert.True(t, strings.HasPrefix(body, notifyText))
+			wantNotifyBody := notifyText + fold + " " + link
+			assert.Equal(t, 256, utf8.RuneCountInString(wantNotifyBody))
 			calls := 0
-			e.notifier = notifyFunc(func(_ context.Context, _ string, body, link string) error {
+			e.notifier = notifyFunc(func(_ context.Context, _ string, body, gotLink string) error {
 				calls++
-				assert.Equal(t, wantLink, link)
+				assert.Equal(t, link, gotLink)
 				assert.Equal(t, wantNotifyBody, body)
 				return nil
 			})
 			e.Emit(Denied, fields)
 			assert.Equal(t, 1, calls)
-			wantBody := body
-			if tc.keep {
-				wantBody += "\n" + fields.ConsoleURL
-			}
+			bannerText := capText(body, 256-1-utf8.RuneCountInString(link))
+			assert.True(t, strings.HasPrefix(body, bannerText))
+			wantBody := bannerText + "\n" + link
+			assert.Equal(t, min(tc.size, 256), utf8.RuneCountInString(wantBody))
 			assert.Equal(t, "==== ALPACON: COMMAND DENIED ====\n"+wantBody+"\n================================\n", output.String())
 		})
 	}

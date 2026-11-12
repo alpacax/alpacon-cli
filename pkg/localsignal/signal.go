@@ -112,13 +112,7 @@ func (e *Emitter) Emit(kind Kind, fields Fields) {
 		return
 	}
 	link := consoleLink(fields.ConsoleURL, e.WorkspaceURL, e.BaseDomain)
-	if utf8.RuneCountInString(body)+1+utf8.RuneCountInString(link) > 256 {
-		link = ""
-	}
-	bannerBody := body
-	if link != "" {
-		bannerBody += "\n" + link
-	}
+	bannerBody, _ := withLink(body, "", "\n", link)
 	banner := fmt.Sprintf("==== %s ====\n%s\n================================\n", strings.ToUpper(title), capText(bannerBody, 256))
 	if e.red != nil {
 		banner = e.red(banner)
@@ -137,16 +131,7 @@ func (e *Emitter) Emit(kind Kind, fields Fields) {
 	if !emit || e.headless() {
 		return
 	}
-	_, body = Format(kind, fields, folded)
-	// The fold suffix lengthens the body, so the link must fit again or be left out.
-	notifyLink := link
-	if utf8.RuneCountInString(body)+1+utf8.RuneCountInString(notifyLink) > 256 {
-		notifyLink = ""
-	}
-	if notifyLink != "" {
-		body += " " + notifyLink
-	}
-	body = capText(body, 256)
+	body, notifyLink := withLink(body, foldSuffix(folded), " ", link)
 	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
 	defer cancel()
 	done := make(chan error, 1)
@@ -315,10 +300,25 @@ func Format(kind Kind, f Fields, folded int) (title, body string) {
 	default:
 		return "", ""
 	}
+	return title, capText(body+foldSuffix(folded), 256)
+}
+
+func foldSuffix(folded int) string {
 	if folded > 0 {
-		body += fmt.Sprintf(" +%d more.", folded)
+		return fmt.Sprintf(" +%d more.", folded)
 	}
-	return title, capText(body, 256)
+	return ""
+}
+
+// withLink joins body, suffix and link within 256 runes. The link is what the
+// person opens, so the body text yields to it; a link that would leave no body
+// text is dropped instead.
+func withLink(body, suffix, sep, link string) (string, string) {
+	room := 256 - utf8.RuneCountInString(suffix) - utf8.RuneCountInString(sep) - utf8.RuneCountInString(link)
+	if link == "" || room <= 0 {
+		return capText(body+suffix, 256), ""
+	}
+	return capText(body, room) + suffix + sep + link, link
 }
 
 func asciiSpace(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '\r' }
