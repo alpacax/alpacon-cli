@@ -118,9 +118,8 @@ func TestHeldCommandSignalKeepsConsoleLinkWithOrdinaryIdentifiers(t *testing.T) 
 	}
 }
 
-// A body that leaves no room for the console link yields to it: the body text is
-// trimmed, the fold suffix stays, and the link is dropped only when no body text
-// could remain beside it.
+// Long identifiers make the body yield to the console link: the body text is
+// trimmed to fit and the fold suffix stays.
 func TestHeldCommandSignalTrimsBodyToKeepConsoleLink(t *testing.T) {
 	t.Parallel()
 	const (
@@ -141,11 +140,12 @@ func TestHeldCommandSignalTrimsBodyToKeepConsoleLink(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			fields := Fields{
-				Command: true, Argv0: "systemctl", Server: "production-web-server-0001", Account: "www-data",
+				Command: true, Argv0: "systemctl", Server: "production-web-server-0001.ap-northeast-2", Account: "www-data",
 				Session: session, ConsoleURL: link, Assignee: tc.assignee,
 			}
-			bannerBody, notifyBody, notifyLink := emitHeld(t, workspace, fields, tc.folded)
 			_, full := Format(ApprovalPending, fields, 0)
+			require.Greater(t, utf8.RuneCountInString(full)+1+len(link), 256, "every row must reach the trim path: %q", full)
+			bannerBody, notifyBody, notifyLink := emitHeld(t, workspace, fields, tc.folded)
 			suffix := ""
 			if tc.folded > 0 {
 				suffix = " +" + strconv.Itoa(tc.folded) + " more."
@@ -153,58 +153,66 @@ func TestHeldCommandSignalTrimsBodyToKeepConsoleLink(t *testing.T) {
 
 			text, found := strings.CutSuffix(bannerBody, "\n"+link)
 			require.True(t, found, "banner keeps the link: %q", bannerBody)
+			assert.NotEmpty(t, text)
 			assert.True(t, strings.HasPrefix(full, text), "banner text must prefix the body: %q", text)
-			assert.LessOrEqual(t, utf8.RuneCountInString(bannerBody), 256)
+			assert.Equal(t, 256, utf8.RuneCountInString(bannerBody))
 
 			assert.Equal(t, link, notifyLink)
 			text, found = strings.CutSuffix(notifyBody, suffix+" "+link)
 			require.True(t, found, "notification keeps the fold suffix and the link: %q", notifyBody)
+			assert.NotEmpty(t, text)
 			assert.True(t, strings.HasPrefix(full, text), "notification text must prefix the body: %q", text)
-			assert.LessOrEqual(t, utf8.RuneCountInString(notifyBody), 256)
-			if utf8.RuneCountInString(full+suffix)+1+len(link) > 256 {
-				assert.Equal(t, 256, utf8.RuneCountInString(notifyBody))
-			}
+			assert.Equal(t, 256, utf8.RuneCountInString(notifyBody))
 		})
 	}
 }
 
 // A link that would leave no body text is dropped; one rune shorter, it is kept
-// beside a single rune of body text.
+// beside a single rune of body text. The fold suffix is on the notification only,
+// so near the limit the banner keeps a link the notification drops.
 func TestConsoleLinkDroppedOnlyWhenNoBodyTextRemains(t *testing.T) {
 	t.Parallel()
 	const workspace = "https://console.example"
 	fields := Fields{Command: true, Argv0: "id", Session: "ses-1"}
 	_, full := Format(ApprovalPending, fields, 0)
+	// bannerText and notifyText are the body runes kept beside the link; -1 means
+	// the link is dropped.
 	for _, tc := range []struct {
-		name  string
-		size  int
-		keep  bool
-		first string
+		name                   string
+		size, folded           int
+		bannerText, notifyText int
 	}{
-		{"leaves no body text", 255, false, ""},
-		{"leaves one rune", 254, true, full[:1]},
+		{"leaves no body text", 255, 0, -1, -1},
+		{"leaves one rune", 254, 0, 1, 1},
+		{"fold leaves no notification text", 245, 12, 10, -1},
+		{"fold leaves one notification rune", 244, 12, 11, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			f := fields
 			f.ConsoleURL = workspace + "/" + strings.Repeat("x", tc.size-len(workspace)-1)
-			bannerBody, notifyBody, notifyLink := emitHeld(t, workspace, f, 0)
-			if !tc.keep {
-				assert.Equal(t, full, bannerBody)
-				assert.Equal(t, full, notifyBody)
-				assert.Empty(t, notifyLink)
-				return
+			suffix := ""
+			if tc.folded > 0 {
+				suffix = " +" + strconv.Itoa(tc.folded) + " more."
 			}
-			assert.Equal(t, tc.first+"\n"+f.ConsoleURL, bannerBody)
-			assert.Equal(t, tc.first+" "+f.ConsoleURL, notifyBody)
-			assert.Equal(t, f.ConsoleURL, notifyLink)
+			wantBanner := full
+			if tc.bannerText >= 0 {
+				wantBanner = full[:tc.bannerText] + "\n" + f.ConsoleURL
+			}
+			wantNotify, wantLink := full+suffix, ""
+			if tc.notifyText >= 0 {
+				wantNotify, wantLink = full[:tc.notifyText]+suffix+" "+f.ConsoleURL, f.ConsoleURL
+			}
+			bannerBody, notifyBody, notifyLink := emitHeld(t, workspace, f, tc.folded)
+			assert.Equal(t, wantBanner, bannerBody)
+			assert.Equal(t, wantNotify, notifyBody)
+			assert.Equal(t, wantLink, notifyLink)
 		})
 	}
 }
 
-// emitHeld emits one approval pending signal, seeding the limiter so the
-// notification carries a fold suffix when folded is positive, and returns the
-// banner body, the notification body and the notification link.
+// emitHeld emits one approval pending signal, seeding a fold of folded repeats,
+// and returns the banner body, the notification body and the notification link.
 func emitHeld(t *testing.T, workspace string, fields Fields, folded int) (string, string, string) {
 	t.Helper()
 	var output bytes.Buffer

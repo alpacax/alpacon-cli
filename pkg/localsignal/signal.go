@@ -310,9 +310,8 @@ func foldSuffix(folded int) string {
 	return ""
 }
 
-// withLink joins body, suffix and link within 256 runes. The link is what the
-// person opens, so the body text yields to it; a link that would leave no body
-// text is dropped instead.
+// withLink fits body, suffix, sep and link in 256 runes and returns the link it
+// kept; body text yields to the link, which is dropped only if no text remains.
 func withLink(body, suffix, sep, link string) (string, string) {
 	room := 256 - utf8.RuneCountInString(suffix) - utf8.RuneCountInString(sep) - utf8.RuneCountInString(link)
 	if link == "" || room <= 0 {
