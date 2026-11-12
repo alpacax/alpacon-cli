@@ -15,23 +15,26 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 	Example: `
 	alpacon workspace preferences update
 	alpacon ws preferences update`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if !utils.IsInteractiveShell() {
-			utils.CliErrorWithExit("This command requires an interactive terminal.")
+			return utils.NewExitError("This command requires an interactive terminal.")
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		preferencesDetail, err := workspace.UpdatePreferences(alpaconClient)
 		if err != nil {
-			utils.ExitIfNoChanges(err)
-			utils.CliErrorWithExit("Failed to update workspace preferences: %s.", err)
+			if utils.ReportNoChanges(err) {
+				return nil
+			}
+			return utils.NewExitError("Failed to update workspace preferences: %s.", err)
 		}
 
 		utils.CliSuccess("Workspace preferences updated.")
 		utils.PrintJson(preferencesDetail)
-	},
+		return nil
+	}),
 }

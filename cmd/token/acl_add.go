@@ -14,7 +14,7 @@ var aclAddCmd = &cobra.Command{
 	Deprecated: "use 'alpacon token acl command add' instead",
 	Hidden:     true,
 	Args:       cobra.RangeArgs(0, 1),
-	Run:        runLegacyAclAdd,
+	RunE:       utils.WithExitError(runLegacyAclAdd),
 }
 
 func init() {
@@ -24,7 +24,7 @@ func init() {
 	aclAddCmd.Flags().String("groupname", "", "Groupname restriction")
 }
 
-func runLegacyAclAdd(cmd *cobra.Command, args []string) {
+func runLegacyAclAdd(cmd *cobra.Command, args []string) error {
 	tokenFlag, _ := cmd.Flags().GetString("token")
 	var tokenArg string
 	switch {
@@ -33,24 +33,24 @@ func runLegacyAclAdd(cmd *cobra.Command, args []string) {
 	case len(args) > 0:
 		tokenArg = args[0]
 	default:
-		utils.CliUsageErrorWithExit("token name or ID is required (use --token or positional argument)")
+		return utils.NewUsageExitError("token name or ID is required (use --token or positional argument)")
 	}
 
 	command, _ := cmd.Flags().GetString("command")
 	if command == "" {
-		utils.CliUsageErrorWithExit("--command is required")
+		return utils.NewUsageExitError("--command is required")
 	}
 	username, _ := cmd.Flags().GetString("username")
 	groupname, _ := cmd.Flags().GetString("groupname")
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %v. Consider re-logging.", err)
+		return utils.NewExitError("Connection to Alpacon API failed: %v. Consider re-logging.", err)
 	}
 
 	tokenID, err := auth.ResolveTokenID(alpaconClient, tokenArg)
 	if err != nil {
-		utils.CliErrorWithExit("Failed to resolve token: %v.", err)
+		return utils.NewExitError("Failed to resolve token: %v.", err)
 	}
 
 	if err = security.AddCommandAcl(alpaconClient, security.CommandAclRequest{
@@ -59,8 +59,9 @@ func runLegacyAclAdd(cmd *cobra.Command, args []string) {
 		Username:  username,
 		Groupname: groupname,
 	}); err != nil {
-		utils.CliErrorWithExit("Failed to add the command ACL: %v.", err)
+		return utils.NewExitError("Failed to add the command ACL: %v.", err)
 	}
 
 	utils.CliSuccess("Command ACL added to token %s: %s", tokenArg, command)
+	return nil
 }

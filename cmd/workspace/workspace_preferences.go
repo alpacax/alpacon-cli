@@ -15,20 +15,20 @@ var workspacePreferencesCmd = &cobra.Command{
 	Example: `
 	alpacon workspace preferences
 	alpacon ws preferences`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		preferencesDetail, err := workspace.GetPreferences(alpaconClient)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve workspace preferences: %s.", err)
+			return utils.NewExitError("Failed to retrieve workspace preferences: %s.", err)
 		}
 
 		utils.PrintJson(preferencesDetail)
 		return nil
-	},
+	}),
 }
 
 func init() {

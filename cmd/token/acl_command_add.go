@@ -28,7 +28,7 @@ personal API token has no command list on the ledger.`,
   alpacon token acl command add my-api-token --command="docker *" --username=root
   alpacon token acl command add my-api-token --command="systemctl status *" --username="*" --groupname="*"`,
 	Args: cobra.ExactArgs(1),
-	Run:  runCommandAclAdd,
+	RunE: utils.WithExitError(runCommandAclAdd),
 }
 
 func init() {
@@ -38,7 +38,7 @@ func init() {
 	_ = aclCommandAddCmd.MarkFlagRequired("command")
 }
 
-func runCommandAclAdd(cmd *cobra.Command, args []string) {
+func runCommandAclAdd(cmd *cobra.Command, args []string) error {
 	tokenArg := args[0]
 	command, _ := cmd.Flags().GetString("command")
 	username, _ := cmd.Flags().GetString("username")
@@ -46,12 +46,12 @@ func runCommandAclAdd(cmd *cobra.Command, args []string) {
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %v. Consider re-logging.", err)
+		return utils.NewExitError("Connection to Alpacon API failed: %v. Consider re-logging.", err)
 	}
 
 	tokenID, err := auth.ResolveTokenID(alpaconClient, tokenArg)
 	if err != nil {
-		utils.CliErrorWithExit("Failed to resolve token: %v.", err)
+		return utils.NewExitError("Failed to resolve token: %v.", err)
 	}
 
 	req := security.CommandAclRequest{
@@ -61,8 +61,9 @@ func runCommandAclAdd(cmd *cobra.Command, args []string) {
 		Groupname: groupname,
 	}
 	if err = security.AddCommandAcl(alpaconClient, req); err != nil {
-		utils.CliErrorWithExit("Failed to add the command ACL: %v.", err)
+		return utils.NewExitError("Failed to add the command ACL: %v.", err)
 	}
 
 	utils.CliSuccess("Command ACL added to token %s: %s", tokenArg, command)
+	return nil
 }
