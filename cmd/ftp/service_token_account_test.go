@@ -6,22 +6,20 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCp_ApplicationAccountRefusal(t *testing.T) {
-	t.Parallel()
 	for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 		t.Run(format, func(t *testing.T) {
-			t.Parallel()
 			var submitted atomic.Bool
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -44,17 +42,23 @@ func TestCp_ApplicationAccountRefusal(t *testing.T) {
 			require.NoError(t, os.WriteFile(filepath.Join(home, ".alpacon", "config.json"), cfg, 0600))
 			source := filepath.Join(home, "file.txt")
 			require.NoError(t, os.WriteFile(source, []byte("test"), 0600))
-			child := exec.Command(os.Args[0], "-test.run=^TestCpApplicationAccountHelper$")
-			child.Env = append(os.Environ(), "ALPACON_CP_ACCOUNT_HELPER="+format, "ALPACON_CP_ACCOUNT_SOURCE="+source, "ALPACON_WORK_SESSION=", "HOME="+home)
-			var stdout, stderr bytes.Buffer
-			child.Stdout = &stdout
-			child.Stderr = &stderr
-			err = child.Run()
-			var exitErr *exec.ExitError
+			t.Setenv("HOME", home)
+			t.Setenv("ALPACON_WORK_SESSION", "")
+			previous := utils.OutputFormat
+			utils.OutputFormat = format
+			t.Cleanup(func() { utils.OutputFormat = previous })
+
+			stdout, _ := testutil.CaptureOutput(t, func() {
+				err = CpCmd.RunE(CpCmd, []string{source, "root@my-server:/tmp/"})
+			})
+
+			var exitErr *utils.ExitError
 			require.ErrorAs(t, err, &exitErr)
-			assert.Equal(t, 1, exitErr.ExitCode())
+			assert.Equal(t, 1, exitErr.Code)
+			var stderr bytes.Buffer
+			utils.FprintExitError(&stderr, exitErr)
+			assert.Empty(t, stdout)
 			assert.True(t, submitted.Load(), "the upload creation must be refused")
-			assert.Empty(t, stdout.String())
 			assert.Contains(t, stderr.String(), "the service token's application cannot run as that account on that server—run as an account bound to the application or as its own account, and check that it is provisioned there")
 			if format == utils.OutputFormatTable {
 				assert.NotContains(t, stderr.String(), "Invalid input.")
@@ -68,13 +72,4 @@ func TestCp_ApplicationAccountRefusal(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestCpApplicationAccountHelper(t *testing.T) {
-	format := os.Getenv("ALPACON_CP_ACCOUNT_HELPER")
-	if format == "" {
-		return
-	}
-	utils.OutputFormat = format
-	CpCmd.Run(CpCmd, []string{os.Getenv("ALPACON_CP_ACCOUNT_SOURCE"), "root@my-server:/tmp/"})
 }

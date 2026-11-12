@@ -75,13 +75,13 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return utils.SetOutputFormat(utils.OutputFormat)
 	},
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if showVersion {
-			runVersion()
-			return
+			return runVersion()
 		}
 		utils.ShowLogo(buildWelcomeLines())
-	},
+		return nil
+	}),
 }
 
 func Execute() {

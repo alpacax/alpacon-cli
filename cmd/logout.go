@@ -25,18 +25,19 @@ var logoutCmd = &cobra.Command{
 	Example: `
 	alpacon logout
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		validConfig, err := config.LoadConfig()
 		if err != nil {
-			utils.CliInfoWithExit("You are not logged in.")
+			utils.CliInfo("You are not logged in.")
+			return nil
 		}
 
 		if validConfig.IsMultiWorkspaceMode() {
 			utils.CliWarning("This will log you out from all workspaces associated with this account.")
 		}
 
-		reportLogout(runLogout(validConfig))
-	},
+		return reportLogout(runLogout(validConfig))
+	}),
 }
 
 // runLogout asks the server to end the session as far as it can, then removes
@@ -104,15 +105,16 @@ func endServerSession(validConfig config.Config) bool {
 	return ok
 }
 
-func reportLogout(err error) {
+func reportLogout(err error) error {
 	switch {
 	case errors.Is(err, config.ErrLoginChanged):
 		utils.CliWarning("Logged out, but kept the config: another shell logged in since this command started.")
 	case err != nil:
-		utils.CliErrorWithExit("Log out from Alpacon failed: %s.", err)
+		return utils.NewExitError("Log out from Alpacon failed: %s.", err)
 	default:
 		utils.CliSuccess("Logout succeeded!")
 	}
+	return nil
 }
 
 // blacklistFailure words a failed token blacklist. A refusal carrying the

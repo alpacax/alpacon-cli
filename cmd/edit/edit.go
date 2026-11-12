@@ -63,7 +63,7 @@ redirections, or '&&' will not work.`,
   alpacon edit my-server:/etc/nginx/nginx.conf --editor "code --wait"
   alpacon edit my-server:/var/log/large.txt --force`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		editorFlag, _ := cmd.Flags().GetString("editor")
 		usernameFlag, _ := cmd.Flags().GetString("username")
 		groupname, _ := cmd.Flags().GetString("groupname")
@@ -72,16 +72,19 @@ redirections, or '&&' will not work.`,
 
 		target, err := parseEditTarget(args[0], usernameFlag)
 		if err != nil {
-			utils.CliUsageErrorWithExit("%s", err)
+			return utils.NewUsageExitError("%s", err)
 		}
 
 		authMethod := config.ResolveAuthMethod()
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
-		workSessionID := worksession.ResolveOrExit(alpaconClient, flagWorkSession)
+		workSessionID, err := worksession.Resolve(alpaconClient, flagWorkSession)
+		if err != nil {
+			return utils.NewExitError("%s", err)
+		}
 
 		deps := realEditDeps(alpaconClient, groupname)
 		result, err := runEdit(editOptions{
@@ -92,23 +95,26 @@ redirections, or '&&' will not work.`,
 		}, deps)
 		if err != nil {
 			printPreservedTempPath(result)
-			utils.HandleWorkSessionError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID)
+			if exitErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID); exitErr != nil {
+				return exitErr
+			}
 			var rejected *event.CommandRejectedError
 			if errors.As(err, &rejected) {
-				utils.CliErrorEnvelopeWithExitCode(rejected.ExitCode(), "edit", err, "Failed to edit '%s:%s': %s", target.Server, target.RemotePath, rejected)
+				return utils.NewEnvelopeExitErrorWithCode(rejected.ExitCode(), "edit", err, "Failed to edit '%s:%s': %s", target.Server, target.RemotePath, rejected)
 			}
 			if refusedForWantOfForce(err, utils.IsInteractiveShell()) {
 				err = utils.MarkUsageError(err)
 			}
-			utils.CliErrorWithExit("Failed to edit '%s:%s': %s", target.Server, target.RemotePath, err)
+			return utils.NewExitError("Failed to edit '%s:%s': %s", target.Server, target.RemotePath, err)
 		}
 
 		if !result.Changed {
 			utils.CliInfo("No changes")
-			return
+			return nil
 		}
 		utils.CliSuccess("Uploaded changes to %s:%s", target.Server, target.RemotePath)
-	},
+		return nil
+	}),
 }
 
 type editTarget struct {

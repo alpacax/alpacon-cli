@@ -93,6 +93,44 @@ func TestExitError_UnwrapsTheCauseAmongItsArguments(t *testing.T) {
 	assert.EqualError(t, err, "lookup failed: boom")
 }
 
+// Serial: OutputFormat is process-wide.
+func TestNewExitErrorWithErrorCodeMatchesCliErrorWithCode(t *testing.T) {
+	saved := OutputFormat
+	t.Cleanup(func() { OutputFormat = saved })
+	usageCause := MarkUsageError(errors.New("bad flag"))
+	cases := []struct {
+		name          string
+		err           error
+		wantExitCode  int
+		wantErrorCode string
+		wantFooter    bool
+	}{
+		{name: "general", err: NewExitErrorWithErrorCode(ExitCodeGeneralError, ErrorCodeNotLoggedIn, "Not logged in."), wantExitCode: ExitCodeGeneralError, wantErrorCode: ErrorCodeNotLoggedIn, wantFooter: true},
+		{name: "chosen exit", err: NewExitErrorWithErrorCode(ExitCodeNotApproved, ErrorCodeNotApproved, "refused"), wantExitCode: ExitCodeNotApproved, wantErrorCode: ErrorCodeNotApproved},
+		{name: "usage promotion", err: NewExitErrorWithErrorCode(ExitCodeGeneralError, ErrorCodeNotLoggedIn, "Failed: %s.", usageCause), wantExitCode: ExitCodeUsageError, wantErrorCode: ErrorCodeUsage},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			exitErr, ok := errors.AsType[*ExitError](tc.err)
+			require.True(t, ok)
+			assert.Equal(t, tc.wantExitCode, exitErr.Code)
+
+			var table bytes.Buffer
+			OutputFormat = OutputFormatTable
+			FprintExitError(&table, exitErr)
+			assert.Equal(t, tc.wantFooter, bytes.Contains(table.Bytes(), []byte(gitIssueURL)))
+
+			var jsonOutput bytes.Buffer
+			OutputFormat = OutputFormatJSON
+			FprintExitError(&jsonOutput, exitErr)
+			var env JSONErrorEnvelope[cliErrorCtx]
+			require.NoError(t, json.Unmarshal(jsonOutput.Bytes(), &env))
+			assert.Equal(t, tc.wantExitCode, env.ExitCode)
+			assert.Equal(t, tc.wantErrorCode, env.ErrorCode)
+		})
+	}
+}
+
 type hintedAPIError struct {
 	fakeAPIError
 	hint string

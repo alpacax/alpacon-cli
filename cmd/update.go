@@ -32,29 +32,29 @@ never has to parse prose:
   8  a newer release exists`,
 	Example: `  alpacon update
   alpacon update --check`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if selfupdate.IsUnknownVersion(utils.Version) {
-			utils.CliErrorWithExit("This build's version %q matches no release, so there is nothing to update from. Install a released build to use 'alpacon update'.", utils.Version)
+			return utils.NewExitError("This build's version %q matches no release, so there is nothing to update from. Install a released build to use 'alpacon update'.", utils.Version)
 		}
 
 		if checkOnly {
 			release, err := selfupdate.LatestRelease(selfupdate.DefaultReleaseAPIURL)
 			if err != nil {
-				utils.CliErrorWithExit("Could not check for updates: %s", err)
+				return utils.NewExitError("Could not check for updates: %s", err)
 			}
 			message, code := checkOutcome(utils.Version, release.Version)
 			utils.CliInfo("%s", message)
 			if code != 0 {
 				// The check succeeded; "Error" would contradict the exit code scripts read.
 				utils.CliInfo("%s", checkAction(installKind()))
-				os.Exit(code)
+				return utils.NewSilentExitError(code)
 			}
-			return
+			return nil
 		}
 
 		executable, err := selfupdate.ResolveExecutablePath()
 		if err != nil {
-			utils.CliErrorWithExit("Could not find the running binary: %s", err)
+			return utils.NewExitError("Could not find the running binary: %s", err)
 		}
 
 		result, err := selfupdate.Run(selfupdate.Options{
@@ -66,19 +66,20 @@ never has to parse prose:
 			Runner:         selfupdate.ExecRunner,
 		})
 		if err != nil {
-			utils.CliErrorWithExit("%s", updateFailureMessage(err))
+			return utils.NewExitError("%s", updateFailureMessage(err))
 		}
 
 		message, code := reportResult(result, utils.Version)
 		switch {
 		case code != 0:
-			utils.CliErrorWithExitCode(code, "%s", message)
+			return utils.NewExitErrorWithCode(code, "%s", message)
 		case result.AlreadyCurrent:
 			utils.CliInfo("%s", message)
 		default:
 			utils.CliSuccess("%s", message) // Info would read like the "already up to date" line.
 		}
-	},
+		return nil
+	}),
 }
 
 func init() {

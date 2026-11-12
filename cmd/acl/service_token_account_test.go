@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,12 +15,12 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestEntryAdd_ApplicationAccount(t *testing.T) {
-	t.Parallel()
 	for _, tt := range []struct {
 		name, username, groupname    string
 		file                         bool
@@ -47,7 +46,6 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 		{name: "workspace lookup fails", lookupFails: true, wantExit: 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var tokenLookups atomic.Int32
 			workspace := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				tokenLookups.Add(1)
@@ -120,22 +118,31 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 					flags = append(flags, "--groupname", tt.groupname)
 				}
 			}
-			data, err := json.Marshal(flags)
-			require.NoError(t, err)
-			child := exec.Command(os.Args[0], "-test.run=^TestEntryAddApplicationAccountHelper$")
-			child.Env = append(os.Environ(), "ALPACON_ACCOUNT_HELPER="+string(data), "ALPACON_ACCOUNT_WORKSPACE="+workspace.URL, client.SignerURLEnvVar+"="+signer.URL)
+			seams := &sessionSeams{cfg: loggedIn("cached"), env: ledgerEnv()}
+			seams.cfg.WorkspaceURL = workspace.URL
+			installSeams(t, seams)
+			t.Setenv(client.SignerURLEnvVar, signer.URL)
+			newWorkspaceClient = func() (*client.AlpaconClient, error) {
+				return &client.AlpaconClient{HTTPClient: httpclient.New(false), BaseURL: workspace.URL}, nil
+			}
+			resetEntryAddFlags(t)
+			require.NoError(t, entryAddCmd.Flags().Parse(flags))
+			oldFormat := utils.OutputFormat
+			utils.OutputFormat = utils.OutputFormatJSON
+			t.Cleanup(func() { utils.OutputFormat = oldFormat })
+
+			err := runEntryAdd(entryAddCmd, nil)
 			var stderr bytes.Buffer
-			child.Stderr = &stderr
-			err = child.Run()
 			if tt.wantExit == 0 {
 				require.NoError(t, err, stderr.String())
 				assert.Equal(t, int32(2), signerRequests.Load())
 				assert.Equal(t, int32(1), signerWrites.Load())
 				return
 			}
-			var exitErr *exec.ExitError
+			var exitErr *utils.ExitError
 			require.ErrorAs(t, err, &exitErr)
-			assert.Equal(t, tt.wantExit, exitErr.ExitCode())
+			assert.Equal(t, tt.wantExit, exitErr.Code)
+			utils.FprintExitError(&stderr, exitErr)
 			var envelope utils.JSONErrorEnvelope[map[string]any]
 			require.NoError(t, json.Unmarshal(stderr.Bytes(), &envelope))
 			assert.Equal(t, tt.wantExit, envelope.ExitCode)
@@ -202,22 +209,20 @@ func TestEntryAdd_AccountHelp(t *testing.T) {
 	assert.Contains(t, strings.Join(strings.Fields(entryListCmd.Long), " "), "blank when the application account cannot be resolved")
 }
 
-func TestEntryAddApplicationAccountHelper(t *testing.T) {
-	data := os.Getenv("ALPACON_ACCOUNT_HELPER")
-	if data == "" {
-		return
+func resetEntryAddFlags(t *testing.T) {
+	t.Helper()
+	reset := func() {
+		entryAddCmd.Flags().VisitAll(func(flag *pflag.Flag) {
+			value := flag.DefValue
+			if flag.Name == "server" {
+				value = ""
+			}
+			require.NoError(t, flag.Value.Set(value))
+			flag.Changed = false
+		})
 	}
-	seams := &sessionSeams{cfg: loggedIn("cached"), env: ledgerEnv()}
-	seams.cfg.WorkspaceURL = os.Getenv("ALPACON_ACCOUNT_WORKSPACE")
-	installSeams(t, seams)
-	newWorkspaceClient = func() (*client.AlpaconClient, error) {
-		return &client.AlpaconClient{HTTPClient: httpclient.New(false), BaseURL: seams.cfg.WorkspaceURL}, nil
-	}
-	var flags []string
-	require.NoError(t, json.Unmarshal([]byte(data), &flags))
-	require.NoError(t, entryAddCmd.Flags().Parse(flags))
-	utils.OutputFormat = utils.OutputFormatJSON
-	runEntryAdd(entryAddCmd, nil)
+	reset()
+	t.Cleanup(reset)
 }
 
 func TestLedgerEntryAttributes_ApplicationAccount(t *testing.T) {

@@ -400,7 +400,10 @@ func TestPrintWhoami_StripsControlSequences(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := testutil.CaptureStdout(t, func() { printWhoami(tt.output) })
+			var err error
+			got := testutil.CaptureStdout(t, func() { err = printWhoami(tt.output) })
+
+			require.NoError(t, err)
 			assert.NotContains(t, got, "\x1b")
 			assert.NotContains(t, got, "\r")
 			assert.Contains(t, got, "prod-workspace")
@@ -411,7 +414,11 @@ func TestPrintWhoami_StripsControlSequences(t *testing.T) {
 
 func TestPrintWhoami_KeepsOneLinePerField(t *testing.T) {
 	// A newline inside a value would forge an identity line the account does not have.
-	plain := testutil.CaptureStdout(t, func() { printWhoami(whoamiOutput{Shell: "/bin/bash"}) })
-	forged := testutil.CaptureStdout(t, func() { printWhoami(whoamiOutput{Shell: "/bin/bash\nRole:        owner"}) })
+	var plainErr, forgedErr error
+	plain := testutil.CaptureStdout(t, func() { plainErr = printWhoami(whoamiOutput{Shell: "/bin/bash"}) })
+	forged := testutil.CaptureStdout(t, func() { forgedErr = printWhoami(whoamiOutput{Shell: "/bin/bash\nRole:        owner"}) })
+
+	require.NoError(t, plainErr)
+	require.NoError(t, forgedErr)
 	assert.Equal(t, strings.Count(plain, "\n"), strings.Count(forged, "\n"))
 }

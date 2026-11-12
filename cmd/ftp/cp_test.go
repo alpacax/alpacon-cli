@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"slices"
 	"testing"
 	"testing/synctest"
@@ -22,20 +20,20 @@ import (
 )
 
 func TestReportDownloadRejectionExitsSixInEitherFormat(t *testing.T) {
-	t.Parallel()
 	for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 		t.Run(format, func(t *testing.T) {
-			t.Parallel()
-			helper := exec.Command(os.Args[0], "-test.run=^TestReportDownloadRejectionHelperProcess$")
-			helper.Env = append(os.Environ(), "GO_WANT_DOWNLOAD_REJECTION_HELPER="+format)
-			var stderr bytes.Buffer
-			helper.Stderr = &stderr
+			previous := utils.OutputFormat
+			utils.OutputFormat = format
+			t.Cleanup(func() { utils.OutputFormat = previous })
+			rejected := &event.CommandRejectedError{Cause: "account_bound_to_other_person", Reported: true, ConsoleURL: "https://console.example/commands/1", WorkSessionID: "550e8400-e29b-41d4-a716-446655440000"}
 
-			err := helper.Run()
+			err := reportDownloadRejection(fmt.Errorf("download command: %w", rejected), "[prod:/a]")
 
-			var exitErr *exec.ExitError
+			var exitErr *utils.ExitError
 			require.ErrorAs(t, err, &exitErr)
-			assert.Equal(t, utils.ExitCodeNotApproved, exitErr.ExitCode())
+			assert.Equal(t, utils.ExitCodeNotApproved, exitErr.Code)
+			var stderr bytes.Buffer
+			utils.FprintExitError(&stderr, exitErr)
 			if format == utils.OutputFormatTable {
 				assert.Contains(t, stderr.String(), "Failed to download from '[prod:/a]': command was rejected")
 				return
@@ -49,17 +47,6 @@ func TestReportDownloadRejectionExitsSixInEitherFormat(t *testing.T) {
 			assert.Equal(t, map[string]any{"console_url": "https://console.example/commands/1", "work_session_id": "550e8400-e29b-41d4-a716-446655440000", "rejection_cause": "account_bound_to_other_person", "rejection_gate": nil}, envelope.Server)
 		})
 	}
-}
-
-func TestReportDownloadRejectionHelperProcess(t *testing.T) {
-	format := os.Getenv("GO_WANT_DOWNLOAD_REJECTION_HELPER")
-	if format == "" {
-		return
-	}
-	utils.OutputFormat = format
-	rejected := &event.CommandRejectedError{Cause: "account_bound_to_other_person", Reported: true, ConsoleURL: "https://console.example/commands/1", WorkSessionID: "550e8400-e29b-41d4-a716-446655440000"}
-	reportDownloadRejection(fmt.Errorf("download command: %w", rejected), "[prod:/a]")
-	os.Exit(99)
 }
 
 func TestIsRemotePath(t *testing.T) {
@@ -520,9 +507,8 @@ func refusedDownloadClient(status int, body string) *client.AlpaconClient {
 	}
 }
 
-// A download fetch refused with the server's hint reaches cp's caller with the hint on the error,
-// and cp's own failed-download checklist, which exits on the spot, stays out. A 429 that outlasts
-// the retries counts the same.
+// A hinted fetch refusal keeps its hint instead of using the download checklist,
+// including a 429 that outlasts retries.
 func TestDownloadObject_FetchRefusalWithAHintSkipsTheChecklist(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -600,4 +586,45 @@ func TestDownloadObject_DeniedCommandSkipsTheChecklists(t *testing.T) {
 			assert.Equal(t, utils.ExitCodeNotApproved, rejected.ExitCode())
 		})
 	}
+}
+
+func TestReportDownloadRejection_LeavesOtherFailuresToTheCaller(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "success"},
+		{name: "network failure", err: errors.New("connection reset")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := reportDownloadRejection(tc.err, "[prod:/a]")
+
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestUploadObject_ReturnsTheMissingSourceAdvice(t *testing.T) {
+	t.Parallel()
+	ac := &client.AlpaconClient{
+		BaseURL: testutil.StubBaseURL,
+		HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
+			return http.StatusOK, `{"count":1,"results":[{"id":"server","name":"my-server"}]}`
+		}),
+	}
+	source := t.TempDir() + "/missing.txt"
+
+	server, err := uploadObject(ac, []string{source}, "my-server:/tmp/", "", "", false, true, "")
+
+	var exitErr *utils.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, "my-server", server)
+	assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
+	var output bytes.Buffer
+	utils.FprintExitError(&output, exitErr)
+	assert.Contains(t, output.String(), "Source file(s) not found: "+source)
+	assert.NotContains(t, output.String(), "Failed to upload to")
 }
