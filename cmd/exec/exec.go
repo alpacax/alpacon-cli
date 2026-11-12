@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -75,18 +74,17 @@ always expires: after the days --reuse-days proposed, or at the workspace
 ceiling (1 to 366 days, default 90).
 
 --file runs the verified file on the host, so it cannot reach into a container
-or pod. For code that runs inside one (docker exec, kubectl exec), put the
-container command and the whole program in one host script and run that:
+or pod. For code that runs inside one (docker, podman, nerdctl or kubectl
+exec), put the container command and the whole program in one host script,
+with the program written into the script as a heredoc passed on stdin:
   kubectl exec -i POD -c CONTAINER -- python - "$1" <<'PY'
   ...
   PY
-  alpacon exec --upload --file /tmp/work.sh --file-from ./work.sh server -- --dry-run
-Put the code that runs inside the container in the script itself, as a heredoc
-passed on stdin: a script that only calls manage.py <command> or decodes a
-base64 or compressed payload still hides what runs from the reviewer. The
-reviewer then reads the program, and --reuse-days can make an unchanged
-re-run reusable. A held docker or kubectl exec line that carries an inline
-program (-c, -e, a heredoc, manage.py shell) prints this template too.
+  alpacon exec --upload --file /tmp/container-work.sh --file-from ./container-work.sh my-server -- --dry-run
+The reviewer then reads the program, and --reuse-days can make an unchanged
+re-run reusable. A script that only calls manage.py <command> or decodes a
+base64 or compressed payload gains nothing: the reviewer still cannot read
+what runs.
 
 The server refuses a command line over its length limit. exec then exits 1 and
 names the --upload --file command to run instead, with /bin/sh, the shell a
@@ -535,97 +533,6 @@ func fileSuggestionAction(parsed RemoteExecArgs, s *event.FileExecutionSuggestio
 	return utils.NextAction{
 		Command:     reRunHint(suggested).Command,
 		Description: description,
-	}, true
-}
-
-// containerExecRe matches a command line that runs something inside a
-// container or pod.
-var containerExecRe = regexp.MustCompile(`\b(docker|podman|nerdctl|kubectl)\b[^|;&]*?\bexec\b`)
-
-// containerExecValueFlags are the runtime exec options that take the next
-// argument as their value, so that argument is neither the target nor the
-// program (docker -e KEY=value, kubectl -c sidecar).
-var containerExecValueFlags = map[string]bool{
-	"-e": true, "--env": true, "--env-file": true, "-u": true, "--user": true,
-	"-w": true, "--workdir": true, "-c": true, "--container": true,
-	"-n": true, "--namespace": true, "--kubeconfig": true, "--context": true,
-	"--pod-running-timeout": true,
-}
-
-// containerProgram returns the argv the container runs. kubectl takes options
-// on either side of the pod and ends them with `--`, so its program is what
-// follows the first `--`. The other runtimes stop reading options at the
-// target, so theirs is what follows it, and a `--` after it is the program's.
-func containerProgram(command string) []string {
-	loc := containerExecRe.FindStringSubmatchIndex(command)
-	if loc == nil {
-		return nil
-	}
-	args := strings.Fields(command[loc[1]:])
-	if command[loc[2]:loc[3]] == "kubectl" {
-		for i, arg := range args {
-			if arg == "--" {
-				return args[i+1:]
-			}
-		}
-	}
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--":
-			return args[i+1:]
-		case !strings.HasPrefix(arg, "-"):
-			rest := args[i+1:]
-			if len(rest) > 0 && rest[0] == "--" {
-				rest = rest[1:]
-			}
-			return rest
-		case containerExecValueFlags[arg]:
-			i++
-		}
-	}
-	return nil
-}
-
-// containerRunsInlineProgram reports whether the container is handed a program
-// body on the line itself: an interpreter's -c or -e argument, a heredoc, or a
-// Django shell. Runtime options such as docker -e or kubectl -c do not count.
-func containerRunsInlineProgram(command string) bool {
-	program := containerProgram(command)
-	if len(program) == 0 {
-		return false
-	}
-	joined := strings.Join(program, " ")
-	if strings.Contains(joined, "<<") || strings.Contains(joined, "manage.py shell") {
-		return true
-	}
-	for _, arg := range program[1:] {
-		if arg == "-c" || arg == "-e" {
-			return true
-		}
-	}
-	return false
-}
-
-// containerScriptAction points a held command line that runs an inline program
-// inside a container or pod at the verified file lane. --file cannot reach into
-// a container, since the agent runs the verified file on the host, so the way
-// there is a host script that holds both the container command and the whole
-// program, which the reviewer then reads in full. The command it names is a
-// template to fill in, never the held command rewritten. It answers false for a
-// command already on the file lane, one that carried --env (the file lane cannot
-// take it), or one that does not match both patterns.
-func containerScriptAction(parsed RemoteExecArgs) (utils.NextAction, bool) {
-	if parsed.File != nil || len(parsed.Env) > 0 || !containerRunsInlineProgram(parsed.Command) {
-		return utils.NextAction{}, false
-	}
-	parts := append([]string{string(ExecInvocation)}, runAsFlags(parsed)...)
-	parts = append(parts, "--upload --file /tmp/container-work.sh --file-from ./container-work.sh", argvQuote(parsed.Server))
-	return utils.NextAction{
-		Command: strings.Join(parts, " "),
-		Description: "to have the program reviewed by its content, put the container command and the whole program in one script " +
-			"(for example kubectl exec -i POD -- python - <<'PY' ... PY) and run it as a verified file; " +
-			"the held command stays queued and runs if approved, so cancel it in the Alpacon console (Commands) before submitting this",
 	}, true
 }
 
