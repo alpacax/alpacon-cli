@@ -293,8 +293,6 @@ func TestExecFileFromServerDeniedExitsNotApproved(t *testing.T) {
 	assert.Equal(t, []string{"download-create"}, s.steps)
 }
 
-// newHeldScriptServer parks a command line at awaiting_approval; suggestion,
-// when non-empty, is the raw file_execution_suggestion on the command detail.
 // newHeldScriptServer parks a command line at awaiting_approval with the given
 // raw detail fields appended, e.g. `,"file_execution_suggestion":{...}`.
 func newHeldScriptServer(fields string) *httptest.Server {
