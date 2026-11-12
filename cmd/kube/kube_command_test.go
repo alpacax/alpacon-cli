@@ -20,6 +20,7 @@ import (
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -44,6 +45,7 @@ func runKubeCommandWith(t *testing.T, newClient clientFactory, outputFormat stri
 	withOutputFormat(t, outputFormat)
 	cmd := newKubeCmd(newClient)
 	cmd.SilenceErrors, cmd.SilenceUsage = true, true // as RootCmd is
+	markRunErrors(cmd)
 	cmd.SetArgs(args)
 	var err error
 	stdout, stderr = testutil.CaptureOutput(t, func() { err = cmd.Execute() })
@@ -59,8 +61,7 @@ func apiClientTo(ts *httptest.Server) clientFactory {
 	}
 }
 
-// reportExit prints err as cmd.Execute does and returns its exit code. An error that is no ExitError
-// is Cobra rejecting the command line, which exits 2; package cmd tests that mapping.
+// reportExit prints err as cmd.Execute does and returns its exit code.
 func reportExit(w io.Writer, err error) int {
 	if err == nil {
 		return 0
@@ -70,7 +71,35 @@ func reportExit(w io.Writer, err error) int {
 		return exitErr.Code
 	}
 	_, _ = fmt.Fprintln(w, err)
-	return utils.ExitCodeUsageError
+	if errors.As(err, new(runError)) && !utils.IsUsageError(err) {
+		return utils.ExitCodeGeneralError // cmd.Execute exits 1 on a hook's own unmarked error
+	}
+	return utils.ExitCodeUsageError // a Cobra error or a usage-marked hook error
+}
+
+// runError marks an error a command's own hook returned, as cmd.Execute's markHookErrors does.
+type runError struct{ err error }
+
+func (e runError) Error() string { return e.err.Error() }
+func (e runError) Unwrap() error { return e.err }
+
+// markRunErrors wraps every error-returning hook in c's tree with runError.
+func markRunErrors(c *cobra.Command) {
+	for _, hook := range []*func(*cobra.Command, []string) error{
+		&c.PersistentPreRunE, &c.PreRunE, &c.RunE, &c.PostRunE, &c.PersistentPostRunE,
+	} {
+		if run := *hook; run != nil {
+			*hook = func(cmd *cobra.Command, args []string) error {
+				if err := run(cmd, args); err != nil {
+					return runError{err: err}
+				}
+				return nil
+			}
+		}
+	}
+	for _, sub := range c.Commands() {
+		markRunErrors(sub)
+	}
 }
 
 func newLogoutScene(t *testing.T, workspaceURL string) logoutScene {
@@ -350,4 +379,33 @@ func TestWithin(t *testing.T) {
 		require.ErrorIs(t, err, want)
 		assert.Equal(t, 7, got)
 	})
+}
+
+func TestReportExit_ExitsLikeExecute(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		args     []string
+		err      error
+		wantCode int
+	}{
+		{name: "plain RunE error exits 1", err: errors.New("boom"), wantCode: utils.ExitCodeGeneralError},
+		{name: "usage-marked RunE error exits 2", err: utils.MarkUsageError(errors.New("bad flag")), wantCode: utils.ExitCodeUsageError},
+		{name: "Cobra argument error exits 2", args: []string{"extra"}, wantCode: utils.ExitCodeUsageError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			probe := &cobra.Command{Use: "probe", Args: cobra.NoArgs, SilenceErrors: true, SilenceUsage: true,
+				RunE: func(*cobra.Command, []string) error { return tc.err }}
+			markRunErrors(probe)
+			probe.SetArgs(tc.args)
+			probe.SetOut(io.Discard)
+			probe.SetErr(io.Discard)
+
+			code := reportExit(io.Discard, probe.Execute())
+
+			assert.Equal(t, tc.wantCode, code)
+		})
+	}
 }

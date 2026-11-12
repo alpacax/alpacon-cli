@@ -143,6 +143,8 @@ func runWorkSessionHelperWithEnv(t *testing.T, env []string, outputFormat, serve
 	resetWorkSessionFlags(WorkSessionCmd)
 
 	WorkSessionCmd.SetArgs(args)
+	restore := markRunErrors(WorkSessionCmd)
+	defer restore()
 	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
 		runErr = WorkSessionCmd.Execute()
@@ -156,7 +158,42 @@ func runWorkSessionHelperWithEnv(t *testing.T, env []string, outputFormat, serve
 	if exitErr, ok := errors.AsType[*utils.ExitError](runErr); ok {
 		return stdout, stderr, exitErr.Code
 	}
-	return stdout, stderr, utils.ExitCodeUsageError // a Cobra error, which Cobra printed itself and cmd.Execute exits 2 on
+	if errors.As(runErr, new(runError)) && !utils.IsUsageError(runErr) {
+		return stdout, stderr, utils.ExitCodeGeneralError // cmd.Execute exits 1 on a hook's own unmarked error
+	}
+	return stdout, stderr, utils.ExitCodeUsageError // a Cobra error or a usage-marked hook error
+}
+
+// runError marks an error a command's own hook returned, as cmd.Execute's markHookErrors does.
+type runError struct{ err error }
+
+func (e runError) Error() string { return e.err.Error() }
+func (e runError) Unwrap() error { return e.err }
+
+// markRunErrors wraps every error-returning hook in c's tree with runError; restore puts the originals back.
+func markRunErrors(c *cobra.Command) (restore func()) {
+	var restores []func()
+	for _, hook := range []*func(*cobra.Command, []string) error{
+		&c.PersistentPreRunE, &c.PreRunE, &c.RunE, &c.PostRunE, &c.PersistentPostRunE,
+	} {
+		if run := *hook; run != nil {
+			*hook = func(cmd *cobra.Command, args []string) error {
+				if err := run(cmd, args); err != nil {
+					return runError{err: err}
+				}
+				return nil
+			}
+			restores = append(restores, func() { *hook = run })
+		}
+	}
+	for _, sub := range c.Commands() {
+		restores = append(restores, markRunErrors(sub))
+	}
+	return func() {
+		for _, r := range restores {
+			r()
+		}
+	}
 }
 
 // resetWorkSessionFlags restores every flag in cmd's tree to its unchanged default and un-silences Cobra:
@@ -193,4 +230,26 @@ func writeWorkSessionTestConfig(t *testing.T, home, workspaceURL string) {
 	data, err := json.Marshal(cfg)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config.json"), data, 0600))
+}
+
+func TestRunWorkSessionHelper_ExitsLikeExecuteForAnErrorRunEReturns(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		wantCode int
+	}{
+		{name: "plain error exits 1", err: errors.New("boom"), wantCode: utils.ExitCodeGeneralError},
+		{name: "usage-marked error exits 2", err: utils.MarkUsageError(errors.New("bad flag")), wantCode: utils.ExitCodeUsageError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			probe := &cobra.Command{Use: "probe", RunE: func(*cobra.Command, []string) error { return tc.err }}
+			WorkSessionCmd.AddCommand(probe)
+			t.Cleanup(func() { WorkSessionCmd.RemoveCommand(probe) })
+
+			_, _, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, "http://127.0.0.1:1", "probe")
+
+			assert.Equal(t, tc.wantCode, exitCode)
+		})
+	}
 }
