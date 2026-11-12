@@ -37,7 +37,6 @@ var groupDetailCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the group details: %s.", err)
 		}
 
-		utils.PrintJson(groupDetail)
-		return nil
+		return utils.PrintJson(groupDetail)
 	}),
 }

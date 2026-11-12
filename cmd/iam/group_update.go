@@ -37,7 +37,6 @@ var groupUpdateCmd = &cobra.Command{
 		}
 
 		utils.CliSuccess("Group updated: %s", groupName)
-		utils.PrintJson(groupDetail)
-		return nil
+		return utils.PrintJson(groupDetail)
 	}),
 }

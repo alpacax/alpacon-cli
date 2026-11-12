@@ -326,8 +326,7 @@ func printWhoami(output whoamiOutput) error {
 		if err != nil {
 			return utils.NewExitError("Failed to marshal whoami: %s", err)
 		}
-		utils.PrintJson(body)
-		return nil
+		return utils.PrintJson(body)
 	}
 
 	output = output.normalized()

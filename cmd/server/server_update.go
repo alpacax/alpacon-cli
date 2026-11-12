@@ -37,7 +37,6 @@ var serverUpdateCmd = &cobra.Command{
 		}
 
 		utils.CliSuccess("Server updated: %s", serverName)
-		utils.PrintJson(serverDetail)
-		return nil
+		return utils.PrintJson(serverDetail)
 	}),
 }

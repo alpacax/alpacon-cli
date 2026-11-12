@@ -266,3 +266,15 @@ func TestWorkSessionCurrentCmd_StaleSessionFails(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkSessionCurrentCmd_NonJSONBodyFailsWithNoOperationInTheEnvelope(t *testing.T) {
+	ts := currentSessionServer(t, "ses-1", http.StatusOK, "<html>bad gateway</html>")
+	home := completeHomeWithActiveSessions(t, ts.URL, map[string]string{"test": "ses-1"})
+
+	stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, []string{"HOME=" + home},
+		utils.OutputFormatJSON, ts.URL, "current")
+
+	assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
+	assertCommandFailure(t, utils.OutputFormatJSON, "", stdout, stderr, utils.ExitCodeGeneralError,
+		utils.ErrorCodeCLI, "Parsing data: Expected a JSON format.")
+}

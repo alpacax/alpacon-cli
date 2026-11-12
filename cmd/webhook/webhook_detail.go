@@ -38,7 +38,6 @@ var webhookDetailCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the webhook details: %s.", err)
 		}
 
-		utils.PrintJson(webhookDetail)
-		return nil
+		return utils.PrintJson(webhookDetail)
 	}),
 }

@@ -169,7 +169,7 @@ func TestPrintJson_JSONOutput(t *testing.T) {
 	compact := []byte(`{"name":"alpha","id":1}`)
 	var got string
 	withFormat("json", func() {
-		got = testutil.CaptureStdout(t, func() { PrintJson(compact) })
+		got = testutil.CaptureStdout(t, func() { require.NoError(t, PrintJson(compact)) })
 	})
 	assert.JSONEq(t, `{"name":"alpha","id":1}`, got)
 	assert.Contains(t, got, "\n  \"name\": \"alpha\"")
@@ -181,7 +181,7 @@ func TestPrintJson_JSONOutput_EscapesRawControlBytes(t *testing.T) {
 	body := []byte("{\"name\":\"a\u009b2K\x7fb\"}")
 	var got string
 	withFormat("json", func() {
-		got = testutil.CaptureStdout(t, func() { PrintJson(body) })
+		got = testutil.CaptureStdout(t, func() { require.NoError(t, PrintJson(body)) })
 	})
 	assert.Contains(t, got, `\u009b`)
 	assert.Contains(t, got, `\u007f`)
@@ -208,7 +208,7 @@ func TestPrintJson_JSONOutput_EscapesBareC1Byte(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var got string
 			withFormat("json", func() {
-				got = testutil.CaptureStdout(t, func() { PrintJson([]byte(tt.body)) })
+				got = testutil.CaptureStdout(t, func() { require.NoError(t, PrintJson([]byte(tt.body))) })
 			})
 			assert.NotContains(t, got, "\x9b")
 
@@ -237,7 +237,7 @@ func TestPrintJson_JSONOutput_EscapesFormatChars(t *testing.T) {
 
 			var got string
 			withFormat("json", func() {
-				got = testutil.CaptureStdout(t, func() { PrintJson(body) })
+				got = testutil.CaptureStdout(t, func() { require.NoError(t, PrintJson(body)) })
 			})
 			assert.Contains(t, got, tt.escape)
 			assert.NotContains(t, got, tt.raw)
@@ -253,10 +253,50 @@ func TestPrintJson_TableOutput(t *testing.T) {
 	compact := []byte(`{"name":"alpha","id":1}`)
 	var got string
 	withFormat("table", func() {
-		got = testutil.CaptureStdout(t, func() { PrintJson(compact) })
+		got = testutil.CaptureStdout(t, func() { require.NoError(t, PrintJson(compact)) })
 	})
 	assert.Contains(t, got, "\"name\": \"alpha\"")
 	assert.Contains(t, got, "\"id\": 1")
+}
+
+func TestPrintJson_ReturnsTheNotJSONFailureAndPrintsNothing(t *testing.T) {
+	tests := []struct {
+		name   string
+		format string
+		body   string
+	}{
+		{name: "html page in table format", format: OutputFormatTable, body: "<html>bad gateway</html>"},
+		{name: "html page in json format", format: OutputFormatJSON, body: "<html>bad gateway</html>"},
+		{name: "empty body in table format", format: OutputFormatTable, body: ""},
+		{name: "truncated object in json format", format: OutputFormatJSON, body: `{"name":`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout string
+			var printed bytes.Buffer
+
+			withFormat(tt.format, func() {
+				var err error
+				stdout = testutil.CaptureStdout(t, func() { err = PrintJson([]byte(tt.body)) })
+
+				exitErr, ok := errors.AsType[*ExitError](err)
+				require.True(t, ok, "want an ExitError, got %v", err)
+				assert.Equal(t, ExitCodeGeneralError, exitErr.Code)
+				FprintExitError(&printed, exitErr)
+			})
+
+			assert.Empty(t, stdout)
+			if tt.format == OutputFormatJSON {
+				envelope := decodeSingleLineEnvelope(t, printed.String())
+				assert.Equal(t, ExitCodeGeneralError, envelope.ExitCode)
+				assert.Equal(t, ErrorCodeCLI, envelope.ErrorCode)
+				assert.Equal(t, "Parsing data: Expected a JSON format.", envelope.Message)
+				return
+			}
+			assert.Contains(t, printed.String(), "Parsing data: Expected a JSON format.\n")
+			assert.Contains(t, printed.String(), gitIssueURL, "the failure keeps its report-an-issue footer")
+		})
+	}
 }
 
 func TestFormatJSON_DisablesHTMLEscaping(t *testing.T) {

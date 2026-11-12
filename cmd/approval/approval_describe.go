@@ -39,8 +39,7 @@ requested changes. Use --output json to print the full raw response.`,
 			if err != nil {
 				return utils.NewExitError("Failed to retrieve approval request: %s.", err)
 			}
-			utils.PrintJson(body)
-			return nil
+			return utils.PrintJson(body)
 		}
 
 		req, err := approvalapi.GetApprovalRequest(ac, args[0])

@@ -36,7 +36,6 @@ var noteUpdateCmd = &cobra.Command{
 		}
 
 		utils.CliSuccess("Note updated: %s", noteID)
-		utils.PrintJson(noteDetail)
-		return nil
+		return utils.PrintJson(noteDetail)
 	}),
 }

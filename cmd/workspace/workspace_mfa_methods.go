@@ -35,7 +35,6 @@ var workspaceMFAMethodsCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve MFA methods: %s.", err)
 		}
 
-		utils.PrintJson(mfaMethodsDetail)
-		return nil
+		return utils.PrintJson(mfaMethodsDetail)
 	}),
 }

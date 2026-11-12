@@ -33,7 +33,6 @@ var csrDetailCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the csr details: %s.", err)
 		}
 
-		utils.PrintJson(csrDetail)
-		return nil
+		return utils.PrintJson(csrDetail)
 	}),
 }

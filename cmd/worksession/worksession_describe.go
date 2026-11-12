@@ -33,8 +33,7 @@ var workSessionDescribeCmd = &cobra.Command{
 			if err != nil {
 				return utils.NewEnvelopeExitError(opDescribe, err, "Failed to retrieve work session: %s.", err)
 			}
-			utils.PrintJson(body)
-			return nil
+			return utils.PrintJson(body)
 		}
 
 		session, err := wsapi.GetWorkSession(ac, args[0])

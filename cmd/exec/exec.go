@@ -357,12 +357,11 @@ func RemoteExec(newClient clientFactory, stdout, stderr io.Writer, parsed Remote
 			if err != nil {
 				return utils.NewExitError("failed to marshal JSON: %s", err)
 			}
-			utils.PrintJson(data)
-		} else {
-			line1, line2 := detachResultLines(resp.ID)
-			_, _ = fmt.Fprintln(stdout, line1)
-			_, _ = fmt.Fprintln(stderr, line2)
+			return utils.PrintJson(data)
 		}
+		line1, line2 := detachResultLines(resp.ID)
+		_, _ = fmt.Fprintln(stdout, line1)
+		_, _ = fmt.Fprintln(stderr, line2)
 		return nil
 	}
 

@@ -98,7 +98,6 @@ var workspaceUsageCmd = &cobra.Command{
 		if err != nil {
 			return utils.NewExitError("Failed to format usage data: %s.", err)
 		}
-		utils.PrintJson(data)
-		return nil
+		return utils.PrintJson(data)
 	}),
 }

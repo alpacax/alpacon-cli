@@ -33,7 +33,6 @@ var revokeDetailCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the revoke request details: %s.", err)
 		}
 
-		utils.PrintJson(requestDetail)
-		return nil
+		return utils.PrintJson(requestDetail)
 	}),
 }

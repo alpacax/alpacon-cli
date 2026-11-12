@@ -49,8 +49,7 @@ names and status and tags as the server stores them.`,
 				if err != nil {
 					return utils.NewExitError("Failed to retrieve the cluster: %s.", err)
 				}
-				utils.PrintJson(body)
-				return nil
+				return utils.PrintJson(body)
 			}
 
 			cluster, err := kubernetes.GetClusterDetail(ac, clusterID)

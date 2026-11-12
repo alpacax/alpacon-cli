@@ -35,8 +35,7 @@ var workspaceAuthenticationCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve authentication settings: %s.", err)
 		}
 
-		utils.PrintJson(authenticationDetail)
-		return nil
+		return utils.PrintJson(authenticationDetail)
 	}),
 }
 
