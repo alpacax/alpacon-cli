@@ -115,22 +115,29 @@ type KubeSessionUser struct {
 // KubeSessionListItem is one entry of the session list. It is apart from
 // KubeSessionDetail so a change in these fields cannot fail the read
 // 'kube credentials' makes on every kubectl call.
+//
+// LatestExec is the newest exec, attach or port-forward stream the session
+// opened, {id, kind}, or null when it opened none; an older server leaves it
+// out. It stays raw so a shape this build does not expect cannot fail the list.
 type KubeSessionListItem struct {
 	ID             string           `json:"id"`
 	Cluster        string           `json:"cluster"`
 	User           *KubeSessionUser `json:"user"`
 	TokenExpiredAt *time.Time       `json:"token_expired_at"`
+	LatestExec     json.RawMessage  `json:"latest_exec"`
 	ClosedAt       *time.Time       `json:"closed_at"`
 }
 
 // KubeSessionAttributes is the 'kube sessions' row. The table shows the expiry
 // in local time; --output json carries it, both raw times and the cluster's ID, all times in UTC.
+// Kind is one of the SessionKind labels or the kind of the session's newest stream.
 type KubeSessionAttributes struct {
 	ID             string          `json:"id" table:"ID"`
 	Cluster        string          `json:"cluster" table:"Cluster"`
 	ClusterID      string          `json:"cluster_id" table:"-"`
 	User           string          `json:"user" table:"User"`
 	Status         string          `json:"status" table:"Status"`
+	Kind           string          `json:"kind" table:"Kind"`
 	ExpiresAt      utils.Timestamp `json:"expires_at" table:"Expires At"`
 	TokenExpiredAt utils.Timestamp `json:"token_expired_at" table:"-"`
 	ClosedAt       utils.Timestamp `json:"closed_at" table:"-"`

@@ -26,6 +26,12 @@ const (
 	SessionStatusClosed = "closed"
 )
 
+// Session kinds sessionKind derives itself; the server stores neither.
+const (
+	sessionKindAPI     = "api"
+	sessionKindUnknown = "unknown"
+)
+
 // SurfaceNotEnabledMessage is what the CLI prints when the workspace does
 // not expose the Kubernetes surface.
 const SurfaceNotEnabledMessage = "Kubernetes support is not enabled on this workspace. If it was enabled recently, run 'alpacon login' again to refresh."
@@ -220,7 +226,7 @@ func GetClusterNames(ac *client.AlpaconClient) (map[string]string, error) {
 // ProjectSessions builds the 'kube sessions' rows, with the expiry shown in loc.
 // A cluster missing from names shows its ID, and the status reads closed_at
 // alone: a session whose token has expired stays open until the server's sweep
-// closes it.
+// closes it. The kind comes from sessionKind.
 func ProjectSessions(sessions []KubeSessionListItem, names map[string]string, loc *time.Location) []KubeSessionAttributes {
 	rows := make([]KubeSessionAttributes, 0, len(sessions))
 	for _, session := range sessions {
@@ -229,6 +235,7 @@ func ProjectSessions(sessions []KubeSessionListItem, names map[string]string, lo
 			Cluster:        session.Cluster,
 			ClusterID:      session.Cluster,
 			Status:         SessionStatusOpen,
+			Kind:           sessionKind(session.LatestExec),
 			TokenExpiredAt: utils.OptionalTimestamp(session.TokenExpiredAt),
 			ClosedAt:       utils.OptionalTimestamp(session.ClosedAt),
 		}
@@ -250,4 +257,22 @@ func ProjectSessions(sessions []KubeSessionListItem, names map[string]string, lo
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// sessionKind labels a session by its newest stream. A latest_exec that is
+// null, or absent as from a server older than the field, means no stream, so
+// the label is sessionKindAPI. A stream whose kind is null, empty or not
+// readable is sessionKindUnknown, never a guessed exec. A kind this build does
+// not know is shown as the server sent it.
+func sessionKind(latestExec json.RawMessage) string {
+	if len(latestExec) == 0 || string(latestExec) == "null" {
+		return sessionKindAPI
+	}
+	var stream struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(latestExec, &stream); err != nil || stream.Kind == "" {
+		return sessionKindUnknown
+	}
+	return stream.Kind
 }

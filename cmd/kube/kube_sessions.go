@@ -26,7 +26,12 @@ cluster you manage, everyone's, which is why each row names its user. Use --all
 to include closed sessions.
 
 A session reads as open until the server closes it, which can be a few minutes
-after its token has expired.`,
+after its token has expired.
+
+The kind column says what the session was used for: api when it opened no
+stream and made only plain Kubernetes API requests, otherwise the kind of its
+newest stream (exec, attach or port_forward), or unknown when the server has
+not recorded that kind.`,
 		Example: `  alpacon kube sessions
   alpacon kube sessions --cluster prod-east
   alpacon kube sessions --all --output json`,
