@@ -65,14 +65,14 @@ var workSessionListCmd = &cobra.Command{
   alpacon work-session ls --user all --status all  # all sessions
   alpacon work-session ls --requester-type agent
   alpacon work-session ls --user 550e8400-e29b-41d4-a716-446655440000 --status active`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if requesterFilter != "" && requesterFilter != "user" && requesterFilter != "agent" {
-			utils.CliUsageErrorEnvelopeWithExit(opList, "Invalid --requester-type %q: must be \"user\" or \"agent\".", requesterFilter)
+			return utils.NewUsageEnvelopeExitError(opList, "Invalid --requester-type %q: must be \"user\" or \"agent\".", requesterFilter)
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opList, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewEnvelopeExitError(opList, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		status := resolveStatusFilter(statusFilter)
@@ -85,18 +85,19 @@ var workSessionListCmd = &cobra.Command{
 			return currentUser.ID, nil
 		})
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opList, err, "Failed to resolve current user: %s.", err)
+			return utils.NewEnvelopeExitError(opList, err, "Failed to resolve current user: %s.", err)
 		}
 
 		sessions, err := wsapi.GetWorkSessionList(ac, status, requesterFilter, assignedUser)
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opList, err, "Failed to retrieve work sessions: %s.", err)
+			return utils.NewEnvelopeExitError(opList, err, "Failed to retrieve work sessions: %s.", err)
 		}
 
 		markActiveFor(ac, sessions)
 
 		utils.PrintTable(sessions)
-	},
+		return nil
+	}),
 }
 
 func init() {

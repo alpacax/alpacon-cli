@@ -55,9 +55,9 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
   alpacon work-session update 550e8400-e29b-41d4-a716-446655440000 --starts-at 2027-01-15T10:00:00Z --expires-at 2027-01-15T12:00:00Z
   alpacon work-session update 550e8400-e29b-41d4-a716-446655440000 --sudo "systemctl restart nginx"
   alpacon work-session update --sudo "tail -f /var/log/nginx/*.log"`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 && !sessionResolvableBeforeClient("") {
-			utils.CliUsageErrorEnvelopeWithExit(opUpdate, noSessionToUpdate)
+			return utils.NewUsageEnvelopeExitError(opUpdate, noSessionToUpdate)
 		}
 
 		var req wsapi.WorkSessionUpdateRequest
@@ -66,7 +66,7 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		if cmd.Flags().Changed("title") {
 			title := strings.TrimSpace(updateTitle)
 			if title == "" {
-				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--title cannot be empty.")
+				return utils.NewUsageEnvelopeExitError(opUpdate, "--title cannot be empty.")
 			}
 			req.Title = title
 			changed++
@@ -74,7 +74,7 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		if cmd.Flags().Changed("description") {
 			description := strings.TrimSpace(updateDescription)
 			if description == "" {
-				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--description cannot be empty.")
+				return utils.NewUsageEnvelopeExitError(opUpdate, "--description cannot be empty.")
 			}
 			req.Description = description
 			changed++
@@ -82,10 +82,10 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		if cmd.Flags().Changed("scope") {
 			scopes := utils.CompactStrings(updateScopes)
 			if len(scopes) == 0 {
-				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--scope must contain at least one scope.")
+				return utils.NewUsageEnvelopeExitError(opUpdate, "--scope must contain at least one scope.")
 			}
 			if err := validateScopeEnum(scopes); err != nil {
-				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "Invalid --scope: %s", err)
+				return utils.NewUsageEnvelopeExitError(opUpdate, "Invalid --scope: %s", err)
 			}
 			req.Scopes = scopes
 			changed++
@@ -93,7 +93,7 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		if cmd.Flags().Changed("starts-at") {
 			val, err := parseRFC3339Flag("--starts-at", updateStartsAt)
 			if err != nil {
-				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "%s.", err)
+				return utils.NewUsageEnvelopeExitError(opUpdate, "%s.", err)
 			}
 			req.StartsAt = val
 			changed++
@@ -101,7 +101,7 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		if cmd.Flags().Changed("expires-at") {
 			val, err := parseRFC3339Flag("--expires-at", updateExpiresAt)
 			if err != nil {
-				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "%s.", err)
+				return utils.NewUsageEnvelopeExitError(opUpdate, "%s.", err)
 			}
 			req.ExpiresAt = val
 			changed++
@@ -110,41 +110,41 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		if cmd.Flags().Changed("server") {
 			serverNames = utils.CompactStrings(updateServers)
 			if len(serverNames) == 0 {
-				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--server must contain at least one valid server name.")
+				return utils.NewUsageEnvelopeExitError(opUpdate, "--server must contain at least one valid server name.")
 			}
 			changed++ // names resolved to IDs below once the client exists
 		}
 		if cmd.Flags().Changed("sudo") {
 			newSudo = buildSudoPolicies(updateSudo, updateSudoReason)
 			if len(newSudo) == 0 {
-				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--sudo must contain at least one command pattern.")
+				return utils.NewUsageEnvelopeExitError(opUpdate, "--sudo must contain at least one command pattern.")
 			}
 			changed++
 		} else if cmd.Flags().Changed("sudo-reason") {
-			utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--sudo-reason has no effect without --sudo.")
+			return utils.NewUsageEnvelopeExitError(opUpdate, "--sudo-reason has no effect without --sudo.")
 		}
 
 		if changed == 0 {
-			utils.CliUsageErrorEnvelopeWithExit(opUpdate, "Nothing to update. Pass at least one of --title, --description, --scope, --server, --starts-at, --expires-at, or --sudo.")
+			return utils.NewUsageEnvelopeExitError(opUpdate, "Nothing to update. Pass at least one of --title, --description, --scope, --server, --starts-at, --expires-at, or --sudo.")
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opUpdate, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewEnvelopeExitError(opUpdate, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		sessionID := updateTargetSession(ac, args)
 		if sessionID == "" {
-			utils.CliUsageErrorEnvelopeWithExit(opUpdate, noSessionToUpdate)
+			return utils.NewUsageEnvelopeExitError(opUpdate, noSessionToUpdate)
 		}
 
 		if len(serverNames) > 0 {
 			if err := validateServerScopes(req.Scopes); err != nil {
-				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "Invalid --scope: %s.", err)
+				return utils.NewUsageEnvelopeExitError(opUpdate, "Invalid --scope: %s.", err)
 			}
 			ids, err := server.ResolveServerNames(ac, serverNames)
 			if err != nil {
-				utils.CliErrorEnvelopeWithExit(opUpdate, err, "%s.", err)
+				return utils.NewEnvelopeExitError(opUpdate, err, "%s.", err)
 			}
 			req.Servers = ids
 		}
@@ -152,21 +152,21 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		updated, err := applyWorkSessionUpdate(ac, sessionID, req, newSudo)
 		if err != nil {
 			if hint := TargetErrorHint(err); hint != "" {
-				utils.CliErrorEnvelopeWithExit(opUpdate, err, "Failed to update work session: %s.", hint)
+				return utils.NewEnvelopeExitError(opUpdate, err, "Failed to update work session: %s.", hint)
 			}
-			utils.CliErrorEnvelopeWithExit(opUpdate, err, "%s.", err)
+			return utils.NewEnvelopeExitError(opUpdate, err, "%s.", err)
 		}
 
 		message := updateSuccessMessage(updated)
 		if utils.OutputFormat == utils.OutputFormatJSON {
-			printWorkSessionMutationJSON(newWorkSessionMutationOutput(opUpdate, message, updated, nil))
-			return
+			return printWorkSessionMutationJSON(newWorkSessionMutationOutput(opUpdate, message, updated, nil))
 		}
 		utils.CliSuccess("%s", message)
 		if len(newSudo) > 0 {
 			utils.CliInfo("Added sudo policies may require approval before they take effect. Re-run your command once the session reflects the change.")
 		}
-	},
+		return nil
+	}),
 }
 
 func updateTargetSession(ac *client.AlpaconClient, args []string) string {

@@ -148,7 +148,7 @@ func completeActiveSessions(t *testing.T, home string) map[string]string {
 	return cfg.Active
 }
 
-func assertCompleteFailure(t *testing.T, format, stdout, stderr string, exitCode int, errorCode, message string) {
+func assertCommandFailure(t *testing.T, format, operation, stdout, stderr string, exitCode int, errorCode, message string) {
 	t.Helper()
 	assert.Empty(t, stdout)
 	if format == utils.OutputFormatJSON {
@@ -157,7 +157,7 @@ func assertCompleteFailure(t *testing.T, format, stdout, stderr string, exitCode
 		assert.False(t, env.OK)
 		assert.Equal(t, exitCode, env.ExitCode)
 		assert.Equal(t, errorCode, env.ErrorCode)
-		assert.Equal(t, opComplete, env.Context.Operation)
+		assert.Equal(t, operation, env.Context.Operation)
 		assert.Contains(t, env.Message, message)
 		return
 	}
@@ -166,10 +166,8 @@ func assertCompleteFailure(t *testing.T, format, stdout, stderr string, exitCode
 }
 
 func TestWorkSessionCompleteCmd_ClearsActiveSessionWhenItIsTheCompletedOne(t *testing.T) {
-	t.Parallel()
 	for _, format := range completeFormats {
 		t.Run(format, func(t *testing.T) {
-			t.Parallel()
 			ts := endSessionServer(t, "ses-1", opComplete, http.StatusOK, `{}`)
 			home := completeHomeWithActiveSessions(t, ts.URL, map[string]string{"test": "ses-1", "other-ws": "ses-1"})
 
@@ -186,10 +184,8 @@ func TestWorkSessionCompleteCmd_ClearsActiveSessionWhenItIsTheCompletedOne(t *te
 }
 
 func TestWorkSessionCompleteCmd_KeepsOtherActiveSession(t *testing.T) {
-	t.Parallel()
 	for _, format := range completeFormats {
 		t.Run(format, func(t *testing.T) {
-			t.Parallel()
 			ts := endSessionServer(t, "ses-1", opComplete, http.StatusOK, `{}`)
 			home := completeHomeWithActiveSessions(t, ts.URL, map[string]string{"test": "ses-other"})
 
@@ -206,10 +202,8 @@ func TestWorkSessionCompleteCmd_KeepsOtherActiveSession(t *testing.T) {
 }
 
 func TestWorkSessionCompleteCmd_ServerRefusalFailsAndKeepsActiveSession(t *testing.T) {
-	t.Parallel()
 	for _, format := range completeFormats {
 		t.Run(format, func(t *testing.T) {
-			t.Parallel()
 			ts := endSessionServer(t, "ses-1", opComplete, http.StatusForbidden,
 				`{"code":"work_session_not_usable","source":"work_session","detail":"not usable"}`)
 			home := completeHomeWithActiveSessions(t, ts.URL, map[string]string{"test": "ses-1"})
@@ -218,7 +212,7 @@ func TestWorkSessionCompleteCmd_ServerRefusalFailsAndKeepsActiveSession(t *testi
 				format, ts.URL, "complete", "ses-1")
 
 			assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
-			assertCompleteFailure(t, format, stdout, stderr, utils.ExitCodeGeneralError,
+			assertCommandFailure(t, format, opComplete, stdout, stderr, utils.ExitCodeGeneralError,
 				"work_session_not_usable", "Failed to complete work session")
 			assert.Contains(t, stderr, "not usable")
 			assert.Equal(t, map[string]string{"test": "ses-1"}, completeActiveSessions(t, home))
@@ -227,33 +221,29 @@ func TestWorkSessionCompleteCmd_ServerRefusalFailsAndKeepsActiveSession(t *testi
 }
 
 func TestWorkSessionCompleteCmd_NotLoggedInReportsConnectionFailure(t *testing.T) {
-	t.Parallel()
 	for _, format := range completeFormats {
 		t.Run(format, func(t *testing.T) {
-			t.Parallel()
 			homeWithoutConfig := t.TempDir()
 
 			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, []string{"HOME=" + homeWithoutConfig},
 				format, "http://127.0.0.1:1", "complete", "ses-1")
 
 			assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
-			assertCompleteFailure(t, format, stdout, stderr, utils.ExitCodeGeneralError,
+			assertCommandFailure(t, format, opComplete, stdout, stderr, utils.ExitCodeGeneralError,
 				utils.ErrorCodeNotLoggedIn, "Connection to Alpacon API failed")
 		})
 	}
 }
 
 func TestWorkSessionCompleteCmd_InvalidSessionIDIsRefusedBeforeAnyRequest(t *testing.T) {
-	t.Parallel()
 	for _, format := range completeFormats {
 		t.Run(format, func(t *testing.T) {
-			t.Parallel()
 			ts := testutil.NewNoRequestServer(t)
 
 			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, nil, format, ts.URL, "complete", "../x")
 
 			assert.Equal(t, utils.ExitCodeUsageError, exitCode)
-			assertCompleteFailure(t, format, stdout, stderr, utils.ExitCodeUsageError,
+			assertCommandFailure(t, format, opComplete, stdout, stderr, utils.ExitCodeUsageError,
 				utils.ErrorCodeUsage, "must be a single path segment")
 		})
 	}

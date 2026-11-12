@@ -34,53 +34,55 @@ reason once the request settles.`,
 	Args: cobra.ExactArgs(1),
 	Example: `  alpacon work-session extend 550e8400-e29b-41d4-a716-446655440000 --expires-in 2h --reason "customer escalation, still triaging"
   alpacon work-session extend 550e8400-e29b-41d4-a716-446655440000 --expires-at 2026-05-09T10:00:00Z --reason "customer escalation, still triaging"`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		id := args[0]
 		expiresAtVal, err := parseExpiryFlag(extendExpiresIn, extendExpiresAt)
 		if err != nil {
 			if extendExpiresIn == "" && extendExpiresAt == "" {
 				if !utils.IsInteractiveShell() {
-					utils.CliUsageErrorEnvelopeWithExit(opExtend, "Non-interactive mode requires --expires-in or --expires-at.")
+					return utils.NewUsageEnvelopeExitError(opExtend, "Non-interactive mode requires --expires-in or --expires-at.")
 				}
-				extendExpiresIn = utils.PromptForRequiredInput("Expires in (e.g. 1h, 2h, 4h): ")
+				if extendExpiresIn, err = utils.ReadRequiredInput("Expires in (e.g. 1h, 2h, 4h): "); err != nil {
+					return err
+				}
 				expiresAtVal, err = parseExpiryFlag(extendExpiresIn, "")
 				if err != nil {
-					utils.CliUsageErrorEnvelopeWithExit(opExtend, "Invalid expiry: %s.", err)
+					return utils.NewUsageEnvelopeExitError(opExtend, "Invalid expiry: %s.", err)
 				}
 			} else {
-				utils.CliUsageErrorEnvelopeWithExit(opExtend, "Invalid expiry: %s.", err)
+				return utils.NewUsageEnvelopeExitError(opExtend, "Invalid expiry: %s.", err)
 			}
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opExtend, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewEnvelopeExitError(opExtend, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		req := wsapi.WorkSessionExtendRequest{ExpiresAt: expiresAtVal, Reason: strings.TrimSpace(extendReason)}
 		session, status, err := wsapi.ExtendWorkSession(ac, id, req)
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opExtend, err, "%s", extendErrorMessage(id, err))
+			return utils.NewEnvelopeExitError(opExtend, err, "%s", extendErrorMessage(id, err))
 		}
 
 		// Branch on the status, not PendingExtensionRequest: a 200 body can still carry a stale
 		// request.
 		if status == http.StatusAccepted {
 			printExtendPending(id, session.PendingExtensionRequest, session.ConsoleURL, ac)
-			os.Exit(utils.ExitCodePendingApproval)
+			return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 		}
 
-		printExtendSuccess(id, formatMutationExpiresAt(session.ExpiresAt))
-	},
+		return printExtendSuccess(id, formatMutationExpiresAt(session.ExpiresAt))
+	}),
 }
 
-func printExtendSuccess(id, expiresAt string) {
+func printExtendSuccess(id, expiresAt string) error {
 	output := newWorkSessionExtendOutput(id, expiresAt)
 	if utils.OutputFormat == utils.OutputFormatJSON {
-		printWorkSessionMutationJSON(output)
-		return
+		return printWorkSessionMutationJSON(output)
 	}
 	utils.CliSuccess("%s", output.Message)
+	return nil
 }
 
 // printExtendPending reports a 202, which queued the extension instead of applying it; req may be

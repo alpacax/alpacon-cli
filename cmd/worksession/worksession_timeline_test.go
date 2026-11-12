@@ -282,9 +282,11 @@ func TestPrintRecordingsSectionTo_StripsControlSequences(t *testing.T) {
 // too, so the JSON goes out escaped rather than verbatim.
 func TestOutputTimelineJSON_EscapesFormatChars(t *testing.T) {
 	rows := []wsapi.TimelineAttributes{{Server: "prod\u202edb"}}
+	var err error
 	out := testutil.CaptureStdout(t, func() {
-		outputTimelineJSON(rows, nil, "ses-1", nil)
+		err = outputTimelineJSON(rows, nil, "ses-1", nil)
 	})
+	require.NoError(t, err)
 	assert.NotContains(t, out, "\u202e")
 	assert.Contains(t, out, `\u202e`)
 }
@@ -292,18 +294,22 @@ func TestOutputTimelineJSON_EscapesFormatChars(t *testing.T) {
 // outputTimelineJSON must emit recordings as [] not null when the session has no
 // terminal.
 func TestOutputTimelineJSON_RecordingsEmptyArrayNotNull(t *testing.T) {
+	var err error
 	out := testutil.CaptureStdout(t, func() {
-		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, "ses-1", nil)
+		err = outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, "ses-1", nil)
 	})
+	require.NoError(t, err)
 	var result map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal([]byte(out), &result))
 	assert.Equal(t, "[]", string(result["recordings"]), "recordings must be [] not null")
 }
 
 func TestOutputTimelineJSON_BothKeysPresent(t *testing.T) {
+	var err error
 	out := testutil.CaptureStdout(t, func() {
-		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, "ses-1", nil)
+		err = outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, "ses-1", nil)
 	})
+	require.NoError(t, err)
 	var keys map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal([]byte(out), &keys))
 	_, hasTimeline := keys["timeline"]
@@ -382,7 +388,6 @@ func timelinePagingServer(t *testing.T) (*httptest.Server, func() []*url.URL) {
 // `next`, asks every page to leave the recordings out, reads no recording, and
 // drops the recording an old server embeds anyway.
 func TestTimelineDefaultWalksTheCursorAndFetchesNoRecording(t *testing.T) {
-	t.Parallel()
 	ts, requests := timelinePagingServer(t)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, "timeline", "ses-1")
@@ -406,7 +411,6 @@ func TestTimelineDefaultWalksTheCursorAndFetchesNoRecording(t *testing.T) {
 }
 
 func TestTimelineRecordingsSectionReadsTheChunkCount(t *testing.T) {
-	t.Parallel()
 	ts, _ := timelinePagingServer(t)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, "timeline", "ses-1")
@@ -442,7 +446,6 @@ func TestTimelineRecordingsSectionReadsTheChunkCount(t *testing.T) {
 }
 
 func TestTimelineJSONRecordingsReadTheChunkCount(t *testing.T) {
-	t.Parallel()
 	ts, _ := timelinePagingServer(t)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, "timeline", "ses-1")
@@ -467,7 +470,6 @@ func TestTimelineJSONRecordingsReadTheChunkCount(t *testing.T) {
 }
 
 func TestTimelineNoRecordsHidesTheTableSection(t *testing.T) {
-	t.Parallel()
 	ts, _ := timelinePagingServer(t)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, "timeline", "ses-1", "--no-records")
@@ -479,7 +481,6 @@ func TestTimelineNoRecordsHidesTheTableSection(t *testing.T) {
 }
 
 func TestTimelineNoRecordsGivesAnEmptyJSONRecordingsList(t *testing.T) {
-	t.Parallel()
 	ts, _ := timelinePagingServer(t)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, "timeline", "ses-1", "--no-records")
@@ -495,7 +496,6 @@ func TestTimelineNoRecordsGivesAnEmptyJSONRecordingsList(t *testing.T) {
 
 // The pages read before a failure are not the timeline: the command fails and prints none of them.
 func TestTimelineFailsWhenALaterPageFails(t *testing.T) {
-	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {

@@ -16,23 +16,24 @@ var workSessionCurrentCmd = &cobra.Command{
 	Use:     "current",
 	Short:   "Show the active work-session in this workspace",
 	Example: `  alpacon work-session current`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		// Checked before any client exists so an unset 'current' neither logs in nor refreshes a token.
 		if uuid, err := config.GetActiveWorkSession(); err != nil {
-			utils.CliErrorEnvelopeWithExit(opCurrent, err, "%s", err)
+			return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
 		} else if uuid == "" {
 			printNoActiveSession()
-			return
+			return nil
 		}
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			err = fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
-			utils.CliErrorEnvelopeWithExit(opCurrent, err, "%s", err)
+			return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
 		}
 		if err := printCurrent(ac); err != nil {
-			utils.CliErrorEnvelopeWithExit(opCurrent, err, "%s", err)
+			return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
 		}
-	},
+		return nil
+	}),
 }
 
 // RunCurrent returns the active work-session UUID and its server-side details.

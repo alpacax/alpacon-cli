@@ -124,9 +124,11 @@ func TestExtendCommand_SendsReason(t *testing.T) {
 		extendReason = ""
 	})
 
+	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		workSessionExtendCmd.Run(workSessionExtendCmd, []string{"ses-1"})
+		runErr = workSessionExtendCmd.RunE(workSessionExtendCmd, []string{"ses-1"})
 	})
+	require.NoError(t, runErr)
 	assert.Empty(t, stderr)
 
 	var got struct {
@@ -141,10 +143,8 @@ func TestExtendCommand_SendsReason(t *testing.T) {
 }
 
 // The 202 path end to end: the CLI reports pending, exits 4, and puts the requested expiry and the
-// request's deadline in the envelope's context. It runs as a subprocess because the path calls
-// os.Exit.
+// request's deadline in the envelope's context.
 func TestExtendCommand_PendingApproval(t *testing.T) {
-	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodPost || r.URL.Path != "/api/work-sessions/sessions/ses-1/extend/" {
@@ -245,9 +245,11 @@ func TestExtendCommand_StalePendingOn200_IsSuccess(t *testing.T) {
 		extendExpiresAt = ""
 	})
 
+	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		workSessionExtendCmd.Run(workSessionExtendCmd, []string{"ses-1"})
+		runErr = workSessionExtendCmd.RunE(workSessionExtendCmd, []string{"ses-1"})
 	})
+	require.NoError(t, runErr)
 	assert.Empty(t, stderr)
 
 	var got struct {
@@ -263,7 +265,6 @@ func TestExtendCommand_StalePendingOn200_IsSuccess(t *testing.T) {
 // The server sends no human detail on work_session_extension_reason_required, so the readable text
 // must come from extendErrorMessage rather than the generic fallback.
 func TestExtendCommand_ReasonRequired_MapsToReadableMessage(t *testing.T) {
-	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/ses-1/extend/" {
@@ -290,7 +291,6 @@ func TestExtendCommand_ReasonRequired_MapsToReadableMessage(t *testing.T) {
 
 // work_session_extension_already_pending likewise carries no human detail from the server.
 func TestExtendCommand_AlreadyPending_MapsToReadableMessage(t *testing.T) {
-	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/ses-1/extend/" {

@@ -113,11 +113,12 @@ func activeWorkSessionSetMessage(successPrefix, id, desc string) string {
 		utils.SanitizeTerminalText(successPrefix), utils.SanitizeTerminalText(id), suffix)
 }
 
-func printWorkSessionMutationJSON(output workSessionMutationOutput) {
+func printWorkSessionMutationJSON(output workSessionMutationOutput) error {
 	if err := utils.PrintJSONValue(os.Stdout, output); err != nil {
 		// Keeps stderr structured even though marshalling failed.
-		utils.CliErrorEnvelopeWithExit(output.Operation, err, "Failed to marshal work-session result: %s", err)
+		return utils.NewEnvelopeExitError(output.Operation, err, "Failed to marshal work-session result: %s", err)
 	}
+	return nil
 }
 
 func formatAdjustments(adj *wsapi.Adjustments) string {

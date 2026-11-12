@@ -644,9 +644,11 @@ func TestWorkSessionCreateWaitPrintsAdvisories(t *testing.T) {
 	expiresAt = "2026-06-01T12:00:00Z"
 	wait = true
 
+	var runErr error
 	_, stderr := testutil.CaptureOutput(t, func() {
-		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
+		runErr = workSessionCreateCmd.RunE(workSessionCreateCmd, nil)
 	})
+	require.NoError(t, runErr)
 
 	assert.Contains(t, stderr, "approved")
 	assert.Contains(t, stderr, "Approver adjusted your request")
@@ -679,9 +681,11 @@ func TestWorkSessionCreateAutoApprovedPrintsAdvisories(t *testing.T) {
 	createServers = []string{"prod"}
 	expiresAt = "2026-06-01T12:00:00Z"
 
+	var runErr error
 	_, stderr := testutil.CaptureOutput(t, func() {
-		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
+		runErr = workSessionCreateCmd.RunE(workSessionCreateCmd, nil)
 	})
+	require.NoError(t, runErr)
 
 	assert.Contains(t, stderr, "Approver adjusted your request")
 	assert.Contains(t, stderr, "command, websh → command")
@@ -717,9 +721,11 @@ func TestWorkSessionCreateWaitJSONOutputIncludesAdjustments(t *testing.T) {
 	expiresAt = "2026-06-01T12:00:00Z"
 	wait = true
 
+	var runErr error
 	stdout, _ := testutil.CaptureOutput(t, func() {
-		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
+		runErr = workSessionCreateCmd.RunE(workSessionCreateCmd, nil)
 	})
+	require.NoError(t, runErr)
 
 	var got struct {
 		WorkSession struct {
@@ -896,7 +902,6 @@ func TestPollForApproval_PlainTimeoutCarriesNoHint(t *testing.T) {
 }
 
 func TestWorkSessionCreateUseWithoutAUsableLoginExitsOne(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name        string
 		config      string
@@ -911,7 +916,6 @@ func TestWorkSessionCreateUseWithoutAUsableLoginExitsOne(t *testing.T) {
 	for _, tt := range tests {
 		for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 			t.Run(tt.name+" "+outputFormat, func(t *testing.T) {
-				t.Parallel()
 				home := t.TempDir()
 				if tt.config != "" {
 					require.NoError(t, os.Mkdir(filepath.Join(home, ".alpacon"), 0o700))
@@ -942,7 +946,6 @@ func TestWorkSessionCreateUseWithoutAUsableLoginExitsOne(t *testing.T) {
 }
 
 func TestWorkSessionCreateUseReportsABadScopeBeforeAMissingLogin(t *testing.T) {
-	t.Parallel()
 
 	stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, append(agentHelperEnv(), "HOME="+t.TempDir()), utils.OutputFormatJSON,
 		"http://127.0.0.1:1", createArgs("--use", "--scope", "bogus")...)
@@ -956,10 +959,8 @@ func TestWorkSessionCreateUseReportsABadScopeBeforeAMissingLogin(t *testing.T) {
 }
 
 func TestWorkSessionCreateUseOnAPendingSessionReportsPendingApproval(t *testing.T) {
-	t.Parallel()
 	for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 		t.Run(outputFormat, func(t *testing.T) {
-			t.Parallel()
 			ts := newCreateServerAnswering(t, "pending", "pending")
 
 			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), outputFormat, ts.URL,
@@ -1003,7 +1004,6 @@ func TestWorkSessionCreateUseOnAPendingSessionReportsPendingApproval(t *testing.
 // The session outlives a refusal, so every path that reports one names the session and only the
 // follow-ups it can still take: not 'work-session use' (see TestRunUseSessionRefusesASettledSession).
 func TestWorkSessionCreateSettledRefusalNamesTheSession(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name         string
 		createStatus string
@@ -1017,7 +1017,6 @@ func TestWorkSessionCreateSettledRefusalNamesTheSession(t *testing.T) {
 	for _, tt := range tests {
 		for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 			t.Run(tt.name+" "+outputFormat, func(t *testing.T) {
-				t.Parallel()
 				ts := newCreateServerAnswering(t, tt.createStatus, tt.pollStatus)
 
 				stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), outputFormat, ts.URL, tt.args...)
@@ -1050,7 +1049,6 @@ func TestWorkSessionCreateSettledRefusalNamesTheSession(t *testing.T) {
 }
 
 func TestWorkSessionCreateWithoutUseReportsASettledSessionAsCreated(t *testing.T) {
-	t.Parallel()
 	ts := newCreateServerAnswering(t, "rejected", "rejected")
 
 	stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), utils.OutputFormatTable, ts.URL, createArgs()...)
@@ -1062,10 +1060,8 @@ func TestWorkSessionCreateWithoutUseReportsASettledSessionAsCreated(t *testing.T
 }
 
 func TestWorkSessionCreateUseOnAnUnknownStatusExitsGeneralError(t *testing.T) {
-	t.Parallel()
 	for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 		t.Run(outputFormat, func(t *testing.T) {
-			t.Parallel()
 			ts := newCreateServerAnswering(t, "paused", "paused")
 
 			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), outputFormat, ts.URL,
