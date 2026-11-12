@@ -1,11 +1,12 @@
 package acl
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -92,7 +93,6 @@ func TestParseEntryFile_NullGroupname(t *testing.T) {
 }
 
 func TestParseEntryFile_NonStringAccountFields(t *testing.T) {
-	t.Parallel()
 	for _, tt := range []struct {
 		name, field string
 		value       any
@@ -103,7 +103,6 @@ func TestParseEntryFile_NonStringAccountFields(t *testing.T) {
 		{name: "object groupname", field: "groupname", value: map[string]any{}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			data := fileOf(t, fileItem(nil), fileItem(map[string]any{tt.field: tt.value}))
 			entries, err := parseEntryFile(data)
 			require.ErrorContains(t, err, "entry 1: "+tt.field+":")
@@ -112,16 +111,20 @@ func TestParseEntryFile_NonStringAccountFields(t *testing.T) {
 
 			file := t.TempDir() + "/entries.json"
 			require.NoError(t, os.WriteFile(file, data, 0600))
-			flags, err := json.Marshal([]string{"--file", file})
-			require.NoError(t, err)
-			child := exec.Command(os.Args[0], "-test.run=^TestEntryAddApplicationAccountHelper$")
-			child.Env = append(os.Environ(), "ALPACON_ACCOUNT_HELPER="+string(flags))
-			_, err = child.Output()
-			var exitErr *exec.ExitError
+			resetEntryAddFlags(t)
+			require.NoError(t, entryAddCmd.Flags().Parse([]string{"--file", file}))
+			oldFormat := utils.OutputFormat
+			utils.OutputFormat = utils.OutputFormatJSON
+			t.Cleanup(func() { utils.OutputFormat = oldFormat })
+
+			err = runEntryAdd(entryAddCmd, nil)
+			var exitErr *utils.ExitError
 			require.ErrorAs(t, err, &exitErr)
-			assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode())
+			assert.Equal(t, utils.ExitCodeUsageError, exitErr.Code)
+			var stderr bytes.Buffer
+			utils.FprintExitError(&stderr, exitErr)
 			var envelope utils.JSONErrorEnvelope[map[string]any]
-			require.NoError(t, json.Unmarshal(exitErr.Stderr, &envelope))
+			require.NoError(t, json.Unmarshal(stderr.Bytes(), &envelope))
 			assert.Equal(t, utils.ErrorCodeUsage, envelope.ErrorCode)
 			assert.Equal(t, utils.ExitCodeUsageError, envelope.ExitCode)
 			assert.Contains(t, envelope.Message, "entry 1: "+tt.field+":")
@@ -264,4 +267,67 @@ func TestParseEntryFile_DefaultApplicationAccount(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, entries[0].Username)
 	assert.True(t, entries[0].usernameOmitted, "an absent username must default to the application account")
+}
+
+func TestEntryRemove_RequiresConfirmationInProcess(t *testing.T) {
+	stdin, err := os.CreateTemp(t.TempDir(), "stdin")
+	require.NoError(t, err)
+	previousStdin := os.Stdin
+	os.Stdin = stdin
+	t.Cleanup(func() { os.Stdin = previousStdin; _ = stdin.Close() })
+	for _, count := range []int{1, 2} {
+		t.Run(fmt.Sprintf("%d entries", count), func(t *testing.T) {
+			args := []string{"550e8400-e29b-41d4-a716-446655440000", "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47"}[:count]
+			previous := utils.OutputFormat
+			utils.OutputFormat = utils.OutputFormatJSON
+			t.Cleanup(func() { utils.OutputFormat = previous })
+
+			err := entryRemoveCmd.RunE(entryRemoveCmd, args)
+
+			var exitErr *utils.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, utils.ExitCodeUsageError, exitErr.Code)
+			var output bytes.Buffer
+			utils.FprintExitError(&output, exitErr)
+			var envelope utils.JSONErrorEnvelope[map[string]any]
+			require.NoError(t, json.Unmarshal(output.Bytes(), &envelope))
+			assert.Equal(t, utils.ErrorCodeConfirmationRequired, envelope.ErrorCode)
+		})
+	}
+}
+
+func TestAdminRevoke_RequiresConfirmationBeforeDeleting(t *testing.T) {
+	installSeams(t, &sessionSeams{cfg: loggedIn("cached"), env: ledgerEnv()})
+	deleted := false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/acl/me/":
+			_, _ = fmt.Fprint(w, adminOfWorkspace)
+		case "/api/acl/admins/":
+			_, _ = fmt.Fprint(w, `{"count":1,"results":[{"id":"550e8400-e29b-41d4-a716-446655440000","subject":"alice"}]}`)
+		default:
+			deleted = r.Method == http.MethodDelete
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+	t.Setenv(client.SignerURLEnvVar, ts.URL)
+	stdin, err := os.CreateTemp(t.TempDir(), "stdin")
+	require.NoError(t, err)
+	previousStdin, previousFormat := os.Stdin, utils.OutputFormat
+	os.Stdin, utils.OutputFormat = stdin, utils.OutputFormatJSON
+	t.Cleanup(func() { os.Stdin, utils.OutputFormat = previousStdin, previousFormat; _ = stdin.Close() })
+
+	err = adminRevokeCmd.RunE(adminRevokeCmd, []string{"alice"})
+
+	var exitErr *utils.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, utils.ExitCodeUsageError, exitErr.Code)
+	assert.False(t, deleted, "confirmation must precede the delete request")
+	var output bytes.Buffer
+	utils.FprintExitError(&output, exitErr)
+	var envelope utils.JSONErrorEnvelope[map[string]any]
+	require.NoError(t, json.Unmarshal(output.Bytes(), &envelope))
+	assert.Equal(t, utils.ErrorCodeConfirmationRequired, envelope.ErrorCode)
 }

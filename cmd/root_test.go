@@ -125,7 +125,6 @@ func TestRootRegistersAPICommand(t *testing.T) {
 }
 
 func TestRootVersionFlagBehavesLikeTheVersionCommand(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name  string
 		cmd   []string
@@ -144,12 +143,9 @@ func TestRootVersionFlagBehavesLikeTheVersionCommand(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			run := func(t *testing.T, args []string) (string, string, int) {
 				t.Helper()
-				return runHelperProcess(t, "TestUpdateCommandHelperProcess", "update-helper", args,
-					"GO_WANT_UPDATE_HELPER=1", homeEnvVar()+"="+t.TempDir(),
-					"ALPACON_TEST_LATEST_RELEASE=1.4.0", "ALPACON_TEST_CURRENT_VERSION=1.3.0")
+				return runVersionCommand(t, args, false)
 			}
 
 			wantOut, wantErr, wantCode := run(t, tc.cmd)
@@ -157,7 +153,6 @@ func TestRootVersionFlagBehavesLikeTheVersionCommand(t *testing.T) {
 
 			for name, flag := range tc.flags {
 				t.Run(name, func(t *testing.T) {
-					t.Parallel()
 					gotOut, gotErr, gotCode := run(t, flag)
 
 					assert.Equal(t, wantCode, gotCode)

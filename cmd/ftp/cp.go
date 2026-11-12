@@ -59,7 +59,7 @@ This is client guidance; personal-token enforcement depends on the server versio
 
   # Attach the transfer to a work-session
   alpacon cp /local/file.txt my-server:/remote/path/ --work-session 550e8400-e29b-41d4-a716-446655440000`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		username, _ := cmd.Flags().GetString("username")
 		groupname, _ := cmd.Flags().GetString("groupname")
 		recursive, _ := cmd.Flags().GetBool("recursive")
@@ -68,7 +68,7 @@ This is client guidance; personal-token enforcement depends on the server versio
 		allowOverwrite := !noOverwrite
 
 		if len(args) < 2 {
-			utils.CliUsageErrorWithExit("You must specify at least two arguments.\n\n" +
+			return utils.NewUsageExitError("You must specify at least two arguments.\n\n" +
 				"Usage examples:\n" +
 				"  • Upload file to server:\n" +
 				"    alpacon cp /local/file.txt server:/remote/path/\n" +
@@ -77,50 +77,56 @@ This is client guidance; personal-token enforcement depends on the server versio
 				"  • Upload folder (recursive):\n" +
 				"    alpacon cp -r /local/folder server:/remote/path/\n\n" +
 				"Note: Remote paths must include server name (e.g., myserver:/path/)")
-			return
 		}
 
 		plan, err := planCopy(args, username)
 		if err != nil {
-			utils.CliUsageErrorWithExit("%v", err)
-			return
+			return utils.NewUsageExitError("%v", err)
 		}
 		username = plan.username
 		sources, dest := plan.sources, plan.dest
 
 		if err := plan.validate(); err != nil {
-			utils.CliUsageErrorWithExit("%s", err.Error())
-			return
+			return utils.NewUsageExitError("%s", err.Error())
 		}
 
 		authMethod := config.ResolveAuthMethod()
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s.\n\n"+
+			return utils.NewExitError("Connection to Alpacon API failed: %s.\n\n"+
 				"Try these solutions:\n"+
 				"  • Re-login with 'alpacon login'\n"+
 				"  • Check your internet connection\n"+
 				"  • Verify the API endpoint is accessible", err)
-			return
 		}
 
-		workSessionID := worksession.ResolveOrExit(alpaconClient, flagWorkSession)
+		workSessionID, err := worksession.Resolve(alpaconClient, flagWorkSession)
+		if err != nil {
+			return utils.NewExitError("%s", err)
+		}
 
 		if plan.isUpload() {
 			serverName, err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
 			if err != nil {
+				if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+					return exitErr
+				}
 				err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(alpaconClient, func() error {
 					_, err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
 					return err
 				}))
 
 				if err != nil {
+					if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+						return exitErr
+					}
 					err = utils.WithSignalFields(err, localsignal.Fields{Server: serverName, Account: username, Session: workSessionID}, alpaconClient)
 					utils.SignalRefusal(err)
-					utils.HandleWorkSessionError(err, utils.OperationWebFTP, serverName, authMethod, workSessionID)
-					utils.CliErrorWithExit("Failed to upload to '%s': %s", dest, err)
-					return
+					if exitErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, serverName, authMethod, workSessionID); exitErr != nil {
+						return exitErr
+					}
+					return utils.NewExitError("Failed to upload to '%s': %s", dest, err)
 				}
 			}
 			wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
@@ -128,39 +134,50 @@ This is client guidance; personal-token enforcement depends on the server versio
 		} else if plan.isDownload() {
 			serverName, err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
 			if err != nil {
+				if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+					return exitErr
+				}
 				err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(alpaconClient, func() error {
 					_, err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
 					return err
 				}))
 
 				if err != nil {
+					if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+						return exitErr
+					}
 					err = utils.WithSignalFields(err, localsignal.Fields{Server: serverName, Account: username, Session: workSessionID}, alpaconClient)
 					utils.SignalRefusal(err)
-					utils.HandleWorkSessionError(err, utils.OperationWebFTP, serverName, authMethod, workSessionID)
+					if exitErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, serverName, authMethod, workSessionID); exitErr != nil {
+						return exitErr
+					}
 					wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
-					reportDownloadRejection(err, wrappedSrc)
-					utils.CliErrorWithExit("Failed to download from '%s': %s", wrappedSrc, err)
-					return
+					if exitErr := reportDownloadRejection(err, wrappedSrc); exitErr != nil {
+						return exitErr
+					}
+					return utils.NewExitError("Failed to download from '%s': %s", wrappedSrc, err)
 				}
 			}
 			wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
 			utils.CliSuccess("Downloaded %s to %s", wrappedSrc, dest)
 		} else {
-			utils.CliUsageErrorWithExit("Invalid combination of source and destination paths.\n\n" +
+			return utils.NewUsageExitError("Invalid combination of source and destination paths.\n\n" +
 				"Valid operations:\n" +
 				"  • Upload (local → remote): alpacon cp /local/file server:/remote/path/\n" +
 				"  • Download (remote → local): alpacon cp server:/remote/file /local/path/\n\n" +
 				"Note: Remote paths must be in format 'servername:/path' (e.g., myserver:/tmp/file.txt)")
 		}
-	},
+		return nil
+	}),
 }
 
-// reportDownloadRejection exits on a refused transfer command and returns on any other error.
-func reportDownloadRejection(err error, source string) {
+// reportDownloadRejection preserves a refused transfer command's exit code and envelope.
+func reportDownloadRejection(err error, source string) error {
 	var rejected *event.CommandRejectedError
 	if errors.As(err, &rejected) {
-		utils.CliErrorEnvelopeWithExitCode(rejected.ExitCode(), "download", err, "Failed to download from '%s': %s", source, rejected)
+		return utils.NewEnvelopeExitErrorWithCode(rejected.ExitCode(), "download", err, "Failed to download from '%s': %s", source, rejected)
 	}
+	return nil
 }
 
 func init() {
@@ -303,14 +320,14 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 	if err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "no such file or directory") {
-			utils.CliErrorWithExit("Source file(s) not found: %s\n\n"+
+			return serverName, utils.NewExitError("Source file(s) not found: %s\n\n"+
 				"Please check:\n"+
 				"  • File paths are correct and files exist\n"+
 				"  • You have read permissions for the source files\n"+
 				"  • For folders, use -r flag: alpacon cp -r /local/folder %s",
 				strings.Join(src, ", "), dest)
 		} else if wantsPermissionAdvice(err) {
-			utils.CliErrorWithExit("Permission denied uploading to '%s' on server '%s'.\n\n"+
+			return serverName, utils.NewExitError("Permission denied uploading to '%s' on server '%s'.\n\n"+
 				"Try these solutions:\n"+
 				"  • Upload as root: alpacon cp -u root %s %s\n"+
 				"  • Upload to writable location: alpacon cp %s %s:/tmp/\n"+
@@ -318,7 +335,7 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 				"  • Ensure destination directory exists",
 				remotePath, serverName, strings.Join(src, " "), dest, strings.Join(src, " "), serverName)
 		} else if strings.Contains(errStr, "server not found") || strings.Contains(errStr, "unknown host") {
-			utils.CliErrorWithExit("Server '%s' not found.\n\n"+
+			return serverName, utils.NewExitError("Server '%s' not found.\n\n"+
 				"Please check:\n"+
 				"  • Server name is spelled correctly\n"+
 				"  • Server is registered: alpacon server ls\n"+
@@ -353,7 +370,7 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 	if err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "no such file or directory") || strings.Contains(errStr, "file not found") {
-			utils.CliErrorWithExit("Source file not found: '%s' on server '%s'.\n\n"+
+			return serverName, utils.NewExitError("Source file not found: '%s' on server '%s'.\n\n"+
 				"Please check:\n"+
 				"  • File path is correct: %s\n"+
 				"  • File exists: alpacon exec %s 'ls -la %s'\n"+
@@ -361,20 +378,20 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 				"  • For folders, use -r flag: alpacon cp -r %s %s",
 				remotePath, serverName, remotePath, serverName, remoteDirHint(client, serverName, remotePath), srcDisplay, dest)
 		} else if wantsPermissionAdvice(err) {
-			utils.CliErrorWithExit("Permission denied downloading '%s' from server '%s'.\n\n"+
+			return serverName, utils.NewExitError("Permission denied downloading '%s' from server '%s'.\n\n"+
 				"Try these solutions:\n"+
 				"  • Download as root: alpacon cp -u root %s %s\n"+
 				"  • Download as file owner: alpacon cp -u OWNER %s %s\n"+
 				"  • Check file permissions: alpacon exec %s 'ls -la %s'",
 				remotePath, serverName, srcDisplay, dest, srcDisplay, dest, serverName, remotePath)
 		} else if strings.Contains(errStr, "server not found") || strings.Contains(errStr, "unknown host") {
-			utils.CliErrorWithExit("Server '%s' not found.\n\n"+
+			return serverName, utils.NewExitError("Server '%s' not found.\n\n"+
 				"Please check:\n"+
 				"  • Server name is spelled correctly\n"+
 				"  • Server is registered: alpacon server ls\n"+
 				"  • You have access to this server", serverName)
 		} else if strings.Contains(errStr, "download failed") && utils.RefusalHint(err) == "" {
-			utils.CliErrorWithExit("Download failed from server '%s': %s\n\n"+
+			return serverName, utils.NewExitError("Download failed from server '%s': %s\n\n"+
 				"This might be due to:\n"+
 				"  • Network connectivity issues\n"+
 				"  • Server timeout (file too large)\n"+

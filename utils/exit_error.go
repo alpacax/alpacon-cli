@@ -57,6 +57,13 @@ func NewExitErrorWithCode(code int, msg string, args ...any) error {
 	return newExitError(code, false, msg, args)
 }
 
+// NewExitErrorWithErrorCode is the failure CliErrorWithCode reports with a named JSON error code.
+func NewExitErrorWithErrorCode(exitCode int, errorCode, msg string, args ...any) error {
+	e := newExitError(exitCode, exitCode == ExitCodeGeneralError, msg, args)
+	e.errorCode = errorCode
+	return e
+}
+
 // NewSilentExitError exits with code and prints nothing, for a command that wrote its own failure line.
 func NewSilentExitError(code int) error {
 	return &ExitError{Code: code, silent: true}

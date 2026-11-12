@@ -37,12 +37,12 @@ var (
 	now                = time.Now
 )
 
-func openLedger() *ledgerSession {
+func openLedger() (*ledgerSession, error) {
 	session, err := newLedgerSession()
 	if err != nil {
-		utils.CliErrorWithExit("%s", sentence(upperFirst(err.Error())))
+		return nil, utils.NewExitError("%s", sentence(upperFirst(err.Error())))
 	}
-	return session
+	return session, nil
 }
 
 // newLedgerSession checks the workspace uses the ledger, authorizes the signer
@@ -183,9 +183,9 @@ func (s *ledgerSession) workspaceAPI() (*client.AlpaconClient, error) {
 	return ac, nil
 }
 
-func (s *ledgerSession) fail(action string, err error) {
+func (s *ledgerSession) fail(action string, err error) error {
 	s.dropRefusedToken(err)
-	utils.CliErrorWithExit("%s", s.errorMessage(action, err))
+	return utils.NewExitError("%s", s.errorMessage(action, err))
 }
 
 // dropRefusedToken removes the cached signer token after the signer answered

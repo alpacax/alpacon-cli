@@ -13,27 +13,27 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Display the current CLI version",
 	Long:  "Displays the current version of the CLI and checks if there is an available update.",
-	Run: func(cmd *cobra.Command, args []string) {
-		runVersion()
-	},
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+		return runVersion()
+	}),
 }
 
-func runVersion() {
+func runVersion() error {
 	if utils.OutputFormat == utils.OutputFormatJSON {
-		printVersionJSON()
-		return
+		return printVersionJSON()
 	}
 	utils.CliInfo("Current version: %s", utils.Version)
 	release, err := selfupdate.LatestRelease(selfupdate.DefaultReleaseAPIURL)
 	if err != nil {
 		utils.CliWarning("Could not check for updates: %s", err)
-		return
+		return nil
 	}
 	if selfupdate.IsOutdated(utils.Version, release.Version) {
 		utils.CliWarning("%s", upgradeNotice(utils.Version, release.Version, release.HTMLURL))
-		return
+		return nil
 	}
 	utils.CliInfo("You are up to date!")
+	return nil
 }
 
 // A released build is sent to 'alpacon update' whoever owns it: asking which
@@ -65,12 +65,13 @@ func newVersionOutput(current string, release *selfupdate.Release) versionOutput
 }
 
 // Exits 0 even when the lookup fails; scripts branch on 'alpacon update --check'.
-func printVersionJSON() {
+func printVersionJSON() error {
 	release, err := selfupdate.LatestRelease(selfupdate.DefaultReleaseAPIURL)
 	if err != nil {
 		utils.CliWarning("Could not check for updates: %s", err)
 	}
 	if err := utils.PrintJSONValue(os.Stdout, newVersionOutput(utils.Version, release)); err != nil {
-		utils.CliErrorWithExit("Failed to print the version: %s", err)
+		return utils.NewExitError("Failed to print the version: %s", err)
 	}
+	return nil
 }

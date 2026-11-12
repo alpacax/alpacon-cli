@@ -41,26 +41,29 @@ resolved.`,
   alpacon acl entry ls --token deploy-bot
   alpacon acl entry ls --output json`,
 	Args: cobra.NoArgs,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		tokenRef, _ := cmd.Flags().GetString("token")
 
-		session := openLedger()
+		session, err := openLedger()
+		if err != nil {
+			return err
+		}
 		principalID := ""
 		if tokenRef != "" {
-			var err error
 			if principalID, err = session.listFilterID(tokenRef); err != nil {
-				utils.CliErrorWithExit("Failed to find service token %q: %s.", tokenRef, err)
+				return utils.NewExitError("Failed to find service token %q: %s.", tokenRef, err)
 			}
 		}
 
 		entries, err := acl.ListEntries(session.signer, session.workspaceID, principalID)
 		if err != nil {
-			session.fail("list pre-approved commands", err)
+			return session.fail("list pre-approved commands", err)
 		}
 
 		tokenNames, serverNames, tokenAccounts := session.workspaceNames(entries)
 		utils.PrintTable(ledgerEntryAttributes(entries, tokenNames, serverNames, tokenAccounts))
-	},
+		return nil
+	}),
 }
 
 func init() {

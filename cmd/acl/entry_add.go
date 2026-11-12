@@ -51,7 +51,7 @@ listed and can be revoked.`,
 
   alpacon acl entry add --file entries.json`,
 	Args: cobra.NoArgs,
-	Run:  runEntryAdd,
+	RunE: utils.WithExitError(runEntryAdd),
 }
 
 func init() {
@@ -65,24 +65,28 @@ func init() {
 	entryAddCmd.Flags().String("file", "", "Issue every entry in this JSON file")
 }
 
-func runEntryAdd(cmd *cobra.Command, args []string) {
+func runEntryAdd(cmd *cobra.Command, args []string) error {
 	file, _ := cmd.Flags().GetString("file")
 
 	var drafts []entryDraft
 	var flagged *flagEntry
 	if file != "" {
 		if flagged := entryFlagsSet(cmd); len(flagged) > 0 {
-			utils.CliUsageErrorWithExit("--file cannot be combined with --%s.", flagged[0])
+			return utils.NewUsageExitError("--file cannot be combined with --%s.", flagged[0])
 		}
 		data, err := os.ReadFile(file)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to read %s: %s.", file, err)
+			return utils.NewExitError("Failed to read %s: %s.", file, err)
 		}
 		if drafts, err = parseEntryFile(data); err != nil {
-			utils.CliErrorWithExit("Failed to read %s: %s.", file, err)
+			return utils.NewExitError("Failed to read %s: %s.", file, err)
 		}
 	} else {
-		flagged = entryFromFlags(cmd)
+		var err error
+		flagged, err = entryFromFlags(cmd)
+		if err != nil {
+			return err
+		}
 	}
 
 	session, err := newLedgerSessionWithCheck(func(s *ledgerSession) error {
@@ -98,10 +102,10 @@ func runEntryAdd(cmd *cobra.Command, args []string) {
 	if err != nil {
 		var accountErr serviceTokenAccountError
 		if errors.As(err, &accountErr) {
-			utils.CliErrorWithCode(utils.ExitCodeUsageError, utils.ServiceTokenAccountNotOwn,
+			return utils.NewExitErrorWithErrorCode(utils.ExitCodeUsageError, utils.ServiceTokenAccountNotOwn,
 				"%s", utils.Reword(err, sentence(upperFirst(err.Error()))))
 		}
-		utils.CliErrorWithExit("%s", utils.Reword(err, sentence(upperFirst(err.Error()))))
+		return utils.NewExitError("%s", utils.Reword(err, sentence(upperFirst(err.Error()))))
 	}
 	entries := make([]acl.EntryRequest, len(drafts))
 	for i, draft := range drafts {
@@ -109,13 +113,14 @@ func runEntryAdd(cmd *cobra.Command, args []string) {
 	}
 	issued, err := acl.IssueEntries(session.signer, session.workspaceID, entries)
 	if err != nil {
-		session.fail("pre-approve the command", err)
+		return session.fail("pre-approve the command", err)
 	}
 
 	printWarnings(issued)
 	for _, entry := range issued {
 		utils.CliSuccess("Pre-approved %q (%s)", entry.CommandPattern, entry.ID)
 	}
+	return nil
 }
 
 func entryFlagsSet(cmd *cobra.Command) []string {
@@ -136,9 +141,8 @@ type flagEntry struct {
 	request    acl.EntryRequest
 }
 
-// entryFromFlags reads the one entry the flags describe, exiting on a missing
-// or malformed value before anything reaches the signer.
-func entryFromFlags(cmd *cobra.Command) *flagEntry {
+// entryFromFlags reads the one entry the flags describe and refuses malformed values before a signer request.
+func entryFromFlags(cmd *cobra.Command) (*flagEntry, error) {
 	tokenRef, _ := cmd.Flags().GetString("token")
 	command, _ := cmd.Flags().GetString("command")
 	username, _ := cmd.Flags().GetString("username")
@@ -150,14 +154,14 @@ func entryFromFlags(cmd *cobra.Command) *flagEntry {
 	tokenRef, command, username = strings.TrimSpace(tokenRef), strings.TrimSpace(command), strings.TrimSpace(username)
 	for _, required := range []struct{ flag, value string }{{"token", tokenRef}, {"command", command}} {
 		if required.value == "" {
-			utils.CliUsageErrorWithExit("--%s is required (or pass --file).", required.flag)
+			return nil, utils.NewUsageExitError("--%s is required (or pass --file).", required.flag)
 		}
 	}
 	if err := validateExpiry(expiresAt); err != nil {
-		utils.CliUsageErrorWithExit("%s", err)
+		return nil, utils.NewUsageExitError("%s", err)
 	}
 	if err := validateServerRefs(cmd.Flags().Changed("server"), serverRefs); err != nil {
-		utils.CliUsageErrorWithExit("%s", err)
+		return nil, utils.NewUsageExitError("%s", err)
 	}
 
 	return &flagEntry{
@@ -170,7 +174,7 @@ func entryFromFlags(cmd *cobra.Command) *flagEntry {
 			ExpiresAt:      expiresAt,
 			Enabled:        !disabled,
 		},
-	}
+	}, nil
 }
 
 // validateServerRefs refuses a --server given with nothing in it, such as
