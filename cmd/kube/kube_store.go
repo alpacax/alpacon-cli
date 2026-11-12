@@ -9,12 +9,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/filelock"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 // kubeSessionRecord is what 'kube login' keeps of the kube session it opened
@@ -175,7 +175,7 @@ func (s kubeSessionStore) write(record kubeSessionRecord) error {
 		_ = tmp.Close()
 		_ = os.Remove(tmp.Name())
 	}()
-	if err := tmp.Chmod(storeFilePerm); err != nil && runtime.GOOS != "windows" {
+	if err := tmp.Chmod(storeFilePerm); err != nil && utils.HasUnixModes() {
 		return err
 	}
 	if _, err := tmp.Write(append(data, '\n')); err != nil {
@@ -230,12 +230,12 @@ func (s kubeSessionStore) removeStaging(k recordKey) error {
 }
 
 // ensureDir creates the store's directory owner-only and narrows one that
-// already grants other accounts access. Windows has no Unix modes to narrow.
+// already grants other accounts access.
 func (s kubeSessionStore) ensureDir() error {
 	if err := os.MkdirAll(s.dir, storeDirPerm); err != nil {
 		return err
 	}
-	if runtime.GOOS == "windows" {
+	if !utils.HasUnixModes() {
 		return nil
 	}
 	info, err := os.Lstat(s.dir)

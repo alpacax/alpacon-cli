@@ -9,8 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
+
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 const (
@@ -256,10 +257,9 @@ func writeDeviceIDTempFile(path, deviceID string) (string, error) {
 // publishes whatever mode the file has at that instant, and chmods the handle rather than the
 // path, which a planted symlink could redirect.
 func narrowToPublishedFileMode(file *os.File, path string) error {
-	if runtime.GOOS == "windows" {
-		// Windows has no Unix mode bits; Chmod there toggles the read-only
-		// attribute, so intersecting the modes Go synthesizes would set it
-		// rather than narrow anything.
+	if !utils.HasUnixModes() {
+		// Intersecting the modes Go synthesizes on Windows would set the
+		// read-only attribute rather than narrow anything.
 		return nil
 	}
 
