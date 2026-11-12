@@ -437,8 +437,7 @@ func uploadScriptAction(accountFlags []string, server string) utils.NextAction {
 }
 
 // runAsFlags returns a run's -u, -g and --work-session flags for a hint to repeat, sanitized for a
-// raw write and quoted with argvQuote so a pasted command keeps each value one argument. reRunHint
-// and the use_file_execution guidance both build their flags here.
+// raw write and quoted with argvQuote so a pasted command keeps each value one argument.
 func runAsFlags(parsed RemoteExecArgs) []string {
 	quote := func(s string) string { return argvQuote(utils.SanitizeTerminalText(s)) }
 	var flags []string

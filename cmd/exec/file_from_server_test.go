@@ -295,7 +295,9 @@ func TestExecFileFromServerDeniedExitsNotApproved(t *testing.T) {
 
 // newHeldScriptServer parks a command line at awaiting_approval; suggestion,
 // when non-empty, is the raw file_execution_suggestion on the command detail.
-func newHeldScriptServer(suggestion string) *httptest.Server {
+// newHeldScriptServer parks a command line at awaiting_approval with the given
+// raw detail fields appended, e.g. `,"file_execution_suggestion":{...}`.
+func newHeldScriptServer(fields string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -304,11 +306,7 @@ func newHeldScriptServer(suggestion string) *httptest.Server {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
 			_, _ = w.Write([]byte(`[{"id":"cmd-1"}]`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
-			detail := `{"id":"cmd-1","status":"awaiting_approval"`
-			if suggestion != "" {
-				detail += `,"file_execution_suggestion":` + suggestion
-			}
-			_, _ = w.Write([]byte(detail + "}"))
+			_, _ = w.Write([]byte(`{"id":"cmd-1","status":"awaiting_approval"` + fields + `}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -321,7 +319,7 @@ const heldScriptSuggestionLine = "alpacon exec -u root --file /opt/deploy.sh --f
 // the server reads as a script gets the --file --from-server form of it under
 // the pending message, in both output formats.
 func TestExecHeldScriptPrintsTheFromServerSuggestion(t *testing.T) {
-	ts := newHeldScriptServer(`{"path":"/opt/deploy.sh","interpreter":"/bin/bash","args":["--fast"]}`)
+	ts := newHeldScriptServer(`,"file_execution_suggestion":{"path":"/opt/deploy.sh","interpreter":"/bin/bash","args":["--fast"]}`)
 	// The subtests run in parallel, after this function returns.
 	t.Cleanup(ts.Close)
 
@@ -346,7 +344,7 @@ func TestExecHeldScriptPrintsTheFromServerSuggestion(t *testing.T) {
 // command line whose interpreter was a bare name gets the --from-server line
 // with an --interpreter placeholder and the 'command -v' hint to fill it.
 func TestExecHeldScriptWithBareInterpreterPrintsAPlaceholder(t *testing.T) {
-	ts := newHeldScriptServer(`{"path":"/opt/deploy.sh","interpreter":null,"interpreter_name":"bash","args":["--fast"]}`)
+	ts := newHeldScriptServer(`,"file_execution_suggestion":{"path":"/opt/deploy.sh","interpreter":null,"interpreter_name":"bash","args":["--fast"]}`)
 	defer ts.Close()
 
 	_, stderr, exitCode := runExecHelper(t, ts.URL, "root@prod", "--", "bash", "/opt/deploy.sh", "--fast")

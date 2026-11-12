@@ -497,7 +497,12 @@ func scriptBodyAction(parsed RemoteExecArgs, s *event.ScriptBodySuggestion) (uti
 	}
 	action := uploadScriptAction(runAsFlags(parsed), parsed.Server)
 	action.Description = "to have the reviewer read the script body, save it to a local file and run it as a verified file " +
-		"(for code that runs inside a container, put the container command and the program in that one script; see 'alpacon exec --help'), adding " + interpreterNote + heldNote
+		"(for code that runs inside a container, put the container command and the program in that one script; see 'alpacon exec --help'), " +
+		"adding --overwrite to replace a file already at that path and " + interpreterNote
+	if len(parsed.Env) > 0 {
+		action.Description += ". --env values cannot ride the file lane, so the script must read them on the host"
+	}
+	action.Description += heldNote
 	return action, true
 }
 

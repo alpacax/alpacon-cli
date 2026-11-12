@@ -1039,6 +1039,27 @@ func TestEventDetails_DecodesHeld(t *testing.T) {
 	}
 }
 
+func TestEventDetails_DecodesScriptBodySuggestion(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+		want *ScriptBodySuggestion
+	}{
+		{"present", `{"script_body_suggestion":{"signal":"embedded_script"}}`, &ScriptBodySuggestion{Signal: "embedded_script"}},
+		{"null", `{"script_body_suggestion":null}`, nil},
+		{"absent on an older server", `{}`, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var details EventDetails
+			require.NoError(t, json.Unmarshal([]byte(tt.body), &details))
+			assert.Equal(t, tt.want, details.ScriptBodySuggestion)
+		})
+	}
+}
+
 func TestGetCommandByID_ReturnsEventDetails(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

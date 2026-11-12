@@ -2,8 +2,6 @@ package exec
 
 import (
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -15,28 +13,6 @@ import (
 
 const scriptBodyLine = "alpacon exec -u root --upload --file /path/to/script.sh --file-from ./script.sh prod"
 
-func TestScriptBodySuggestionDecodes(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		body string
-		want *event.ScriptBodySuggestion
-	}{
-		{"present", `{"script_body_suggestion":{"signal":"embedded_script"}}`, &event.ScriptBodySuggestion{Signal: "embedded_script"}},
-		{"null", `{"script_body_suggestion":null}`, nil},
-		{"absent on an older server", `{}`, nil},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			var details event.EventDetails
-			require.NoError(t, json.Unmarshal([]byte(tt.body), &details))
-			assert.Equal(t, tt.want, details.ScriptBodySuggestion)
-		})
-	}
-}
-
 func TestScriptBodyAction(t *testing.T) {
 	t.Parallel()
 
@@ -46,6 +22,12 @@ func TestScriptBodyAction(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "alpacon exec -u root -g wheel --work-session ws-1 --upload --file /path/to/script.sh --file-from ./script.sh srv", action.Command)
 	assert.Contains(t, action.Description, "cancel it in the Alpacon console")
+	assert.Contains(t, action.Description, "--overwrite")
+	assert.NotContains(t, action.Description, "--env values")
+
+	action, ok = scriptBodyAction(RemoteExecArgs{Server: "srv", Env: map[string]string{"DB_URL": ""}}, signal)
+	require.True(t, ok, "--env still gets the hint, with a warning")
+	assert.Contains(t, action.Description, "--env values cannot ride the file lane")
 
 	_, ok = scriptBodyAction(RemoteExecArgs{Server: "srv"}, nil)
 	assert.False(t, ok, "no suggestion")
@@ -53,30 +35,12 @@ func TestScriptBodyAction(t *testing.T) {
 	assert.False(t, ok, "already on the file lane")
 }
 
-// newHeldBodyServer parks a command line at awaiting_approval with the given raw
-// detail fields appended, e.g. `,"script_body_suggestion":{...}`.
-func newHeldBodyServer(fields string) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
-			_, _ = w.Write([]byte(`[{"id":"cmd-1"}]`))
-		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
-			_, _ = w.Write([]byte(`{"id":"cmd-1","status":"awaiting_approval"` + fields + `}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-}
-
 const scriptBodyField = `,"script_body_suggestion":{"signal":"embedded_script"}`
 
 // A held line the server says carries a script body gets the --upload --file
 // template, in both output formats.
 func TestExecHeldScriptBodyPrintsTheUploadTemplate(t *testing.T) {
-	ts := newHeldBodyServer(scriptBodyField)
+	ts := newHeldScriptServer(scriptBodyField)
 	t.Cleanup(ts.Close)
 	line := []string{"root@prod", "--", "python3", "-c", "print(1)"}
 
@@ -101,7 +65,7 @@ func TestExecHeldScriptBodyDefersToAFileSuggestion(t *testing.T) {
 	line := []string{"root@prod", "--", "bash", "/opt/deploy.sh", "--fast"}
 
 	t.Run("renderable", func(t *testing.T) {
-		ts := newHeldBodyServer(`,"file_execution_suggestion":{"path":"/opt/deploy.sh","interpreter":"/bin/bash","args":["--fast"]}` + scriptBodyField)
+		ts := newHeldScriptServer(`,"file_execution_suggestion":{"path":"/opt/deploy.sh","interpreter":"/bin/bash","args":["--fast"]}` + scriptBodyField)
 		defer ts.Close()
 		_, stderr, exitCode := runExecHelper(t, ts.URL, line...)
 		assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
@@ -109,7 +73,7 @@ func TestExecHeldScriptBodyDefersToAFileSuggestion(t *testing.T) {
 		assert.NotContains(t, stderr, "--upload --file")
 	})
 	t.Run("unrenderable", func(t *testing.T) {
-		ts := newHeldBodyServer(`,"file_execution_suggestion":{"path":"relative.sh","interpreter":"/bin/bash","args":[]}` + scriptBodyField)
+		ts := newHeldScriptServer(`,"file_execution_suggestion":{"path":"relative.sh","interpreter":"/bin/bash","args":[]}` + scriptBodyField)
 		defer ts.Close()
 		_, stderr, exitCode := runExecHelper(t, ts.URL, line...)
 		assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
@@ -122,7 +86,7 @@ func TestExecHeldScriptBodyDefersToAFileSuggestion(t *testing.T) {
 func TestExecHeldWithoutScriptBodyKeepsTodaysHint(t *testing.T) {
 	for name, fields := range map[string]string{"null": `,"script_body_suggestion":null`, "absent": ""} {
 		t.Run(name, func(t *testing.T) {
-			ts := newHeldBodyServer(fields)
+			ts := newHeldScriptServer(fields)
 			defer ts.Close()
 			_, stderr, exitCode := runExecHelper(t, ts.URL, "root@prod", "--", "python3", "-c", "print(1)")
 			assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
