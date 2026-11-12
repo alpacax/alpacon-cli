@@ -73,6 +73,19 @@ re-queues review. The approver decides whether to grant reuse, and a grant
 always expires: after the days --reuse-days proposed, or at the workspace
 ceiling (1 to 366 days, default 90).
 
+--file runs the verified file on the host, so it cannot reach into a container
+or pod. For code that runs inside one (docker, podman, nerdctl or kubectl
+exec), put the container command and the whole program in one host script,
+with the program written into the script as a heredoc passed on stdin:
+  kubectl exec -i POD -c CONTAINER -- python - "$1" <<'PY'
+  ...
+  PY
+  alpacon exec --upload --file /tmp/container-work.sh --file-from ./container-work.sh my-server -- --dry-run
+The reviewer then reads the program, and --reuse-days can make an unchanged
+re-run reusable. A script that only calls manage.py <command> or decodes a
+base64 or compressed payload gains nothing: the reviewer still cannot read
+what runs.
+
 The server refuses a command line over its length limit. exec then exits 1 and
 names the --upload --file command to run instead, with /bin/sh, the shell a
 command line runs in. Nothing is written to the server until you run it. -u, -g,
