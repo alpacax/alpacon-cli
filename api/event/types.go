@@ -146,16 +146,19 @@ type AwaitingPurposeError struct {
 }
 
 type EventAttributes struct {
-	Server                string           `json:"server"`
-	Shell                 string           `json:"shell"`
-	Command               string           `json:"command"`
-	Result                string           `json:"result"`
-	Status                string           `json:"status" table:"-"`
-	StatusCell            string           `json:"-" table:"Status"`
-	Operator              string           `json:"operator"`
-	RequestedAt           string           `json:"requested_at" table:"Requested At"`
-	ApprovedFileExecution *json.RawMessage `json:"approved_file_execution,omitempty" table:"-"`
-	DenialCode            types.SentString `json:"denial_code,omitzero" table:"-"`
+	ID                    string              `json:"id" table:"-"`
+	Server                string              `json:"server"`
+	Shell                 string              `json:"shell"`
+	Command               string              `json:"command"`
+	Result                utils.TruncatedText `json:"result"`
+	Status                string              `json:"status" table:"-"`
+	StatusCell            string              `json:"-" table:"Status"`
+	ExitCode              *int                `json:"exit_code" table:"-"`
+	ErrorPhase            *string             `json:"error_phase" table:"-"`
+	Operator              string              `json:"operator"`
+	RequestedAt           utils.Timestamp     `json:"requested_at" table:"Requested At"`
+	ApprovedFileExecution *json.RawMessage    `json:"approved_file_execution,omitempty" table:"-"`
+	DenialCode            types.SentString    `json:"denial_code,omitzero" table:"-"`
 	CommandRejection      `table:"-"`
 }
 

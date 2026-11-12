@@ -36,7 +36,9 @@ func GetRevokeRequestList(ac *client.AlpaconClient, status string, certificate s
 			SerialNumber: req.SerialNumber,
 			Status:       req.Status,
 			RequestedBy:  req.RequestedBy.Name,
-			AddedAt:      utils.TimeUtils(req.AddedAt),
+			AddedAt:      utils.RelativeTime(req.AddedAt),
+			ErrorMessage: req.ErrorMessage,
+			HandledAt:    utils.OptionalTimestamp(req.HandledAt),
 		})
 	}
 

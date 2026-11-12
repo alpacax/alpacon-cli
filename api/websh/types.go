@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/gorilla/websocket"
 )
 
@@ -112,13 +113,13 @@ type JoinRequest struct {
 }
 
 type SessionListItem struct {
-	ID       string `json:"id"        table:"ID"`
-	Server   string `json:"server"    table:"Server"`
-	User     string `json:"user"      table:"User"`
-	Username string `json:"username"  table:"Username"`
-	RemoteIP string `json:"remote_ip" table:"Remote IP"`
-	AddedAt  string `json:"added_at"  table:"Added At"`
-	ClosedAt string `json:"closed_at" table:"Closed At"`
+	ID       string          `json:"id"        table:"ID"`
+	Server   string          `json:"server"    table:"Server"`
+	User     string          `json:"user"      table:"User"`
+	Username string          `json:"username"  table:"Username"`
+	RemoteIP string          `json:"remote_ip" table:"Remote IP"`
+	AddedAt  utils.Timestamp `json:"added_at"  table:"Added At"`
+	ClosedAt utils.Timestamp `json:"closed_at" table:"Closed At"`
 }
 
 type SessionDetailResponse struct {

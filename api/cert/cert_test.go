@@ -854,3 +854,47 @@ func TestGetAuthorityListOutputsRowsWithoutOwner(t *testing.T) {
 		})
 	}
 }
+
+func TestGetCertificateList_JSONKeepsRevocationState(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"count":2,"results":[
+			{"id":"550e8400-e29b-41d4-a716-446655440000","common_name":"my-server","serial_number":"0a1b","status":"revoked","is_revoked":true,"revoked_at":"2026-11-07T18:30:45+09:00","signed_at":"2026-11-01T00:00:00Z","expires_at":"2027-11-01T00:00:00Z"},
+			{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","common_name":"my-server","serial_number":"0a1c","status":"signed","is_revoked":false,"revoked_at":null,"signed_at":"2026-11-01T00:00:00Z","expires_at":"2027-11-01T00:00:00Z"}
+		]}`))
+	}))
+	defer ts.Close()
+
+	certs, err := GetCertificateList(newTestClient(ts))
+
+	require.NoError(t, err)
+	body, err := json.Marshal(certs)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{"id":"550e8400-e29b-41d4-a716-446655440000","authority":"","common_name":"my-server","serial_number":"0a1b","status":"revoked","is_revoked":true,"revoked_at":"2026-11-07T09:30:45Z","csr":"","valid_days":0,"signed_at":"2026-11-01T00:00:00Z","expires_at":"2027-11-01T00:00:00Z","signed_by":"","renewed_by":""},
+		{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","authority":"","common_name":"my-server","serial_number":"0a1c","status":"signed","is_revoked":false,"revoked_at":null,"csr":"","valid_days":0,"signed_at":"2026-11-01T00:00:00Z","expires_at":"2027-11-01T00:00:00Z","signed_by":"","renewed_by":""}
+	]`, string(body))
+}
+
+func TestGetRevokeRequestList_JSONKeepsFailureMessage(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"count":2,"results":[
+			{"id":"550e8400-e29b-41d4-a716-446655440000","status":"failed","error_message":"authority unreachable","handled_at":"2026-11-07T18:30:45+09:00","added_at":"2026-11-07T09:00:00Z"},
+			{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","status":"requested","error_message":"","handled_at":null,"added_at":"2026-11-07T09:00:00Z"}
+		]}`))
+	}))
+	defer ts.Close()
+
+	requests, err := GetRevokeRequestList(newTestClient(ts), "", "")
+
+	require.NoError(t, err)
+	body, err := json.Marshal(requests)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{"id":"550e8400-e29b-41d4-a716-446655440000","common_name":"","authority":"","serial_number":"","status":"failed","requested_by":"","added_at":"2026-11-07T09:00:00Z","error_message":"authority unreachable","handled_at":"2026-11-07T09:30:45Z"},
+		{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","common_name":"","authority":"","serial_number":"","status":"requested","requested_by":"","added_at":"2026-11-07T09:00:00Z","error_message":"","handled_at":null}
+	]`, string(body))
+}

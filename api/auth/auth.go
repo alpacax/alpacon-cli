@@ -186,8 +186,8 @@ func GetAPITokenList(ac *client.AlpaconClient) ([]APITokenAttributes, error) {
 			ID:        token.ID,
 			Name:      token.Name,
 			Enabled:   token.Enabled,
-			UpdatedAt: utils.TimeUtils(token.UpdatedAt),
-			ExpiresAt: utils.TimeUtils(token.ExpiresAt),
+			UpdatedAt: utils.RelativeTime(token.UpdatedAt),
+			ExpiresAt: utils.RelativeTime(token.ExpiresAt),
 			Scopes:    strings.Join(token.Scopes, ", "),
 		})
 	}

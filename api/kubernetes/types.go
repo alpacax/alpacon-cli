@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 // ClusterDetail decodes one entry of /api/kubernetes/clusters/. Status and Tags
@@ -122,15 +124,14 @@ type KubeSessionListItem struct {
 }
 
 // KubeSessionAttributes is the 'kube sessions' row. The table shows the expiry
-// in local time; --output json also carries the cluster's ID and both times as
-// the server sent them.
+// in local time; --output json carries it, both raw times and the cluster's ID, all times in UTC.
 type KubeSessionAttributes struct {
-	ID             string     `json:"id" table:"ID"`
-	Cluster        string     `json:"cluster" table:"Cluster"`
-	ClusterID      string     `json:"cluster_id" table:"-"`
-	User           string     `json:"user" table:"User"`
-	Status         string     `json:"status" table:"Status"`
-	ExpiresAt      string     `json:"expires_at" table:"Expires At"`
-	TokenExpiredAt *time.Time `json:"token_expired_at" table:"-"`
-	ClosedAt       *time.Time `json:"closed_at" table:"-"`
+	ID             string          `json:"id" table:"ID"`
+	Cluster        string          `json:"cluster" table:"Cluster"`
+	ClusterID      string          `json:"cluster_id" table:"-"`
+	User           string          `json:"user" table:"User"`
+	Status         string          `json:"status" table:"Status"`
+	ExpiresAt      utils.Timestamp `json:"expires_at" table:"Expires At"`
+	TokenExpiredAt utils.Timestamp `json:"token_expired_at" table:"-"`
+	ClosedAt       utils.Timestamp `json:"closed_at" table:"-"`
 }

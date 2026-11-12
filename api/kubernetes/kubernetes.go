@@ -229,8 +229,8 @@ func ProjectSessions(sessions []KubeSessionListItem, names map[string]string, lo
 			Cluster:        session.Cluster,
 			ClusterID:      session.Cluster,
 			Status:         SessionStatusOpen,
-			TokenExpiredAt: session.TokenExpiredAt,
-			ClosedAt:       session.ClosedAt,
+			TokenExpiredAt: utils.OptionalTimestamp(session.TokenExpiredAt),
+			ClosedAt:       utils.OptionalTimestamp(session.ClosedAt),
 		}
 		if name := names[session.Cluster]; name != "" {
 			row.Cluster = name
@@ -245,7 +245,7 @@ func ProjectSessions(sessions []KubeSessionListItem, names map[string]string, lo
 			row.Status = SessionStatusClosed
 		}
 		if session.TokenExpiredAt != nil {
-			row.ExpiresAt = session.TokenExpiredAt.In(loc).Format("2006-01-02 15:04")
+			row.ExpiresAt = utils.NewTimestamp(*session.TokenExpiredAt, session.TokenExpiredAt.In(loc).Format("2006-01-02 15:04"))
 		}
 		rows = append(rows, row)
 	}

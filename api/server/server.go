@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -282,9 +283,9 @@ func GetRegistrationTokenAttributes(ac *client.AlpaconClient) ([]RegistrationTok
 				names = append(names, id)
 			}
 		}
-		expires := "never"
+		expires := utils.NewTimestamp(time.Time{}, "never")
 		if t.ExpiresAt != nil {
-			expires = *t.ExpiresAt
+			expires = utils.ParseTimestamp(*t.ExpiresAt)
 		}
 		out = append(out, RegistrationTokenAttributes{
 			Name:          t.Name,

@@ -88,9 +88,9 @@ func GetSessionList(ac *client.AlpaconClient, tail int) ([]SessionListItem, erro
 
 	list := make([]SessionListItem, 0, len(sessions))
 	for _, s := range sessions {
-		closedAt := "-"
+		closedAt := utils.NewTimestamp(time.Time{}, "-")
 		if s.ClosedAt != nil {
-			closedAt = *s.ClosedAt
+			closedAt = utils.ParseTimestamp(*s.ClosedAt)
 		}
 		list = append(list, SessionListItem{
 			ID:       s.ID,
@@ -98,7 +98,7 @@ func GetSessionList(ac *client.AlpaconClient, tail int) ([]SessionListItem, erro
 			User:     s.User.Name,
 			Username: s.Username,
 			RemoteIP: s.RemoteIP,
-			AddedAt:  s.AddedAt,
+			AddedAt:  utils.ParseTimestamp(s.AddedAt),
 			ClosedAt: closedAt,
 		})
 	}

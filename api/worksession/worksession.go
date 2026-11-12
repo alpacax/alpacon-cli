@@ -43,12 +43,12 @@ func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType, assigne
 func ProjectAttributes(ws *WorkSession) WorkSessionAttributes {
 	return WorkSessionAttributes{
 		ID:          ws.ID,
-		Description: utils.TruncateString(ws.Description, 70),
+		Description: utils.Truncate(ws.Description, 70),
 		Status:      ws.Status,
 		Scopes:      strings.Join(ws.Scopes, ", "),
 		Servers:     strings.Join(ServerNames(ws), ", "),
 		Clusters:    strings.Join(ClusterNames(ws), ", "),
-		ExpiresAt:   FormatExpiresAt(ws.ExpiresAt),
+		ExpiresAt:   utils.NewTimestamp(ws.ExpiresAt, FormatExpiresAt(ws.ExpiresAt)),
 	}
 }
 

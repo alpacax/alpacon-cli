@@ -50,13 +50,20 @@ func projectAttributes(r *ApprovalRequest) ApprovalRequestAttributes {
 	if r.RequestedBy != nil {
 		requestedBy = r.RequestedBy.Name
 	}
+	reviewedBy := ""
+	if r.ReviewedBy != nil {
+		reviewedBy = r.ReviewedBy.Name
+	}
 	return ApprovalRequestAttributes{
-		ID:          r.ID,
-		Type:        r.RequestType,
-		Status:      r.Status,
-		RequestData: utils.TruncateString(r.RequestData, 50),
-		RequestedBy: requestedBy,
-		AddedAt:     r.AddedAt.Local().Format("2006-01-02 15:04"),
+		ID:            r.ID,
+		ReviewedBy:    reviewedBy,
+		ReviewedAt:    utils.OptionalTimestamp(r.ReviewedAt),
+		RejectionNote: r.RejectionNote,
+		Type:          r.RequestType,
+		Status:        r.Status,
+		RequestData:   utils.Truncate(r.RequestData, 50),
+		RequestedBy:   requestedBy,
+		AddedAt:       utils.NewTimestamp(r.AddedAt, r.AddedAt.Local().Format("2006-01-02 15:04")),
 	}
 }
 

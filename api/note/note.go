@@ -42,7 +42,7 @@ func GetNoteList(ac *client.AlpaconClient, serverName string, tail int, pinnedOn
 			Content: note.Content,
 			Private: note.Private,
 			Pinned:  note.Pinned,
-			AddedAt: utils.TimeUtils(note.AddedAt),
+			AddedAt: utils.RelativeTime(note.AddedAt),
 		})
 	}
 

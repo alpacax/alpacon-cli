@@ -222,14 +222,17 @@ func GetEventList(ac *client.AlpaconClient, tail int, serverName string, userNam
 			cell = event.Label()
 		}
 		eventList = append(eventList, EventAttributes{
+			ID:                    event.ID,
 			Server:                event.Server.Name,
 			Shell:                 event.Shell,
 			Command:               event.Line,
-			Result:                utils.TruncateString(event.Result, 70),
+			Result:                utils.Truncate(event.Result, 70),
 			Status:                status,
 			StatusCell:            cell,
+			ExitCode:              event.ExitCode,
+			ErrorPhase:            event.ErrorPhase,
 			Operator:              event.RequestedBy.Name,
-			RequestedAt:           utils.TimeUtils(event.AddedAt),
+			RequestedAt:           utils.RelativeTime(event.AddedAt),
 			ApprovedFileExecution: event.ApprovedFileExecution,
 			DenialCode:            event.DenialCode,
 			CommandRejection:      event.CommandRejection,

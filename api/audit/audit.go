@@ -33,14 +33,15 @@ func GetAuditLogList(ac *client.AlpaconClient, tail int, userName string, app st
 	var auditList []AuditLogAttributes
 	for _, entry := range entries {
 		auditList = append(auditList, AuditLogAttributes{
+			ID:          entry.ID,
 			Username:    entry.Username,
 			App:         entry.App,
 			Action:      entry.Action,
 			Model:       entry.Model,
 			StatusCode:  entry.StatusCode,
 			IP:          entry.IP,
-			Description: utils.TruncateString(entry.Description, 70),
-			AddedAt:     utils.TimeUtils(entry.AddedAt),
+			Description: utils.Truncate(entry.Description, 70),
+			AddedAt:     utils.RelativeTime(entry.AddedAt),
 		})
 	}
 
