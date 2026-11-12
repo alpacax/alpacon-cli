@@ -102,6 +102,9 @@ type PendingApprovalError struct {
 	// FileSuggestion is the server's proposal to run the held command as a
 	// verified file instead; nil when the server made none.
 	FileSuggestion *FileExecutionSuggestion
+	// ScriptBodySuggestion says the held line carries a script body the file
+	// lane could take instead; nil when the server sent none.
+	ScriptBodySuggestion *ScriptBodySuggestion
 	// ApprovalLane is the server's approval_lane: who decides the open request.
 	// Empty on an older server.
 	ApprovalLane string
@@ -130,6 +133,14 @@ type FileExecutionSuggestion struct {
 	Interpreter     string   `json:"interpreter"`
 	InterpreterName string   `json:"interpreter_name"`
 	Args            []string `json:"args"`
+}
+
+// ScriptBodySuggestion is the server's signal that a held command line carries
+// a script body (an interpreter's inline-body flag, a heredoc, a body piped into
+// an interpreter) that could run as a verified file instead. Signal names what
+// the server detected; the server proposes no path or interpreter.
+type ScriptBodySuggestion struct {
+	Signal string `json:"signal"`
 }
 
 // AwaitingPurposeError is returned when the server parked a command at the
@@ -197,6 +208,9 @@ type EventDetails struct {
 	// FileExecutionSuggestion is set on a held command line the server reads as
 	// a script on the target; absent otherwise and on older servers.
 	FileExecutionSuggestion *FileExecutionSuggestion `json:"file_execution_suggestion"`
+	// ScriptBodySuggestion is set on a held command line that carries a script
+	// body the file lane could take; absent otherwise and on older servers.
+	ScriptBodySuggestion *ScriptBodySuggestion `json:"script_body_suggestion"`
 	// ApprovalLane names who decides the open approval holding the command:
 	// "assignee" is the session's assignee, any other lane an approver. Null
 	// unless the command awaits approval, and absent on an older server.

@@ -1039,6 +1039,27 @@ func TestEventDetails_DecodesHeld(t *testing.T) {
 	}
 }
 
+func TestEventDetails_DecodesScriptBodySuggestion(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+		want *ScriptBodySuggestion
+	}{
+		{"present", `{"script_body_suggestion":{"signal":"embedded_script"}}`, &ScriptBodySuggestion{Signal: "embedded_script"}},
+		{"null", `{"script_body_suggestion":null}`, nil},
+		{"absent on an older server", `{}`, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var details EventDetails
+			require.NoError(t, json.Unmarshal([]byte(tt.body), &details))
+			assert.Equal(t, tt.want, details.ScriptBodySuggestion)
+		})
+	}
+}
+
 func TestGetCommandByID_ReturnsEventDetails(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1423,6 +1444,34 @@ func TestStreamSubscribed_WaitTimeoutCarriesTheFileSuggestion(t *testing.T) {
 		require.ErrorAs(t, awaitStream(t, done), &pending)
 		assert.Equal(t, "cmd-uuid", pending.CommandID)
 		assert.Equal(t, &FileExecutionSuggestion{Path: "/opt/deploy.sh", Interpreter: "/bin/bash", Args: []string{"--fast"}}, pending.FileSuggestion)
+	})
+}
+
+// The same timed-out wait carries the script body suggestion too.
+func TestStreamSubscribed_WaitTimeoutCarriesTheScriptBodySuggestion(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		ac := newStreamingServers(t, streamingServerConfig{
+			cmdID:      "cmd-uuid",
+			serverID:   "srv-uuid",
+			heldPolls:  1 << 20,
+			heldFields: `,"script_body_suggestion":{"signal":"embedded_script"}`,
+		})
+		listener := NewCommandOutputListener(ac)
+		listener.Start()
+		t.Cleanup(listener.Stop)
+		require.True(t, listener.WaitConnected(commandOutputConnectTimeout), "listener should connect")
+
+		pathID := testPathID(t, "cmd-uuid")
+		done := make(chan error, 1)
+		go func() {
+			done <- streamSubscribed(ac, listener, pathID, "srv-uuid", &bytes.Buffer{}, 5*time.Second, true)
+		}()
+
+		var pending *PendingApprovalError
+		require.ErrorAs(t, awaitStream(t, done), &pending)
+		assert.Equal(t, &ScriptBodySuggestion{Signal: "embedded_script"}, pending.ScriptBodySuggestion)
+		assert.Nil(t, pending.FileSuggestion)
 	})
 }
 
