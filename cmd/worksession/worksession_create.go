@@ -275,6 +275,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 			req.Servers = serverIDs
 		}
 
+		warnBroadSudoPolicies(req.SudoPolicies)
 		session, err := wsapi.CreateWorkSession(ac, req)
 		if err != nil {
 			if hint := TargetErrorHint(err); hint != "" {

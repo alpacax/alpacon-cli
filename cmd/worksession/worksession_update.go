@@ -239,6 +239,7 @@ func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsap
 		desired = append(desired, newSudo...)
 		req.SudoPolicies = desired
 	}
+	warnBroadSudoPolicies(newSudo)
 	updated, err := wsapi.UpdateWorkSession(ac, sessionID, req)
 	if err != nil {
 		return nil, err
