@@ -152,7 +152,7 @@ type KubeSessionListItem struct {
 
 // KubeSessionAttributes is the 'kube sessions' row. The table shows the expiry
 // in local time; --output json carries it, both raw times and the cluster's ID, all times in UTC.
-// Kind is one of the SessionKind labels or the kind of the session's newest stream.
+// Kind is api, unknown, or the kind of the session's newest stream (see sessionKind).
 // A session that opened with an RBAC drift warning shows its external grants
 // in the table; --output json carries the server's warning object as it came,
 // or null.
