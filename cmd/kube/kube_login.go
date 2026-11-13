@@ -506,12 +506,15 @@ func findClusterSession(ac *client.AlpaconClient, want sessionWant, now time.Tim
 // and waits for it to activate.
 func createClusterWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clusterID string) (workSessionChoice, error) {
 	interactive := utils.IsInteractiveShell()
+	var err error
 	purpose := in.purpose
 	if purpose == "" {
 		if !interactive {
 			return workSessionChoice{}, utils.NewUsageEnvelopeExitError(opKubeLogin, "No WorkSession for %s was found to reuse. Non-interactive mode requires --purpose, --scope and --duration to create one, or --work-session to name one.", in.cluster)
 		}
-		purpose = utils.PromptForRequiredInput("Purpose (what you're doing and why): ")
+		if purpose, err = utils.ReadRequiredInput("Purpose (what you're doing and why): "); err != nil {
+			return workSessionChoice{}, err
+		}
 	}
 	scopes := in.scopes
 	if scopes == nil && in.requesterType == "agent" {
@@ -522,14 +525,18 @@ func createClusterWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clust
 		if !interactive {
 			return workSessionChoice{}, utils.NewUsageEnvelopeExitError(opKubeLogin, "Non-interactive mode requires --scope (kube or kube,kube_exec) to create a WorkSession.")
 		}
-		scopes = promptKubeScopes()
+		if scopes, err = promptKubeScopes(); err != nil {
+			return workSessionChoice{}, err
+		}
 	}
 	duration := in.duration
 	if duration == 0 {
 		if !interactive {
 			return workSessionChoice{}, utils.NewUsageEnvelopeExitError(opKubeLogin, "Non-interactive mode requires --duration (e.g. 2h) to create a WorkSession.")
 		}
-		duration = promptDuration()
+		if duration, err = promptDuration(); err != nil {
+			return workSessionChoice{}, err
+		}
 	}
 
 	session, err := wsapi.CreateWorkSession(ac, wsapi.WorkSessionCreateRequest{
@@ -593,28 +600,35 @@ var kubeScopeChoices = []struct {
 	{[]string{worksession.ScopeKube, worksession.ScopeKubeExec}, "kube,kube_exec   also exec, attach and port-forward into pods"},
 }
 
-func promptKubeScopes() []string {
+func promptKubeScopes() ([]string, error) {
 	fmt.Fprintln(os.Stderr, "Scopes for the WorkSession:")
 	for i, c := range kubeScopeChoices {
 		fmt.Fprintf(os.Stderr, "  %d) %s\n", i+1, c.label)
 	}
 	for {
-		answer := utils.PromptForRequiredInput(fmt.Sprintf("Select [1-%d]: ", len(kubeScopeChoices)))
+		answer, err := utils.ReadRequiredInput(fmt.Sprintf("Select [1-%d]: ", len(kubeScopeChoices)))
+		if err != nil {
+			return nil, err
+		}
 		if n, err := strconv.Atoi(strings.TrimSpace(answer)); err == nil && n >= 1 && n <= len(kubeScopeChoices) {
-			return kubeScopeChoices[n-1].scopes
+			return kubeScopeChoices[n-1].scopes, nil
 		}
 		if scopes, err := parseKubeScopes(utils.SplitAndTrim(answer, ",")); err == nil {
-			return scopes
+			return scopes, nil
 		}
 		utils.CliWarning("Enter a number from 1 to %d, or kube or kube,kube_exec.", len(kubeScopeChoices))
 	}
 }
 
-func promptDuration() time.Duration {
+func promptDuration() (time.Duration, error) {
 	for {
-		d, err := utils.ParsePositiveDuration("duration", utils.PromptForRequiredInput("Duration (e.g. 1h, 2h): "))
+		answer, err := utils.ReadRequiredInput("Duration (e.g. 1h, 2h): ")
+		if err != nil {
+			return 0, err
+		}
+		d, err := utils.ParsePositiveDuration("duration", answer)
 		if err == nil {
-			return d
+			return d, nil
 		}
 		utils.CliWarning("%s.", err)
 	}

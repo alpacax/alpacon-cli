@@ -318,6 +318,9 @@ func runWebsh(cmd *cobra.Command, args []string, newClient clientFactory) error 
 		}))
 
 		if err != nil {
+			if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+				return exitErr
+			}
 			if gateErr := utils.WorkSessionExitError(err, utils.OperationWebsh, serverName, authMethod, workSessionID); gateErr != nil {
 				return gateErr
 			}

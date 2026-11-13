@@ -3,6 +3,7 @@ package exec
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -337,6 +338,9 @@ func RemoteExec(newClient clientFactory, stdout, stderr io.Writer, parsed Remote
 			}))
 		}
 		if err != nil {
+			if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+				return exitErr
+			}
 			signalArgs := parsed
 			signalArgs.WorkSessionID = workSessionID
 			err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), alpaconClient)
@@ -378,6 +382,9 @@ func RemoteExec(newClient clientFactory, stdout, stderr io.Writer, parsed Remote
 		err = RunFileExecWithApprovalWait(alpaconClient, parsed.Server, *file, parsed.Username, parsed.Groupname, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
 	} else {
 		err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
+	}
+	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+		return exitErr // the MFA failure carries the lookup's error, which the classifiers below would read as a refusal
 	}
 	if file == nil && isLineTooLong(err) {
 		return lineTooLongFailure(stderr, err, parsed)

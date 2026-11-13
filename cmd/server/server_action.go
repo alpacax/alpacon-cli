@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/alpacax/alpacon-cli/api/mfa"
@@ -35,6 +36,10 @@ func RunDisruptiveServerAction(serverName, action, confirmMsg, successMsg, failM
 	}
 
 	if err := requestServerActionWithMFA(alpaconClient, serverName, action, force); err != nil {
+		if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+			return exitErr
+		}
+
 		if code, _ := utils.ParseErrorResponse(err); code == utils.ServerBusyWithUserWork {
 			return utils.NewExitErrorWithCode(utils.ExitCodeServerBusy, "%s", busyGuardMessage(serverName, force))
 		}
@@ -60,6 +65,10 @@ func RunServerAction(serverName, action, confirmMsg, successMsg, failMsg string,
 	}
 
 	if err := requestServerActionWithMFA(alpaconClient, serverName, action, false); err != nil {
+		if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+			return exitErr
+		}
+
 		return utils.NewExitError("%s: %s.", failMsg, err)
 	}
 

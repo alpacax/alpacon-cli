@@ -532,9 +532,9 @@ func TestPromptForLoginTarget(t *testing.T) {
 	t.Run("no input for a required workspace returns the prompt failure", func(t *testing.T) {
 		noInput := errors.New("no input received")
 		failRequired := func(string) (string, error) { return "", noInput }
-		unused := func(promptText, _ string) string {
+		unused := func(promptText, _ string) (string, error) {
 			t.Errorf("unexpected prompt %q after the required prompt failed", promptText)
-			return ""
+			return "", nil
 		}
 
 		_, _, _, err := promptForLoginTargetWithPrompts(config.Config{}, unused, failRequired)
@@ -842,13 +842,13 @@ func runPromptForLoginTarget(t *testing.T, cfg config.Config, responses ...strin
 		return response
 	}
 
-	promptWithDefault := func(promptText, defaultValue string) string {
+	promptWithDefault := func(promptText, defaultValue string) (string, error) {
 		calls = append(calls, promptCall{prompt: promptText, defaultValue: defaultValue})
 		response := nextResponse()
 		if response == "" {
-			return defaultValue
+			return defaultValue, nil
 		}
-		return response
+		return response, nil
 	}
 	promptRequired := func(promptText string) (string, error) {
 		calls = append(calls, promptCall{prompt: promptText, required: true})

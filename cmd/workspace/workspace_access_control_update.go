@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"errors"
+
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/client"
@@ -55,6 +57,9 @@ from the CLI; edits that tighten these settings or leave them unchanged are save
 				return err
 			}))
 			if err != nil {
+				if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+					return exitErr
+				}
 				return utils.NewExitError("Failed to update access control settings: %s.", err)
 			}
 		}

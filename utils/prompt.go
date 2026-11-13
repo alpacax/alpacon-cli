@@ -160,6 +160,45 @@ func PromptForIntInput(promptText string, defaultValue int) int {
 	return inputInt
 }
 
+func ReadInputWithDefault(promptText, defaultValue string) (string, error) {
+	input, err := ReadInput(promptText)
+	if err != nil {
+		return "", err
+	}
+	if input == "" {
+		return defaultValue, nil
+	}
+	return input, nil
+}
+
+func ReadRequiredIntInput(promptText string) (int, error) {
+	for {
+		inputStr, err := ReadInput(promptText)
+		if err != nil {
+			return 0, err
+		}
+		inputInt, err := strconv.Atoi(inputStr)
+		if err != nil {
+			CliWarning("Only integers are allowed. Please try again.")
+			continue
+		}
+		return inputInt, nil
+	}
+}
+
+func ReadIntInput(promptText string, defaultValue int) (int, error) {
+	inputStr, err := ReadInputWithDefault(promptText, strconv.Itoa(defaultValue))
+	if err != nil {
+		return 0, err
+	}
+	inputInt, err := strconv.Atoi(inputStr)
+	if err != nil {
+		CliWarning("Invalid input. Using default value: %d", defaultValue)
+		return defaultValue, nil
+	}
+	return inputInt, nil
+}
+
 func PromptForListInput(promptText string) []string {
 	return SplitAndTrim(PromptForInput(promptText), ",")
 }

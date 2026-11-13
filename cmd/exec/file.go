@@ -177,6 +177,9 @@ func uploadFile(stderr io.Writer, ac *client.AlpaconClient, parsed RemoteExecArg
 	if err == nil {
 		return nil
 	}
+	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+		return exitErr
+	}
 	signalArgs := parsed
 	signalArgs.WorkSessionID = workSessionID
 	err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), ac)
@@ -202,6 +205,9 @@ func downloadFile(stderr io.Writer, ac *client.AlpaconClient, parsed RemoteExecA
 	label := parsed.Server + ":" + parsed.File.Path
 	content, msg, err := fetchServerScript(ac, parsed, label, workSessionID)
 	if err != nil {
+		if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+			return event.FileExecution{}, exitErr
+		}
 		signalArgs := parsed
 		signalArgs.WorkSessionID = workSessionID
 		err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), ac)
