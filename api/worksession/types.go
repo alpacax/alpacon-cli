@@ -210,6 +210,10 @@ type TimelineItem struct {
 	ElapsedTime        float64 `json:"elapsed_time"`
 	VerificationStatus string  `json:"verification_status"`
 	event.CommandRejection
+	// The error code of the command's latest refused sudo, such as
+	// work_session_scope_not_allowed. Nil when none was refused, and from a
+	// server that does not send it.
+	SudoRefusalReason *string `json:"sudo_refusal_reason"`
 
 	// tunnel_session
 	IsTunnel   bool `json:"is_tunnel"`
@@ -245,6 +249,7 @@ type TimelineAttributes struct {
 	User                   string              `json:"user"      table:"User"`
 	Details                utils.TruncatedText `json:"details"   table:"Details"`
 	event.CommandRejection `table:"-"`
+	SudoRefusalReason      *string `json:"sudo_refusal_reason,omitempty" table:"-"`
 }
 
 // RecordChunk is one entry of the per-session recording route's cursor envelope.

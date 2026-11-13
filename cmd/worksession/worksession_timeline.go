@@ -207,13 +207,14 @@ func outputTimelineJSON(rows []wsapi.TimelineAttributes, terminals []wsapi.Timel
 
 func projectTimelineAttributes(item *wsapi.TimelineItem, serverMap map[string]string) wsapi.TimelineAttributes {
 	return wsapi.TimelineAttributes{
-		ID:               item.ID,
-		Time:             resolveTimestamp(item.Timestamp),
-		Type:             formatType(item.Type),
-		Server:           resolveServer(item.ServerID, serverMap),
-		User:             item.Username,
-		Details:          formatDetails(item),
-		CommandRejection: item.CommandRejection,
+		ID:                item.ID,
+		Time:              resolveTimestamp(item.Timestamp),
+		Type:              formatType(item.Type),
+		Server:            resolveServer(item.ServerID, serverMap),
+		User:              item.Username,
+		Details:           formatDetails(item),
+		CommandRejection:  item.CommandRejection,
+		SudoRefusalReason: item.SudoRefusalReason,
 	}
 }
 
@@ -249,6 +250,10 @@ func formatDetails(item *wsapi.TimelineItem) utils.TruncatedText {
 			status = item.Label()
 		} else if item.Denied {
 			status = "denied"
+		} else if item.SudoRefusalReason != nil && *item.SudoRefusalReason != "" {
+			// The command was allowed to run but the host refused a sudo inside it,
+			// so its exit status alone would read as an ordinary failure.
+			status = "sudo denied: " + utils.SanitizeTerminalText(*item.SudoRefusalReason)
 		} else if item.Success != nil {
 			if *item.Success {
 				status = "ok"
