@@ -15,10 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	defaultPrivateKeyDir string
-	defaultCSRDir        string
-)
+var currentUser = user.Current
 
 const (
 	infoMessage = "Please specify the paths for the private key and CSR files.\n" +
@@ -48,6 +45,12 @@ var csrCreateCmd = &cobra.Command{
 	alpacon csr create -d "a.com,b.com" --valid-days 90
 	`,
 	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+		usr, err := currentUser()
+		if err != nil {
+			return utils.NewExitError("Failed to obtain the current user information: %v", err)
+		}
+		defaultPrivateKeyDir := filepath.Join(usr.HomeDir, "tmp/private/")
+		defaultCSRDir := filepath.Join(usr.HomeDir, "tmp/")
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
@@ -81,7 +84,7 @@ var csrCreateCmd = &cobra.Command{
 				certPath.CSRPath = filepath.Join(defaultCSRDir, commonName+".csr")
 			}
 		} else {
-			signRequest, certPath, err = promptForCert()
+			signRequest, certPath, err = promptForCert(defaultPrivateKeyDir, defaultCSRDir)
 			if err != nil {
 				return err
 			}
@@ -112,14 +115,6 @@ var csrCreateCmd = &cobra.Command{
 }
 
 func init() {
-	usr, err := user.Current()
-	if err != nil {
-		utils.CliErrorWithExit("Failed to obtain the current user information: %v", err)
-	}
-
-	defaultPrivateKeyDir = filepath.Join(usr.HomeDir, "tmp/private/")
-	defaultCSRDir = filepath.Join(usr.HomeDir, "tmp/")
-
 	csrCreateCmd.Flags().StringVarP(&csrFlags.domains, "domain", "d", "", "Comma-separated domain list (e.g., a.com,b.com)")
 	csrCreateCmd.Flags().StringVarP(&csrFlags.ips, "ip", "i", "", "Comma-separated IP list (e.g., 192.168.1.1)")
 	csrCreateCmd.Flags().IntVar(&csrFlags.validDays, "valid-days", 0, "Certificate validity in days (default: the CA's default validity)")
@@ -127,7 +122,7 @@ func init() {
 	csrCreateCmd.Flags().StringVarP(&csrFlags.csrPath, "out", "o", "", "Path for the CSR output file")
 }
 
-func promptForCert() (certApi.SignRequest, cert.CertificatePath, error) {
+func promptForCert(defaultPrivateKeyDir, defaultCSRDir string) (certApi.SignRequest, cert.CertificatePath, error) {
 	var signRequest certApi.SignRequest
 	var certPath cert.CertificatePath
 
