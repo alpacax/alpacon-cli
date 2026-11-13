@@ -250,10 +250,10 @@ func formatDetails(item *wsapi.TimelineItem) utils.TruncatedText {
 			status = item.Label()
 		} else if item.Denied {
 			status = "denied"
-		} else if item.SudoRefusalReason != nil && *item.SudoRefusalReason != "" {
+		} else if item.SudoRefusalReason.Value != "" {
 			// The command was allowed to run but the host refused a sudo inside it,
 			// so its exit status alone would read as an ordinary failure.
-			status = "sudo denied: " + utils.SanitizeTerminalText(*item.SudoRefusalReason)
+			status = "sudo denied: " + utils.SanitizeTerminalText(item.SudoRefusalReason.Value)
 		} else if item.Success != nil {
 			if *item.Success {
 				status = "ok"

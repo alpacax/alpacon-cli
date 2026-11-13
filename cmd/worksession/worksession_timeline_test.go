@@ -622,10 +622,10 @@ func TestTimelineShowsSudoRefusal(t *testing.T) {
 			wantExtra:   `,"sudo_refusal_reason":"sudo_risk_denied"`,
 		},
 		{
-			name:        "null reason keeps the result",
+			name:        "null reason keeps the result and the null",
 			wire:        `{"type":"command","line":"ls","success":false,"sudo_refusal_reason":null}`,
 			wantDetails: "[failed] ls",
-			wantExtra:   ``,
+			wantExtra:   `,"sudo_refusal_reason":null`,
 		},
 		{
 			name:        "server without the field is unchanged",
