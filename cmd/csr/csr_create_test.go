@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os/user"
 	"testing"
 
 	certApi "github.com/alpacax/alpacon-cli/api/cert"
@@ -189,4 +190,21 @@ func TestCreateSignRequestErrorText_ServerHintReplacesTheLocalSentence(t *testin
 	assert.Equal(t, hint, utils.RefusalHint(utils.Reword(err, got)))
 
 	assert.Contains(t, createSignRequestErrorText(hintedRefusal{code: certApi.CodeInvalidPeriod}, 90), "The CA refused a validity of 90 days")
+}
+
+// A failed home lookup fails csr create alone, as an ExitError from its RunE.
+func TestCSRCreateReturnsHomeLookupFailure(t *testing.T) {
+	home := t.TempDir() // no config here, so the command never reaches a real workspace
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	saved := currentUser
+	t.Cleanup(func() { currentUser = saved })
+	currentUser = func() (*user.User, error) { return nil, errors.New("no passwd entry") }
+
+	err := csrCreateCmd.RunE(csrCreateCmd, nil)
+
+	exitErr, ok := errors.AsType[*utils.ExitError](err)
+	require.True(t, ok, "want an ExitError, got %v", err)
+	assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
+	assert.Equal(t, "Failed to obtain the current user information: no passwd entry", exitErr.Error())
 }

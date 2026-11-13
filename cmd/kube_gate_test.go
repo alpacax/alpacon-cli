@@ -222,8 +222,7 @@ func TestKubeGatePassesCredentialsThrough(t *testing.T) {
 }
 
 // kube logout cleans up a context of another workspace, so it stays usable on
-// one without Kubernetes, help included: the stand-in's help only refuses, and
-// a kept command must not inherit it.
+// one without Kubernetes, help included: only help for the stand-in itself refuses.
 func TestKubeGatePassesLogoutThrough(t *testing.T) {
 	t.Parallel()
 	home := writeKubeGateConfig(t, map[string]any{
