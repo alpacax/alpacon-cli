@@ -1366,7 +1366,7 @@ func TestStreamSubscribed_NoFinSubscriptionPollsEverySecond(t *testing.T) {
 }
 
 // The approval wait follows the same rule: parked behind a connected stream, the
-// command is read at the connected pace, not every second.
+// command is read at the fin-deliverable pace, not every second.
 func TestStreamApprovedCommand_ConnectedHoldPollsAtTheBackstopPace(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -1386,7 +1386,7 @@ func TestStreamApprovedCommand_ConnectedHoldPollsAtTheBackstopPace(t *testing.T)
 		require.NotEmpty(t, after)
 		for _, gap := range after {
 			if gap > 0 {
-				assert.Equal(t, connectedStreamPollTick, gap)
+				assert.Equal(t, finDeliverablePollTick, gap)
 			}
 		}
 	})

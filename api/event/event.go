@@ -24,11 +24,11 @@ const (
 	// have lost the fin.
 	streamPollTick = time.Second
 
-	// connectedStreamPollTick paces that poll while the stream can still deliver the
+	// finDeliverablePollTick paces that poll while the stream can still deliver the
 	// fin, bounding how late a lost fin is noticed. It is the slowest gap NextPollTick
 	// reaches from streamPollTick, so a short run no longer spends a service token's
 	// hourly quota once a second.
-	connectedStreamPollTick = 10 * time.Second
+	finDeliverablePollTick = 10 * time.Second
 )
 
 // CommandPollTick paces a command poll with no stream behind it. A var so a test's
@@ -72,7 +72,7 @@ type commandSubmitter func() (CommandResponse, error)
 type pollSeams struct {
 	cancel <-chan struct{}
 	// finAtRisk, for a poll beside a stream, closes once that stream may have lost
-	// the fin. Until then the poll reads every connectedStreamPollTick.
+	// the fin. Until then the poll reads every finDeliverablePollTick.
 	finAtRisk <-chan struct{}
 	now       func() time.Time
 	after     func(time.Duration) <-chan time.Time
@@ -394,19 +394,19 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 	started := seams.Now()
 	deadline := started.Add(timeout)
 	finAtRisk := seams.finAtRisk // nil once closed, so a wait never selects it again
-	// pace returns the next wait and whether a lost fin should cut it short.
-	pace := func() (time.Duration, bool) {
+	// pace returns the next wait and the signal that cuts it short, nil when none should.
+	pace := func() (time.Duration, <-chan struct{}) {
 		if finAtRisk != nil {
 			select {
 			case <-finAtRisk:
 				finAtRisk = nil
 			default:
-				return connectedStreamPollTick, true
+				return finDeliverablePollTick, finAtRisk
 			}
 		}
-		return utils.NextPollTick(tick, seams.Now().Sub(started)), false
+		return utils.NextPollTick(tick, seams.Now().Sub(started)), nil
 	}
-	delay, connected := pace()
+	delay, lost := pace()
 	failures, throttles := 0, 0
 	budget := utils.NewThrottleBudget(timeout)
 	lastRefusalHint := ""
@@ -421,14 +421,10 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 		// ticks at the slow pace, 60 once throttled. An extended deadline always
 		// leaves the whole wait, so a throttled retry still gets its poll.
 		if wait := min(delay, deadline.Sub(seams.Now())); wait > 0 {
-			var lost <-chan struct{}
-			if connected {
-				lost = finAtRisk
-			}
 			select {
 			case <-seams.After(wait):
 			case <-lost:
-				delay, connected = pace()
+				delay, lost = pace()
 				continue
 			case <-seams.cancel:
 				return response, errPollCancelled
@@ -445,7 +441,7 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 			return response, err
 		case err != nil && utils.HTTPStatusCode(err) == http.StatusTooManyRequests:
 			lastRefusalHint = utils.RefusalHint(err) // kept for a timeout that ends while throttled
-			delay, connected = utils.NextPollBackoff(tick, throttles, utils.RetryAfter(err)), false
+			delay, lost = utils.NextPollBackoff(tick, throttles, utils.RetryAfter(err)), nil
 			throttles++
 			// The wait can reach two timeouts, and nothing else on this path
 			// prints while it lasts.
@@ -462,7 +458,7 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 			if failures >= utils.MaxConsecutivePollFailures && !seams.uncapped {
 				return response, err
 			}
-			delay, connected = utils.NextPollBackoff(tick, failures-1, utils.RetryAfter(err)), false
+			delay, lost = utils.NextPollBackoff(tick, failures-1, utils.RetryAfter(err)), nil
 			continue
 		}
 		failures, throttles = 0, 0
@@ -473,12 +469,12 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 		if IsRunningStatus(response.Status) {
 			deadline = seams.Now().Add(timeout)
 			budget.Reset()
-			delay, connected = pace()
+			delay, lost = pace()
 			continue
 		}
 		// Running is handled above, so what is left here is the approval hold.
 		if isPollWaitStatus(response.Status, waitApproval) {
-			delay, connected = pace()
+			delay, lost = pace()
 			continue
 		}
 		return response, nil
@@ -694,7 +690,7 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 	}
 	// The fin subscription went in after the command was submitted, so a command
 	// that finished first sent its fin before anyone listened. The poll would catch
-	// it only a connected tick later.
+	// it only a finDeliverablePollTick later.
 	if details, done := over(); done {
 		return finish(details)
 	}
