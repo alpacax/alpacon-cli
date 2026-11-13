@@ -264,20 +264,19 @@ func TestPollForApproval_SustainedThrottleDoesNotTripTheFailureCap(t *testing.T)
 	throttled := utils.MaxConsecutivePollFailures + 1
 
 	requests := 0
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
 		requests++
 		if requests <= throttled {
-			w.WriteHeader(http.StatusTooManyRequests)
-			return
+			return http.StatusTooManyRequests, ""
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"approved"}`))
-	}))
-	defer ts.Close()
+		return http.StatusOK, `{"id":"ws-uuid","status":"approved"}`
+	})}
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
-	session, err := WaitForApproval(ac, "ws-uuid", false, interval, timeout)
+	var session *wsapi.WorkSession
+	var err error
+	synctest.Test(t, func(*testing.T) {
+		session, err = WaitForApproval(ac, "ws-uuid", false, interval, timeout)
+	})
 
 	require.NoError(t, err)
 	require.NotNil(t, session)
@@ -324,23 +323,22 @@ func TestPollForApproval_ThrottleWarnsOnce(t *testing.T) {
 	throttled := utils.MaxConsecutivePollFailures + 1
 
 	requests := 0
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
 		requests++
 		if requests <= throttled {
-			w.WriteHeader(http.StatusTooManyRequests)
-			return
+			return http.StatusTooManyRequests, ""
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"approved"}`))
-	}))
-	defer ts.Close()
+		return http.StatusOK, `{"id":"ws-uuid","status":"approved"}`
+	})}
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
+	var err error
 	_, stderr := testutil.CaptureOutput(t, func() {
-		_, _ = WaitForApproval(ac, "ws-uuid", false, interval, timeout)
+		synctest.Test(t, func(*testing.T) {
+			_, err = WaitForApproval(ac, "ws-uuid", false, interval, timeout)
+		})
 	})
 
+	require.NoError(t, err, "the whole throttled stretch must run for the single warning to mean anything")
 	assert.Equal(t, 1, strings.Count(stderr, "rate limited by the server"))
 	assert.NotContains(t, stderr, "Poll failed")
 }
