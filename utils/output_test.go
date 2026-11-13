@@ -34,7 +34,7 @@ func TestPrintTable_JSONOutput(t *testing.T) {
 	}
 	var got string
 	withFormat("json", func() {
-		got = testutil.CaptureStdout(t, func() { PrintTable(items) })
+		got = testutil.CaptureStdout(t, func() { assert.NoError(t, PrintTable(items)) })
 	})
 	assert.JSONEq(t, `[{"name":"alpha","id":1},{"name":"beta","id":2}]`, strings.TrimSpace(got))
 	assert.Contains(t, got, "\n  ")
@@ -44,7 +44,7 @@ func TestPrintTable_JSONOutput_EmptySlice(t *testing.T) {
 	items := []outputTestItem{}
 	var got string
 	withFormat("json", func() {
-		got = testutil.CaptureStdout(t, func() { PrintTable(items) })
+		got = testutil.CaptureStdout(t, func() { assert.NoError(t, PrintTable(items)) })
 	})
 	assert.Equal(t, "[]\n", got)
 }
@@ -53,7 +53,7 @@ func TestPrintTable_JSONOutput_NilSlice(t *testing.T) {
 	var items []outputTestItem
 	var got string
 	withFormat("json", func() {
-		got = testutil.CaptureStdout(t, func() { PrintTable(items) })
+		got = testutil.CaptureStdout(t, func() { assert.NoError(t, PrintTable(items)) })
 	})
 	assert.Equal(t, "[]\n", got)
 }
@@ -75,7 +75,7 @@ func TestPrintTable_JSONOutput_KeepsControlSequencesEscaped(t *testing.T) {
 			items := []outputTestItem{{Name: tt.payload, ID: 1}}
 			var got string
 			withFormat("json", func() {
-				got = testutil.CaptureStdout(t, func() { PrintTable(items) })
+				got = testutil.CaptureStdout(t, func() { assert.NoError(t, PrintTable(items)) })
 			})
 			assert.Contains(t, got, tt.escape)
 			assert.NotContains(t, got, "\x1b")
@@ -93,7 +93,7 @@ func TestPrintTable_TableOutput(t *testing.T) {
 	items := []outputTestItem{{Name: "alpha", ID: 1}}
 	var got string
 	withFormat("table", func() {
-		got = testutil.CaptureStdout(t, func() { PrintTable(items) })
+		got = testutil.CaptureStdout(t, func() { assert.NoError(t, PrintTable(items)) })
 	})
 	assert.Contains(t, got, "NAME")
 	assert.Contains(t, got, "ID")
@@ -109,14 +109,14 @@ func TestPrintTable_HiddenTableFieldRemainsInJSON(t *testing.T) {
 	items := []item{{Name: "alpha", Grant: "grant-1"}}
 	var table string
 	withFormat("table", func() {
-		table = testutil.CaptureStdout(t, func() { PrintTable(items) })
+		table = testutil.CaptureStdout(t, func() { assert.NoError(t, PrintTable(items)) })
 	})
 	assert.Contains(t, table, "alpha")
 	assert.NotContains(t, table, "GRANT")
 	assert.NotContains(t, table, "grant-1")
 	var body string
 	withFormat("json", func() {
-		body = testutil.CaptureStdout(t, func() { PrintTable(items) })
+		body = testutil.CaptureStdout(t, func() { assert.NoError(t, PrintTable(items)) })
 	})
 	assert.JSONEq(t, `[{"name":"alpha","grant":"grant-1"}]`, body)
 }
@@ -138,7 +138,7 @@ func TestPrintTable_TableOutput_StripsControlSequences(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var got string
 			withFormat("table", func() {
-				got = testutil.CaptureStdout(t, func() { PrintTable([]outputTestItem{{Name: tt.payload, ID: 1}}) })
+				got = testutil.CaptureStdout(t, func() { assert.NoError(t, PrintTable([]outputTestItem{{Name: tt.payload, ID: 1}})) })
 			})
 			assert.NotContains(t, got, "\x1b")
 			assert.NotContains(t, got, "\r")
@@ -151,13 +151,62 @@ func TestPrintTable_TableOutput_StripsControlSequences(t *testing.T) {
 	}
 }
 
+type unmarshalableItem struct {
+	Name string    `json:"name"`
+	Done chan bool `json:"done"`
+}
+
+// Serial: OutputFormat and os.Stdout are process-wide.
+func TestPrintTable_ReturnsTheFailureInsteadOfExiting(t *testing.T) {
+	tests := []struct {
+		name    string
+		format  string
+		rows    any
+		wantMsg string
+	}{
+		{name: "not a slice in table mode", format: OutputFormatTable, rows: outputTestItem{Name: "alpha"}, wantMsg: "Parsing data: Expected a list format."},
+		{name: "not a slice in json mode", format: OutputFormatJSON, rows: map[string]int{"alpha": 1}, wantMsg: "Parsing data: Expected a list format."},
+		{name: "rows json cannot encode", format: OutputFormatJSON, rows: []unmarshalableItem{{Name: "alpha"}}, wantMsg: "Failed to marshal data to JSON: json: unsupported type: chan bool"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var err error
+			var stdout string
+			withFormat(tt.format, func() {
+				stdout = testutil.CaptureStdout(t, func() { err = PrintTable(tt.rows) })
+			})
+
+			exitErr, ok := errors.AsType[*ExitError](err)
+			require.True(t, ok, "want an ExitError, got %v", err)
+			assert.Equal(t, ExitCodeGeneralError, exitErr.Code)
+			assert.Equal(t, tt.wantMsg, exitErr.Error())
+			assert.Empty(t, stdout)
+		})
+	}
+}
+
+// Serial: OutputFormat and os.Stdout are process-wide.
+func TestPartialTableExitError_ReturnsTheTableFailureOverTheSilentExit(t *testing.T) {
+	var err error
+	withFormat(OutputFormatJSON, func() {
+		testutil.CaptureOutput(t, func() {
+			err = PartialTableExitError([]unmarshalableItem{{Name: "alpha"}}, "Showing only %d entries.", 1)
+		})
+	})
+
+	exitErr, ok := errors.AsType[*ExitError](err)
+	require.True(t, ok, "want an ExitError, got %v", err)
+	assert.Equal(t, ExitCodeGeneralError, exitErr.Code)
+	assert.Equal(t, "Failed to marshal data to JSON: json: unsupported type: chan bool", exitErr.Error())
+}
+
 func TestPrintTable_TableOutput_StripsFormatChars(t *testing.T) {
 	// Every table command reaches the terminal through here, and a bidi override
 	// rewrites the cell without carrying a control byte for the other passes to find.
 	var got string
 	withFormat("table", func() {
 		got = testutil.CaptureStdout(t, func() {
-			PrintTable([]outputTestItem{{Name: "denied\u202e\u2066 approved", ID: 1}})
+			assert.NoError(t, PrintTable([]outputTestItem{{Name: "denied\u202e\u2066 approved", ID: 1}}))
 		})
 	})
 	assert.NotContains(t, got, "\u202e")
@@ -506,16 +555,16 @@ func TestPartialListOutputHelperProcess(t *testing.T) {
 	boom := errors.New("boom")
 	switch helperCase {
 	case "partial-table":
-		PartialTableWithExit(rows, "Showing only the %d entries read before the request failed: %s.", 1, boom)
+		exitOnError(PartialTableExitError(rows, "Showing only the %d entries read before the request failed: %s.", 1, boom))
 	case "partial-json":
 		OutputFormat = OutputFormatJSON
-		PartialTableWithExit(rows, "Showing only the %d entries read before the request failed: %s.", 1, boom)
+		exitOnError(PartialTableExitError(rows, "Showing only the %d entries read before the request failed: %s.", 1, boom))
 	case "list-complete":
-		PrintListOrExit(rows, nil, "Failed to get logs")
+		exitOnError(PrintList(rows, nil, "Failed to get logs"))
 	case "list-partial":
-		PrintListOrExit(rows, boom, "Failed to get logs")
+		exitOnError(PrintList(rows, boom, "Failed to get logs"))
 	case "list-failed":
-		PrintListOrExit([]outputTestItem{}, boom, "Failed to get logs")
+		exitOnError(PrintList([]outputTestItem{}, boom, "Failed to get logs"))
 	}
 	os.Exit(0)
 }

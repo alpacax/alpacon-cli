@@ -30,7 +30,6 @@ var certListCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the certificate list: %s.", err)
 		}
 
-		utils.PrintTable(certList)
-		return nil
+		return utils.PrintTable(certList)
 	}),
 }

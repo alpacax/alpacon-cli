@@ -32,8 +32,7 @@ var csrListCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the csr list: %s.", err)
 		}
 
-		utils.PrintTable(csrList)
-		return nil
+		return utils.PrintTable(csrList)
 	}),
 }
 

@@ -172,25 +172,7 @@ func TestProcessEditedDataHandsTheEditorPrettyJSON(t *testing.T) {
 	assert.Equal(t, want, content, "the editor gets tab-indented JSON, not just equivalent JSON")
 }
 
-func TestExitIfNoChangesReturnsOnOtherErrors(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		err  error
-	}{
-		{"nil error", nil},
-		{"unrelated error", errors.New("editor exited with status 1")},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			ExitIfNoChanges(tt.err)
-		})
-	}
-}
-
-func TestExitIfNoChangesPrintsTheNoticeAndExitsZero(t *testing.T) {
+func TestReportNoChangesPrintsTheNoticeInEveryFormat(t *testing.T) {
 	tests := []struct {
 		name   string
 		format string
@@ -200,7 +182,7 @@ func TestExitIfNoChangesPrintsTheNoticeAndExitsZero(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			help := osexec.Command(os.Args[0], "-test.run=^TestExitIfNoChangesHelperProcess$")
+			help := osexec.Command(os.Args[0], "-test.run=^TestReportNoChangesHelperProcess$")
 			help.Env = append(os.Environ(), "GO_WANT_NO_CHANGES_HELPER="+tt.format)
 			var stdout, stderr bytes.Buffer
 			help.Stdout = &stdout
@@ -215,14 +197,16 @@ func TestExitIfNoChangesPrintsTheNoticeAndExitsZero(t *testing.T) {
 	}
 }
 
-func TestExitIfNoChangesHelperProcess(t *testing.T) {
+func TestReportNoChangesHelperProcess(t *testing.T) {
 	format := os.Getenv("GO_WANT_NO_CHANGES_HELPER")
 	if format == "" {
 		return
 	}
 	OutputFormat = format
-	ExitIfNoChanges(fmt.Errorf("failed to update: %w", ErrNoChanges))
-	_, _ = fmt.Fprintln(os.Stderr, "ExitIfNoChanges returned")
+	if !ReportNoChanges(fmt.Errorf("failed to update: %w", ErrNoChanges)) {
+		_, _ = fmt.Fprintln(os.Stderr, "ReportNoChanges answered false")
+	}
+	os.Exit(0)
 }
 
 func TestPendingSignalReturnsASignalBufferedBeforeDone(t *testing.T) {

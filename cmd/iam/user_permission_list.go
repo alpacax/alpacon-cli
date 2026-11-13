@@ -49,8 +49,7 @@ second group says the user holds the permission somewhere without saying on what
 				return utils.NewExitError("Failed to retrieve %s's permissions: %s.", subj.Label, describeRBACError(alpaconClient, gatePermissionIntrospect, err))
 			}
 
-			utils.PrintTable(rbac.PermissionPatternAttributesFrom(patterns))
-			return nil
+			return utils.PrintTable(rbac.PermissionPatternAttributesFrom(patterns))
 		}
 
 		effective, err := rbac.GetEffectivePermissions(alpaconClient, subj.PK)
@@ -76,10 +75,11 @@ second group says the user holds the permission somewhere without saying on what
 		}
 
 		utils.PrintHeader("Roles in effect")
-		utils.PrintTable(roleRows)
+		if err := utils.PrintTable(roleRows); err != nil {
+			return err
+		}
 		utils.PrintHeader("Permissions")
-		utils.PrintTable(capabilityRows)
-		return nil
+		return utils.PrintTable(capabilityRows)
 	}),
 }
 

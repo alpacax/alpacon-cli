@@ -30,7 +30,6 @@ var tokenListCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the api token list: %s.", err)
 		}
 
-		utils.PrintTable(tokenList)
-		return nil
+		return utils.PrintTable(tokenList)
 	}),
 }

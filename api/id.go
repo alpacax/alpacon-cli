@@ -55,6 +55,7 @@ func RequireResponseID(id, what string) (PathID, error) {
 }
 
 // IDURL builds base/id/action/ with params as the query. action is one constant segment such as "close", or "" for none.
+// It panics on a base that does not parse, as on a bad action: every base is a route this module declares.
 func IDURL(base string, id PathID, action string, params map[string]string) string {
 	if id.s == "" {
 		panic("api.IDURL: zero PathID")
@@ -62,7 +63,11 @@ func IDURL(base string, id PathID, action string, params map[string]string) stri
 	if segment, ok := pathSegmentID(action); action != "" && (!ok || segment != action) {
 		panic(fmt.Sprintf("api.IDURL: action %q is not one path segment", action))
 	}
-	return utils.BuildURL(base, path.Join(id.s, action), params)
+	u, err := utils.BuildURL(base, path.Join(id.s, action), params)
+	if err != nil {
+		panic(fmt.Sprintf("api.IDURL: base %q is not a URL", base))
+	}
+	return u
 }
 
 func pathSegmentID(id string) (string, bool) {

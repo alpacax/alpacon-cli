@@ -169,19 +169,11 @@ func ExtractWorkspaceName(workspaceURL string) string {
 	return ""
 }
 
-func SplitAndParseInt(input string) []int {
-	intValues, err := ParseIntList(input)
-	if err != nil {
-		exitWithError(notIntegersError())
-	}
-	return intValues
-}
-
 func notIntegersError() *ExitError {
 	return newExitError(ExitCodeGeneralError, true, "Invalid input: only integers allowed.", nil)
 }
 
-// ParseIntList is SplitAndParseInt for a RunE command: it returns the failure SplitAndParseInt exits with.
+// ParseIntList parses a comma-separated list of integers, or returns the exit-1 failure on any other value.
 func ParseIntList(input string) ([]int, error) {
 	var intValues []int
 
@@ -512,10 +504,12 @@ func BoolPointerToString(value *bool) string {
 	return "false"
 }
 
-func BuildURL(basePath, relativePath string, params map[string]string) string {
+// BuildURL joins relativePath onto basePath with a trailing slash and params as the query, or returns
+// the parse error when basePath is not a URL.
+func BuildURL(basePath, relativePath string, params map[string]string) (string, error) {
 	u, err := url.Parse(basePath)
 	if err != nil {
-		CliErrorWithExit("Failed to parse base URL")
+		return "", err
 	}
 
 	u.Path = path.Join(u.Path, relativePath)
@@ -529,7 +523,7 @@ func BuildURL(basePath, relativePath string, params map[string]string) string {
 	}
 
 	u.RawQuery = q.Encode()
-	return u.String()
+	return u.String(), nil
 }
 
 // SetQuery changes only the query string, leaving an invalid URL for the caller to handle.
@@ -645,15 +639,8 @@ func SanitizeTerminalBlockKeepingTabs(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-// ExitIfNoChanges prints the no-change notice and exits 0 when err is ErrNoChanges.
-func ExitIfNoChanges(err error) {
-	if ReportNoChanges(err) {
-		os.Exit(0)
-	}
-}
-
-// ReportNoChanges is ExitIfNoChanges for a RunE command: it prints the notice and returns true when
-// err is ErrNoChanges, and the caller ends on exit 0.
+// ReportNoChanges prints the no-change notice and returns true when err is ErrNoChanges; the caller
+// then ends on exit 0.
 func ReportNoChanges(err error) bool {
 	if !errors.Is(err, ErrNoChanges) {
 		return false
@@ -842,14 +829,7 @@ func SplitAndTrim(s, sep string) []string {
 	return result
 }
 
-// RequirePositiveInt exits with a usage error when an integer flag is not positive.
-func RequirePositiveInt(flagName string, value int) {
-	if exitErr, ok := errors.AsType[*ExitError](CheckPositiveInt(flagName, value)); ok {
-		exitWithError(exitErr)
-	}
-}
-
-// CheckPositiveInt is the usage failure RequirePositiveInt reports, or nil for a positive value.
+// CheckPositiveInt returns the usage failure for an integer flag that is not positive, or nil.
 func CheckPositiveInt(flagName string, value int) error {
 	if value <= 0 {
 		return NewUsageExitError("--%s must be a positive integer.", flagName)

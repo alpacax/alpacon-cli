@@ -33,7 +33,6 @@ var workspaceListCmd = &cobra.Command{
 			return utils.NewExitError("Failed to list workspaces: %s", err)
 		}
 
-		utils.PrintTable(entries)
-		return nil
+		return utils.PrintTable(entries)
 	}),
 }

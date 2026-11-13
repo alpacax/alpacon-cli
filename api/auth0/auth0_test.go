@@ -921,6 +921,25 @@ func TestFetchAuthEnv_ErrorCarriesTheStatus(t *testing.T) {
 	}
 }
 
+func TestFetchAuthEnv_ReturnsAnErrorForAWorkspaceURLThatDoesNotParse(t *testing.T) {
+	t.Parallel()
+
+	env, err := FetchAuthEnv("https://[::1", http.DefaultClient)
+
+	assert.Nil(t, env)
+	assert.ErrorContains(t, err, "missing ']' in host")
+}
+
+func TestRequestDeviceCode_ReturnsAnErrorForAnAuth0DomainThatDoesNotParse(t *testing.T) {
+	t.Parallel()
+	env := &AuthEnvResponse{Auth0: Auth0Config{Method: "auth0", Domain: "[::1"}}
+
+	code, err := requestDeviceCode(http.DefaultClient, env, "openid", "https://alpacon.test/")
+
+	assert.Nil(t, code)
+	assert.ErrorContains(t, err, "missing ']' in host")
+}
+
 func TestRevokeToken_RefusesAnAuth0DomainThatDoesNotParse(t *testing.T) {
 	t.Parallel()
 	env := &AuthEnvResponse{Auth0: Auth0Config{Method: "auth0", Domain: "[::1"}}

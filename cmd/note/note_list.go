@@ -49,6 +49,5 @@ func runNoteList(tail int, serverName string, pinnedOnly bool) error {
 		return utils.NewExitError("Failed to retrieve the notes: %s.", err)
 	}
 
-	utils.PrintTable(noteList)
-	return nil
+	return utils.PrintTable(noteList)
 }

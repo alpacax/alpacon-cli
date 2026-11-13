@@ -58,15 +58,7 @@ func PromptForPassword(promptText string) string {
 	return strings.TrimSpace(string(password))
 }
 
-func PromptForInput(promptText string) string {
-	input, err := ReadInput(promptText)
-	if err != nil {
-		exitWithError(noInputError())
-	}
-	return input
-}
-
-// ReadInput is PromptForInput for a RunE command: it returns the failure PromptForInput exits with.
+// ReadInput reads one line from stdin after promptText, or returns the exit-1 failure on no input.
 func ReadInput(promptText string) (string, error) {
 	input, err := promptForInput(os.Stdin, promptText)
 	if err != nil {
@@ -98,16 +90,7 @@ func noteEchoedNewline(r io.Reader, readErr error) {
 	}
 }
 
-func PromptForRequiredInput(promptText string) string {
-	input, err := ReadRequiredInput(promptText)
-	if err != nil {
-		exitWithError(noInputError())
-	}
-	return input
-}
-
-// ReadRequiredInput is PromptForRequiredInput for a RunE command: it asks again on an empty line and
-// returns the failure PromptForRequiredInput exits with.
+// ReadRequiredInput is ReadInput that asks again on an empty line.
 func ReadRequiredInput(promptText string) (string, error) {
 	return readRequiredInput(os.Stdin, promptText)
 }
@@ -123,41 +106,6 @@ func readRequiredInput(r io.Reader, promptText string) (string, error) {
 		}
 		CliWarning("This field is required. Please enter a value.")
 	}
-}
-
-// PromptForInputWithDefault prompts for input and returns the default if empty.
-func PromptForInputWithDefault(promptText, defaultValue string) string {
-	input := PromptForInput(promptText)
-	if input == "" {
-		return defaultValue
-	}
-	return input
-}
-
-func PromptForRequiredIntInput(promptText string) int {
-	for {
-		inputStr := PromptForInput(promptText)
-		inputInt, err := strconv.Atoi(inputStr)
-		if err != nil {
-			CliWarning("Only integers are allowed. Please try again.")
-			continue
-		}
-		return inputInt
-	}
-}
-
-func PromptForIntInput(promptText string, defaultValue int) int {
-	inputStr := PromptForInput(promptText)
-	inputStr = strings.TrimSpace(inputStr)
-	if inputStr == "" {
-		return defaultValue
-	}
-	inputInt, err := strconv.Atoi(inputStr)
-	if err != nil {
-		CliWarning("Invalid input. Using default value: %d", defaultValue)
-		return defaultValue
-	}
-	return inputInt
 }
 
 func ReadInputWithDefault(promptText, defaultValue string) (string, error) {
@@ -199,25 +147,8 @@ func ReadIntInput(promptText string, defaultValue int) (int, error) {
 	return inputInt, nil
 }
 
-func PromptForListInput(promptText string) []string {
-	return SplitAndTrim(PromptForInput(promptText), ",")
-}
-
-// ConfirmAction prompts the user for confirmation before a destructive action.
-// In non-interactive mode (piped stdin, CI, etc.), it exits and asks for --yes flag.
-// Returns on confirm; exits the program on decline.
-func ConfirmAction(msg string, args ...any) {
-	proceed, err := Confirm(msg, args...)
-	if err != nil {
-		exitWithError(confirmationRequiredError())
-	}
-	if !proceed {
-		os.Exit(0)
-	}
-}
-
-// Confirm is ConfirmAction for a RunE command. A decline prints the cancel notice and returns false,
-// which the caller ends on with exit 0; a non-interactive run returns the exit-2 failure.
+// Confirm asks msg as a yes/no question before a destructive action. A decline prints the cancel
+// notice and returns false, which the caller ends on with exit 0; a non-interactive run returns the exit-2 failure.
 func Confirm(msg string, args ...any) (bool, error) {
 	return confirm(IsInteractiveShell(), os.Stdin, msg, args...)
 }

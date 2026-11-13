@@ -94,7 +94,7 @@ func TestExitError_UnwrapsTheCauseAmongItsArguments(t *testing.T) {
 }
 
 // Serial: OutputFormat is process-wide.
-func TestNewExitErrorWithErrorCodeMatchesCliErrorWithCode(t *testing.T) {
+func TestNewExitErrorWithErrorCode_KeepsTheFooterOnlyOnExitOne(t *testing.T) {
 	saved := OutputFormat
 	t.Cleanup(func() { OutputFormat = saved })
 	usageCause := MarkUsageError(errors.New("bad flag"))

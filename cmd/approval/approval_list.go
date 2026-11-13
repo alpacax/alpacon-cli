@@ -58,8 +58,7 @@ requests you submitted.`,
 			return utils.NewExitError("Failed to list approval requests: %s.", err)
 		}
 
-		utils.PrintTable(requests)
-		return nil
+		return utils.PrintTable(requests)
 	}),
 }
 

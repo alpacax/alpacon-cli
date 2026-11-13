@@ -50,8 +50,7 @@ the flag and read the whole catalog.`,
 			return utils.NewExitError("Failed to retrieve the role catalog: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
-		utils.PrintTable(rbac.RoleAttributesFrom(roles))
-		return nil
+		return utils.PrintTable(rbac.RoleAttributesFrom(roles))
 	}),
 }
 

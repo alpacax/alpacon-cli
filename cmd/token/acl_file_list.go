@@ -36,6 +36,5 @@ func runFileAclList(_ *cobra.Command, args []string) error {
 		return utils.NewExitError("Failed to retrieve file ACLs: %v.", err)
 	}
 
-	utils.PrintTable(acls)
-	return nil
+	return utils.PrintTable(acls)
 }

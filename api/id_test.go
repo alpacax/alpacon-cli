@@ -174,6 +174,14 @@ func TestIDURLPanicsOnAnUncheckedPathID(t *testing.T) {
 	assert.Panics(t, func() { IDURL("https://alpacon.test/api/notes/", PathID{}, "", nil) })
 }
 
+func TestIDURLPanicsOnABaseThatIsNotAURL(t *testing.T) {
+	t.Parallel()
+	id, err := RequireID("42", "note")
+	require.NoError(t, err)
+
+	assert.PanicsWithValue(t, `api.IDURL: base "https://[::1" is not a URL`, func() { IDURL("https://[::1", id, "", nil) })
+}
+
 func TestIDURLPanicsOnAnActionThatIsNotOneSegment(t *testing.T) {
 	t.Parallel()
 	id, err := RequireID("42", "note")

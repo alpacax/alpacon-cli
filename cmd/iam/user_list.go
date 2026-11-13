@@ -30,7 +30,6 @@ var userListCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the user list: %s.", err)
 		}
 
-		utils.PrintTable(userList)
-		return nil
+		return utils.PrintTable(userList)
 	}),
 }

@@ -57,8 +57,7 @@ names and status and tags as the server stores them.`,
 				return utils.NewExitError("Failed to retrieve the cluster: %s.", err)
 			}
 
-			utils.PrintTable(describeRows(cluster, kubernetes.ResolveGroupNames(ac, cluster.Groups), time.Local))
-			return nil
+			return utils.PrintTable(describeRows(cluster, kubernetes.ResolveGroupNames(ac, cluster.Groups), time.Local))
 		}),
 	}
 }

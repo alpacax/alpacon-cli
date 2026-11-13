@@ -57,7 +57,8 @@ func NewExitErrorWithCode(code int, msg string, args ...any) error {
 	return newExitError(code, false, msg, args)
 }
 
-// NewExitErrorWithErrorCode is the failure CliErrorWithCode reports with a named JSON error code.
+// NewExitErrorWithErrorCode names the json error_code (an ErrorCode* constant); table mode follows the
+// exit code, so only exit 1 keeps the report footer.
 func NewExitErrorWithErrorCode(exitCode int, errorCode, msg string, args ...any) error {
 	e := newExitError(exitCode, exitCode == ExitCodeGeneralError, msg, args)
 	e.errorCode = errorCode

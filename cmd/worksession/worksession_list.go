@@ -95,8 +95,7 @@ var workSessionListCmd = &cobra.Command{
 
 		markActiveFor(ac, sessions)
 
-		utils.PrintTable(sessions)
-		return nil
+		return utils.PrintTable(sessions)
 	}),
 }
 

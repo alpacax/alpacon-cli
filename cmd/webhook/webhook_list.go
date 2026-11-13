@@ -29,7 +29,6 @@ var webhookListCmd = &cobra.Command{
 			return utils.NewExitError("Failed to get webhooks: %s.", err)
 		}
 
-		utils.PrintTable(webhookList)
-		return nil
+		return utils.PrintTable(webhookList)
 	}),
 }

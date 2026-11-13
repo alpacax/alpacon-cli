@@ -78,10 +78,11 @@ list was narrowed.`,
 		}
 
 		utils.PrintHeader("Permissions")
-		utils.PrintTable(permissionRows)
+		if err := utils.PrintTable(permissionRows); err != nil {
+			return err
+		}
 		utils.PrintHeader("Holders")
-		utils.PrintTable(holderRows)
-		return nil
+		return utils.PrintTable(holderRows)
 	}),
 }
 

@@ -31,8 +31,7 @@ connected. A version or node count the agent has not reported yet is blank.`,
 				return utils.NewExitError("Failed to retrieve the clusters: %s.", err)
 			}
 
-			utils.PrintTable(clusterList)
-			return nil
+			return utils.PrintTable(clusterList)
 		}),
 	}
 }

@@ -22,7 +22,10 @@ func GetWorkspaceID(ac *client.AlpaconClient, paymentBaseURL, workspaceName stri
 	page := 1
 
 	for {
-		pageURL := utils.BuildURL(paymentBaseURL, paymentWorkspacesURL, map[string]string{"page": strconv.Itoa(page)})
+		pageURL, err := utils.BuildURL(paymentBaseURL, paymentWorkspacesURL, map[string]string{"page": strconv.Itoa(page)})
+		if err != nil {
+			return api.PathID{}, err
+		}
 		body, err := ac.SendGetRequestToURL(pageURL)
 		if err != nil {
 			return api.PathID{}, fmt.Errorf("failed to list workspaces from payment API: %w", err)

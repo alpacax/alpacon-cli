@@ -58,6 +58,5 @@ func listFromFlags(cmd *cobra.Command, newClient clientFactory) error {
 		return utils.NewExitError("Failed to retrieve the commands: %s.", err)
 	}
 
-	utils.PrintTable(eventList)
-	return nil
+	return utils.PrintTable(eventList)
 }

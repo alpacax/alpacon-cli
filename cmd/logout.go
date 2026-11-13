@@ -52,7 +52,7 @@ func runLogout(validConfig config.Config) error {
 // endServerSession reports whether every server call succeeded. A failed call
 // only warns, so an offline or expired session can still be logged out.
 func endServerSession(validConfig config.Config) bool {
-	if _, err := url.Parse(validConfig.WorkspaceURL); err != nil { // BuildURL would exit before DeleteConfig
+	if _, err := url.Parse(validConfig.WorkspaceURL); err != nil { // every server call below would fail on the same URL
 		utils.CliWarning("Skipped the server logout: the workspace URL does not parse: %s.", err)
 		return false
 	}

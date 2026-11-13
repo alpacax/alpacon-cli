@@ -111,7 +111,11 @@ func FindCommandApprovalRequestID(ac *client.AlpaconClient, commandID string) (s
 	}
 	for page := 1; ; page++ {
 		params["page"] = strconv.Itoa(page)
-		body, err := ac.SendGetRequest(utils.BuildURL(myRequestsURL, "", params))
+		pageURL, err := utils.BuildURL(myRequestsURL, "", params)
+		if err != nil {
+			return "", err
+		}
+		body, err := ac.SendGetRequest(pageURL)
 		if err != nil {
 			// This optional lookup may be unavailable to the viewer or on an older server.
 			if status := utils.HTTPStatusCode(err); status == http.StatusForbidden || status == http.StatusNotFound {

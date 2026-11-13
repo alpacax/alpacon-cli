@@ -313,7 +313,10 @@ func fetchRegistrationGuide[T any](ac *client.AlpaconClient, guideURL, platform,
 		RegistrationToken: tokenID,
 	}
 
-	url := utils.BuildURL(guideURL, "", map[string]string{"response_type": "json"})
+	url, err := utils.BuildURL(guideURL, "", map[string]string{"response_type": "json"})
+	if err != nil {
+		return response, err
+	}
 	body, err := ac.SendPostRequest(url, req)
 	if err != nil {
 		return response, err

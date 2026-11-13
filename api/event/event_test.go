@@ -3096,14 +3096,14 @@ func rejectionOf(cause, gate types.SentString) CommandRejection {
 // TestEventAttributesTableKeepsItsColumns runs serially: PrintTable writes to os.Stdout.
 func TestEventAttributesTableKeepsItsColumns(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
-		utils.PrintTable([]EventAttributes{{
+		assert.NoError(t, utils.PrintTable([]EventAttributes{{
 			Server: "prod", Shell: "bash", Command: "uptime", Result: utils.Truncate("ok", 70), Status: "null", StatusCell: "rejected: risk_denied, gate risk",
 			Operator: "alice", RequestedAt: utils.NewTimestamp(time.Time{}, "now"),
 			CommandRejection: CommandRejection{
 				RejectionCause: types.SentString{Value: "risk_denied", Sent: true},
 				RejectionGate:  types.SentString{Value: "risk", Sent: true},
 			},
-		}})
+		}}))
 	})
 
 	header, _, _ := strings.Cut(out, "\n")

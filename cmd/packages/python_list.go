@@ -30,7 +30,6 @@ var pythonPackageListCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the Python packages: %s.", err)
 		}
 
-		utils.PrintTable(packageList)
-		return nil
+		return utils.PrintTable(packageList)
 	}),
 }

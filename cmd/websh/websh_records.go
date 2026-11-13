@@ -54,8 +54,7 @@ Use --query to search records by command text (fuzzy match).`,
 			if err != nil {
 				return utils.PartialTableExitError(rows, "Showing only the %d records read before the request failed: %s.", len(rows), err)
 			}
-			utils.PrintTable(rows)
-			return nil
+			return utils.PrintTable(rows)
 		}),
 	}
 	cmd.Flags().StringP("query", "q", "", "Search records by command text (fuzzy match)")

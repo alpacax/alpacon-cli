@@ -105,8 +105,7 @@ func WriteCurrentTable(ac *client.AlpaconClient, uuid string) error {
 	rows := []wsapi.WorkSessionAttributes{wsapi.ProjectAttributes(ws)}
 	MarkActive(rows, uuid)
 	warnIfEnded(uuid, ws.Status)
-	utils.PrintTable(rows)
-	return nil
+	return utils.PrintTable(rows)
 }
 
 func warnIfEnded(uuid, status string) {

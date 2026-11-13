@@ -52,8 +52,7 @@ scope.`,
 			return utils.NewExitError("Failed to retrieve the role history: %s.", describeRBACError(alpaconClient, gateAuditRead, err))
 		}
 
-		utils.PrintTable(rbac.AuditAttributesFrom(entries, time.Local))
-		return nil
+		return utils.PrintTable(rbac.AuditAttributesFrom(entries, time.Local))
 	}),
 }
 

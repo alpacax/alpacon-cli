@@ -75,7 +75,10 @@ func IsRefreshTokenRejected(err error) bool {
 }
 
 func FetchAuthEnv(workspaceURL string, httpClient *http.Client) (*AuthEnvResponse, error) {
-	apiURL := utils.BuildURL(workspaceURL, envPath, map[string]string{"client": "cli"})
+	apiURL, err := utils.BuildURL(workspaceURL, envPath, map[string]string{"client": "cli"})
+	if err != nil {
+		return nil, err
+	}
 
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
@@ -182,7 +185,10 @@ func requestDeviceCode(httpClient *http.Client, envInfo *AuthEnvResponse, scope,
 		return nil, err
 	}
 
-	apiURL := utils.BuildURL("https://"+envInfo.Auth0.Domain, deviceCodePath, nil)
+	apiURL, err := utils.BuildURL("https://"+envInfo.Auth0.Domain, deviceCodePath, nil)
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, err
@@ -388,7 +394,10 @@ func requestRefreshedToken(envInfo *AuthEnvResponse, httpClient *http.Client, re
 		return nil, err
 	}
 
-	apiURL := utils.BuildURL("https://"+envInfo.Auth0.Domain, tokenPath, nil)
+	apiURL, err := utils.BuildURL("https://"+envInfo.Auth0.Domain, tokenPath, nil)
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, err
@@ -428,7 +437,8 @@ func requestRefreshedToken(envInfo *AuthEnvResponse, httpClient *http.Client, re
 
 // RevokeToken revokes refreshToken at the Auth0 domain envInfo names.
 func RevokeToken(httpClient *http.Client, envInfo *AuthEnvResponse, refreshToken string) error {
-	if _, err := url.Parse("https://" + envInfo.Auth0.Domain); err != nil { // BuildURL would exit instead
+	apiURL, err := utils.BuildURL("https://"+envInfo.Auth0.Domain, revokePath, nil)
+	if err != nil {
 		return fmt.Errorf("invalid Auth0 domain: %w", err)
 	}
 	data := map[string]string{
@@ -440,8 +450,6 @@ func RevokeToken(httpClient *http.Client, envInfo *AuthEnvResponse, refreshToken
 	if err != nil {
 		return err
 	}
-
-	apiURL := utils.BuildURL("https://"+envInfo.Auth0.Domain, revokePath, nil)
 
 	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -475,7 +483,10 @@ func requestAccessToken(deviceCode string, envInfo *AuthEnvResponse) (*TokenResp
 		return nil, err
 	}
 
-	apiURL := utils.BuildURL("https://"+envInfo.Auth0.Domain, tokenPath, nil)
+	apiURL, err := utils.BuildURL("https://"+envInfo.Auth0.Domain, tokenPath, nil)
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, err
