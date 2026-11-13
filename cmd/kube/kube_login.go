@@ -318,9 +318,7 @@ func runKubeLogin(cmd *cobra.Command, args []string, flags kubeLoginFlagValues, 
 // kubeLoginError is the failure to open or write the kube session. Every
 // failure under --output json is an envelope, the gate refusal included.
 func kubeLoginError(err error, clusterName, workSessionID string) error {
-	return kubeSessionError(err, clusterName, workSessionID, func(err error, format string, args ...any) error {
-		return utils.NewEnvelopeExitError(opKubeLogin, err, format, args...)
-	})
+	return kubeSessionError(err, clusterName, workSessionID, opKubeLogin)
 }
 
 func credentialPlugin(cluster string) *kubeconfig.ExecUser {

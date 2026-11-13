@@ -15,9 +15,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// openSessionJSON opened with an RBAC drift warning; closedSessionJSON carries
+// neither latest_exec nor rbac_drift_warning, as a server older than both sends.
 const (
-	openSessionJSON = `{"id":"s-1","cluster":"c-prod","user":{"id":"u-1","name":"alice","email":"alice@example.com"},
-		"work_session":{"id":"w-1"},"token_expired_at":"2026-11-02T11:00:00Z","closed_at":null}`
+	driftWarningJSON = `{"cluster_external_grants":2,"namespaced_external_grants":1,"incomplete":false,"checked_at":"2026-11-02T09:00:00Z","policy":"warn"}`
+	openSessionJSON  = `{"id":"s-1","cluster":"c-prod","user":{"id":"u-1","name":"alice","email":"alice@example.com"},
+		"work_session":{"id":"w-1"},"token_expired_at":"2026-11-02T11:00:00Z","latest_exec":{"id":"x-1","kind":"exec"},
+		"rbac_drift_warning":` + driftWarningJSON + `,"closed_at":null}`
 	closedSessionJSON = `{"id":"s-2","cluster":"c-gone","user":{"id":"u-2","name":"","email":"bob@example.com"},
 		"token_expired_at":"2026-11-01T11:00:00Z","closed_at":"2026-11-01T10:00:00Z"}`
 )
@@ -89,6 +93,7 @@ func TestListKubeSessionsFiltersOnTheServer(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, rows, 1)
 			assert.Equal(t, "prod-east", rows[0].Cluster)
+			assert.Equal(t, "exec", rows[0].Kind)
 			require.Len(t, f.listQueries, 1)
 			assert.Equal(t, tt.wantCluster, f.listQueries[0]["cluster"])
 			assert.Equal(t, tt.wantStatus, f.listQueries[0]["status"])
@@ -153,23 +158,27 @@ func TestKubeSessionsPrintsTable(t *testing.T) {
 
 	require.Equal(t, 0, code, stderr)
 
-	assert.Regexp(t, `ID\s+CLUSTER\s+USER\s+STATUS\s+EXPIRES AT`, stdout)
-	assert.Regexp(t, `s-1\s+prod-east\s+alice\s+open\s+2026-11-0`, stdout)
-	assert.Regexp(t, `s-2\s+c-gone\s+bob@example\.com\s+closed\s+2026-11-0`, stdout)
+	assert.Regexp(t, `ID\s+CLUSTER\s+USER\s+STATUS\s+KIND\s+EXPIRES AT\s+EXTERNAL GRANTS\n`, stdout)
+	assert.Regexp(t, `s-1\s+prod-east\s+alice\s+open\s+exec\s+2026-11-0\S+ \S+\s+2 cluster-wide, 1 namespaced\n`, stdout)
+	assert.Regexp(t, `s-2\s+c-gone\s+bob@example\.com\s+closed\s+api\s+2026-11-0\S+ \S+\s*\n`, stdout)
 	assert.NotContains(t, stdout, "CLUSTER ID")
 }
 
 // Serial: it swaps os.Stdout and flips utils.OutputFormat.
 func TestKubeSessionsJSON(t *testing.T) {
-	f := &sessionListServer{sessions: []string{openSessionJSON}}
+	f := &sessionListServer{sessions: []string{openSessionJSON, closedSessionJSON}}
 	ts := httptest.NewServer(f.handler(t))
 	defer ts.Close()
-	stdout, stderr, code := runKubeCommandWith(t, apiClientTo(ts), utils.OutputFormatJSON, "sessions")
+	stdout, stderr, code := runKubeCommandWith(t, apiClientTo(ts), utils.OutputFormatJSON, "sessions", "--all")
 
 	require.Equal(t, 0, code, stderr)
 
-	assert.JSONEq(t, `[{"id":"s-1","cluster":"prod-east","cluster_id":"c-prod","user":"alice","status":"open",
-		"expires_at":"2026-11-02T11:00:00Z","token_expired_at":"2026-11-02T11:00:00Z","closed_at":null}]`, stdout)
+	assert.JSONEq(t, `[{"id":"s-1","cluster":"prod-east","cluster_id":"c-prod","user":"alice","status":"open","kind":"exec",
+		"expires_at":"2026-11-02T11:00:00Z","token_expired_at":"2026-11-02T11:00:00Z","closed_at":null,
+		"rbac_drift_warning":`+driftWarningJSON+`},
+		{"id":"s-2","cluster":"c-gone","cluster_id":"c-gone","user":"bob@example.com","status":"closed","kind":"api",
+		"expires_at":"2026-11-01T11:00:00Z","token_expired_at":"2026-11-01T11:00:00Z","closed_at":"2026-11-01T10:00:00Z",
+		"rbac_drift_warning":null}]`, stdout)
 }
 
 // Serial: it swaps os.Stdout and flips utils.OutputFormat.

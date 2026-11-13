@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -82,7 +83,12 @@ type kubeConfigResult struct {
 	ProxyURL        string    `json:"proxy_url"`
 	TokenExpiresAt  time.Time `json:"token_expires_at"`
 	PreviousContext string    `json:"previous_context"`
+	// RBACDriftWarning is the server's rbac_drift_warning on the opened
+	// session, passed through as it came; null when the session opened
+	// without one or the server is older than the field.
+	RBACDriftWarning json.RawMessage `json:"rbac_drift_warning"`
 
+	clusterName    string // the cluster as the user named it, for the drift warning
 	replacedServer string // host of an entry with the same name that pointed elsewhere
 	plaintext      bool   // the proxy URL is http, so the token travels unencrypted
 }
@@ -230,14 +236,16 @@ func kubeConfigError(err error, clusterName, workSessionID string) error {
 		return utils.NewExitError("Failed to find the cluster: %s.", lookupErr.err)
 	}
 
-	return kubeSessionError(err, clusterName, workSessionID, func(_ error, format string, args ...any) error {
-		return utils.NewExitError(format, args...)
-	})
+	// An empty operation keeps the command's name in the --output json envelope.
+	return kubeSessionError(err, clusterName, workSessionID, "")
 }
 
-// kubeSessionError is openKubeSession's failure, built by fail: a gate refusal exits 3, a refusal the
-// server names gets its hint, and anything else says the kubeconfig was not written.
-func kubeSessionError(err error, clusterName, workSessionID string, fail func(err error, format string, args ...any) error) error {
+// kubeSessionError is openKubeSession's failure, an envelope under operation: a gate refusal exits 3, a
+// refusal the server names gets its hint, and anything else says the kubeconfig was not written.
+func kubeSessionError(err error, clusterName, workSessionID, operation string) error {
+	fail := func(err error, format string, args ...any) error {
+		return utils.NewEnvelopeExitError(operation, err, format, args...)
+	}
 	var createErr *sessionCreateError
 	if errors.As(err, &createErr) {
 		if gateErr := utils.WorkSessionExitError(createErr.err, utils.OperationKube, clusterName, config.ResolveAuthMethod(), workSessionID); gateErr != nil {
@@ -267,6 +275,8 @@ func kubeSessionErrorHint(err error, clusterName string) string {
 		return "the cluster's agent did not accept the session, so it was closed; try again"
 	case utils.KubeSessionPrincipalNotSupported:
 		return "this account has no user name a kube session can act as; log in as a user"
+	case utils.ClusterRBACDrift:
+		return fmt.Sprintf("cluster %s has RBAC bindings outside Alpacon that grant sessions more than Alpacon does, and the workspace policy refuses new sessions on it until a cluster admin removes them", clusterName)
 	}
 	return ""
 }
@@ -372,16 +382,18 @@ func openKubeSession(ac *client.AlpaconClient, editor *kubeconfig.Editor, opts k
 	}
 
 	return &kubeConfigResult{
-		Context:         entry.Name,
-		Kubeconfig:      opts.kubeconfig,
-		KubeSessionID:   session.ID,
-		ClusterID:       clusterID,
-		WorkSessionID:   opts.workSessionID,
-		ProxyURL:        session.ProxyURL,
-		TokenExpiresAt:  session.TokenExpiredAt,
-		PreviousContext: previous,
-		replacedServer:  replaced,
-		plaintext:       plaintext,
+		Context:          entry.Name,
+		Kubeconfig:       opts.kubeconfig,
+		KubeSessionID:    session.ID,
+		ClusterID:        clusterID,
+		WorkSessionID:    opts.workSessionID,
+		ProxyURL:         session.ProxyURL,
+		TokenExpiresAt:   session.TokenExpiredAt,
+		PreviousContext:  previous,
+		RBACDriftWarning: session.RBACDriftWarning,
+		clusterName:      opts.clusterName,
+		replacedServer:   replaced,
+		plaintext:        plaintext,
 	}, nil
 }
 
@@ -440,6 +452,30 @@ func printKubeConfigWarnings(result *kubeConfigResult, insecure bool) {
 	if kubeconfig.Shadowed(result.Kubeconfig) {
 		utils.CliWarning("KUBECONFIG lists files before %s; kubectl takes current-context and %s from the first file that sets them.", result.Kubeconfig, result.Context)
 	}
+	if line := rbacDriftWarningLine(result.clusterName, result.RBACDriftWarning); line != "" {
+		utils.CliWarning("%s", line)
+	}
+}
+
+// rbacDriftWarningLine says that the session opened on a cluster whose RBAC
+// bindings made outside Alpacon widen what its identity may do, or returns ""
+// when the session carries no such warning. The session is open, so this is
+// information, not a failure. The counts are named when they can be read, as
+// a lower bound when the cluster's check did not finish.
+func rbacDriftWarningLine(clusterName string, raw json.RawMessage) string {
+	warning, present := kubernetes.ParseRBACDriftWarning(raw)
+	if !present {
+		return ""
+	}
+	detail := ""
+	if counts := kubernetes.ExternalGrantCounts(warning); counts != "" {
+		if warning.Incomplete {
+			detail = fmt.Sprintf(" (external grants: at least %s; the cluster's check did not finish)", counts)
+		} else {
+			detail = fmt.Sprintf(" (external grants: %s)", counts)
+		}
+	}
+	return fmt.Sprintf("Cluster %q has RBAC bindings made outside Alpacon that widen what this session's identity may do%s; the workspace policy allows the session anyway.", clusterName, detail)
 }
 
 func printKubeConfigNext(result *kubeConfigResult) {

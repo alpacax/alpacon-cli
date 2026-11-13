@@ -88,13 +88,32 @@ type KubeSessionCreateRequest struct {
 
 // KubeSessionResponse is the session the server opened. ChannelToken is the
 // credential kubectl presents to ProxyURL until TokenExpiredAt.
+// RBACDriftWarning is set when the session opened despite cluster RBAC
+// bindings outside Alpacon. It stays raw so --output json carries it as the
+// server sent it and a shape this build does not expect cannot fail the open.
 type KubeSessionResponse struct {
-	ID             string    `json:"id"`
-	Cluster        string    `json:"cluster"`
-	ChannelID      string    `json:"channel_id"`
-	ChannelToken   string    `json:"channel_token"`
-	TokenExpiredAt time.Time `json:"token_expired_at"`
-	ProxyURL       string    `json:"proxy_url"`
+	ID               string          `json:"id"`
+	Cluster          string          `json:"cluster"`
+	ChannelID        string          `json:"channel_id"`
+	ChannelToken     string          `json:"channel_token"`
+	TokenExpiredAt   time.Time       `json:"token_expired_at"`
+	ProxyURL         string          `json:"proxy_url"`
+	RBACDriftWarning json.RawMessage `json:"rbac_drift_warning"`
+}
+
+// RBACDriftWarning is the part of the server's rbac_drift_warning the CLI
+// shows: its cluster's RBAC check at the open, a snapshot that a later cleanup
+// of the cluster does not change. The two counts are permissions beyond
+// Alpacon's baseline that bindings Alpacon did not make grant the session
+// identity, through ClusterRoleBindings (in every namespace) and through
+// RoleBindings (once per namespace). Incomplete means the check did not
+// finish, so the counts are a lower bound. The other fields stay out, so a
+// value the CLI never reads cannot make the counts unreadable; --output json
+// carries the whole object.
+type RBACDriftWarning struct {
+	ClusterExternalGrants    int  `json:"cluster_external_grants"`
+	NamespacedExternalGrants int  `json:"namespaced_external_grants"`
+	Incomplete               bool `json:"incomplete"`
 }
 
 // KubeSessionDetail is a kube session as it is read back. It never carries
@@ -115,23 +134,38 @@ type KubeSessionUser struct {
 // KubeSessionListItem is one entry of the session list. It is apart from
 // KubeSessionDetail so a change in these fields cannot fail the read
 // 'kube credentials' makes on every kubectl call.
+//
+// LatestExec is the newest exec, attach or port-forward stream the session
+// opened, {id, kind}, or null when it opened none. RBACDriftWarning is null
+// unless the session opened with a warning. An older server leaves either
+// out. Both stay raw so a shape this build does not expect cannot fail the
+// list.
 type KubeSessionListItem struct {
-	ID             string           `json:"id"`
-	Cluster        string           `json:"cluster"`
-	User           *KubeSessionUser `json:"user"`
-	TokenExpiredAt *time.Time       `json:"token_expired_at"`
-	ClosedAt       *time.Time       `json:"closed_at"`
+	ID               string           `json:"id"`
+	Cluster          string           `json:"cluster"`
+	User             *KubeSessionUser `json:"user"`
+	TokenExpiredAt   *time.Time       `json:"token_expired_at"`
+	LatestExec       json.RawMessage  `json:"latest_exec"`
+	RBACDriftWarning json.RawMessage  `json:"rbac_drift_warning"`
+	ClosedAt         *time.Time       `json:"closed_at"`
 }
 
 // KubeSessionAttributes is the 'kube sessions' row. The table shows the expiry
 // in local time; --output json carries it, both raw times and the cluster's ID, all times in UTC.
+// Kind is api, unknown, or the kind of the session's newest stream (see sessionKind).
+// A session that opened with an RBAC drift warning shows its external grants
+// in the table; --output json carries the server's warning object as it came,
+// or null.
 type KubeSessionAttributes struct {
-	ID             string          `json:"id" table:"ID"`
-	Cluster        string          `json:"cluster" table:"Cluster"`
-	ClusterID      string          `json:"cluster_id" table:"-"`
-	User           string          `json:"user" table:"User"`
-	Status         string          `json:"status" table:"Status"`
-	ExpiresAt      utils.Timestamp `json:"expires_at" table:"Expires At"`
-	TokenExpiredAt utils.Timestamp `json:"token_expired_at" table:"-"`
-	ClosedAt       utils.Timestamp `json:"closed_at" table:"-"`
+	ID               string          `json:"id" table:"ID"`
+	Cluster          string          `json:"cluster" table:"Cluster"`
+	ClusterID        string          `json:"cluster_id" table:"-"`
+	User             string          `json:"user" table:"User"`
+	Status           string          `json:"status" table:"Status"`
+	Kind             string          `json:"kind" table:"Kind"`
+	ExpiresAt        utils.Timestamp `json:"expires_at" table:"Expires At"`
+	TokenExpiredAt   utils.Timestamp `json:"token_expired_at" table:"-"`
+	ClosedAt         utils.Timestamp `json:"closed_at" table:"-"`
+	RBACDriftWarning json.RawMessage `json:"rbac_drift_warning" table:"-"`
+	ExternalGrants   string          `json:"-" table:"External grants"`
 }
