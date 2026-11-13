@@ -63,9 +63,10 @@ var errPollCancelled = errors.New("poll cancelled")
 // verified file—is decided once, by whoever builds the closure.
 type commandSubmitter func() (CommandResponse, error)
 
-// pollSeams are the hooks only a stream or a test supplies: cancellation, the
-// stream's fin-at-risk signal, and a clock in place of real time. The zero value
-// polls uncancellably on the real one at the tick it is given.
+// pollSeams are what only a stream or a test supplies. A stream sets the policy
+// for a poll beside it (cancel, finAtRisk, uncapped); a test sets the clock. The
+// zero value polls uncancellably on the real clock at the tick it is given, under
+// the failure cap.
 // Passed rather than kept in package vars—a poll outlives the stream that started
 // it by an in-flight request, and a test swapping a var would swap it under a
 // loop still running.
