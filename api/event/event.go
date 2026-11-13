@@ -20,8 +20,15 @@ import (
 const (
 	getEventURL = "/api/events/commands/"
 
-	// Base tick utils.NextPollTick widens, for the poll running behind a live stream.
+	// Base tick utils.NextPollTick widens, for the poll behind a stream that may
+	// have lost the fin.
 	streamPollTick = time.Second
+
+	// connectedStreamPollTick paces that poll while the stream can still deliver the
+	// fin, bounding how late a lost fin is noticed. It is the slowest gap NextPollTick
+	// reaches from streamPollTick, so a short run no longer spends a service token's
+	// hourly quota once a second.
+	connectedStreamPollTick = 10 * time.Second
 )
 
 // CommandPollTick paces a command poll with no stream behind it. A var so a test's
@@ -56,15 +63,19 @@ var errPollCancelled = errors.New("poll cancelled")
 // verified file—is decided once, by whoever builds the closure.
 type commandSubmitter func() (CommandResponse, error)
 
-// pollSeams are the hooks only a stream or a test supplies: cancellation, and a
-// clock in place of real time. The zero value polls uncancellably on the real one.
+// pollSeams are the hooks only a stream or a test supplies: cancellation, the
+// stream's fin-at-risk signal, and a clock in place of real time. The zero value
+// polls uncancellably on the real one at the tick it is given.
 // Passed rather than kept in package vars—a poll outlives the stream that started
 // it by an in-flight request, and a test swapping a var would swap it under a
 // loop still running.
 type pollSeams struct {
 	cancel <-chan struct{}
-	now    func() time.Time
-	after  func(time.Duration) <-chan time.Time
+	// finAtRisk, for a poll beside a stream, closes once that stream may have lost
+	// the fin. Until then the poll reads every connectedStreamPollTick.
+	finAtRisk <-chan struct{}
+	now       func() time.Time
+	after     func(time.Duration) <-chan time.Time
 	// uncapped lifts the failure cap, for a poll beside a stream whose fin can
 	// still end the run while the result reads fail.
 	uncapped bool
@@ -382,7 +393,20 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 
 	started := seams.Now()
 	deadline := started.Add(timeout)
-	delay := tick
+	finAtRisk := seams.finAtRisk // nil once closed, so a wait never selects it again
+	// pace returns the next wait and whether a lost fin should cut it short.
+	pace := func() (time.Duration, bool) {
+		if finAtRisk != nil {
+			select {
+			case <-finAtRisk:
+				finAtRisk = nil
+			default:
+				return connectedStreamPollTick, true
+			}
+		}
+		return utils.NextPollTick(tick, seams.Now().Sub(started)), false
+	}
+	delay, connected := pace()
 	failures, throttles := 0, 0
 	budget := utils.NewThrottleBudget(timeout)
 	lastRefusalHint := ""
@@ -397,8 +421,15 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 		// ticks at the slow pace, 60 once throttled. An extended deadline always
 		// leaves the whole wait, so a throttled retry still gets its poll.
 		if wait := min(delay, deadline.Sub(seams.Now())); wait > 0 {
+			var lost <-chan struct{}
+			if connected {
+				lost = finAtRisk
+			}
 			select {
 			case <-seams.After(wait):
+			case <-lost:
+				delay, connected = pace()
+				continue
 			case <-seams.cancel:
 				return response, errPollCancelled
 			}
@@ -414,7 +445,7 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 			return response, err
 		case err != nil && utils.HTTPStatusCode(err) == http.StatusTooManyRequests:
 			lastRefusalHint = utils.RefusalHint(err) // kept for a timeout that ends while throttled
-			delay = utils.NextPollBackoff(tick, throttles, utils.RetryAfter(err))
+			delay, connected = utils.NextPollBackoff(tick, throttles, utils.RetryAfter(err)), false
 			throttles++
 			// The wait can reach two timeouts, and nothing else on this path
 			// prints while it lasts.
@@ -431,7 +462,7 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 			if failures >= utils.MaxConsecutivePollFailures && !seams.uncapped {
 				return response, err
 			}
-			delay = utils.NextPollBackoff(tick, failures-1, utils.RetryAfter(err))
+			delay, connected = utils.NextPollBackoff(tick, failures-1, utils.RetryAfter(err)), false
 			continue
 		}
 		failures, throttles = 0, 0
@@ -442,12 +473,12 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 		if IsRunningStatus(response.Status) {
 			deadline = seams.Now().Add(timeout)
 			budget.Reset()
-			delay = utils.NextPollTick(tick, seams.Now().Sub(started))
+			delay, connected = pace()
 			continue
 		}
 		// Running is handled above, so what is left here is the approval hold.
 		if isPollWaitStatus(response.Status, waitApproval) {
-			delay = utils.NextPollTick(tick, seams.Now().Sub(started))
+			delay, connected = pace()
 			continue
 		}
 		return response, nil
@@ -613,7 +644,8 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 	pollCancel := make(chan struct{})
 	defer close(pollCancel)
 	go func() {
-		details, err := pollCommandExecution(ac, cmdID, timeout, streamPollTick, waitApproval, pollSeams{cancel: pollCancel, uncapped: true})
+		details, err := pollCommandExecution(ac, cmdID, timeout, streamPollTick, waitApproval,
+			pollSeams{cancel: pollCancel, uncapped: true, finAtRisk: listener.finAtRisk})
 		switch {
 		case errors.Is(err, errPollCancelled): // the stream is gone; nobody reads these
 		case err != nil:
@@ -653,19 +685,28 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 		return errorFromDetails(cmdID, details)
 	}
 
+	// over reads the command for its exit state, which fin does not carry. A failed
+	// read, or one racing a state not yet written, leaves the poll as the net rather
+	// than reporting a half-finished run.
+	over := func() (EventDetails, bool) {
+		details, err := getCommandByPathID(ac, cmdID)
+		return details, err == nil && !isPollWaitStatus(details.Status, waitApproval)
+	}
+	// The fin subscription went in after the command was submitted, so a command
+	// that finished first sent its fin before anyone listened. The poll would catch
+	// it only a connected tick later.
+	if details, done := over(); done {
+		return finish(details)
+	}
+
 	for {
 		select {
 		case chunk := <-listener.Chunks():
 			lastSeq = applyChunk(ac, cmdID, lastSeq, chunk, out, gap)
 		case <-listener.Finished():
-			// fin says only that it is over; the exit code lives on the command. A
-			// failed read, or one racing a state not yet written, leaves the poll as
-			// the net rather than reporting a half-finished run.
-			details, err := getCommandByPathID(ac, cmdID)
-			if err != nil || isPollWaitStatus(details.Status, waitApproval) {
-				continue
+			if details, done := over(); done {
+				return finish(details)
 			}
-			return finish(details)
 		case details := <-pollResult:
 			return finish(details)
 		case err := <-pollErr:
