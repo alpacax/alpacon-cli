@@ -80,6 +80,8 @@ type pollSeams struct {
 	// uncapped lifts the failure cap, for a poll beside a stream whose fin can
 	// still end the run while the result reads fail.
 	uncapped bool
+	// readFirst sends the first read at once rather than a gap later.
+	readFirst bool
 }
 
 func (s pollSeams) Now() time.Time {
@@ -408,6 +410,9 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 		return utils.NextPollTick(tick, seams.Now().Sub(started)), nil
 	}
 	delay, lost := pace()
+	if seams.readFirst {
+		delay, lost = 0, nil
+	}
 	failures, throttles := 0, 0
 	budget := utils.NewThrottleBudget(timeout)
 	lastRefusalHint := ""
@@ -639,8 +644,10 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 	pollCancel := make(chan struct{})
 	defer close(pollCancel)
 	go func() {
+		// The fin subscription went in after the submit, so a command that finished
+		// first sent its fin before anyone listened: read once at the start.
 		details, err := pollCommandExecution(ac, cmdID, timeout, streamPollTick, waitApproval,
-			pollSeams{cancel: pollCancel, uncapped: true, finAtRisk: listener.FinAtRisk()})
+			pollSeams{cancel: pollCancel, uncapped: true, readFirst: true, finAtRisk: listener.FinAtRisk()})
 		switch {
 		case errors.Is(err, errPollCancelled): // the stream is gone; nobody reads these
 		case err != nil:
@@ -686,12 +693,6 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 		details, err := getCommandByPathID(ac, cmdID)
 		return details, err == nil && !isPollWaitStatus(details.Status, waitApproval)
 	}
-	// The fin subscription went in after the submit, so a command that finished first
-	// sent its fin before anyone listened.
-	if details, done := over(); done {
-		return finish(details)
-	}
-
 	for {
 		select {
 		case chunk := <-listener.Chunks():

@@ -1182,7 +1182,7 @@ func awaitStream(t *testing.T, done <-chan error) error {
 	select {
 	case err := <-done:
 		return err
-	case <-time.After(time.Minute): // past a few finDeliverablePollTick waits
+	case <-time.After(5 * time.Minute): // past a throttled wait's longest backoff
 		t.Fatal("the run never ended")
 		return nil
 	}
@@ -1458,6 +1458,48 @@ func TestStreamSubscribed_CommandDoneBeforeSubscribingEndsAtOnce(t *testing.T) {
 	})
 }
 
+// The read right after subscribing must not hold up the stream: a fin that lands
+// while that read is still out ends the run when it lands.
+func TestStreamSubscribed_SlowFirstReadDoesNotDelayTheFin(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		ac := newStreamingServers(t, streamingServerConfig{
+			cmdID:            "cmd-uuid",
+			serverID:         "srv-uuid",
+			wsFinFor:         "cmd-uuid",
+			runningFor:       3 * time.Second,
+			firstDetailDelay: 20 * time.Second,
+			terminal:         EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
+		})
+
+		err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", &bytes.Buffer{}, false))
+		require.NoError(t, err)
+		assert.Equal(t, 3*time.Second, time.Since(start), "the fin ended the run")
+		time.Sleep(20 * time.Second) // let the held read finish, or the bubble deadlocks
+	})
+}
+
+// A 429 on the read right after subscribing is a throttle like any other: the next
+// read waits out its Retry-After instead of going out a fin-deliverable tick later.
+func TestStreamSubscribed_ThrottledFirstReadHonorsRetryAfter(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		reads := newDetailReads()
+		ac := newStreamingServers(t, streamingServerConfig{
+			cmdID:                 "cmd-uuid",
+			serverID:              "srv-uuid",
+			firstDetailRetryAfter: "60",
+			onDetail:              reads.record,
+			terminal:              EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
+		})
+
+		err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", &bytes.Buffer{}, false))
+		require.NoError(t, err)
+		assert.Equal(t, []time.Duration{0, time.Minute}, reads.snapshot())
+	})
+}
+
 // The fin channel is the command's server, which on this path only the submit
 // response names—the command's own id would subscribe to nothing that fires.
 func TestRunCommandStreaming_FinSubscriptionTargetsTheCommandsServer(t *testing.T) {
@@ -1502,8 +1544,8 @@ func TestStreamSubscribed_FinOnStillRunningStatusWaitsForPoll(t *testing.T) {
 			serverID: "srv-uuid",
 			wsFinFor: "cmd-uuid",
 			onDetail: func() { details.Add(1) },
-			// The fin arrives before the first poll, so these are the read right after
-			// subscribing and the read the fin triggers; the terminal one goes to the poll.
+			// The poll's first read and the read the fin triggers, in either order; the
+			// terminal one goes to the poll.
 			runningPolls: 2,
 			terminal:     EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
 		})
@@ -1513,7 +1555,7 @@ func TestStreamSubscribed_FinOnStillRunningStatusWaitsForPoll(t *testing.T) {
 		assert.Equal(t, "done\n", stdoutBuf.String())
 		assert.GreaterOrEqual(t, details.Load(), int32(3),
 			"the running read must not have ended the run: a second read, the poll's, did")
-		assert.Less(t, time.Since(start), streamPollTick, "not a finDeliverablePollTick later")
+		assert.LessOrEqual(t, time.Since(start), streamPollTick, "not a finDeliverablePollTick later")
 	})
 }
 
@@ -1529,7 +1571,7 @@ func TestStreamSubscribed_FinWithFailedReadWaitsForPoll(t *testing.T) {
 			serverID:    "srv-uuid",
 			wsFinFor:    "cmd-uuid",
 			onDetail:    func() { details.Add(1) },
-			detailFails: 2, // the read right after subscribing and the read the fin triggers
+			detailFails: 2, // the poll's first read and the read the fin triggers, in either order
 			terminal:    EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
 		})
 
@@ -1538,7 +1580,7 @@ func TestStreamSubscribed_FinWithFailedReadWaitsForPoll(t *testing.T) {
 		assert.Equal(t, "done\n", stdoutBuf.String())
 		assert.GreaterOrEqual(t, details.Load(), int32(3),
 			"a failed read must not surface as the result: a second read, the poll's, ended the run")
-		assert.Less(t, time.Since(start), streamPollTick, "not a finDeliverablePollTick later")
+		assert.LessOrEqual(t, time.Since(start), streamPollTick, "not a finDeliverablePollTick later")
 	})
 }
 
@@ -2072,6 +2114,10 @@ type streamingServerConfig struct {
 	// dropAfter, when set, closes the first WebSocket that long after the first
 	// subscription; a reconnect stays open and sends nothing.
 	dropAfter time.Duration
+	// firstDetailDelay holds the first detail response that long before answering it.
+	firstDetailDelay time.Duration
+	// firstDetailRetryAfter, when set, answers the first detail request 429 with it.
+	firstDetailRetryAfter string
 }
 
 // newStreamingServers starts a WS + API server pair and returns a client for
@@ -2142,7 +2188,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 	server := testutil.NewPipeServer(t, nil)
 	wsURL := server.WebsocketURL("/ws/")
 
-	var pollCount, failCount, submitN int
+	var pollCount, failCount, submitN, detailN int
 	var mu sync.Mutex
 	server.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/ws/" {
@@ -2213,6 +2259,19 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 		case r.URL.Path == "/api/events/commands/"+cfg.cmdID+"/" && r.Method == http.MethodGet:
 			if cfg.onDetail != nil {
 				cfg.onDetail()
+			}
+			mu.Lock()
+			detailN++
+			first := detailN == 1
+			mu.Unlock()
+			if first && cfg.firstDetailDelay > 0 {
+				time.Sleep(cfg.firstDetailDelay)
+			}
+			if first && cfg.firstDetailRetryAfter != "" {
+				w.Header().Set("Retry-After", cfg.firstDetailRetryAfter)
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"detail":"Request was throttled."}`))
+				return
 			}
 			if cfg.detailStatus != 0 {
 				w.WriteHeader(cfg.detailStatus)
