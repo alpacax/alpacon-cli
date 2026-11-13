@@ -12,6 +12,13 @@ import (
 	"golang.org/x/term"
 )
 
+// stdin is the one buffered reader every prompt on os.Stdin shares, since a pipe hands over many
+// lines per read and a dropped reader loses the rest. A swapped os.Stdin gets a fresh one.
+var stdin struct {
+	file   *os.File
+	reader *bufio.Reader
+}
+
 func PromptForPassword(promptText string) string {
 	_, _ = fmt.Fprint(TrackedStderr(), promptText)
 
@@ -72,7 +79,7 @@ func noInputError() *ExitError {
 }
 
 func promptForInput(r io.Reader, promptText string) (string, error) {
-	reader := bufio.NewReader(r)
+	reader := lineReader(r)
 	_, _ = fmt.Fprint(TrackedStderr(), promptText)
 	line, err := reader.ReadString('\n')
 	noteEchoedNewline(r, err)
@@ -81,6 +88,16 @@ func promptForInput(r io.Reader, promptText string) (string, error) {
 		return "", err
 	}
 	return input, nil
+}
+
+func lineReader(r io.Reader) *bufio.Reader {
+	if r != os.Stdin {
+		return bufio.NewReader(r)
+	}
+	if stdin.file != os.Stdin {
+		stdin.file, stdin.reader = os.Stdin, bufio.NewReader(os.Stdin)
+	}
+	return stdin.reader
 }
 
 // noteEchoedNewline records the Enter a terminal echoes, which lands on stderr only when stderr is that terminal.
@@ -181,7 +198,7 @@ func PromptForBool(prompt string) bool {
 }
 
 func promptForBool(r io.Reader, prompt string) bool {
-	reader := bufio.NewReader(r)
+	reader := lineReader(r)
 
 	for {
 		_, _ = fmt.Fprintf(TrackedStderr(), "%s [y/n]: ", prompt)

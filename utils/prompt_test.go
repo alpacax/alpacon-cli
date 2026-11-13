@@ -3,6 +3,7 @@ package utils
 import (
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -229,4 +230,53 @@ func TestConfirmPrompt_RemovesControlCharacters(t *testing.T) {
 	assert.NotContains(t, prompt, "\r")
 	assert.NotContains(t, prompt, "\u202e")
 	assert.Contains(t, prompt, "alice@example.com")
+}
+
+// Serial: it swaps os.Stdin. A pipe hands over every queued line in one read, unlike a terminal.
+func TestPromptsOnPipedStdinEachGetTheirOwnLine(t *testing.T) {
+	tests := []struct {
+		name, input string
+		prompts     []func() (any, error)
+		want        []any
+	}{
+		{name: "two inputs", input: "ops\nOps Team\n", prompts: []func() (any, error){
+			func() (any, error) { return ReadInput("Name: ") },
+			func() (any, error) { return ReadRequiredInput("Display name: ") },
+		}, want: []any{"ops", "Ops Team"}},
+		{name: "input then confirmation", input: "ops\ny\n", prompts: []func() (any, error){
+			func() (any, error) { return ReadInput("Name: ") },
+			func() (any, error) { return PromptForBool("Proceed?"), nil },
+		}, want: []any{"ops", true}},
+		{name: "default then integer", input: "ops\n0\n", prompts: []func() (any, error){
+			func() (any, error) { return ReadInputWithDefault("Name: ", "saved") },
+			func() (any, error) { return ReadIntInput("Count: ", 7) },
+		}, want: []any{"ops", 0}},
+		{name: "required input asks again", input: "\nops\n", prompts: []func() (any, error){
+			func() (any, error) { return ReadRequiredInput("Name: ") },
+		}, want: []any{"ops"}},
+		{name: "required integer asks again", input: "bad\n3\n", prompts: []func() (any, error){
+			func() (any, error) { return ReadRequiredIntInput("Count: ") },
+		}, want: []any{3}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, w, err := os.Pipe()
+			require.NoError(t, err)
+			_, err = w.WriteString(tt.input)
+			require.NoError(t, err)
+			require.NoError(t, w.Close())
+			saved := os.Stdin
+			os.Stdin = r
+			t.Cleanup(func() { os.Stdin = saved; _ = r.Close() })
+
+			var got []any
+			for _, prompt := range tt.prompts {
+				answer, err := prompt()
+				require.NoError(t, err)
+				got = append(got, answer)
+			}
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
