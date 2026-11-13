@@ -34,7 +34,6 @@ var tokenScopesCmd = &cobra.Command{
 			}
 		}
 
-		utils.PrintTable(scopes)
-		return nil
+		return utils.PrintTable(scopes)
 	}),
 }

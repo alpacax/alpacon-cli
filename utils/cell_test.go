@@ -87,7 +87,7 @@ func TestPrintTableUsesCellTableTextAndRawJSON(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var got string
 			withFormat(tt.format, func() {
-				got = testutil.CaptureStdout(t, func() { PrintTable(rows) })
+				got = testutil.CaptureStdout(t, func() { assert.NoError(t, PrintTable(rows)) })
 			})
 			if tt.format == OutputFormatJSON {
 				assert.JSONEq(t, tt.want, got)

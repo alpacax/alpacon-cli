@@ -42,7 +42,6 @@ narrows the answer to your own rather than refusing, so an empty table can mean
 			return utils.NewExitError("Failed to retrieve the role bindings: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
-		utils.PrintTable(rbac.BindingAttributesFrom(bindings, time.Local))
-		return nil
+		return utils.PrintTable(rbac.BindingAttributesFrom(bindings, time.Local))
 	}),
 }

@@ -810,7 +810,7 @@ func TestGetServerListOutputsRowsWithoutOwner(t *testing.T) {
 			for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 				t.Run(format, func(t *testing.T) {
 					utils.OutputFormat = format
-					output := testutil.CaptureStdout(t, func() { utils.PrintTable(rows) })
+					output := testutil.CaptureStdout(t, func() { assert.NoError(t, utils.PrintTable(rows)) })
 					assert.NotContains(t, strings.ToLower(output), "owner")
 					assert.NotContains(t, output, "legacy-user")
 					assert.Contains(t, output, "my-server")

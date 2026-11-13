@@ -28,7 +28,6 @@ Tokens are used by Alpamon to self-register servers without manual intervention.
 			return utils.NewExitError("Failed to retrieve the registration tokens: %s.", err)
 		}
 
-		utils.PrintTable(tokens)
-		return nil
+		return utils.PrintTable(tokens)
 	}),
 }

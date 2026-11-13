@@ -33,8 +33,7 @@ var revokeListCmd = &cobra.Command{
 			return utils.NewExitError("Failed to get revoke requests: %s.", err)
 		}
 
-		utils.PrintTable(requestList)
-		return nil
+		return utils.PrintTable(requestList)
 	}),
 }
 

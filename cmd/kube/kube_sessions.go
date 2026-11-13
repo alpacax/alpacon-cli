@@ -55,8 +55,7 @@ after its token has expired.`,
 				return utils.NewEnvelopeExitError(opKubeSessions, err, "Failed to retrieve the kube sessions: %s.", err)
 			}
 
-			utils.PrintTable(rows)
-			return nil
+			return utils.PrintTable(rows)
 		}),
 	}
 	cmd.Flags().StringVar(&clusterFlag, "cluster", "", "only sessions on this cluster")

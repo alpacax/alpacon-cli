@@ -31,7 +31,6 @@ var authorityListCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the authority list: %s.", err)
 		}
 
-		utils.PrintTable(authorityList)
-		return nil
+		return utils.PrintTable(authorityList)
 	}),
 }

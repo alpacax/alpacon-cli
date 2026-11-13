@@ -54,7 +54,9 @@ requested changes. Use --output json to print the full raw response.`,
 		if fe != nil {
 			script, hasScript = fileExecutionScript(fe)
 		}
-		utils.PrintTable(rows)
+		if err := utils.PrintTable(rows); err != nil {
+			return err
+		}
 		if hasScript {
 			fmt.Println()
 			fmt.Println(script)

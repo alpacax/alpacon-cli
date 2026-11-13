@@ -74,7 +74,9 @@ var workSessionDescribeCmd = &cobra.Command{
 			{"Added at", session.AddedAt.Local().Format("2006-01-02 15:04")},
 		}
 
-		utils.PrintTable(rows)
+		if err := utils.PrintTable(rows); err != nil {
+			return err
+		}
 
 		if block := formatAdjustments(session.Adjustments); block != "" {
 			fmt.Printf("\nAdjustments:\n%s\n", block)

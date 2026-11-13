@@ -41,8 +41,7 @@ var adminListCmd = &cobra.Command{
 		if err != nil {
 			return session.fail("list Command ACL admins", err)
 		}
-		utils.PrintTable(acl.ToAdminAttributes(admins))
-		return nil
+		return utils.PrintTable(acl.ToAdminAttributes(admins))
 	}),
 }
 

@@ -30,7 +30,6 @@ var serverListCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the servers: %s.", err)
 		}
 
-		utils.PrintTable(serverList)
-		return nil
+		return utils.PrintTable(serverList)
 	}),
 }

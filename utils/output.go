@@ -180,24 +180,26 @@ func PrintJSONError[T any](w io.Writer, envelope JSONErrorEnvelope[T]) {
 	_, _ = w.Write(line)
 }
 
-func PrintTable(slice any) {
+// PrintTable prints a slice of row structs as a table, or as JSON under --output json. It returns the
+// exit-1 failure when slice is not a slice or does not marshal.
+func PrintTable(slice any) error {
 	s := reflect.ValueOf(slice)
 
 	if s.Kind() != reflect.Slice {
-		CliErrorWithExit("Parsing data: Expected a list format.")
+		return NewExitError("Parsing data: Expected a list format.")
 	}
 
 	if OutputFormat == OutputFormatJSON {
 		if s.IsNil() || s.Len() == 0 {
 			_, _ = fmt.Fprintln(os.Stdout, "[]")
-			return
+			return nil
 		}
 		data, err := json.MarshalIndent(slice, "", "  ")
 		if err != nil {
-			CliErrorWithExit("Failed to marshal data to JSON: %s", err)
+			return NewExitError("Failed to marshal data to JSON: %s", err)
 		}
 		_, _ = fmt.Fprintln(os.Stdout, string(escapeJSONControls(data)))
-		return
+		return nil
 	}
 
 	writer, cleanup := WriteToPager()
@@ -233,13 +235,16 @@ func PrintTable(slice any) {
 	}
 
 	_ = tw.Flush()
+	return nil
 }
 
 // PartialTableExitError prints rows to stdout and the reason to stderr, and returns a silent
 // ExitCodeGeneralError, since the warning is the failure line. A walk that read nothing is an ordinary failure.
 func PartialTableExitError(rows any, msg string, args ...any) error {
 	CliWarning(msg, args...)
-	PrintTable(rows)
+	if err := PrintTable(rows); err != nil {
+		return err
+	}
 	return NewSilentExitError(ExitCodeGeneralError)
 }
 
@@ -252,8 +257,7 @@ func PrintList[T any](rows []T, err error, failMsg string) error {
 	case err != nil:
 		return NewExitError("%s: %s.", failMsg, err)
 	}
-	PrintTable(rows)
-	return nil
+	return PrintTable(rows)
 }
 
 // PrintJson prints body to stdout as indented JSON, or returns the exit-1 failure when body is not JSON.

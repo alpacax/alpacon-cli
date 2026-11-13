@@ -29,8 +29,7 @@ func newListCommand(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve websh sessions: %s.", err)
 			}
 
-			utils.PrintTable(sessionList)
-			return nil
+			return utils.PrintTable(sessionList)
 		}),
 	}
 	cmd.Flags().IntP("tail", "t", 25, "Number of sessions to show, newest first")

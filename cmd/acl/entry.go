@@ -61,8 +61,7 @@ resolved.`,
 		}
 
 		tokenNames, serverNames, tokenAccounts := session.workspaceNames(entries)
-		utils.PrintTable(ledgerEntryAttributes(entries, tokenNames, serverNames, tokenAccounts))
-		return nil
+		return utils.PrintTable(ledgerEntryAttributes(entries, tokenNames, serverNames, tokenAccounts))
 	}),
 }
 

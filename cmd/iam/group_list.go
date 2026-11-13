@@ -30,7 +30,6 @@ var groupListCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the group list: %s.", err)
 		}
 
-		utils.PrintTable(groupList)
-		return nil
+		return utils.PrintTable(groupList)
 	}),
 }

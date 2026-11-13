@@ -30,7 +30,6 @@ var systemPackageListCmd = &cobra.Command{
 			return utils.NewExitError("Failed to retrieve the system packages: %s.", err)
 		}
 
-		utils.PrintTable(packageList)
-		return nil
+		return utils.PrintTable(packageList)
 	}),
 }
