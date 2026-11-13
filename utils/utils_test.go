@@ -87,10 +87,21 @@ func TestBuildURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := BuildURL(tt.basePath, tt.relativePath, tt.params)
+			result, err := BuildURL(tt.basePath, tt.relativePath, tt.params)
+
+			require.NoError(t, err)
 			assert.Contains(t, result, tt.wantSuffix)
 		})
 	}
+}
+
+func TestBuildURL_ReturnsTheParseErrorForABaseThatIsNotAURL(t *testing.T) {
+	t.Parallel()
+
+	got, err := BuildURL("https://[::1", "/oauth/token", nil)
+
+	assert.Empty(t, got)
+	assert.EqualError(t, err, `parse "https://[::1": missing ']' in host`)
 }
 
 func TestSetQuery(t *testing.T) {

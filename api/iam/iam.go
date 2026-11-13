@@ -426,7 +426,11 @@ func diffEditedUser(original []byte, edited any) (*UserEdit, error) {
 }
 
 func GetCurrentUser(ac *client.AlpaconClient) (*CurrentUserResponse, error) {
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(userURL, "-", nil))
+	meURL, err := utils.BuildURL(userURL, "-", nil)
+	if err != nil {
+		return nil, err
+	}
+	responseBody, err := ac.SendGetRequest(meURL)
 	if err != nil {
 		return nil, err
 	}

@@ -504,10 +504,12 @@ func BoolPointerToString(value *bool) string {
 	return "false"
 }
 
-func BuildURL(basePath, relativePath string, params map[string]string) string {
+// BuildURL joins relativePath onto basePath with a trailing slash and params as the query, or returns
+// the parse error when basePath is not a URL.
+func BuildURL(basePath, relativePath string, params map[string]string) (string, error) {
 	u, err := url.Parse(basePath)
 	if err != nil {
-		CliErrorWithExit("Failed to parse base URL")
+		return "", err
 	}
 
 	u.Path = path.Join(u.Path, relativePath)
@@ -521,7 +523,7 @@ func BuildURL(basePath, relativePath string, params map[string]string) string {
 	}
 
 	u.RawQuery = q.Encode()
-	return u.String()
+	return u.String(), nil
 }
 
 // SetQuery changes only the query string, leaving an invalid URL for the caller to handle.

@@ -250,7 +250,11 @@ func fetchMFALink(ac *client.AlpaconClient, params map[string]string) (string, e
 		return "", err
 	}
 
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(mfaURL, "", params))
+	linkURL, err := utils.BuildURL(mfaURL, "", params)
+	if err != nil {
+		return "", err
+	}
+	responseBody, err := ac.SendGetRequest(linkURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to get the MFA URL: %w", err)
 	}
