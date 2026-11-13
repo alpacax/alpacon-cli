@@ -185,6 +185,9 @@ func (l *CommandOutputListener) Chunks() <-chan ChunkEvent { return l.chunks }
 // never say: they carry no end marker.
 func (l *CommandOutputListener) Finished() <-chan struct{} { return l.finished }
 
+// FinAtRisk closes once Finished may never fire for the targeted command.
+func (l *CommandOutputListener) FinAtRisk() <-chan struct{} { return l.finAtRisk }
+
 // handleMessage parses one WS frame and routes it: a chunk onto chunks, a fin onto
 // finished. Non-matching frames (other event types, another command's id, parse
 // failure) are silently dropped.

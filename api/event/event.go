@@ -641,7 +641,7 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 	defer close(pollCancel)
 	go func() {
 		details, err := pollCommandExecution(ac, cmdID, timeout, streamPollTick, waitApproval,
-			pollSeams{cancel: pollCancel, uncapped: true, finAtRisk: listener.finAtRisk})
+			pollSeams{cancel: pollCancel, uncapped: true, finAtRisk: listener.FinAtRisk()})
 		switch {
 		case errors.Is(err, errPollCancelled): // the stream is gone; nobody reads these
 		case err != nil:
