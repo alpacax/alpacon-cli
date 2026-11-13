@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
@@ -268,6 +270,70 @@ func TestKubeConfigWarnsOnlyWhenAnEarlierFileCanOverride(t *testing.T) {
 				assert.Contains(t, stderr, "KUBECONFIG lists files before")
 			} else {
 				assert.NotContains(t, stderr, "KUBECONFIG lists files before")
+			}
+		})
+	}
+}
+
+// Serial: it swaps os.Stdout and os.Stderr and flips utils.OutputFormat.
+func TestKubeConfigWarnsWhenTheSessionOpenedOnADriftedCluster(t *testing.T) {
+	const (
+		complete   = `{"cluster_external_grants":2,"namespaced_external_grants":1,"incomplete":false,"checked_at":"2026-11-10T09:00:00Z","policy":"warn"}`
+		incomplete = `{"cluster_external_grants":0,"namespaced_external_grants":3,"incomplete":true,"checked_at":"2026-11-10T09:00:00Z","policy":"warn"}`
+	)
+	tests := []struct {
+		name    string
+		format  string
+		warning string
+		want    string // "" means no warning line at all
+	}{
+		{name: "no warning", format: utils.OutputFormatTable},
+		{name: "null warning", format: utils.OutputFormatTable, warning: `null`},
+		{
+			name: "warning", format: utils.OutputFormatTable, warning: complete,
+			want: `Warning: Cluster "prod-east" has RBAC bindings made outside Alpacon that widen what this session's identity may do (external grants: 2 cluster-wide, 1 namespaced); the workspace policy allows the session anyway.`,
+		},
+		{
+			name: "warning under json output", format: utils.OutputFormatJSON, warning: complete,
+			want: `Warning: Cluster "prod-east" has RBAC bindings made outside Alpacon that widen what this session's identity may do (external grants: 2 cluster-wide, 1 namespaced); the workspace policy allows the session anyway.`,
+		},
+		{
+			name: "incomplete check", format: utils.OutputFormatTable, warning: incomplete,
+			want: `Warning: Cluster "prod-east" has RBAC bindings made outside Alpacon that widen what this session's identity may do (external grants: at least 3 namespaced; the cluster's check did not finish); the workspace policy allows the session anyway.`,
+		},
+		{
+			name: "warning that does not decode", format: utils.OutputFormatTable, warning: `"degraded"`,
+			want: `Warning: Cluster "prod-east" has RBAC bindings made outside Alpacon that widen what this session's identity may do; the workspace policy allows the session anyway.`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			withOutputFormat(t, tt.format)
+			result := kubeLoginResult{kubeConfigResult: kubeConfigResult{
+				Context: "alpacon-prod-east", Kubeconfig: filepath.Join(t.TempDir(), "config"), clusterName: "prod-east",
+			}}
+			if tt.warning != "" {
+				result.RBACDriftWarning = json.RawMessage(tt.warning)
+			}
+			for _, p := range []struct {
+				name string
+				run  func()
+			}{
+				{name: "kube config", run: func() { _ = printKubeConfigResult(os.Stdout, &result.kubeConfigResult, false) }},
+				{name: "kube login", run: func() { _ = printKubeLoginResult(os.Stdout, result, false, time.Now()) }},
+			} {
+				stdout, stderr := testutil.CaptureOutput(t, p.run)
+				if tt.want == "" {
+					assert.NotContains(t, stderr, "RBAC", p.name)
+				} else {
+					assert.Contains(t, stderr, tt.want+"\n", p.name)
+					assert.NotContains(t, stdout, "Warning:", p.name)
+				}
+				if tt.format == utils.OutputFormatJSON {
+					var fields map[string]json.RawMessage
+					require.NoError(t, json.Unmarshal([]byte(stdout), &fields), p.name)
+					assert.JSONEq(t, tt.warning, string(fields["rbac_drift_warning"]), p.name)
+				}
 			}
 		})
 	}

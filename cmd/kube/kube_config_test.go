@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -38,6 +39,9 @@ type sessionServer struct {
 	proxyURL     string
 	token        string
 	closeStatus  int // 0 answers 200
+	// rbacDriftWarning is the created session's rbac_drift_warning as raw JSON;
+	// "" leaves the field out, as a server older than it does.
+	rbacDriftWarning string
 
 	mu          sync.Mutex
 	createBody  map[string]any
@@ -77,12 +81,16 @@ func (s *sessionServer) start(t *testing.T) *client.AlpaconClient {
 				_, _ = fmt.Fprintf(w, `{"code":%q}`, s.createCode)
 				return
 			}
+			warning := ""
+			if s.rbacDriftWarning != "" {
+				warning = `"rbac_drift_warning":` + s.rbacDriftWarning + `,`
+			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = fmt.Fprintf(w, `{"id":%q,"cluster":"c-prod","work_session":null,"user":null,
-				"impersonate_user":"alice","impersonate_groups":[],"client_type":"cli",
+				"impersonate_user":"alice","impersonate_groups":[],"client_type":"cli",%s
 				"token_expired_at":"2026-10-08T09:40:00Z","closed_at":null,"added_at":"2026-10-08T07:40:00Z",
 				"updated_at":"2026-10-08T07:40:00Z","channel_id":"ch-1","channel_token":%q,"proxy_url":%q}`,
-				testSessionID, s.token, s.proxyURL)
+				testSessionID, warning, s.token, s.proxyURL)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/kubernetes/sessions/"+testSessionID+"/close/":
 			s.mu.Lock()
 			s.closeCalls = append(s.closeCalls, r.URL.Path)
@@ -191,6 +199,7 @@ func TestOpenKubeConfigWritesTheSessionContext(t *testing.T) {
 				ClusterID:      "c-prod",
 				WorkSessionID:  tt.workSessionID,
 				ProxyURL:       testProxyURL,
+				clusterName:    "prod-east",
 				TokenExpiresAt: time.Date(2026, 10, 8, 9, 40, 0, 0, time.UTC),
 			}, result)
 			assert.Zero(t, srv.closes())
@@ -383,6 +392,7 @@ func TestKubeSessionErrorHint(t *testing.T) {
 		{name: "cluster not connected", code: utils.ClusterNotConnected, expected: "'alpacon kube describe prod-east'"},
 		{name: "channel open failed", code: utils.KubeSessionChannelOpenFailed, expected: "try again"},
 		{name: "no user name", code: utils.KubeSessionPrincipalNotSupported, expected: "log in as a user"},
+		{name: "cluster rbac drift", code: utils.ClusterRBACDrift, expected: "cluster prod-east has RBAC bindings outside Alpacon"},
 		{name: "other code", code: utils.APITokenACLNotAllowed},
 	}
 	for _, tt := range tests {
@@ -488,8 +498,45 @@ func TestKubeConfigResultJSONCarriesNoToken(t *testing.T) {
 		"work_session_id": "ws-1",
 		"proxy_url": %q,
 		"token_expires_at": "2026-10-08T09:40:00Z",
-		"previous_context": ""
+		"previous_context": "",
+		"rbac_drift_warning": null
 	}`, path, testSessionID, testProxyURL), rendered)
+}
+
+// The warning reaches the result as the server sent it, so --output json shows
+// the counts and the policy; without one the field is null, never missing.
+func TestOpenKubeConfigCarriesTheRBACDriftWarning(t *testing.T) {
+	t.Parallel()
+	const warning = `{"cluster_external_grants":2,"namespaced_external_grants":1,"incomplete":false,"checked_at":"2026-11-10T09:00:00Z","policy":"warn"}`
+	tests := []struct {
+		name   string
+		server string
+		want   string
+	}{
+		{name: "older server", want: "null"},
+		{name: "no warning", server: "null", want: "null"},
+		{name: "warning", server: warning, want: warning},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := newSessionServer()
+			srv.rbacDriftWarning = tt.server
+			ac := srv.start(t)
+			path := filepath.Join(t.TempDir(), "config")
+
+			result, err := openKubeConfig(ac, openEditor(t, path), kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
+			require.NoError(t, err)
+			assert.Equal(t, "prod-east", result.clusterName)
+
+			rendered, err := utils.FormatJSON(result)
+			require.NoError(t, err)
+			var fields map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal([]byte(rendered), &fields))
+			require.Contains(t, fields, "rbac_drift_warning")
+			assert.JSONEq(t, tt.want, string(fields["rbac_drift_warning"]))
+		})
+	}
 }
 
 // A Ctrl+C is honored at the next safe point: before the session is opened,
@@ -557,4 +604,39 @@ func TestKubeConfigReleasesTheLockBeforePrintingTheResult(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, probe.wrote, "the result never reached stdout")
 	assert.False(t, probe.lockedSeen, "a stdout write that kills the process would leave %s behind", probe.lockPath)
+}
+
+// A refusal the server names keeps its code and status in the failure, so the
+// --output json envelope reports the server's error_code, and an expected
+// refusal does not ask the user to report a CLI issue.
+// Serial: it sets ALPACON_WORK_SESSION and utils.OutputFormat and swaps os.Stdout and os.Stderr.
+func TestKubeConfigRefusalKeepsTheServerCode(t *testing.T) {
+	t.Setenv("ALPACON_WORK_SESSION", "")
+	for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+		t.Run(format, func(t *testing.T) {
+			srv := newSessionServer()
+			srv.createStatus = http.StatusBadRequest
+			srv.createCode = utils.ClusterRBACDrift
+			ac := srv.start(t)
+			path := filepath.Join(t.TempDir(), "config")
+
+			_, stderr, code := runKubeCommandWith(t, func() (*client.AlpaconClient, error) { return ac, nil }, format,
+				"config", "prod-east", "--kubeconfig", path)
+
+			assert.Equal(t, utils.ExitCodeGeneralError, code)
+			assert.NotContains(t, stderr, "report on https://github.com")
+			assert.NoFileExists(t, path)
+			if format == utils.OutputFormatTable {
+				assert.Contains(t, stderr, "Failed to open a kube session: cluster prod-east has RBAC bindings outside Alpacon")
+				return
+			}
+			var envelope struct {
+				ErrorCode  string `json:"error_code"`
+				HTTPStatus int    `json:"http_status"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(stderr)), &envelope), "stderr: %s", stderr)
+			assert.Equal(t, utils.ClusterRBACDrift, envelope.ErrorCode)
+			assert.Equal(t, http.StatusBadRequest, envelope.HTTPStatus)
+		})
+	}
 }

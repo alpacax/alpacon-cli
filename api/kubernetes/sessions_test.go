@@ -168,3 +168,68 @@ func TestGetSessionList_MalformedLatestExecDoesNotFailTheList(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, sessionKindUnknown, rows[0].Kind)
 }
+
+func TestParseRBACDriftWarning(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		raw         string
+		wantPresent bool
+		want        *RBACDriftWarning
+		wantCounts  string
+		wantCell    string
+	}{
+		{name: "field missing"},
+		{name: "null", raw: `null`},
+		{
+			name: "cluster-wide only", raw: `{"cluster_external_grants":2,"namespaced_external_grants":0,"incomplete":false,"checked_at":"2026-11-10T09:00:00Z","policy":"warn"}`,
+			wantPresent: true, want: &RBACDriftWarning{ClusterExternalGrants: 2},
+			wantCounts: "2 cluster-wide", wantCell: "2 cluster-wide",
+		},
+		{
+			name: "namespaced only", raw: `{"cluster_external_grants":0,"namespaced_external_grants":3,"incomplete":false,"checked_at":"2026-11-10T09:00:00Z","policy":"warn_namespaced"}`,
+			wantPresent: true, want: &RBACDriftWarning{NamespacedExternalGrants: 3},
+			wantCounts: "3 namespaced", wantCell: "3 namespaced",
+		},
+		{
+			name: "both", raw: `{"cluster_external_grants":2,"namespaced_external_grants":1,"incomplete":false,"checked_at":"2026-11-10T09:00:00Z","policy":"warn"}`,
+			wantPresent: true, want: &RBACDriftWarning{ClusterExternalGrants: 2, NamespacedExternalGrants: 1},
+			wantCounts: "2 cluster-wide, 1 namespaced", wantCell: "2 cluster-wide, 1 namespaced",
+		},
+		{
+			name: "incomplete marks a lower bound", raw: `{"cluster_external_grants":0,"namespaced_external_grants":3,"incomplete":true,"checked_at":"2026-11-10T09:00:00Z","policy":"warn"}`,
+			wantPresent: true, want: &RBACDriftWarning{NamespacedExternalGrants: 3, Incomplete: true},
+			wantCounts: "3 namespaced", wantCell: "3 namespaced+",
+		},
+		{
+			name: "no counts", raw: `{"policy":"warn"}`,
+			wantPresent: true, want: &RBACDriftWarning{},
+			wantCell: "unknown",
+		},
+		{
+			name: "a checked_at this build cannot read", raw: `{"cluster_external_grants":2,"namespaced_external_grants":0,"incomplete":false,"checked_at":"2026-11-10T09:00:00","policy":"warn"}`,
+			wantPresent: true, want: &RBACDriftWarning{ClusterExternalGrants: 2},
+			wantCounts: "2 cluster-wide", wantCell: "2 cluster-wide",
+		},
+		{name: "not an object", raw: `"degraded"`, wantPresent: true, wantCell: "unknown"},
+		{name: "a count of the wrong type", raw: `{"cluster_external_grants":"2"}`, wantPresent: true, wantCell: "unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var raw json.RawMessage
+			if tt.raw != "" {
+				raw = json.RawMessage(tt.raw)
+			}
+			got, present := ParseRBACDriftWarning(raw)
+			assert.Equal(t, tt.wantPresent, present)
+			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.wantCounts, ExternalGrantCounts(got))
+
+			rows := ProjectSessions([]KubeSessionListItem{{ID: "s", Cluster: "c-1", RBACDriftWarning: raw}}, nil, time.UTC)
+			require.Len(t, rows, 1)
+			assert.Equal(t, tt.wantCell, rows[0].ExternalGrants)
+			assert.Equal(t, raw, rows[0].RBACDriftWarning, "--output json carries the server's object as it came")
+		})
+	}
+}

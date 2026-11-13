@@ -29,9 +29,15 @@ A session reads as open until the server closes it, which can be a few minutes
 after its token has expired.
 
 The kind column says what the session was used for: api when it opened no
-stream and made only plain Kubernetes API requests, otherwise the kind of its
-newest stream (exec, attach or port_forward), or unknown when the server has
-not recorded that kind.`,
+exec, attach or port-forward stream, otherwise the kind of its newest stream
+(exec, attach or port_forward), or unknown when the server has not recorded
+that kind.
+
+The external grants column marks a session that opened even though its
+cluster grants sessions more than Alpacon does through RBAC bindings made
+outside Alpacon: it counts those grants, cluster-wide and namespaced, with a
+"+" when the cluster's check did not finish, or reads unknown when the server's
+counts cannot be read.`,
 		Example: `  alpacon kube sessions
   alpacon kube sessions --cluster prod-east
   alpacon kube sessions --all --output json`,
