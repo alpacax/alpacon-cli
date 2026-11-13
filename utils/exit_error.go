@@ -52,7 +52,8 @@ func NewExitError(msg string, args ...any) error {
 	return newExitError(ExitCodeGeneralError, true, msg, args)
 }
 
-// NewExitErrorWithCode exits with code and no footer, for an expected refusal scripts branch on.
+// NewExitErrorWithCode returns a failure with the given exit code and no footer, for an expected
+// refusal scripts branch on.
 func NewExitErrorWithCode(code int, msg string, args ...any) error {
 	return newExitError(code, false, msg, args)
 }
@@ -65,7 +66,8 @@ func NewExitErrorWithErrorCode(exitCode int, errorCode, msg string, args ...any)
 	return e
 }
 
-// NewSilentExitError exits with code and prints nothing, for a command that wrote its own failure line.
+// NewSilentExitError returns a failure with the given exit code that prints nothing, for a command
+// that wrote its own failure line.
 func NewSilentExitError(code int) error {
 	return &ExitError{Code: code, silent: true}
 }
