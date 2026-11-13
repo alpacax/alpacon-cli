@@ -685,3 +685,42 @@ func TestConsoleLinkBannerBodyLimit(t *testing.T) {
 		})
 	}
 }
+
+// With no console link kept, a body that fills the limit still yields to the
+// fold suffix: the notification ends with the whole " +N more." in 256 runes.
+func TestFoldSuffixKeptWhenBodyFillsLimit(t *testing.T) {
+	t.Parallel()
+	const workspace = "https://console.example"
+	for _, tc := range []struct {
+		name, server, link string
+		folded             int
+	}{
+		{"ascii no link", strings.Repeat("s", 64), "", 3},
+		{"ascii multi-digit fold", strings.Repeat("s", 64), "", 1234},
+		{"non-ascii no link", strings.Repeat("서버", 32), "", 12},
+		{"untrusted link dropped", strings.Repeat("서버", 32), "https://evil.example/commands/1", 12},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fields := Fields{
+				Command: true, Argv0: strings.Repeat("c", 64), Server: tc.server, Account: strings.Repeat("a", 32),
+				Session: strings.Repeat("e", 64), ConsoleURL: tc.link,
+			}
+			suffix := " +" + strconv.Itoa(tc.folded) + " more."
+			_, full := Format(ApprovalPending, fields, 0)
+			require.Equal(t, 256, utf8.RuneCountInString(full), "every row must fill the limit: %q", full)
+
+			_, formatted := Format(ApprovalPending, fields, tc.folded)
+			assert.True(t, strings.HasSuffix(formatted, suffix), "Format keeps the fold suffix: %q", formatted)
+			assert.Equal(t, 256, utf8.RuneCountInString(formatted))
+
+			bannerBody, notifyBody, notifyLink := emitHeld(t, workspace, fields, tc.folded)
+			assert.Equal(t, full, bannerBody)
+			assert.Empty(t, notifyLink)
+			text, found := strings.CutSuffix(notifyBody, suffix)
+			require.True(t, found, "notification keeps the fold suffix: %q", notifyBody)
+			assert.True(t, strings.HasPrefix(full, text), "notification text must prefix the body: %q", text)
+			assert.Equal(t, 256, utf8.RuneCountInString(notifyBody))
+		})
+	}
+}
