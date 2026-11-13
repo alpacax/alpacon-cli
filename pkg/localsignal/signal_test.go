@@ -691,14 +691,19 @@ func TestConsoleLinkBannerBodyLimit(t *testing.T) {
 func TestFoldSuffixKeptWhenBodyFillsLimit(t *testing.T) {
 	t.Parallel()
 	const workspace = "https://console.example"
+	// A trusted link this long leaves the notification no room beside the
+	// suffix, so it is dropped there; the banner has no suffix and keeps it.
+	trusted := workspace + "/" + strings.Repeat("x", 245-len(workspace)-1)
 	for _, tc := range []struct {
 		name, server, link string
 		folded             int
+		bannerText         int
 	}{
-		{"ascii no link", strings.Repeat("s", 64), "", 3},
-		{"ascii multi-digit fold", strings.Repeat("s", 64), "", 1234},
-		{"non-ascii no link", strings.Repeat("서버", 32), "", 12},
-		{"untrusted link dropped", strings.Repeat("서버", 32), "https://evil.example/commands/1", 12},
+		{"ascii no link", strings.Repeat("s", 64), "", 3, -1},
+		{"ascii multi-digit fold", strings.Repeat("s", 64), "", 1234, -1},
+		{"non-ascii no link", strings.Repeat("서버", 32), "", 12, -1},
+		{"untrusted link dropped", strings.Repeat("서버", 32), "https://evil.example/commands/1", 12, -1},
+		{"trusted link leaves no notification room", strings.Repeat("서버", 32), trusted, 12, 10},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -709,18 +714,19 @@ func TestFoldSuffixKeptWhenBodyFillsLimit(t *testing.T) {
 			suffix := " +" + strconv.Itoa(tc.folded) + " more."
 			_, full := Format(ApprovalPending, fields, 0)
 			require.Equal(t, 256, utf8.RuneCountInString(full), "every row must fill the limit: %q", full)
+			wantBanner := full
+			if tc.bannerText >= 0 {
+				wantBanner = capText(full, tc.bannerText) + "\n" + tc.link
+			}
 
+			want := capText(full, 256-utf8.RuneCountInString(suffix)) + suffix
 			_, formatted := Format(ApprovalPending, fields, tc.folded)
-			assert.True(t, strings.HasSuffix(formatted, suffix), "Format keeps the fold suffix: %q", formatted)
-			assert.Equal(t, 256, utf8.RuneCountInString(formatted))
+			assert.Equal(t, want, formatted)
 
 			bannerBody, notifyBody, notifyLink := emitHeld(t, workspace, fields, tc.folded)
-			assert.Equal(t, full, bannerBody)
+			assert.Equal(t, wantBanner, bannerBody)
 			assert.Empty(t, notifyLink)
-			text, found := strings.CutSuffix(notifyBody, suffix)
-			require.True(t, found, "notification keeps the fold suffix: %q", notifyBody)
-			assert.True(t, strings.HasPrefix(full, text), "notification text must prefix the body: %q", text)
-			assert.Equal(t, 256, utf8.RuneCountInString(notifyBody))
+			assert.Equal(t, want, notifyBody)
 		})
 	}
 }
