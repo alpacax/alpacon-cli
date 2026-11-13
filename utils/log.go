@@ -60,13 +60,6 @@ func CliErrorWithExit(msg string, args ...any) {
 	exitWithError(newExitError(ExitCodeGeneralError, true, msg, args))
 }
 
-// CliErrorWithExitCode prints an error message to stderr and exits with the given code.
-// Unlike CliErrorWithExit it omits the "report an issue" footer—use it for expected,
-// machine-distinguishable refusals (e.g. a busy server) that scripts branch on by exit code.
-func CliErrorWithExitCode(code int, msg string, args ...any) {
-	exitWithError(newExitError(code, false, msg, args))
-}
-
 // CliUsageErrorWithExit reports a flag or argument the command rejected and exits 2 with error_code usage_error.
 func CliUsageErrorWithExit(msg string, args ...any) {
 	CliUsageErrorEnvelopeWithExit("", msg, args...)

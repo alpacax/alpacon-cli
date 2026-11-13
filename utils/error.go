@@ -187,7 +187,7 @@ const (
 	WorkSessionAdmissionDenied = "work_session_admission_denied"
 
 	// ExitCodeGeneralError is the process exit code for an ordinary failure, the one
-	// CliErrorWithExit exits with. Name it when calling CliErrorWithExitCode so the general case
+	// NewExitError exits with. Name it when calling NewExitErrorWithCode so the general case
 	// reads like the specific ones beside it.
 	ExitCodeGeneralError = 1
 

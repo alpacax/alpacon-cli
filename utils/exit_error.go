@@ -52,7 +52,7 @@ func NewExitError(msg string, args ...any) error {
 	return newExitError(ExitCodeGeneralError, true, msg, args)
 }
 
-// NewExitErrorWithCode is the failure CliErrorWithExitCode reports: the given exit and no footer.
+// NewExitErrorWithCode exits with code and no footer, for an expected refusal scripts branch on.
 func NewExitErrorWithCode(code int, msg string, args ...any) error {
 	return newExitError(code, false, msg, args)
 }
