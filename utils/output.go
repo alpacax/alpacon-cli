@@ -240,7 +240,7 @@ func PrintTable(slice any) error {
 
 // PartialTableExitError prints the reason to stderr and rows to stdout, then returns a silent
 // ExitCodeGeneralError, since the warning is the failure line, or PrintTable's failure when rows do not print.
-// With no rows to show, return an ordinary failure instead.
+// It does not check for empty rows: a caller with none to show returns an ordinary failure instead.
 func PartialTableExitError(rows any, msg string, args ...any) error {
 	CliWarning(msg, args...)
 	if err := PrintTable(rows); err != nil {

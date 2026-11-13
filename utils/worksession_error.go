@@ -10,7 +10,8 @@ import (
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 )
 
-// Operations WorkSessionExitError reports; each is also the WorkSession scope it requires.
+// WorkSessionExitError names one of these operations in its diagnostic. Each is also the WorkSession
+// scope that the operation requires.
 const (
 	OperationCommand = "command"
 	OperationWebFTP  = "webftp"
