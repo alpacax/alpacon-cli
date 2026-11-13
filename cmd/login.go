@@ -285,6 +285,8 @@ func validateInteractiveLoginTargetPrompt(isInteractive bool) error {
 	return errors.New("login target is required in non-interactive mode. Pass a HOST or use --workspace and --region; use -t with an explicit target for CI/CD or automation")
 }
 
+var promptPassword = utils.PromptForPassword // a seam: a test cannot type Ctrl+C into a terminal
+
 func promptForCredentials(username, password string) (string, string, error) {
 	if username == "" {
 		var err error
@@ -294,7 +296,10 @@ func promptForCredentials(username, password string) (string, string, error) {
 	}
 
 	if password == "" {
-		password = utils.PromptForPassword("Password: ")
+		var err error
+		if password, err = promptPassword("Password: "); err != nil {
+			return "", "", err
+		}
 	}
 
 	return username, password, nil

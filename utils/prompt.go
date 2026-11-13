@@ -19,55 +19,59 @@ var stdin struct {
 	reader *bufio.Reader
 }
 
-func PromptForPassword(promptText string) string {
+// PromptForPassword reads a password after promptText; Ctrl+C returns a silent exit-1 failure.
+func PromptForPassword(promptText string) (string, error) {
 	_, _ = fmt.Fprint(TrackedStderr(), promptText)
 
 	if !term.IsTerminal(int(os.Stdin.Fd())) { // nothing to hide, and ReadPassword refuses a pipe
 		line, _ := lineReader(os.Stdin).ReadString('\n')
-		return strings.TrimSpace(line)
+		return strings.TrimSpace(line), nil
 	}
 
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		bytePassword, err := term.ReadPassword(int(os.Stdin.Fd()))
 		if err != nil {
-			return ""
+			return "", nil
 		}
 		_, _ = fmt.Fprintln(TrackedStderr())
-		return strings.TrimSpace(string(bytePassword))
+		return strings.TrimSpace(string(bytePassword)), nil
 	}
 	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
+	return readRawPassword(os.Stdin, TrackedStderr())
+}
 
+// readRawPassword reads a password typed in raw mode from r, echoing a mask to w.
+func readRawPassword(r io.Reader, w io.Writer) (string, error) {
 	var password []byte
 	buf := make([]byte, 1)
 	for {
-		_, err := os.Stdin.Read(buf)
+		_, err := r.Read(buf)
 		if err != nil {
 			break
 		}
 		switch buf[0] {
 		case '\n', '\r':
-			_, _ = fmt.Fprint(TrackedStderr(), "\r\n")
-			return strings.TrimSpace(string(password))
+			_, _ = fmt.Fprint(w, "\r\n")
+			return strings.TrimSpace(string(password)), nil
 		case 127, '\b': // backspace
 			if len(password) > 0 {
 				password = password[:len(password)-1]
-				_, _ = fmt.Fprint(TrackedStderr(), "\b \b")
+				_, _ = fmt.Fprint(w, "\b \b")
 			}
 		case 3: // Ctrl+C
-			_, _ = fmt.Fprint(TrackedStderr(), "\r\n")
-			_ = term.Restore(int(os.Stdin.Fd()), oldState)
-			os.Exit(1)
+			_, _ = fmt.Fprint(w, "\r\n")
+			return "", NewSilentExitError(ExitCodeGeneralError)
 		default:
 			if buf[0] >= 32 {
 				password = append(password, buf[0])
-				_, _ = fmt.Fprint(TrackedStderr(), "*")
+				_, _ = fmt.Fprint(w, "*")
 			}
 		}
 	}
 
-	_, _ = fmt.Fprintln(TrackedStderr())
-	return strings.TrimSpace(string(password))
+	_, _ = fmt.Fprintln(w)
+	return strings.TrimSpace(string(password)), nil
 }
 
 // ReadInput reads one line from stdin after promptText, or returns the exit-1 failure on no input.

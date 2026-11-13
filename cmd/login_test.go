@@ -1097,3 +1097,30 @@ func TestIsWorkspaceNotFound_DecidesOnTheStatusNotTheText(t *testing.T) {
 		})
 	}
 }
+
+// Serial: reassigns the promptPassword seam.
+func TestPromptForCredentialsReturnsPasswordPromptFailure(t *testing.T) {
+	saved := promptPassword
+	t.Cleanup(func() { promptPassword = saved })
+	interrupted := utils.NewSilentExitError(utils.ExitCodeGeneralError)
+	promptPassword = func(string) (string, error) { return "", interrupted }
+
+	username, password, err := promptForCredentials("alice", "")
+
+	assert.Same(t, interrupted, err)
+	assert.Empty(t, username)
+	assert.Empty(t, password)
+}
+
+// Serial: reassigns the promptPassword seam.
+func TestPromptForCredentialsReturnsTypedPassword(t *testing.T) {
+	saved := promptPassword
+	t.Cleanup(func() { promptPassword = saved })
+	promptPassword = func(string) (string, error) { return "pw", nil }
+
+	username, password, err := promptForCredentials("alice", "")
+
+	require.NoError(t, err)
+	assert.Equal(t, "alice", username)
+	assert.Equal(t, "pw", password)
+}
