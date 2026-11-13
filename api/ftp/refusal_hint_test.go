@@ -121,7 +121,6 @@ func TestPollTransferStatus_TimeoutWhileThrottledKeepsTheHint(t *testing.T) {
 	assert.Zero(t, utils.HTTPStatusCode(err), "a timeout is not the throttle")
 	code, _ := utils.ParseErrorResponse(err)
 	assert.Empty(t, code)
-	require.NoError(t, utils.WorkSessionExitError(err, utils.OperationWebFTP, "my-server", "API token", ""), "a batch is not a work-session refusal")
 }
 
 // bulkStatusRefusalServer runs a bulk upload of two files whose status polls
@@ -220,6 +219,7 @@ func TestExecuteBulkUpload_WorkSessionRefusalStaysInTheBatch(t *testing.T) {
 	require.Error(t, err)
 	code, _ := utils.ParseErrorResponse(err)
 	assert.Empty(t, code)
+	require.NoError(t, utils.WorkSessionExitError(err, utils.OperationWebFTP, "my-server", "API token", ""), "a batch is not a work-session refusal")
 
 	_, stderr := testutil.CaptureOutput(t, func() {
 		utils.CliError("Failed to upload to '%s': %s", "my-server:/home/alice", err)
