@@ -257,6 +257,16 @@ func TestPromptsOnPipedStdinEachGetTheirOwnLine(t *testing.T) {
 		{name: "required integer asks again", input: "bad\n3\n", prompts: []func() (any, error){
 			func() (any, error) { return ReadRequiredIntInput("Count: ") },
 		}, want: []any{3}},
+		{name: "username then password", input: "alice\ns3cret\n", prompts: []func() (any, error){
+			func() (any, error) { return ReadRequiredInput("Username: ") },
+			func() (any, error) { return PromptForPassword("Password: "), nil },
+		}, want: []any{"alice", "s3cret"}},
+		{name: "password without a final newline", input: "s3cret", prompts: []func() (any, error){
+			func() (any, error) { return PromptForPassword("Password: "), nil },
+		}, want: []any{"s3cret"}},
+		{name: "password on empty input", input: "", prompts: []func() (any, error){
+			func() (any, error) { return PromptForPassword("Password: "), nil },
+		}, want: []any{""}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

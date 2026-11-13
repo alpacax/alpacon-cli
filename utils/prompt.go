@@ -22,6 +22,11 @@ var stdin struct {
 func PromptForPassword(promptText string) string {
 	_, _ = fmt.Fprint(TrackedStderr(), promptText)
 
+	if !term.IsTerminal(int(os.Stdin.Fd())) { // nothing to hide, and ReadPassword refuses a pipe
+		line, _ := lineReader(os.Stdin).ReadString('\n')
+		return strings.TrimSpace(line)
+	}
+
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		bytePassword, err := term.ReadPassword(int(os.Stdin.Fd()))
