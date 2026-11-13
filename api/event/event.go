@@ -26,8 +26,8 @@ const (
 
 	// finDeliverablePollTick paces that poll while the stream can still deliver the
 	// fin, bounding how late a lost fin is noticed. It is the slowest gap NextPollTick
-	// reaches from streamPollTick, so a short run no longer spends a service token's
-	// hourly quota once a second.
+	// reaches from streamPollTick, so a run whose fin arrives spends no service-token
+	// quota on reads once a second.
 	finDeliverablePollTick = 10 * time.Second
 )
 
@@ -424,9 +424,7 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 		if wait := min(delay, deadline.Sub(seams.Now())); wait > 0 {
 			select {
 			case <-seams.After(wait):
-			case <-lost:
-				delay, lost = pace()
-				continue
+			case <-lost: // read now: a fresh gap from here could land later than this one
 			case <-seams.cancel:
 				return response, errPollCancelled
 			}
@@ -682,16 +680,14 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 		return errorFromDetails(cmdID, details)
 	}
 
-	// over reads the command for its exit state, which fin does not carry. A failed
-	// read, or one racing a state not yet written, leaves the poll as the net rather
-	// than reporting a half-finished run.
+	// over reads the exit state, which fin does not carry. A failed read, or one racing
+	// a state not yet written, leaves the poll as the net.
 	over := func() (EventDetails, bool) {
 		details, err := getCommandByPathID(ac, cmdID)
 		return details, err == nil && !isPollWaitStatus(details.Status, waitApproval)
 	}
-	// The fin subscription went in after the command was submitted, so a command
-	// that finished first sent its fin before anyone listened. The poll would catch
-	// it only a finDeliverablePollTick later.
+	// The fin subscription went in after the submit, so a command that finished first
+	// sent its fin before anyone listened.
 	if details, done := over(); done {
 		return finish(details)
 	}
@@ -704,6 +700,7 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 			if details, done := over(); done {
 				return finish(details)
 			}
+			listener.markFinAtRisk() // that fin is spent, so only the poll can end the run
 		case details := <-pollResult:
 			return finish(details)
 		case err := <-pollErr:

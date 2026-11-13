@@ -1182,7 +1182,7 @@ func awaitStream(t *testing.T, done <-chan error) error {
 	select {
 	case err := <-done:
 		return err
-	case <-time.After(time.Minute): // past a few connected ticks
+	case <-time.After(time.Minute): // past a few finDeliverablePollTick waits
 		t.Fatal("the run never ended")
 		return nil
 	}
@@ -1335,13 +1335,38 @@ func TestStreamSubscribed_DroppedStreamPollsEverySecond(t *testing.T) {
 		err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", &bytes.Buffer{}, false))
 		require.NoError(t, err)
 		assert.Equal(t, 6*time.Second, time.Since(reads.start),
-			"a read a second after the drop, then one per second until the command is done")
+			"a read at the drop, then one per second until the command is done")
 
 		after := gapsAfter(reads.snapshot(), 2*time.Second)
 		require.NotEmpty(t, after)
 		for _, gap := range after {
 			assert.Equal(t, streamPollTick, gap)
 		}
+	})
+}
+
+// A drop past the fast window must not push the next read out: the poll reads at
+// the drop rather than starting a fresh, already widened gap from there.
+func TestStreamSubscribed_LateDropReadsAtOnce(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		reads := newDetailReads()
+		ac := newStreamingServers(t, streamingServerConfig{
+			cmdID:      "cmd-uuid",
+			serverID:   "srv-uuid",
+			runningFor: 25 * time.Second,
+			dropAfter:  15 * time.Second,
+			onDetail:   reads.record,
+			terminal:   EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
+		})
+
+		err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", &bytes.Buffer{}, false))
+		require.NoError(t, err)
+
+		at := reads.snapshot()
+		i := slices.IndexFunc(at, func(d time.Duration) bool { return d > finDeliverablePollTick })
+		require.GreaterOrEqual(t, i, 0)
+		assert.Equal(t, 15*time.Second, at[i], "the first read after the drop goes out at the drop")
 	})
 }
 
@@ -1365,9 +1390,30 @@ func TestStreamSubscribed_NoFinSubscriptionPollsEverySecond(t *testing.T) {
 	})
 }
 
+// Same when the server is known but refuses the fin subscription alone: the output
+// still streams, and the poll keeps the one-second pace.
+func TestStreamSubscribed_RefusedFinSubscriptionPollsEverySecond(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		reads := newDetailReads()
+		ac := newStreamingServers(t, streamingServerConfig{
+			cmdID:              "cmd-uuid",
+			serverID:           "srv-uuid",
+			finSubscribeStatus: http.StatusServiceUnavailable,
+			runningFor:         3 * time.Second,
+			onDetail:           reads.record,
+			terminal:           EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
+		})
+
+		err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", &bytes.Buffer{}, false))
+		require.NoError(t, err)
+		assert.Equal(t, 3*time.Second, time.Since(reads.start))
+	})
+}
+
 // The approval wait follows the same rule: parked behind a connected stream, the
 // command is read at the fin-deliverable pace, not every second.
-func TestStreamApprovedCommand_ConnectedHoldPollsAtTheBackstopPace(t *testing.T) {
+func TestStreamApprovedCommand_ConnectedHoldPollsAtTheFinDeliverablePace(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		reads := newDetailReads()
@@ -1444,12 +1490,13 @@ func TestRunCommandStreaming_FinSubscriptionTargetsTheCommandsServer(t *testing.
 }
 
 // A fin racing a status the server has not written yet must not end the run on a
-// half-finished read: the poll picks it up on its next tick instead.
+// half-finished read. The fin is spent, so the poll takes over at once.
 func TestStreamSubscribed_FinOnStillRunningStatusWaitsForPoll(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		stdoutBuf := &bytes.Buffer{}
 		details := &atomic.Int32{}
+		start := time.Now()
 		ac := newStreamingServers(t, streamingServerConfig{
 			cmdID:    "cmd-uuid",
 			serverID: "srv-uuid",
@@ -1466,6 +1513,7 @@ func TestStreamSubscribed_FinOnStillRunningStatusWaitsForPoll(t *testing.T) {
 		assert.Equal(t, "done\n", stdoutBuf.String())
 		assert.GreaterOrEqual(t, details.Load(), int32(3),
 			"the running read must not have ended the run: a second read, the poll's, did")
+		assert.Less(t, time.Since(start), streamPollTick, "not a finDeliverablePollTick later")
 	})
 }
 
@@ -1475,6 +1523,7 @@ func TestStreamSubscribed_FinWithFailedReadWaitsForPoll(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		stdoutBuf := &bytes.Buffer{}
 		details := &atomic.Int32{}
+		start := time.Now()
 		ac := newStreamingServers(t, streamingServerConfig{
 			cmdID:       "cmd-uuid",
 			serverID:    "srv-uuid",
@@ -1489,6 +1538,7 @@ func TestStreamSubscribed_FinWithFailedReadWaitsForPoll(t *testing.T) {
 		assert.Equal(t, "done\n", stdoutBuf.String())
 		assert.GreaterOrEqual(t, details.Load(), int32(3),
 			"a failed read must not surface as the result: a second read, the poll's, ended the run")
+		assert.Less(t, time.Since(start), streamPollTick, "not a finDeliverablePollTick later")
 	})
 }
 
@@ -2011,6 +2061,8 @@ type streamingServerConfig struct {
 	submits       *atomic.Int32 // counts command submissions when set
 	// subscribeStatus, when set, answers every subscription request with it.
 	subscribeStatus int
+	// finSubscribeStatus, when set, answers the command_fin subscription with it.
+	finSubscribeStatus int
 	// chunkStatus, when set, answers every chunk request with it.
 	chunkStatus int
 	// runningFor, when set, answers the detail endpoint "running" until that long
@@ -2126,17 +2178,21 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			}
 			_, _ = w.Write([]byte(`[{"id":"` + cfg.cmdID + `","server":{"id":"` + cfg.serverID + `"}}]`))
 		case r.URL.Path == "/api/events/subscriptions/" && r.Method == http.MethodPost:
+			var req EventSubscriptionRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
 			if cfg.onSubscribe != nil {
-				var req EventSubscriptionRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
 				cfg.onSubscribe(string(req.EventType), req.TargetID)
 			}
 			subOnce.Do(func() {
 				subscribedAt = time.Now()
 				close(subscribed)
 			})
-			if cfg.subscribeStatus != 0 {
-				w.WriteHeader(cfg.subscribeStatus)
+			status := cfg.subscribeStatus
+			if req.EventType == EventTypeCommandFin && cfg.finSubscribeStatus != 0 {
+				status = cfg.finSubscribeStatus
+			}
+			if status != 0 {
+				w.WriteHeader(status)
 				_, _ = w.Write([]byte(`{"detail":"unavailable"}`))
 				return
 			}
