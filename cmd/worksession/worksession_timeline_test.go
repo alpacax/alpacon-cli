@@ -589,6 +589,73 @@ func TestTimelineShowsRejectionCauseAndGate(t *testing.T) {
 	}
 }
 
+func TestTimelineShowsSudoRefusal(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		wire        string
+		wantDetails string
+		wantExtra   string
+	}{
+		{
+			name:        "refused sudo on a failed command",
+			wire:        `{"type":"command","line":"sudo systemctl restart chronyd","success":false,"verification_status":"approved","sudo_refusal_reason":"work_session_scope_not_allowed"}`,
+			wantDetails: "[sudo denied: work_session_scope_not_allowed] sudo systemctl restart chronyd",
+			wantExtra:   `,"sudo_refusal_reason":"work_session_scope_not_allowed"`,
+		},
+		{
+			name:        "refused sudo on a command that still exited 0",
+			wire:        `{"type":"command","line":"sudo a; sudo b","success":true,"sudo_refusal_reason":"sudo_risk_denied"}`,
+			wantDetails: "[sudo denied: sudo_risk_denied] sudo a; sudo b",
+			wantExtra:   `,"sudo_refusal_reason":"sudo_risk_denied"`,
+		},
+		{
+			name:        "a rejection before the run wins over the refusal",
+			wire:        `{"type":"command","line":"sudo su","success":false,"verification_status":"rejected","rejection_cause":"risk_denied","rejection_gate":"risk","sudo_refusal_reason":"sudo_risk_denied"}`,
+			wantDetails: "[rejected: risk_denied, gate risk] sudo su",
+			wantExtra:   `,"rejection_cause":"risk_denied","rejection_gate":"risk","sudo_refusal_reason":"sudo_risk_denied"`,
+		},
+		{
+			name:        "a denied command stays denied",
+			wire:        `{"type":"command","line":"sudo su","denied":true,"sudo_refusal_reason":"sudo_risk_denied"}`,
+			wantDetails: "[denied] sudo su",
+			wantExtra:   `,"sudo_refusal_reason":"sudo_risk_denied"`,
+		},
+		{
+			name:        "null reason keeps the result and the null",
+			wire:        `{"type":"command","line":"ls","success":false,"sudo_refusal_reason":null}`,
+			wantDetails: "[failed] ls",
+			wantExtra:   `,"sudo_refusal_reason":null`,
+		},
+		{
+			name:        "server without the field is unchanged",
+			wire:        `{"type":"command","line":"ls","success":false}`,
+			wantDetails: "[failed] ls",
+			wantExtra:   ``,
+		},
+		{
+			name:        "control characters in the reason are stripped",
+			wire:        `{"type":"command","line":"ls","success":false,"sudo_refusal_reason":"bad\u001b[2Jcode"}`,
+			wantDetails: "[sudo denied: badcode] ls",
+			wantExtra:   `,"sudo_refusal_reason":"bad\u001b[2Jcode"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var item wsapi.TimelineItem
+			require.NoError(t, json.Unmarshal([]byte(tc.wire), &item))
+
+			row := projectTimelineAttributes(&item, nil)
+
+			assert.Equal(t, tc.wantDetails, row.Details.String())
+			raw, err := json.Marshal(row)
+			require.NoError(t, err)
+			assert.JSONEq(t, fmt.Sprintf(`{"id":"","timestamp":null,"type":"command","server":"","user":"","details":%q%s}`, tc.wantDetails, tc.wantExtra), string(raw))
+		})
+	}
+}
+
 func TestProjectTimelineAttributes_JSONKeepsUTCTimeAndFullDetails(t *testing.T) {
 	t.Parallel()
 	long := strings.Repeat("y", 80)
