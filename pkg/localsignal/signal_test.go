@@ -685,3 +685,48 @@ func TestConsoleLinkBannerBodyLimit(t *testing.T) {
 		})
 	}
 }
+
+// With no console link kept, a body that fills the limit still yields to the
+// fold suffix: the notification ends with the whole " +N more." in 256 runes.
+func TestFoldSuffixKeptWhenBodyFillsLimit(t *testing.T) {
+	t.Parallel()
+	const workspace = "https://console.example"
+	// A trusted link this long leaves the notification no room beside the
+	// suffix, so it is dropped there; the banner has no suffix and keeps it.
+	trusted := workspace + "/" + strings.Repeat("x", 245-len(workspace)-1)
+	for _, tc := range []struct {
+		name, server, link string
+		folded             int
+		bannerText         int
+	}{
+		{"ascii no link", strings.Repeat("s", 64), "", 3, -1},
+		{"ascii multi-digit fold", strings.Repeat("s", 64), "", 1234, -1},
+		{"non-ascii no link", strings.Repeat("서버", 32), "", 12, -1},
+		{"untrusted link dropped", strings.Repeat("서버", 32), "https://evil.example/commands/1", 12, -1},
+		{"trusted link leaves no notification room", strings.Repeat("서버", 32), trusted, 12, 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fields := Fields{
+				Command: true, Argv0: strings.Repeat("c", 64), Server: tc.server, Account: strings.Repeat("a", 32),
+				Session: strings.Repeat("e", 64), ConsoleURL: tc.link,
+			}
+			suffix := " +" + strconv.Itoa(tc.folded) + " more."
+			_, full := Format(ApprovalPending, fields, 0)
+			require.Equal(t, 256, utf8.RuneCountInString(full), "every row must fill the limit: %q", full)
+			wantBanner := full
+			if tc.bannerText >= 0 {
+				wantBanner = capText(full, tc.bannerText) + "\n" + tc.link
+			}
+
+			want := capText(full, 256-utf8.RuneCountInString(suffix)) + suffix
+			_, formatted := Format(ApprovalPending, fields, tc.folded)
+			assert.Equal(t, want, formatted)
+
+			bannerBody, notifyBody, notifyLink := emitHeld(t, workspace, fields, tc.folded)
+			assert.Equal(t, wantBanner, bannerBody)
+			assert.Empty(t, notifyLink)
+			assert.Equal(t, want, notifyBody)
+		})
+	}
+}

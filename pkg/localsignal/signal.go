@@ -300,7 +300,7 @@ func Format(kind Kind, f Fields, folded int) (title, body string) {
 	default:
 		return "", ""
 	}
-	return title, capText(body+foldSuffix(folded), 256)
+	return title, withSuffix(body, foldSuffix(folded), 256)
 }
 
 func foldSuffix(folded int) string {
@@ -315,9 +315,15 @@ func foldSuffix(folded int) string {
 func withLink(body, suffix, sep, link string) (string, string) {
 	room := 256 - utf8.RuneCountInString(suffix) - utf8.RuneCountInString(sep) - utf8.RuneCountInString(link)
 	if link == "" || room <= 0 {
-		return capText(body+suffix, 256), ""
+		return withSuffix(body, suffix, 256), ""
 	}
 	return capText(body, room) + suffix + sep + link, link
+}
+
+// withSuffix fits body and suffix in limit runes, trimming body text so the
+// suffix stays whole.
+func withSuffix(body, suffix string, limit int) string {
+	return capText(body, max(limit-utf8.RuneCountInString(suffix), 0)) + suffix
 }
 
 func asciiSpace(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '\r' }
