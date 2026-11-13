@@ -9,6 +9,7 @@ issues:
 linters:
   enable:
     - errcheck
+    - forbidigo
     - govet
     - ineffassign
     - intrange
@@ -18,6 +19,15 @@ linters:
     - thelper
     - unused
   settings:
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^os\.Exit$
+          pkg: ^os$
+          msg: &exit-msg only cmd.Execute ends the process; return a utils.ExitError (see "Process exit" in AGENTS.md)
+        - pattern: ^utils\.(Cli\w*WithExit\w*|ExitIfUsageError|ExitWithFailureJSON)$
+          pkg: ^github\.com/alpacax/alpacon-cli/utils$
+          msg: *exit-msg
     errcheck:
       exclude-functions:
         - fmt.Fprintf
@@ -27,6 +37,27 @@ linters:
   exclusions:
     paths:
       - docs
+    # The in-place exits AGENTS.md allows under "Process exit"; a new one needs its reason there and a rule here.
+    rules:
+      - path: ^cmd/root\.go$
+        linters: [forbidigo]
+        text: "use of `(os\\.Exit|utils\\.(CliErrorWithExit|CliUsageErrorWithExit|CliParseErrorWithExit))`"
+      - path: ^cmd/kube/kube_config\.go$
+        linters: [forbidigo]
+        text: "use of `utils\\.CliErrorWithExit`"
+      - path: ^cmd/kube/kube_login\.go$
+        linters: [forbidigo]
+        text: "use of `utils\\.CliErrorEnvelopeWithExit`"
+      - path: ^cmd/kube/kube_logout\.go$
+        linters: [forbidigo]
+        text: "use of `utils\\.CliErrorEnvelopeWithExitCode`"
+      - path: ^utils/(log|error_envelope|exit_error|failure_report)\.go$ # the helpers themselves
+        linters: [forbidigo]
+      - path: ^utils/utils\.go$ # reraise
+        linters: [forbidigo]
+        text: "use of `os\\.Exit`"
+      - path: (_test\.go$|^pkg/testutil/) # TestMain and helper processes
+        linters: [forbidigo]
 
 formatters:
   enable:
