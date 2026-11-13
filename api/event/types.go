@@ -136,9 +136,10 @@ type FileExecutionSuggestion struct {
 }
 
 // ScriptBodySuggestion is the server's signal that a held command line carries
-// a script body (an interpreter's inline-body flag, a heredoc, a body piped into
-// an interpreter) that could run as a verified file instead. Signal names what
-// the server detected; the server proposes no path or interpreter.
+// a script body (a multi-line inline program, a heredoc, or an encoded body
+// decoded into an interpreter) that could run as a verified file instead.
+// Signal names what the server detected; the server proposes no path or
+// interpreter.
 type ScriptBodySuggestion struct {
 	Signal string `json:"signal"`
 }
