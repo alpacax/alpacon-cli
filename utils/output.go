@@ -3,7 +3,6 @@ package utils
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -236,28 +235,12 @@ func PrintTable(slice any) {
 	_ = tw.Flush()
 }
 
-// PartialTableWithExit prints rows to stdout, the reason to stderr, and exits with
-// ExitCodeGeneralError. It is not for a walk that collected nothing: that is an
-// ordinary failure for CliErrorWithExit.
-func PartialTableWithExit(rows any, msg string, args ...any) {
-	_ = PartialTableExitError(rows, msg, args...)
-	os.Exit(ExitCodeGeneralError)
-}
-
-// PartialTableExitError is PartialTableWithExit for a RunE command: it prints the same and returns
-// a silent ExitCodeGeneralError, since the warning is already the failure line.
+// PartialTableExitError prints rows to stdout and the reason to stderr, and returns a silent
+// ExitCodeGeneralError, since the warning is the failure line. A walk that read nothing is an ordinary failure.
 func PartialTableExitError(rows any, msg string, args ...any) error {
 	CliWarning(msg, args...)
 	PrintTable(rows)
 	return NewSilentExitError(ExitCodeGeneralError)
-}
-
-// PrintListOrExit prints a list a paginated read returned with err and exits on the failure PrintList
-// returns.
-func PrintListOrExit[T any](rows []T, err error, failMsg string) {
-	if exitErr, ok := errors.AsType[*ExitError](PrintList(rows, err, failMsg)); ok {
-		exitWithError(exitErr)
-	}
 }
 
 // PrintList prints a list a paginated read returned with err. On a nil err it is PrintTable; otherwise

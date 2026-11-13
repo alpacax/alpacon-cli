@@ -476,13 +476,13 @@ func TestCliErrorHelpersHelperProcess(t *testing.T) {
 	case "exit-code":
 		CliErrorWithExitCode(6, "refused")
 	case "positive-int":
-		RequirePositiveInt("timeout", 0)
+		exitOnError(CheckPositiveInt("timeout", 0))
 	case "exit-code-usage":
 		CliErrorWithExitCode(ExitCodeUsageError, "bad")
 	case "with-code":
-		CliErrorWithCode(1, ErrorCodeNotLoggedIn, "Not logged in.")
+		exitOnError(NewExitErrorWithErrorCode(1, ErrorCodeNotLoggedIn, "Not logged in."))
 	case "with-code-6":
-		CliErrorWithCode(6, ErrorCodeNotApproved, "refused")
+		exitOnError(NewExitErrorWithErrorCode(6, ErrorCodeNotApproved, "refused"))
 	case "envelope-code":
 		CliErrorEnvelopeWithExitCode(6, "", apiErr, "Failed: %s.", apiErr)
 	case "usage":
@@ -490,7 +490,7 @@ func TestCliErrorHelpersHelperProcess(t *testing.T) {
 	case "exit-usage-arg":
 		CliErrorWithExit("Failed: %s.", usageArg)
 	case "with-code-usage-arg":
-		CliErrorWithCode(ExitCodeGeneralError, "", "Failed: %s.", usageArg)
+		exitOnError(NewExitErrorWithErrorCode(ExitCodeGeneralError, "", "Failed: %s.", usageArg))
 	case "exit-code-1-usage-arg":
 		CliErrorWithExitCode(ExitCodeGeneralError, "Failed: %s.", usageArg)
 	case "envelope-code-1-usage":
@@ -502,7 +502,8 @@ func TestCliErrorHelpersHelperProcess(t *testing.T) {
 	case "usage-no-operation":
 		CliUsageErrorWithExit("bad flag --%s", "x")
 	case "prompt-eof":
-		PromptForInput("Username: ")
+		_, err := ReadInput("Username: ")
+		exitOnError(err)
 	case "failure":
 		ExitWithFailureJSON(Failure{ExitCode: ExitCodeNotApproved, ErrorCode: ErrorCodeNotApproved, Message: "no"})
 	}
@@ -511,6 +512,13 @@ func TestCliErrorHelpersHelperProcess(t *testing.T) {
 
 // helperReturned is the helper's exit code when the helper under test did not exit.
 const helperReturned = 97
+
+// exitOnError prints and exits on an ExitError, as cmd.Execute does.
+func exitOnError(err error) {
+	if exitErr, ok := errors.AsType[*ExitError](err); ok {
+		exitWithError(exitErr)
+	}
+}
 
 func withCommandName(t *testing.T, name string) {
 	t.Helper()

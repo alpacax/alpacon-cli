@@ -506,16 +506,16 @@ func TestPartialListOutputHelperProcess(t *testing.T) {
 	boom := errors.New("boom")
 	switch helperCase {
 	case "partial-table":
-		PartialTableWithExit(rows, "Showing only the %d entries read before the request failed: %s.", 1, boom)
+		exitOnError(PartialTableExitError(rows, "Showing only the %d entries read before the request failed: %s.", 1, boom))
 	case "partial-json":
 		OutputFormat = OutputFormatJSON
-		PartialTableWithExit(rows, "Showing only the %d entries read before the request failed: %s.", 1, boom)
+		exitOnError(PartialTableExitError(rows, "Showing only the %d entries read before the request failed: %s.", 1, boom))
 	case "list-complete":
-		PrintListOrExit(rows, nil, "Failed to get logs")
+		exitOnError(PrintList(rows, nil, "Failed to get logs"))
 	case "list-partial":
-		PrintListOrExit(rows, boom, "Failed to get logs")
+		exitOnError(PrintList(rows, boom, "Failed to get logs"))
 	case "list-failed":
-		PrintListOrExit([]outputTestItem{}, boom, "Failed to get logs")
+		exitOnError(PrintList([]outputTestItem{}, boom, "Failed to get logs"))
 	}
 	os.Exit(0)
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 )
 
-// Operations HandleWorkSessionError reports; each is also the WorkSession scope it requires.
+// Operations WorkSessionExitError reports; each is also the WorkSession scope it requires.
 const (
 	OperationCommand = "command"
 	OperationWebFTP  = "webftp"
@@ -82,16 +82,8 @@ type deniedCommand interface {
 	SubmittedCommandDenied() bool
 }
 
-// HandleWorkSessionError prints a WorkSession gate diagnostic and exits(3); no-op for other errors.
-// target is what the operation names: a cluster for OperationKube, a server otherwise.
-func HandleWorkSessionError(err error, operation, target, authMethod, activeWS string) {
-	if exitErr, ok := errors.AsType[*ExitError](WorkSessionExitError(err, operation, target, authMethod, activeWS)); ok {
-		exitWithError(exitErr)
-	}
-}
-
-// WorkSessionExitError is the failure HandleWorkSessionError reports, exit 3 with the gate diagnostic,
-// or nil when err is not a WorkSession gate refusal.
+// WorkSessionExitError returns the exit-3 gate diagnostic, or nil when err is not a WorkSession gate
+// refusal. target is what the operation names: a cluster for OperationKube, a server otherwise.
 func WorkSessionExitError(err error, operation, target, authMethod, activeWS string) error {
 	if err == nil {
 		return nil

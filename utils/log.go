@@ -67,19 +67,6 @@ func CliErrorWithExitCode(code int, msg string, args ...any) {
 	exitWithError(newExitError(code, false, msg, args))
 }
 
-// CliErrorWithCode names the json error_code (an ErrorCode* constant); table mode follows the
-// exit code, so only exit 1 keeps the report footer.
-func CliErrorWithCode(exitCode int, errorCode string, msg string, args ...any) {
-	ExitIfUsageError(exitCode, "", nil, msg, args...)
-	if OutputFormat == OutputFormatJSON {
-		exitWithEnvelope(exitCode, errorCode, msg, args)
-	}
-	if exitCode == ExitCodeGeneralError {
-		CliErrorWithExit(msg, args...)
-	}
-	CliErrorWithExitCode(exitCode, msg, args...)
-}
-
 // CliUsageErrorWithExit reports a flag or argument the command rejected and exits 2 with error_code usage_error.
 func CliUsageErrorWithExit(msg string, args ...any) {
 	CliUsageErrorEnvelopeWithExit("", msg, args...)
@@ -104,10 +91,6 @@ func newParseExitError(cmd *cobra.Command, format, msg string) *ExitError {
 		return newUsageExitError("", "%s", []any{msg})
 	}
 	return newUsageExitError("", "%s\nRun '%s --help' for usage.", []any{msg, cmd.CommandPath()})
-}
-
-func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {
-	ExitWithFailureJSON(envelopeFailure(exitCode, errorCode, msg, args))
 }
 
 // envelopeFailure classifies the envelope from the first error in args.
@@ -203,11 +186,4 @@ func spinnerLineBreak() string {
 // CliSuccess handles all success messages in the CLI.
 func CliSuccess(msg string, args ...any) {
 	_, _ = fmt.Fprintf(TrackedStderr(), "%s: %s\n", Green("Success"), cliMessage(msg, args...))
-}
-
-// CliInfoWithExit prints an informational message to stderr and exits the program with a status
-// code of 0.
-func CliInfoWithExit(msg string, args ...any) {
-	_, _ = fmt.Fprintf(TrackedStderr(), "%s: %s\n", Blue("Info"), cliMessage(msg, args...))
-	os.Exit(0)
 }
