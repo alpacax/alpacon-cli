@@ -2,8 +2,12 @@ package kube
 
 import (
 	"bytes"
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api/kubernetes"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -132,4 +136,74 @@ func TestApplySurfaceGate_DisabledKeepsCredentialsAndLogout(t *testing.T) {
 	found, _, err := root.Find([]string{"kube", "sessions"})
 	require.NoError(t, err)
 	assert.NotSame(t, kept["sessions"], found, "sessions needs the workspace, so the stand-in answers it")
+}
+
+// 'alpacon help kube', by name or alias and with a subcommand, returns the
+// not-enabled failure for cmd.Execute to print.
+func TestApplySurfaceGate_DisabledHelpTopicReturnsNotEnabled(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{{"help", "kube"}, {"help", "k8s", "ls"}} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			t.Parallel()
+			root, real := newGateTree()
+			applySurfaceGate(root, real, false)
+			var out bytes.Buffer
+			root.SetOut(&out)
+			root.SetErr(&out)
+			root.SilenceErrors, root.SilenceUsage = true, true // as RootCmd sets them
+			root.SetArgs(args)
+
+			err := root.Execute()
+
+			exitErr, ok := errors.AsType[*utils.ExitError](err)
+			require.True(t, ok, "want an ExitError, got %v", err)
+			assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
+			assert.Equal(t, kubernetes.SurfaceNotEnabledMessage, exitErr.Error())
+			assert.Empty(t, out.String())
+		})
+	}
+}
+
+func TestApplySurfaceGate_DisabledHelpTopicOfKeptChildPrintsHelp(t *testing.T) {
+	t.Parallel()
+	root, real := newGateTree()
+	real.AddCommand(&cobra.Command{Use: "logout", Short: "Remove kube contexts", Run: func(*cobra.Command, []string) {}})
+	applySurfaceGate(root, real, false, "logout")
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"help", "kube", "logout"})
+
+	err := root.Execute()
+
+	require.NoError(t, err)
+	assert.Contains(t, out.String(), "Remove kube contexts")
+}
+
+func TestApplySurfaceGate_DisabledHelpTopicOfOtherCommandPrintsHelp(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "another command", args: []string{"help", "server"}, want: "Manage registered servers"},
+		{name: "unknown topic", args: []string{"help", "bogus"}, want: "Unknown help topic"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			root, real := newGateTree()
+			applySurfaceGate(root, real, false)
+			var out bytes.Buffer
+			root.SetOut(&out)
+			root.SetErr(&out)
+			root.SetArgs(tt.args)
+
+			err := root.Execute()
+
+			require.NoError(t, err)
+			assert.Contains(t, out.String(), tt.want)
+			assert.NotContains(t, out.String(), kubernetes.SurfaceNotEnabledMessage)
+		})
+	}
 }
