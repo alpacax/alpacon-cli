@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,8 +32,9 @@ const (
 
 // RenewedToken is an access token a refresh-token grant returned, with its lifetime in seconds.
 type RenewedToken struct {
-	AccessToken string
-	ExpiresIn   int
+	AccessToken  string
+	RefreshToken string
+	ExpiresIn    int
 }
 
 func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, refreshToken, baseDomain string, expiresIn int, insecure bool) error {
@@ -45,6 +47,10 @@ func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, re
 		RefreshToken:  refreshToken,
 		BaseDomain:    baseDomain,
 		Insecure:      insecure,
+	}
+
+	if refreshToken != "" {
+		config.Auth0LoginID = rand.Text()
 	}
 
 	if expiresIn > 0 {
@@ -91,7 +97,7 @@ func moveWorkspace(fromURL string, login, to Config, renewed *RenewedToken) erro
 
 // sameLogin reports whether c holds other's credentials, which a login replaces and a switch or refresh keeps.
 func (c Config) sameLogin(other Config) bool {
-	return c.Token == other.Token && c.RefreshToken == other.RefreshToken
+	return c.Token == other.Token && c.auth0LoginID() == other.auth0LoginID()
 }
 
 // saveConfig renames a sibling temp file over the config, so LoadConfig, which takes no lock, never reads half
@@ -312,6 +318,10 @@ func configDir() (string, error) {
 }
 
 func LoadConfig() (Config, error) {
+	return loadConfig(nil)
+}
+
+func loadConfig(modified *time.Time) (Config, error) {
 	dir, err := configDir()
 	if err != nil {
 		return Config{}, err
@@ -336,6 +346,13 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("failed to decode config file: %v", err)
 	}
 
+	if modified != nil {
+		info, err := file.Stat()
+		if err != nil {
+			return Config{}, err
+		}
+		*modified = info.ModTime()
+	}
 	return config, nil
 }
 

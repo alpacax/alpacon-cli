@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"math"
 	"net/http"
 	"net/url"
@@ -288,31 +287,45 @@ func mapAuth0Error(err error) error {
 	}
 }
 
-func RefreshAccessToken(workspaceURL string, httpClient *http.Client, refreshToken string) (*TokenResponse, error) {
-	envInfo, err := FetchAuthEnv(workspaceURL, httpClient)
-	if err != nil {
-		return nil, err
-	}
-
-	orgName := resolveOrgName(envInfo, "")
-	if orgName == "" {
-		orgName, err = extractSubdomain(workspaceURL)
+// RefreshAccessToken serializes the complete grant against the login the caller loaded.
+func RefreshAccessToken(workspaceURL string, httpClient *http.Client, started config.Config) (*TokenResponse, error) {
+	var response *TokenResponse
+	renewed, err := config.RefreshAuth0Token(started, func(refreshToken string) (config.RenewedToken, error) {
+		envInfo, err := FetchAuthEnv(workspaceURL, httpClient)
 		if err != nil {
+			return config.RenewedToken{}, err
+		}
+		orgName := resolveOrgName(envInfo, "")
+		if orgName == "" {
+			orgName, err = extractSubdomain(workspaceURL)
+			if err != nil {
+				return config.RenewedToken{}, err
+			}
+		}
+		response, err = refreshWithDeviceScopeFallback(envInfo, httpClient, refreshToken, orgName)
+		if err != nil {
+			return config.RenewedToken{}, err
+		}
+		return config.RenewedToken{AccessToken: response.AccessToken, RefreshToken: response.RefreshToken, ExpiresIn: response.ExpiresIn}, nil
+	}, func(err error) bool {
+		var refusal *oauthError
+		return errors.As(err, &refusal) && refusal.Code == "invalid_grant" && IsRefreshTokenRejected(err)
+	})
+	if err != nil {
+		// Without rotation a failed save only makes the next command renew again.
+		// A rotated token must reach disk before another process can use the login.
+		if renewed.AccessToken == "" || (renewed.RefreshToken != "" && renewed.RefreshToken != started.RefreshToken) {
 			return nil, err
 		}
-	}
-
-	tokenRes, err := refreshWithDeviceScopeFallback(envInfo, httpClient, refreshToken, orgName)
-	if err != nil {
-		return nil, err
-	}
-
-	err = config.SaveRefreshedAuth0Token(refreshToken, tokenRes.AccessToken, tokenRes.ExpiresIn)
-	if err != nil && !errors.Is(err, config.ErrLoginChanged) && !errors.Is(err, fs.ErrNotExist) {
 		utils.CliWarning("Could not save the refreshed access token, so the next command will refresh it again: %s", err)
 	}
-
-	return tokenRes, nil
+	if response == nil {
+		response = &TokenResponse{TokenType: "Bearer"}
+	}
+	response.AccessToken = renewed.AccessToken
+	response.RefreshToken = renewed.RefreshToken
+	response.ExpiresIn = renewed.ExpiresIn
+	return response, nil
 }
 
 // refreshWithDeviceScopeFallback runs the refresh-token grant with the device scope and retries

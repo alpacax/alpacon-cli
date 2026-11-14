@@ -143,6 +143,7 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 
 	client := &AlpaconClient{
 		HTTPClient:    httpClient,
+		login:         &validConfig,
 		BaseURL:       validConfig.WorkspaceURL,
 		WorkspaceName: validConfig.WorkspaceIdentity(),
 		BaseDomain:    validConfig.BaseDomain,
@@ -158,7 +159,7 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 		}
 		spinner := utils.NewSpinner("Refreshing access token...")
 		spinner.Start()
-		tokenRes, err := auth0.RefreshAccessToken(validConfig.WorkspaceURL, httpClient, validConfig.RefreshToken)
+		tokenRes, err := auth0.RefreshAccessToken(validConfig.WorkspaceURL, httpClient, validConfig)
 		spinner.Stop()
 		if err != nil {
 			if auth0.IsRefreshTokenRejected(err) {
@@ -1092,8 +1093,12 @@ func (ac *AlpaconClient) IsUsingHTTPS() (bool, error) {
 // RefreshToken refreshes the access token using the stored refresh token.
 // Uses ac.BaseURL (not config's WorkspaceURL) to stay consistent with the client's target.
 func (ac *AlpaconClient) RefreshToken() error {
+	sent := ac.AccessToken()
 	ac.refreshMu.Lock()
 	defer ac.refreshMu.Unlock()
+	if ac.AccessToken() != sent {
+		return nil
+	}
 	return ac.refreshLocked()
 }
 
@@ -1129,10 +1134,20 @@ func (ac *AlpaconClient) refreshLocked() error {
 	if err != nil {
 		return err
 	}
+	if ac.login != nil && !cfg.SameLogin(*ac.login) {
+		return config.ErrLoginChanged
+	}
+	if cfg.WorkspaceURL != ac.BaseURL {
+		return config.ErrWorkspaceChanged
+	}
+	if cfg.AccessToken != ac.AccessToken() && cfg.AccessToken != "" && !isAccessTokenExpired(cfg) {
+		ac.SetAccessToken(cfg.AccessToken)
+		return nil
+	}
 	if cfg.RefreshToken == "" {
 		return errors.New("no refresh token stored; run 'alpacon login' to authenticate again")
 	}
-	tokenRes, err := auth0.RefreshAccessToken(ac.BaseURL, ac.HTTPClient, cfg.RefreshToken)
+	tokenRes, err := auth0.RefreshAccessToken(ac.BaseURL, ac.HTTPClient, cfg)
 	if err != nil {
 		return err
 	}
