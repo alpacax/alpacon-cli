@@ -2,18 +2,14 @@ package auth0
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -78,37 +74,4 @@ func TestRefreshAccessTokenAcrossProcesses(t *testing.T) {
 	stored := loadedRefreshConfig(t)
 	assert.Equal(t, "rotated-access", stored.AccessToken)
 	assert.Equal(t, "rotated-refresh", stored.RefreshToken)
-}
-
-// Serial: the simulated older writer replaces the config selected by HOME.
-func TestRefreshAccessTokenRecoversInvalidGrant(t *testing.T) {
-	var started config.Config
-	server := newRefreshServer(t, func(tokenRequest) (int, string) {
-		latest := started
-		latest.AccessToken = "concurrent-access"
-		latest.RefreshToken = "concurrent-refresh"
-		latest.AccessTokenExpiresAt = time.Now().Add(time.Hour).Format(time.RFC3339)
-		data, err := json.Marshal(latest)
-		if err != nil {
-			t.Errorf("encode replacement config: %v", err)
-			return http.StatusInternalServerError, ""
-		}
-		path := filepath.Join(os.Getenv("HOME"), config.ConfigFileDir, config.ConfigFileName)
-		if err := os.WriteFile(path+".replacement", data, 0600); err != nil {
-			t.Errorf("write replacement config: %v", err)
-			return http.StatusInternalServerError, ""
-		}
-		if err := os.Rename(path+".replacement", path); err != nil {
-			t.Errorf("replace config: %v", err)
-			return http.StatusInternalServerError, ""
-		}
-		return http.StatusBadRequest, `{"error":"invalid_grant"}`
-	})
-	setupRefreshConfig(t, server)
-	started = loadedRefreshConfig(t)
-	result, err := RefreshAccessToken(server.URL, server.Client(), started)
-	require.NoError(t, err)
-	assert.Equal(t, "concurrent-access", result.AccessToken)
-	assert.Equal(t, "concurrent-refresh", result.RefreshToken)
-	assert.Len(t, server.exchanges(), 1)
 }

@@ -560,7 +560,7 @@ func TestRefreshAccessToken_DoesNotFileTheTokenUnderAnotherLogin(t *testing.T) {
 
 	tokenRes, err := RefreshAccessToken(server.URL, server.Client(), started)
 
-	require.ErrorIs(t, err, config.ErrWorkspaceChanged)
+	require.ErrorIs(t, err, config.ErrLoginChanged)
 	assert.Nil(t, tokenRes)
 	assert.Empty(t, server.exchanges())
 	storedConfig, err := config.LoadConfig()

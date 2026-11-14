@@ -515,7 +515,8 @@ func (ac *AlpaconClient) renewAccessTokenWithin(ctx context.Context, sent string
 		return ac.renewAccessToken(sent)
 	}
 	renewed := make(chan bool, 1)
-	go func() { renewed <- ac.renewAccessToken(sent) }()
+	finish := utils.BeginTokenRefresh()
+	go func() { defer finish(); renewed <- ac.renewAccessToken(sent) }()
 	select {
 	case ok := <-renewed:
 		return ok
@@ -1137,16 +1138,14 @@ func (ac *AlpaconClient) refreshLocked() error {
 	if ac.login != nil && !cfg.SameLogin(*ac.login) {
 		return config.ErrLoginChanged
 	}
-	if cfg.WorkspaceURL != ac.BaseURL {
-		return config.ErrWorkspaceChanged
-	}
-	if cfg.AccessToken != ac.AccessToken() && cfg.AccessToken != "" && !isAccessTokenExpired(cfg) {
+	if cfg.WorkspaceURL == ac.BaseURL && cfg.AccessToken != ac.AccessToken() && cfg.AccessToken != "" && !isAccessTokenExpired(cfg) {
 		ac.SetAccessToken(cfg.AccessToken)
 		return nil
 	}
 	if cfg.RefreshToken == "" {
 		return errors.New("no refresh token stored; run 'alpacon login' to authenticate again")
 	}
+	cfg.WorkspaceURL = ac.BaseURL
 	tokenRes, err := auth0.RefreshAccessToken(ac.BaseURL, ac.HTTPClient, cfg)
 	if err != nil {
 		return err

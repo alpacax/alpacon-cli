@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -35,7 +36,7 @@ func runConfigWriter(name string) error {
 		if name != "b" {
 			continue
 		}
-		if err := SaveRefreshedAuth0Token("refresh", "token-"+strconv.Itoa(i), 3600); err != nil {
+		if err := saveTestRefreshedToken("refresh", "token-"+strconv.Itoa(i), 3600); err != nil {
 			return err
 		}
 	}
@@ -181,11 +182,8 @@ func TestEveryWriterWaitsForTheLockAndLeavesTheFileAlone(t *testing.T) {
 		}},
 		{name: "revert", write: func(started Config) error { return RestoreWorkspace(started.WorkspaceURL, started) }},
 		{name: "workspace env", write: func(started Config) error { return SetWorkspaceEnv(started.WorkspaceURL, "frozen", true) }},
-		{name: "token refresh", write: func(started Config) error {
-			return SaveRefreshedAuth0Token(started.RefreshToken, "access-2", 3600)
-		}},
 		{name: "serialized token refresh", write: func(started Config) error {
-			_, err := RefreshAuth0Token(started, func(string) (RenewedToken, error) { return RenewedToken{}, assert.AnError }, func(error) bool { return false })
+			_, err := RefreshAuth0Token(started, func(context.Context, string) (RenewedToken, error) { return RenewedToken{}, assert.AnError })
 			return err
 		}},
 		{name: "while logged in", write: func(started Config) error {
@@ -309,7 +307,7 @@ func insideWithConfigLock(stack []ast.Node) bool {
 		if !ok {
 			continue
 		}
-		if fn, ok := call.Fun.(*ast.Ident); ok && fn.Name == "withConfigLock" && slices.Contains(call.Args, ast.Expr(lit)) {
+		if fn, ok := call.Fun.(*ast.Ident); ok && (fn.Name == "withConfigLock" || fn.Name == "withConfigLockTimeout") && slices.Contains(call.Args, ast.Expr(lit)) {
 			return true
 		}
 	}

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/pkg/filelock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,12 +28,12 @@ func TestRefreshRotationPersistsAtomicallyAndKeepsLogin(t *testing.T) {
 	before, err := os.Stat(path)
 	require.NoError(t, err)
 	calls := 0
-	grant := func(token string) (RenewedToken, error) {
+	grant := func(_ context.Context, token string) (RenewedToken, error) {
 		calls++
 		assert.Equal(t, "old-refresh", token)
 		return RenewedToken{AccessToken: "new-access", RefreshToken: "new-refresh", ExpiresIn: 3600}, nil
 	}
-	result, err := RefreshAuth0Token(started, grant, func(error) bool { return false })
+	result, err := RefreshAuth0Token(started, grant)
 	require.NoError(t, err)
 	assert.Equal(t, "new-refresh", result.RefreshToken)
 	stored := loadedConfig(t)
@@ -45,7 +47,7 @@ func TestRefreshRotationPersistsAtomicallyAndKeepsLogin(t *testing.T) {
 	if os.PathSeparator != '\\' {
 		assert.Equal(t, os.FileMode(0600), after.Mode().Perm())
 	}
-	_, err = RefreshAuth0Token(started, grant, func(error) bool { return false })
+	_, err = RefreshAuth0Token(started, grant)
 	require.NoError(t, err)
 	assert.Equal(t, 1, calls)
 	require.NoError(t, SwitchWorkspace(started, "https://next.us1.alpacon.io", "next", false, nil))
@@ -55,66 +57,6 @@ func TestRefreshRotationPersistsAtomicallyAndKeepsLogin(t *testing.T) {
 	// Re-login by the same account must still invalidate the original snapshot.
 	require.NoError(t, CreateConfig(started.WorkspaceURL, "myws", "", "", "new-access", "new-refresh", "alpacon.io", 3600, false))
 	assert.ErrorIs(t, DeleteConfig(started), ErrLoginChanged)
-}
-
-// Serial: each case sets HOME; the fake clock pins the reuse boundary exactly.
-func TestRefreshRecoversOnlyARecentRotation(t *testing.T) {
-	cases := []struct {
-		name                                                     string
-		delay                                                    time.Duration
-		newLogin, otherWorkspace, unchanged, expired, otherError bool
-		recover                                                  bool
-	}{
-		{name: "rotation", recover: true},
-		{name: "late rotation during slow grant", recover: true},
-		{name: "at reuse boundary", delay: 30 * time.Second, recover: true},
-		{name: "past reuse boundary", delay: 30*time.Second + time.Nanosecond},
-		{name: "another login", newLogin: true},
-		{name: "another workspace", otherWorkspace: true},
-		{name: "unchanged token", unchanged: true},
-		{name: "expired replacement", expired: true},
-		{name: "another refusal", otherError: true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			setupTestConfig(t)
-			synctest.Test(t, func(t *testing.T) {
-				require.NoError(t, CreateConfig("https://myws.us1.alpacon.io", "myws", "", "", "old-access", "old-refresh", "alpacon.io", 1, false))
-				started := loadedConfig(t)
-				result, err := RefreshAuth0Token(started, func(string) (RenewedToken, error) {
-					if tc.name == "late rotation during slow grant" {
-						time.Sleep(31 * time.Second)
-					}
-					latest := started
-					if !tc.unchanged {
-						latest.RefreshToken = "new-refresh"
-						latest.AccessToken = "new-access"
-					}
-					latest.AccessTokenExpiresAt = time.Now().Add(time.Hour).Format(time.RFC3339)
-					if tc.newLogin {
-						latest.Auth0LoginID = "another-login"
-					}
-					if tc.otherWorkspace {
-						latest.WorkspaceURL = "https://next.us1.alpacon.io"
-					}
-					if tc.expired {
-						latest.AccessTokenExpiresAt = time.Now().Format(time.RFC3339)
-					}
-					writeRefreshSnapshot(t, latest)
-					time.Sleep(tc.delay)
-					return RenewedToken{}, assert.AnError
-				}, func(error) bool { return !tc.otherError })
-				if tc.recover {
-					require.NoError(t, err)
-					assert.Equal(t, "new-access", result.AccessToken)
-					assert.Equal(t, "new-refresh", result.RefreshToken)
-				} else {
-					require.ErrorIs(t, err, assert.AnError)
-					assert.Empty(t, result.AccessToken)
-				}
-			})
-		})
-	}
 }
 
 // writeRefreshSnapshot models a writer that predates refresh locking. Production
@@ -144,7 +86,7 @@ func TestConcurrentRefreshesShareSuccessAndFailure(t *testing.T) {
 				started := loadedConfig(t)
 				release := make(chan struct{})
 				var calls atomic.Int32
-				grant := func(string) (RenewedToken, error) {
+				grant := func(context.Context, string) (RenewedToken, error) {
 					calls.Add(1)
 					<-release
 					if tc.err != nil {
@@ -155,7 +97,7 @@ func TestConcurrentRefreshesShareSuccessAndFailure(t *testing.T) {
 				var done sync.WaitGroup
 				for range 12 {
 					done.Go(func() {
-						result, err := RefreshAuth0Token(started, grant, func(error) bool { return false })
+						result, err := RefreshAuth0Token(started, grant)
 						if tc.err != nil {
 							assert.ErrorIs(t, err, tc.err)
 						} else {
@@ -174,4 +116,70 @@ func TestConcurrentRefreshesShareSuccessAndFailure(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestRefreshAfterWorkspaceSwitchKeepsWorkspaceAccessToken(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://first.example.com", "first", "", "", "first-access", "old-refresh", "", 1, false))
+	started := loadedConfig(t)
+	require.NoError(t, SwitchWorkspace(started, "https://second.example.com", "second", false, &RenewedToken{AccessToken: "second-access", ExpiresIn: 3600}))
+	result, err := RefreshAuth0Token(started, func(_ context.Context, sent string) (RenewedToken, error) {
+		assert.Equal(t, "old-refresh", sent)
+		return RenewedToken{AccessToken: "first-renewed", RefreshToken: "rotated-refresh", ExpiresIn: 3600}, nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "first-renewed", result.AccessToken)
+	saved := loadedConfig(t)
+	assert.Equal(t, "https://second.example.com", saved.WorkspaceURL)
+	assert.Equal(t, "second-access", saved.AccessToken)
+	assert.Equal(t, "rotated-refresh", saved.RefreshToken)
+}
+
+func TestRefreshGrantHasDeadlineAndReleasesLock(t *testing.T) {
+	setupTestConfig(t)
+	synctest.Test(t, func(t *testing.T) {
+		require.NoError(t, CreateConfig("https://myws.example.com", "myws", "", "", "old-access", "old-refresh", "", 1, false))
+		started := loadedConfig(t)
+		start := time.Now()
+		_, err := RefreshAuth0Token(started, func(ctx context.Context, _ string) (RenewedToken, error) {
+			<-ctx.Done()
+			return RenewedToken{}, ctx.Err()
+		})
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.Equal(t, RefreshGrantTimeout, time.Since(start))
+		require.NoError(t, withConfigLock(func() error { return nil }))
+	})
+}
+
+func TestRefreshWaiterCoversLockWaitAndGrant(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://myws.example.com", "myws", "", "", "old-access", "old-refresh", "", 1, false))
+	started := loadedConfig(t)
+	held, err := filelock.Acquire(configLockPath(t), 0644)
+	require.NoError(t, err)
+	defer func() { _ = held.Release() }()
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		grant := func(context.Context, string) (RenewedToken, error) {
+			calls.Add(1)
+			time.Sleep(14 * time.Second)
+			return RenewedToken{AccessToken: "new-access", RefreshToken: "new-refresh", ExpiresIn: 3600}, nil
+		}
+		var done sync.WaitGroup
+		for range 2 {
+			done.Go(func() {
+				result, err := RefreshAuth0Token(started, grant)
+				if err != nil {
+					t.Errorf("refresh failed: %v", err)
+					return
+				}
+				assert.Equal(t, "new-access", result.AccessToken)
+			})
+		}
+		synctest.Wait()
+		time.Sleep(29 * time.Second)
+		require.NoError(t, held.Release())
+		done.Wait()
+		assert.Equal(t, int32(1), calls.Load())
+	})
 }

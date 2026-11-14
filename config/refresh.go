@@ -1,13 +1,20 @@
 package config
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
-const refreshReuseWindow = 30 * time.Second
+const (
+	RefreshGrantTimeout = 15 * time.Second
+	refreshLockTimeout  = 30 * time.Second
+	refreshWaitTimeout  = refreshLockTimeout + RefreshGrantTimeout + time.Second
+)
 
 var refreshes = struct {
 	sync.Mutex
@@ -38,8 +45,9 @@ func (c Config) auth0LoginID() string {
 
 // RefreshAuth0Token holds the config writer lock across re-read, grant and atomic save.
 // grant must not call a config writer: the lock is deliberately not reentrant.
-// isInvalidGrant identifies the one refusal that can recover from a recent rotation.
-func RefreshAuth0Token(started Config, grant func(string) (RenewedToken, error), isInvalidGrant func(error) bool) (RenewedToken, error) {
+func RefreshAuth0Token(started Config, grant func(context.Context, string) (RenewedToken, error)) (RenewedToken, error) {
+	finish := utils.BeginTokenRefresh()
+	defer finish()
 	dir, err := configDir()
 	if err != nil {
 		return RenewedToken{}, err
@@ -48,19 +56,19 @@ func RefreshAuth0Token(started Config, grant func(string) (RenewedToken, error),
 	refreshes.Lock()
 	if flight := refreshes.pending[key]; flight != nil {
 		refreshes.Unlock()
-		timer := time.NewTimer(lockTimeout)
+		timer := time.NewTimer(refreshWaitTimeout)
 		defer timer.Stop()
 		select {
 		case <-flight.done:
 			return flight.token, flight.err
 		case <-timer.C:
-			return RenewedToken{}, fmt.Errorf("timed out after %s waiting for access token refresh", lockTimeout)
+			return RenewedToken{}, fmt.Errorf("timed out after %s waiting for access token refresh", refreshWaitTimeout)
 		}
 	}
 	flight := &refreshFlight{done: make(chan struct{})}
 	refreshes.pending[key] = flight
 	refreshes.Unlock()
-	flight.token, flight.err = refreshAuth0Token(started, grant, isInvalidGrant)
+	flight.token, flight.err = refreshAuth0Token(started, grant)
 	refreshes.Lock()
 	delete(refreshes.pending, key)
 	close(flight.done)
@@ -68,45 +76,33 @@ func RefreshAuth0Token(started Config, grant func(string) (RenewedToken, error),
 	return flight.token, flight.err
 }
 
-func refreshAuth0Token(started Config, grant func(string) (RenewedToken, error), isInvalidGrant func(error) bool) (RenewedToken, error) {
+func refreshAuth0Token(started Config, grant func(context.Context, string) (RenewedToken, error)) (RenewedToken, error) {
 	var result RenewedToken
-	err := withConfigLock(func() error {
+	err := withConfigLockTimeout(refreshLockTimeout, func() error {
 		cfg, err := LoadConfig()
 		if err != nil {
 			return err
 		}
-		if cfg.WorkspaceURL != started.WorkspaceURL {
-			return ErrWorkspaceChanged
-		}
 		if !cfg.sameLogin(started) {
 			return ErrLoginChanged
 		}
-		if refreshAdvanced(started, cfg) {
+		if cfg.WorkspaceURL == started.WorkspaceURL && refreshAdvanced(started, cfg) {
 			result = cfg.renewedToken()
 			return nil
 		}
 		if cfg.RefreshToken == "" {
 			return fmt.Errorf("no refresh token stored; run 'alpacon login' to authenticate again")
 		}
-		renewed, err := grant(cfg.RefreshToken)
+		ctx, cancel := context.WithTimeout(context.Background(), RefreshGrantTimeout)
+		defer cancel()
+		renewed, err := grant(ctx, cfg.RefreshToken)
 		if err != nil {
-			// A writer outside this locking protocol can still replace the file.
-			// Recover only from a recent replacement of the same login, never by
-			// replaying the refresh token the endpoint refused.
-			if isInvalidGrant(err) {
-				var modified time.Time
-				latest, readErr := loadConfig(&modified)
-				age := time.Since(modified)
-				if readErr == nil && age >= 0 && age <= refreshReuseWindow && latest.WorkspaceURL == cfg.WorkspaceURL && latest.sameLogin(cfg) && latest.RefreshToken != cfg.RefreshToken && refreshAdvanced(cfg, latest) {
-					result = latest.renewedToken()
-					return nil
-				}
-			}
 			return err
 		}
 		cfg.Auth0LoginID = cfg.auth0LoginID()
-		cfg.AccessToken = renewed.AccessToken
-		cfg.AccessTokenExpiresAt = time.Now().Add(time.Duration(renewed.ExpiresIn) * time.Second).Format(time.RFC3339)
+		if cfg.WorkspaceURL == started.WorkspaceURL {
+			cfg.setAccessToken(renewed.AccessToken, renewed.ExpiresIn)
+		}
 		if renewed.RefreshToken != "" {
 			cfg.RefreshToken = renewed.RefreshToken
 		}
