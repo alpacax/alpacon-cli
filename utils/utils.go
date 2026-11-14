@@ -774,6 +774,7 @@ func pendingSignal(sigs <-chan os.Signal, done <-chan struct{}) os.Signal {
 
 // reraise ends the process with sig under its default action, or exits 1 where that cannot be sent.
 func reraise(sig os.Signal) {
+	WaitForTokenRefreshes()
 	if p, err := os.FindProcess(os.Getpid()); err == nil && p.Signal(sig) == nil {
 		time.Sleep(time.Second) // delivery is asynchronous; the default action ends the process here
 	}

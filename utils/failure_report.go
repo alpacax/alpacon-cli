@@ -49,7 +49,7 @@ func ExitWithFailureJSON(f Failure) {
 	}
 	SignalPaused(f.Err)
 	FprintFailureJSON(os.Stderr, f)
-	os.Exit(f.ExitCode)
+	Exit(f.ExitCode)
 }
 
 // FprintFailureJSON writes f's envelope to w whatever the output format, for a caller that has

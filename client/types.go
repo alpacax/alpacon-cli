@@ -3,6 +3,8 @@ package client
 import (
 	"net/http"
 	"sync"
+
+	"github.com/alpacax/alpacon-cli/config"
 )
 
 type AlpaconClient struct {
@@ -33,8 +35,10 @@ type AlpaconClient struct {
 	// has no timeout (no HTTP client on that path sets one), so it never runs under tokenMu,
 	// which every request takes.
 	refreshMu sync.Mutex
-	loadOnce  sync.Once
-	loadErr   error
+	// login pins the identity across refreshes, including rotations on disk.
+	login    *config.Config
+	loadOnce sync.Once
+	loadErr  error
 }
 
 type RawResponse struct {

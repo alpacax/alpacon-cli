@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,8 +32,9 @@ const (
 
 // RenewedToken is an access token a refresh-token grant returned, with its lifetime in seconds.
 type RenewedToken struct {
-	AccessToken string
-	ExpiresIn   int
+	AccessToken  string
+	RefreshToken string
+	ExpiresIn    int
 }
 
 func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, refreshToken, baseDomain string, expiresIn int, insecure bool) error {
@@ -45,6 +47,10 @@ func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, re
 		RefreshToken:  refreshToken,
 		BaseDomain:    baseDomain,
 		Insecure:      insecure,
+	}
+
+	if refreshToken != "" {
+		config.Auth0LoginID = rand.Text()
 	}
 
 	if expiresIn > 0 {
@@ -91,7 +97,7 @@ func moveWorkspace(fromURL string, login, to Config, renewed *RenewedToken) erro
 
 // sameLogin reports whether c holds other's credentials, which a login replaces and a switch or refresh keeps.
 func (c Config) sameLogin(other Config) bool {
-	return c.Token == other.Token && c.RefreshToken == other.RefreshToken
+	return c.Token == other.Token && c.auth0LoginID() == other.auth0LoginID()
 }
 
 // saveConfig renames a sibling temp file over the config, so LoadConfig, which takes no lock, never reads half
@@ -142,7 +148,7 @@ func saveConfig(config *Config) error {
 		return fmt.Errorf("failed to write config file: %v", err)
 	}
 
-	if err = os.Rename(tempFile, configFile); err != nil {
+	if err = renameConfig(tempFile, configFile); err != nil {
 		return fmt.Errorf("failed to replace config file: %v", err)
 	}
 
@@ -155,7 +161,9 @@ var ErrWorkspaceChanged = errors.New("the config now names another workspace")
 
 // ErrLoginChanged reports that the config holds another login than the one a
 // change was decided for, so nothing was written or removed.
-var ErrLoginChanged = errors.New("the config now holds another login")
+//
+//nolint:staticcheck // The remedy is a complete user-facing sentence.
+var ErrLoginChanged = errors.New("the config now holds another login. You signed in again in another terminal; run the command again.")
 
 // SetWorkspaceEnv records the schema name (empty keeps the stored one) and Kubernetes surface the workspace
 // at workspaceURL reported, and writes nothing once another login or switch has moved the config elsewhere.
@@ -174,17 +182,6 @@ func SetWorkspaceEnv(workspaceURL, schemaName string, kubernetesSurface bool) er
 			changed = true
 		}
 		return changed, nil
-	})
-}
-
-// SaveRefreshedAuth0Token stores accessToken while the config still holds refreshToken; once a login made
-// during the grant has replaced it, it returns ErrLoginChanged and writes nothing.
-func SaveRefreshedAuth0Token(refreshToken, accessToken string, expiresIn int) error {
-	return updateConfig(func(cfg *Config) (bool, error) {
-		if cfg.RefreshToken != refreshToken {
-			return false, ErrLoginChanged
-		}
-		return cfg.setAccessToken(accessToken, expiresIn), nil
 	})
 }
 
@@ -335,7 +332,6 @@ func LoadConfig() (Config, error) {
 	if err = decoder.Decode(&config); err != nil {
 		return Config{}, fmt.Errorf("failed to decode config file: %v", err)
 	}
-
 	return config, nil
 }
 

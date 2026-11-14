@@ -173,7 +173,7 @@ func TestGetOrCreateDeviceID_SurvivesConfigWrites(t *testing.T) {
 		}},
 		{"access token refresh", func(t *testing.T) {
 			t.Helper()
-			require.NoError(t, SaveRefreshedAuth0Token("refresh-token", "refreshed-access-token", 3600))
+			require.NoError(t, saveTestRefreshedToken("refresh-token", "refreshed-access-token", 3600))
 		}},
 		{"active work session", func(t *testing.T) {
 			t.Helper()

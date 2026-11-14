@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -279,10 +280,16 @@ func TestWritersDecidedBeforeAnotherLoginWriteNothing(t *testing.T) {
 			return SetWorkspaceEnv(ws1, "frozen", true)
 		}},
 		{name: "token refreshed after a login elsewhere", anotherLogin: ws9, wantErr: ErrLoginChanged, write: func(started Config) error {
-			return SaveRefreshedAuth0Token(started.RefreshToken, "access-from-ws1", 3600)
+			_, err := RefreshAuth0Token(started, func(context.Context, string) (RenewedToken, error) {
+				return RenewedToken{AccessToken: "access-from-ws1", ExpiresIn: 3600}, nil
+			})
+			return err
 		}},
 		{name: "token refreshed after another account logged in to the same workspace", anotherLogin: ws1, wantErr: ErrLoginChanged, write: func(started Config) error {
-			return SaveRefreshedAuth0Token(started.RefreshToken, "access-from-ws1", 3600)
+			_, err := RefreshAuth0Token(started, func(context.Context, string) (RenewedToken, error) {
+				return RenewedToken{AccessToken: "access-from-ws1", ExpiresIn: 3600}, nil
+			})
+			return err
 		}},
 		{name: "logout after a login elsewhere", anotherLogin: ws9, wantErr: ErrLoginChanged, write: func(started Config) error {
 			return DeleteConfig(started)
@@ -317,12 +324,14 @@ func TestWritersDecidedBeforeAnotherSwitchStillWrite(t *testing.T) {
 		started := loadedConfig(t)
 		require.NoError(t, SwitchWorkspace(started, ws2, "ws2", false, nil))
 
-		err := SaveRefreshedAuth0Token(started.RefreshToken, "access-2", 3600)
+		_, err := RefreshAuth0Token(started, func(context.Context, string) (RenewedToken, error) {
+			return RenewedToken{AccessToken: "access-2", ExpiresIn: 3600}, nil
+		})
 
 		require.NoError(t, err)
 		cfg := loadedConfig(t)
 		assert.Equal(t, ws2, cfg.WorkspaceURL)
-		assert.Equal(t, "access-2", cfg.AccessToken)
+		assert.Equal(t, "access-1", cfg.AccessToken)
 	})
 
 	t.Run("logout", func(t *testing.T) {
@@ -583,7 +592,7 @@ func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
 			// Varying lengths so a half-written file differs in size from the
 			// one it replaced, which is what a reader would catch.
 			for i := range 300 {
-				if err := SaveRefreshedAuth0Token("refresh", strings.Repeat(string(rune('a'+w)), 1+i%400), 3600); err != nil {
+				if err := saveTestRefreshedToken("refresh", strings.Repeat(string(rune('a'+w)), 1+i%400), 3600); err != nil {
 					writeErrs[w] = err
 					return
 				}
@@ -1002,7 +1011,7 @@ func TestRenewedTokenNeverReplacesALaterOne(t *testing.T) {
 		write func(started Config, accessToken string) error
 	}{
 		{name: "refresh", write: func(started Config, accessToken string) error {
-			return SaveRefreshedAuth0Token(started.RefreshToken, accessToken, 3600)
+			return saveTestRefreshedToken(started.RefreshToken, accessToken, 3600)
 		}},
 		{name: "switch", write: func(started Config, accessToken string) error {
 			return SwitchWorkspace(started, "https://ws2.us1.alpacon.io", "ws2", false, &RenewedToken{AccessToken: accessToken, ExpiresIn: 3600})
@@ -1032,4 +1041,19 @@ func TestRenewedTokenNeverReplacesALaterOne(t *testing.T) {
 			})
 		}
 	}
+}
+
+func saveTestRefreshedToken(refresh, access string, expires int) error {
+	started, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	if started.RefreshToken != refresh {
+		return ErrLoginChanged
+	}
+	// Force a grant rather than treating an unchanged disk snapshot as newer.
+	_, err = RefreshAuth0Token(started, func(context.Context, string) (RenewedToken, error) {
+		return RenewedToken{AccessToken: access, ExpiresIn: expires}, nil
+	})
+	return err
 }

@@ -170,7 +170,7 @@ func printExitError(text, envelope io.Writer, e *ExitError) {
 
 func exitWithError(e *ExitError) {
 	PrintExitError(e)
-	os.Exit(e.Code)
+	Exit(e.Code)
 }
 
 // WithExitError wraps a RunE that returns ExitError. Cobra prints nothing for an ExitError, which

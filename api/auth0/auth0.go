@@ -2,11 +2,11 @@ package auth0
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"math"
 	"net/http"
 	"net/url"
@@ -75,12 +75,16 @@ func IsRefreshTokenRejected(err error) bool {
 }
 
 func FetchAuthEnv(workspaceURL string, httpClient *http.Client) (*AuthEnvResponse, error) {
+	return fetchAuthEnv(context.Background(), workspaceURL, httpClient)
+}
+
+func fetchAuthEnv(ctx context.Context, workspaceURL string, httpClient *http.Client) (*AuthEnvResponse, error) {
 	apiURL, err := utils.BuildURL(workspaceURL, envPath, map[string]string{"client": "cli"})
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -288,31 +292,46 @@ func mapAuth0Error(err error) error {
 	}
 }
 
-func RefreshAccessToken(workspaceURL string, httpClient *http.Client, refreshToken string) (*TokenResponse, error) {
-	envInfo, err := FetchAuthEnv(workspaceURL, httpClient)
-	if err != nil {
-		return nil, err
-	}
-
-	orgName := resolveOrgName(envInfo, "")
-	if orgName == "" {
-		orgName, err = extractSubdomain(workspaceURL)
+// RefreshAccessToken serializes the complete grant against the login the caller loaded.
+func RefreshAccessToken(workspaceURL string, httpClient *http.Client, started config.Config) (*TokenResponse, error) {
+	stop := utils.ProtectRefreshOnSignal()
+	defer stop()
+	var response *TokenResponse
+	var sent string
+	renewed, err := config.RefreshAuth0Token(started, func(ctx context.Context, refreshToken string) (config.RenewedToken, error) {
+		sent = refreshToken
+		envInfo, err := fetchAuthEnv(ctx, workspaceURL, httpClient)
 		if err != nil {
+			return config.RenewedToken{}, err
+		}
+		orgName := resolveOrgName(envInfo, "")
+		if orgName == "" {
+			orgName, err = extractSubdomain(workspaceURL)
+			if err != nil {
+				return config.RenewedToken{}, err
+			}
+		}
+		response, err = refreshWithDeviceScopeFallback(ctx, envInfo, httpClient, refreshToken, orgName)
+		if err != nil {
+			return config.RenewedToken{}, err
+		}
+		return config.RenewedToken{AccessToken: response.AccessToken, RefreshToken: response.RefreshToken, ExpiresIn: response.ExpiresIn}, nil
+	})
+	if err != nil {
+		// Without rotation a failed save only makes the next command renew again.
+		// A rotated token must reach disk before another process can use the login.
+		if renewed.AccessToken == "" || (renewed.RefreshToken != "" && renewed.RefreshToken != sent) {
 			return nil, err
 		}
-	}
-
-	tokenRes, err := refreshWithDeviceScopeFallback(envInfo, httpClient, refreshToken, orgName)
-	if err != nil {
-		return nil, err
-	}
-
-	err = config.SaveRefreshedAuth0Token(refreshToken, tokenRes.AccessToken, tokenRes.ExpiresIn)
-	if err != nil && !errors.Is(err, config.ErrLoginChanged) && !errors.Is(err, fs.ErrNotExist) {
 		utils.CliWarning("Could not save the refreshed access token, so the next command will refresh it again: %s", err)
 	}
-
-	return tokenRes, nil
+	if response == nil {
+		response = &TokenResponse{TokenType: "Bearer"}
+	}
+	response.AccessToken = renewed.AccessToken
+	response.RefreshToken = renewed.RefreshToken
+	response.ExpiresIn = renewed.ExpiresIn
+	return response, nil
 }
 
 // refreshWithDeviceScopeFallback runs the refresh-token grant with the device scope and retries
@@ -325,11 +344,11 @@ func RefreshAccessToken(workspaceURL string, httpClient *http.Client, refreshTok
 // identifier was sent, so a login with it and a refresh without it lose presence. The fallback
 // therefore runs per exchange and costs one extra round-trip only when the server refuses the
 // scope.
-func refreshWithDeviceScopeFallback(envInfo *AuthEnvResponse, httpClient *http.Client, refreshToken, orgName string) (*TokenResponse, error) {
+func refreshWithDeviceScopeFallback(ctx context.Context, envInfo *AuthEnvResponse, httpClient *http.Client, refreshToken, orgName string) (*TokenResponse, error) {
 	scope := refreshScope(orgName, currentDeviceID())
 	fallbackScope := refreshScope(orgName, "")
 
-	tokenRes, err := requestRefreshedToken(envInfo, httpClient, refreshToken, scope)
+	tokenRes, err := requestRefreshedToken(ctx, envInfo, httpClient, refreshToken, scope)
 	if err == nil || scope == fallbackScope {
 		// Either it worked, or there was no device scope to drop and a retry
 		// would send the identical request.
@@ -348,7 +367,7 @@ func refreshWithDeviceScopeFallback(envInfo *AuthEnvResponse, httpClient *http.C
 	utils.CliDebug("The authentication server rejected the refresh carrying this installation's device scope (%s). "+
 		"Retrying without it; MFA presence falls back to the server-side fingerprint until the next 'alpacon login'.", oauthErr.Code)
 
-	return requestRefreshedToken(envInfo, httpClient, refreshToken, fallbackScope)
+	return requestRefreshedToken(ctx, envInfo, httpClient, refreshToken, fallbackScope)
 }
 
 // isDeviceScopeRefusal reports whether an OAuth error code is the server declining the requested
@@ -381,7 +400,7 @@ func isDeviceScopeRefusal(code string) bool {
 // requestRefreshedToken exchanges a refresh token for a new access token under
 // the given scope. It neither reads nor writes the stored config, so the caller
 // can attempt more than one scope before committing a result.
-func requestRefreshedToken(envInfo *AuthEnvResponse, httpClient *http.Client, refreshToken, scope string) (*TokenResponse, error) {
+func requestRefreshedToken(ctx context.Context, envInfo *AuthEnvResponse, httpClient *http.Client, refreshToken, scope string) (*TokenResponse, error) {
 	data := map[string]string{
 		"grant_type":    "refresh_token",
 		"client_id":     envInfo.Auth0.ClientID,
@@ -398,7 +417,7 @@ func requestRefreshedToken(envInfo *AuthEnvResponse, httpClient *http.Client, re
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, err
 	}
