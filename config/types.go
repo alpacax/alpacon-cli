@@ -10,11 +10,13 @@ type Config struct {
 	// SchemaName is the workspace's frozen identity, taken from the server's
 	// auth environment at login. Empty in a config written before the field
 	// existed, or by a server that does not report it.
-	SchemaName           string `json:"schema_name,omitempty"`
-	Token                string `json:"token,omitempty"`
-	ExpiresAt            string `json:"expires_at,omitempty"`
-	AccessToken          string `json:"access_token,omitempty"`
-	RefreshToken         string `json:"refresh_token,omitempty"`
+	SchemaName   string `json:"schema_name,omitempty"`
+	Token        string `json:"token,omitempty"`
+	ExpiresAt    string `json:"expires_at,omitempty"`
+	AccessToken  string `json:"access_token,omitempty"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	// Auth0LoginID stays stable across refresh-token rotations and changes at login.
+	Auth0LoginID         string `json:"auth0_login_id,omitempty"`
 	AccessTokenExpiresAt string `json:"access_token_expires_at,omitempty"`
 	BaseDomain           string `json:"base_domain,omitempty"`
 	Insecure             bool   `json:"insecure"`

@@ -417,7 +417,7 @@ func TestRefreshAccessToken_RetriesWithoutTheDeviceScopeWhenRejected(t *testing.
 	server := newRefreshServer(t, rejectDeviceScopeWith("invalid_scope"))
 	setupRefreshConfig(t, server)
 
-	tokenRes, err := RefreshAccessToken(server.URL, server.Client(), "refresh-token")
+	tokenRes, err := RefreshAccessToken(server.URL, server.Client(), loadedRefreshConfig(t))
 	require.NoError(t, err)
 	assert.Equal(t, "new-access-token", tokenRes.AccessToken)
 
@@ -441,7 +441,7 @@ func TestRefreshAccessToken_RetriesEveryScopeShapedRefusal(t *testing.T) {
 			server := newRefreshServer(t, rejectDeviceScopeWith(code))
 			setupRefreshConfig(t, server)
 
-			tokenRes, err := RefreshAccessToken(server.URL, server.Client(), "refresh-token")
+			tokenRes, err := RefreshAccessToken(server.URL, server.Client(), loadedRefreshConfig(t))
 			require.NoError(t, err)
 			assert.Equal(t, "new-access-token", tokenRes.AccessToken)
 
@@ -490,7 +490,7 @@ func TestRefreshAccessToken_DoesNotRetryARefusalTheScopeCannotFix(t *testing.T) 
 			})
 			setupRefreshConfig(t, server)
 
-			_, err := RefreshAccessToken(server.URL, server.Client(), "refresh-token")
+			_, err := RefreshAccessToken(server.URL, server.Client(), loadedRefreshConfig(t))
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.code, "the server's own refusal must reach the caller unchanged")
 
@@ -510,7 +510,7 @@ func TestRefreshAccessToken_FallbackIsObservable(t *testing.T) {
 
 	var err error
 	stderr := captureStderr(t, func() {
-		_, err = RefreshAccessToken(server.URL, server.Client(), "refresh-token")
+		_, err = RefreshAccessToken(server.URL, server.Client(), loadedRefreshConfig(t))
 	})
 	require.NoError(t, err)
 	assert.Contains(t, stderr, "device scope")
@@ -526,7 +526,7 @@ func TestRefreshAccessToken_FallbackIsQuietWithoutTheDebugSwitch(t *testing.T) {
 
 	var err error
 	stderr := captureStderr(t, func() {
-		_, err = RefreshAccessToken(server.URL, server.Client(), "refresh-token")
+		_, err = RefreshAccessToken(server.URL, server.Client(), loadedRefreshConfig(t))
 	})
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
@@ -540,7 +540,7 @@ func TestRefreshAccessToken_KeepsTheDeviceScopeWhenAccepted(t *testing.T) {
 	})
 	setupRefreshConfig(t, server)
 
-	tokenRes, err := RefreshAccessToken(server.URL, server.Client(), "refresh-token")
+	tokenRes, err := RefreshAccessToken(server.URL, server.Client(), loadedRefreshConfig(t))
 	require.NoError(t, err)
 	assert.Equal(t, "new-access-token", tokenRes.AccessToken)
 
@@ -554,56 +554,32 @@ func TestRefreshAccessToken_DoesNotFileTheTokenUnderAnotherLogin(t *testing.T) {
 		return http.StatusOK, refreshSuccessBody
 	})
 	setupRefreshConfig(t, server)
-	// Another shell logged in to a self-hosted workspace while the grant ran.
+	started := loadedRefreshConfig(t)
+	// Another shell logged in to a self-hosted workspace before the lock was acquired.
 	require.NoError(t, config.CreateConfig("https://alpacon.example.com", "self-hosted", "api-key", "", "", "", "", 0, false))
 
-	tokenRes, err := RefreshAccessToken(server.URL, server.Client(), "refresh-token")
+	tokenRes, err := RefreshAccessToken(server.URL, server.Client(), started)
 
-	require.NoError(t, err)
-	assert.Equal(t, "new-access-token", tokenRes.AccessToken)
+	require.ErrorIs(t, err, config.ErrLoginChanged)
+	assert.Nil(t, tokenRes)
+	assert.Empty(t, server.exchanges())
 	storedConfig, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Empty(t, storedConfig.AccessToken)
 	assert.Equal(t, "api-key", storedConfig.Token)
 }
 
-// Serial: each case sets HOME and swaps os.Stderr.
-func TestRefreshAccessToken_ReturnsTheTokenWhenItCannotBeSaved(t *testing.T) {
-	tests := []struct {
-		name        string
-		dirInPlace  bool
-		wantWarning string
-	}{
-		{name: "a logout removed the config"},
-		{name: "the config cannot be read", dirInPlace: true, wantWarning: "Could not save the refreshed access token"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := newRefreshServer(t, func(tokenRequest) (int, string) {
-				return http.StatusOK, refreshSuccessBody
-			})
-			setupRefreshConfig(t, server)
-			configFile := filepath.Join(os.Getenv("HOME"), config.ConfigFileDir, config.ConfigFileName)
-			require.NoError(t, os.Remove(configFile))
-			if tt.dirInPlace {
-				require.NoError(t, os.Mkdir(configFile, 0700))
-			}
-
-			var tokenRes *TokenResponse
-			var err error
-			stderr := captureStderr(t, func() {
-				tokenRes, err = RefreshAccessToken(server.URL, server.Client(), "refresh-token")
-			})
-
-			require.NoError(t, err)
-			assert.Equal(t, "new-access-token", tokenRes.AccessToken)
-			if tt.wantWarning == "" {
-				assert.Empty(t, stderr)
-			} else {
-				assert.Contains(t, stderr, tt.wantWarning)
-			}
-		})
-	}
+// Serial: each case sets HOME.
+func TestRefreshAccessTokenDoesNotExchangeAfterConfigRemoval(t *testing.T) {
+	server := newRefreshServer(t, func(tokenRequest) (int, string) { return http.StatusOK, refreshSuccessBody })
+	setupRefreshConfig(t, server)
+	started := loadedRefreshConfig(t)
+	path := filepath.Join(os.Getenv("HOME"), config.ConfigFileDir, config.ConfigFileName)
+	require.NoError(t, os.Remove(path))
+	token, err := RefreshAccessToken(server.URL, server.Client(), started)
+	require.Error(t, err)
+	assert.Nil(t, token)
+	assert.Empty(t, server.exchanges())
 }
 
 // TestRefreshAccessToken_ReportsTheFallbackFailure: when the retry after a scope refusal fails
@@ -617,7 +593,7 @@ func TestRefreshAccessToken_ReportsTheFallbackFailure(t *testing.T) {
 	})
 	setupRefreshConfig(t, server)
 
-	_, err := RefreshAccessToken(server.URL, server.Client(), "refresh-token")
+	_, err := RefreshAccessToken(server.URL, server.Client(), loadedRefreshConfig(t))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid_grant")
 	assert.Len(t, server.exchanges(), 2)
@@ -633,7 +609,7 @@ func TestRefreshAccessToken_DoesNotReplayAnUnansweredExchange(t *testing.T) {
 	})
 	setupRefreshConfig(t, server)
 
-	_, err := RefreshAccessToken(server.URL, server.Client(), "refresh-token")
+	_, err := RefreshAccessToken(server.URL, server.Client(), loadedRefreshConfig(t))
 	require.Error(t, err)
 	assert.Len(t, server.exchanges(), 1, "an unreadable reply must not be retried")
 }
@@ -662,7 +638,7 @@ func TestRefreshAccessToken_DoesNotRetryWhenNoDeviceScopeWasSent(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(deviceIDPath, 0600) })
 	require.Empty(t, currentDeviceID(), "the identifier must be unavailable for this test to mean anything")
 
-	_, err = RefreshAccessToken(server.URL, server.Client(), "refresh-token")
+	_, err = RefreshAccessToken(server.URL, server.Client(), loadedRefreshConfig(t))
 	require.Error(t, err)
 	assert.Len(t, server.exchanges(), 1, "there was no device scope to drop, so the retry would be identical")
 }
@@ -947,4 +923,35 @@ func TestRevokeToken_RefusesAnAuth0DomainThatDoesNotParse(t *testing.T) {
 	err := RevokeToken(http.DefaultClient, env, "refresh")
 
 	assert.ErrorContains(t, err, "invalid Auth0 domain")
+}
+
+// Serial: the refresh config is selected through HOME.
+func TestRefreshAccessTokenSerializesGoroutines(t *testing.T) {
+	server := newRefreshServer(t, func(tokenRequest) (int, string) {
+		return http.StatusOK, `{"access_token":"rotated-access","refresh_token":"rotated-refresh","expires_in":3600}`
+	})
+	setupRefreshConfig(t, server)
+	started := loadedRefreshConfig(t)
+	const n = 12
+	var done sync.WaitGroup
+	for range n {
+		done.Go(func() {
+			token, err := RefreshAccessToken(server.URL, server.Client(), started)
+			if assert.NoError(t, err) {
+				assert.Equal(t, "rotated-access", token.AccessToken)
+			}
+		})
+	}
+	done.Wait()
+	assert.Len(t, server.exchanges(), 1)
+	cfg, err := config.LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "rotated-refresh", cfg.RefreshToken)
+}
+
+func loadedRefreshConfig(t *testing.T) config.Config {
+	t.Helper()
+	cfg, err := config.LoadConfig()
+	require.NoError(t, err)
+	return cfg
 }
