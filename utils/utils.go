@@ -778,7 +778,7 @@ func reraise(sig os.Signal) {
 	if p, err := os.FindProcess(os.Getpid()); err == nil && p.Signal(sig) == nil {
 		time.Sleep(time.Second) // delivery is asynchronous; the default action ends the process here
 	}
-	os.Exit(1)
+	Exit(1)
 }
 
 // SplitPath splits a "server:/path" target into its server name and remote path.

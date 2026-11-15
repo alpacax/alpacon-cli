@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	RefreshGrantTimeout = 15 * time.Second
-	refreshLockTimeout  = 30 * time.Second
+	// Leave ordinary config writers time to acquire the lock within their 10s wait.
+	RefreshGrantTimeout = 8 * time.Second
+	refreshLockTimeout  = lockTimeout
 	refreshWaitTimeout  = refreshLockTimeout + RefreshGrantTimeout + time.Second
 )
 

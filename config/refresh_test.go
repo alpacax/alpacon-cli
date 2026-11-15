@@ -146,7 +146,8 @@ func TestRefreshGrantHasDeadlineAndReleasesLock(t *testing.T) {
 			return RenewedToken{}, ctx.Err()
 		})
 		require.ErrorIs(t, err, context.DeadlineExceeded)
-		assert.Equal(t, RefreshGrantTimeout, time.Since(start))
+		assert.Equal(t, 8*time.Second, time.Since(start))
+		assert.Less(t, RefreshGrantTimeout, lockTimeout)
 		require.NoError(t, withConfigLock(func() error { return nil }))
 	})
 }
@@ -162,7 +163,7 @@ func TestRefreshWaiterCoversLockWaitAndGrant(t *testing.T) {
 		var calls atomic.Int32
 		grant := func(context.Context, string) (RenewedToken, error) {
 			calls.Add(1)
-			time.Sleep(14 * time.Second)
+			time.Sleep(RefreshGrantTimeout - time.Second)
 			return RenewedToken{AccessToken: "new-access", RefreshToken: "new-refresh", ExpiresIn: 3600}, nil
 		}
 		var done sync.WaitGroup
@@ -177,9 +178,35 @@ func TestRefreshWaiterCoversLockWaitAndGrant(t *testing.T) {
 			})
 		}
 		synctest.Wait()
-		time.Sleep(29 * time.Second)
+		time.Sleep(refreshLockTimeout - time.Second)
 		require.NoError(t, held.Release())
 		done.Wait()
 		assert.Equal(t, int32(1), calls.Load())
+	})
+}
+
+// Serial: sets HOME and observes a writer waiting behind a grant.
+func TestConfigWriterWaitsThroughSlowRefresh(t *testing.T) {
+	setupTestConfig(t)
+	synctest.Test(t, func(t *testing.T) {
+		require.NoError(t, CreateConfig("https://myws.example.com", "myws", "", "", "old-access", "old-refresh", "", 1, false))
+		started := loadedConfig(t)
+		grantStarted := make(chan struct{})
+		refreshed := make(chan error, 1)
+		go func() {
+			_, err := RefreshAuth0Token(started, func(ctx context.Context, _ string) (RenewedToken, error) {
+				close(grantStarted)
+				<-ctx.Done()
+				return RenewedToken{}, ctx.Err()
+			})
+			refreshed <- err
+		}()
+		<-grantStarted
+		start := time.Now()
+		require.NoError(t, DeleteConfig(started))
+		assert.Less(t, time.Since(start), lockTimeout)
+		require.ErrorIs(t, <-refreshed, context.DeadlineExceeded)
+		assert.Equal(t, 10*time.Second, refreshLockTimeout)
+		assert.Equal(t, 19*time.Second, refreshWaitTimeout)
 	})
 }

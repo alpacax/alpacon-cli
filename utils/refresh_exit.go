@@ -25,7 +25,7 @@ func BeginTokenRefresh() func() {
 	}
 }
 
-// WaitForTokenRefreshes gives grants already in flight one grant deadline to finish.
+// WaitForTokenRefreshes covers a 10s config lock wait, an 8s grant and 1s for saving.
 func WaitForTokenRefreshes() {
 	tokenRefreshes.Lock()
 	pending := make([]chan struct{}, 0, len(tokenRefreshes.pending))
@@ -33,7 +33,7 @@ func WaitForTokenRefreshes() {
 		pending = append(pending, done)
 	}
 	tokenRefreshes.Unlock()
-	timer := time.NewTimer(15 * time.Second)
+	timer := time.NewTimer(19 * time.Second)
 	defer timer.Stop()
 	for _, done := range pending {
 		select {
