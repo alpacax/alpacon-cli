@@ -13,14 +13,22 @@ import (
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
 const (
 	getEventURL = "/api/events/commands/"
 
-	// Base tick utils.NextPollTick widens, for the poll running behind a live stream.
+	// Base tick utils.NextPollTick widens, for the poll behind a stream that may
+	// have lost the fin.
 	streamPollTick = time.Second
+
+	// finDeliverablePollTick paces that poll while the stream can still deliver the
+	// fin, bounding how late a lost fin is noticed. It is the slowest gap NextPollTick
+	// reaches from streamPollTick, so a run whose fin arrives spends no service-token
+	// quota on reads once a second.
+	finDeliverablePollTick = 10 * time.Second
 )
 
 // CommandPollTick paces a command poll with no stream behind it. A var so a test's
@@ -55,18 +63,25 @@ var errPollCancelled = errors.New("poll cancelled")
 // verified file—is decided once, by whoever builds the closure.
 type commandSubmitter func() (CommandResponse, error)
 
-// pollSeams are the hooks only a stream or a test supplies: cancellation, and a
-// clock in place of real time. The zero value polls uncancellably on the real one.
+// pollSeams are what only a stream or a test supplies. A stream sets the policy
+// for a poll beside it (cancel, finAtRisk, uncapped); a test sets the clock. The
+// zero value polls uncancellably on the real clock at the tick it is given, under
+// the failure cap.
 // Passed rather than kept in package vars—a poll outlives the stream that started
 // it by an in-flight request, and a test swapping a var would swap it under a
 // loop still running.
 type pollSeams struct {
 	cancel <-chan struct{}
-	now    func() time.Time
-	after  func(time.Duration) <-chan time.Time
-	// surfaceMFA returns an MFA refusal of the poll to the caller at once, for
-	// a caller that runs the MFA wait itself and polls again after it.
-	surfaceMFA bool
+	// finAtRisk, for a poll beside a stream, closes once that stream may have lost
+	// the fin. Until then the poll reads every finDeliverablePollTick.
+	finAtRisk <-chan struct{}
+	now       func() time.Time
+	after     func(time.Duration) <-chan time.Time
+	// uncapped lifts the failure cap, for a poll beside a stream whose fin can
+	// still end the run while the result reads fail.
+	uncapped bool
+	// readFirst sends the first read at once rather than a gap later.
+	readFirst bool
 }
 
 func (s pollSeams) Now() time.Time {
@@ -211,19 +226,29 @@ func GetEventList(ac *client.AlpaconClient, tail int, serverName string, userNam
 	for _, event := range events {
 		status := utils.BoolPointerToString(event.Success)
 		cell := status
-		if event.IsRejected() {
+		if IsDeniedStatus(event.Status) {
+			reason := event.Rejection().ErrorCode()
+			if reason == "" {
+				reason = "cause not recorded"
+			}
+			cell = "denied: " + utils.SanitizeTerminalText(reason)
+		} else if event.IsRejected() {
 			cell = event.Label()
 		}
 		eventList = append(eventList, EventAttributes{
+			ID:                    event.ID,
 			Server:                event.Server.Name,
 			Shell:                 event.Shell,
 			Command:               event.Line,
-			Result:                utils.TruncateString(event.Result, 70),
+			Result:                utils.Truncate(event.Result, 70),
 			Status:                status,
 			StatusCell:            cell,
+			ExitCode:              event.ExitCode,
+			ErrorPhase:            event.ErrorPhase,
 			Operator:              event.RequestedBy.Name,
-			RequestedAt:           utils.TimeUtils(event.AddedAt),
+			RequestedAt:           utils.RelativeTime(event.AddedAt),
 			ApprovedFileExecution: event.ApprovedFileExecution,
+			DenialCode:            event.DenialCode,
 			CommandRejection:      event.CommandRejection,
 		})
 	}
@@ -336,10 +361,9 @@ func getCommandByPathID(ac *client.AlpaconClient, pathID api.PathID) (EventDetai
 
 // PollCommandExecution polls with the default timeout and tick. An MFA refusal
 // (auth_mfa_required) is returned at once as the typed error, so the caller can wait
-// for MFA and poll again; the poll only reads, so that is safe. Any other GET error
-// is retried with backoff.
+// for MFA and poll again; the poll only reads, so that is safe.
 func PollCommandExecution(ac *client.AlpaconClient, cmdID api.PathID) (EventDetails, error) {
-	return pollCommandExecution(ac, cmdID, execTimeout(), CommandPollTick, false, pollSeams{surfaceMFA: true})
+	return pollCommandExecution(ac, cmdID, execTimeout(), CommandPollTick, false, pollSeams{})
 }
 
 func execTimeout() time.Duration {
@@ -363,15 +387,33 @@ func isPollWaitStatus(status string, waitApproval bool) bool {
 // pollCommandExecution polls until the command leaves the running state. With waitApproval
 // it also polls through the awaiting_approval hold—bounded by timeout, which the hold never
 // resets and throttled waits extend by at most one timeout or utils.PollMaxThrottleExtensions
-// grants, plus one backoff wait—so an approved job resumes streaming. A closed seams.cancel
-// ends the poll with errPollCancelled.
+// grants, plus one backoff wait—so an approved job resumes streaming. A failed GET that will
+// repeat, such as a 404 or an MFA refusal, is returned at once, and any other failure after
+// utils.MaxConsecutivePollFailures in a row unless seams.uncapped. A closed seams.cancel ends
+// the poll with errPollCancelled.
 func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, tick time.Duration, waitApproval bool, seams pollSeams) (EventDetails, error) {
 	var response EventDetails
 
 	started := seams.Now()
 	deadline := started.Add(timeout)
-	delay := tick
-	failures := 0
+	finAtRisk := seams.finAtRisk // nil once closed, so a wait never selects it again
+	// pace returns the next wait and the signal that cuts it short, nil when none should.
+	pace := func() (time.Duration, <-chan struct{}) {
+		if finAtRisk != nil {
+			select {
+			case <-finAtRisk:
+				finAtRisk = nil
+			default:
+				return finDeliverablePollTick, finAtRisk
+			}
+		}
+		return utils.NextPollTick(tick, seams.Now().Sub(started)), nil
+	}
+	delay, lost := pace()
+	if seams.readFirst {
+		delay, lost = 0, nil
+	}
+	failures, throttles := 0, 0
 	budget := utils.NewThrottleBudget(timeout)
 	lastRefusalHint := ""
 
@@ -387,6 +429,7 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 		if wait := min(delay, deadline.Sub(seams.Now())); wait > 0 {
 			select {
 			case <-seams.After(wait):
+			case <-lost: // read now: a fresh gap from here could land later than this one
 			case <-seams.cancel:
 				return response, errPollCancelled
 			}
@@ -397,29 +440,32 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 
 		responseBody, err := ac.SendGetRequest(api.IDURL(getEventURL, pathID, "", nil))
 		lastRefusalHint = ""
-		if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
-			lastRefusalHint = utils.RefusalHint(err)
-		}
-		if err != nil {
-			if seams.surfaceMFA && utils.StructuredErrorCode(err) == utils.AuthMFARequired {
-				return response, err
-			}
-			delay = utils.NextPollBackoff(tick, failures, utils.RetryAfter(err))
-			failures++
-			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
-				// The wait can reach two timeouts, and nothing else on this path
-				// prints while it lasts.
-				budget.WarnThrottled(delay)
-				// The server is alive: the command may be done, only its result GET refused.
-				// Budgeted so a token stuck over quota gives up—extending by exactly the
-				// wait would keep the deadline ahead forever.
-				if newDeadline, extended := budget.Extend(deadline, delay); extended {
-					deadline = newDeadline
-				}
+		switch {
+		case err != nil && !utils.IsTransientRequestError(err):
+			return response, err
+		case err != nil && utils.HTTPStatusCode(err) == http.StatusTooManyRequests:
+			lastRefusalHint = utils.RefusalHint(err) // kept for a timeout that ends while throttled
+			delay, lost = utils.NextPollBackoff(tick, throttles, utils.RetryAfter(err)), nil
+			throttles++
+			// The wait can reach two timeouts, and nothing else on this path
+			// prints while it lasts.
+			budget.WarnThrottled(delay)
+			// The server is alive: the command may be done, only its result GET refused.
+			// Budgeted so a token stuck over quota gives up—extending by exactly the
+			// wait would keep the deadline ahead forever.
+			if newDeadline, extended := budget.Extend(deadline, delay); extended {
+				deadline = newDeadline
 			}
 			continue
+		case err != nil:
+			failures++
+			if failures >= utils.MaxConsecutivePollFailures && !seams.uncapped {
+				return response, err
+			}
+			delay, lost = utils.NextPollBackoff(tick, failures-1, utils.RetryAfter(err)), nil
+			continue
 		}
-		failures = 0
+		failures, throttles = 0, 0
 		if err = json.Unmarshal(responseBody, &response); err != nil {
 			return response, err
 		}
@@ -427,12 +473,12 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 		if IsRunningStatus(response.Status) {
 			deadline = seams.Now().Add(timeout)
 			budget.Reset()
-			delay = utils.NextPollTick(tick, seams.Now().Sub(started))
+			delay, lost = pace()
 			continue
 		}
 		// Running is handled above, so what is left here is the approval hold.
 		if isPollWaitStatus(response.Status, waitApproval) {
-			delay = utils.NextPollTick(tick, seams.Now().Sub(started))
+			delay, lost = pace()
 			continue
 		}
 		return response, nil
@@ -598,7 +644,10 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 	pollCancel := make(chan struct{})
 	defer close(pollCancel)
 	go func() {
-		details, err := pollCommandExecution(ac, cmdID, timeout, streamPollTick, waitApproval, pollSeams{cancel: pollCancel})
+		// The fin subscription went in after the submit, so a command that finished
+		// first sent its fin before anyone listened: read once at the start.
+		details, err := pollCommandExecution(ac, cmdID, timeout, streamPollTick, waitApproval,
+			pollSeams{cancel: pollCancel, uncapped: true, readFirst: true, finAtRisk: listener.FinAtRisk()})
 		switch {
 		case errors.Is(err, errPollCancelled): // the stream is gone; nobody reads these
 		case err != nil:
@@ -610,6 +659,10 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 
 	// Runs on whichever terminal signal arrives first, the fin event or the poll.
 	finish := func(details EventDetails) error {
+		if IsDeniedStatus(details.Status) {
+			listener.Stop()
+			return errorFromDetails(cmdID, details)
+		}
 		// select picks among ready cases at random, so delivered chunks may still be queued.
 		for delivered := true; delivered; {
 			select {
@@ -630,22 +683,25 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 		printStandingGrant(details)
 		// Output is already streamed; errorFromDetails keeps it on the error for
 		// inspection, such as the sudo-denial hint, not for reprinting.
+		SignalPendingSudoApproval(ac, details)
 		return errorFromDetails(cmdID, details)
 	}
 
+	// over reads the exit state, which fin does not carry. A failed read, or one racing
+	// a state not yet written, leaves the poll as the net.
+	over := func() (EventDetails, bool) {
+		details, err := getCommandByPathID(ac, cmdID)
+		return details, err == nil && !isPollWaitStatus(details.Status, waitApproval)
+	}
 	for {
 		select {
 		case chunk := <-listener.Chunks():
 			lastSeq = applyChunk(ac, cmdID, lastSeq, chunk, out, gap)
 		case <-listener.Finished():
-			// fin says only that it is over; the exit code lives on the command. A
-			// failed read, or one racing a state not yet written, leaves the poll as
-			// the net rather than reporting a half-finished run.
-			details, err := getCommandByPathID(ac, cmdID)
-			if err != nil || isPollWaitStatus(details.Status, waitApproval) {
-				continue
+			if details, done := over(); done {
+				return finish(details)
 			}
-			return finish(details)
+			listener.markFinAtRisk() // that fin is spent, so only the poll can end the run
 		case details := <-pollResult:
 			return finish(details)
 		case err := <-pollErr:
@@ -658,11 +714,16 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 				// One more read, best effort, so the timed-out wait carries the
 				// same file suggestion a run without --wait prints.
 				if details, err := getCommandByPathID(ac, cmdID); err == nil {
+					pending.Username = details.Username
 					pending.FileSuggestion = details.FileExecutionSuggestion
+					pending.ScriptBodySuggestion = details.ScriptBodySuggestion
+					pending.ConsoleURL = details.ConsoleURL
+					pending.WorkSessionID = details.WorkSessionID()
+					pending.ApprovalLane = details.ApprovalLane
 				}
 				return pending
 			}
-			return err
+			return commandPollError(cmdID, err)
 		}
 	}
 }
@@ -781,7 +842,7 @@ func errorFromDetails(id api.PathID, d EventDetails) error {
 		return &AwaitingPurposeError{CommandID: id.String(), ExpiresAt: d.PurposeExpiresAt}
 	}
 	if IsAwaitingApprovalStatus(d.Status) {
-		return &PendingApprovalError{CommandID: id.String(), FileSuggestion: d.FileExecutionSuggestion}
+		return &PendingApprovalError{Username: d.Username, CommandID: id.String(), FileSuggestion: d.FileExecutionSuggestion, ScriptBodySuggestion: d.ScriptBodySuggestion, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID(), ApprovalLane: d.ApprovalLane}
 	}
 	if d.IsRejected() {
 		rejected := d.Rejection()
@@ -813,12 +874,32 @@ func errorFromDetails(id api.PathID, d EventDetails) error {
 			if d.ErrorPhase != nil {
 				phase = *d.ErrorPhase
 			}
-			return &RemoteCommandError{Output: d.Result, ExitCode: exitCode, ErrorPhase: phase, CommandID: id.String()}
+			return &RemoteCommandError{Username: d.Username, Output: d.Result, ExitCode: exitCode, ErrorPhase: phase, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID(), CommandID: id.String(), Held: d.Held}
 		}
 		return nil
 	default:
 		return fmt.Errorf("unexpected command status: %s (command may still be running)", d.Status)
 	}
+}
+
+// SignalPendingSudoApproval signals a successful command whose sudo grant awaits approval.
+func SignalPendingSudoApproval(ac *client.AlpaconClient, details EventDetails) {
+	if errorFromDetails(api.PathID{}, details) == nil && details.SudoGrantStatus != nil && *details.SudoGrantStatus == "pending_approval" {
+		utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{
+			Command: true, Argv0: localsignal.Argv0(details.Line), Server: details.Server.Name,
+			Account: details.Username, Session: details.WorkSessionID(), ConsoleURL: details.ConsoleURL,
+		}, ac)
+	}
+}
+
+// commandPollError marks a poll of a submitted command that ended on a failed read.
+// A timeout keeps its own type, which already says the command was not cancelled.
+func commandPollError(cmdID api.PathID, err error) error {
+	var timeout *ClientTimeoutError
+	if errors.As(err, &timeout) {
+		return err
+	}
+	return &CommandPollError{CommandID: cmdID.String(), Err: err}
 }
 
 // runCommandFallback submits the command and polls it in place of the stream.
@@ -840,7 +921,10 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID api.PathID, out io
 	utils.CliWarning("real-time output unavailable (%v); falling back to polling", cause)
 	details, err := pollCommandExecution(ac, cmdID, execTimeout(), tick, waitApproval, pollSeams{})
 	if err != nil {
-		return err
+		return commandPollError(cmdID, err)
+	}
+	if IsDeniedStatus(details.Status) {
+		return errorFromDetails(cmdID, details)
 	}
 	output, oerr := resolveCommandOutputByPathID(ac, cmdID, details.Result)
 	if output != "" {
@@ -850,6 +934,7 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID api.PathID, out io
 	// The command's own failure carries the remote exit code the caller
 	// propagates, so it outranks an unreadable output. The warning above names a
 	// lost stream, not a lost output, so it cannot stand in for this error.
+	SignalPendingSudoApproval(ac, details)
 	if err := errorFromDetails(cmdID, details); err != nil {
 		return err
 	}

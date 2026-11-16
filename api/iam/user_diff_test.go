@@ -3,6 +3,7 @@ package iam
 import (
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,11 +27,6 @@ func TestDiffEditedUser(t *testing.T) {
 		wantChanges    map[string]any
 		wantPrivileges []PrivilegeEdit
 	}{
-		{
-			name:        "an untouched buffer changes nothing",
-			edited:      map[string]any{"id": "u-1", "username": "john", "phone": "", "is_active": true, "is_staff": false, "is_superuser": true, "is_ldap_user": true, "num_groups": float64(2)},
-			wantChanges: map[string]any{},
-		},
 		{
 			name:        "only the edited field is sent",
 			edited:      map[string]any{"phone": "010", "is_staff": false, "is_ldap_user": true},
@@ -60,11 +56,6 @@ func TestDiffEditedUser(t *testing.T) {
 			wantChanges:    map[string]any{},
 			wantPrivileges: []PrivilegeEdit{{Field: "is_staff", Enable: true}},
 		},
-		{
-			name:        "a deleted key reads as untouched",
-			edited:      map[string]any{"username": "john"},
-			wantChanges: map[string]any{},
-		},
 	}
 
 	for _, tt := range tests {
@@ -74,6 +65,35 @@ func TestDiffEditedUser(t *testing.T) {
 
 			assert.Equal(t, tt.wantChanges, edit.Changes)
 			assert.Equal(t, tt.wantPrivileges, edit.Privileges)
+		})
+	}
+}
+
+func TestDiffEditedUserReturnsErrNoChangesWhenNothingDiffers(t *testing.T) {
+	t.Parallel()
+	original := []byte(`{"id": "u-1", "username": "john", "phone": "", "is_staff": false, "num_groups": 2}`)
+	tests := []struct {
+		name   string
+		edited map[string]any
+	}{
+		{
+			name:   "reformatted but identical fields",
+			edited: map[string]any{"id": "u-1", "username": "john", "phone": "", "is_staff": false, "num_groups": float64(2)},
+		},
+		{
+			name:   "a deleted key reads as untouched",
+			edited: map[string]any{"username": "john"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			edit, err := diffEditedUser(original, tt.edited)
+
+			require.ErrorIs(t, err, utils.ErrNoChanges)
+			assert.Nil(t, edit)
 		})
 	}
 }

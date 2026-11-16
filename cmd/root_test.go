@@ -73,6 +73,27 @@ func TestBuildWelcomeLines(t *testing.T) {
 	})
 }
 
+func TestLocalSignalConsoleOrigin(t *testing.T) {
+	home := t.TempDir()
+	setTestHome(t, home)
+	workspace, base := utils.LocalSignalConsoleOrigin()
+	assert.Empty(t, workspace)
+	assert.Empty(t, base)
+
+	dir := filepath.Join(home, ".alpacon")
+	require.NoError(t, os.MkdirAll(dir, 0700))
+	file := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(file, []byte(`{"workspace_url":"https://my-workspace.ap1.alpacon.io","base_domain":"alpacon.io"}`), 0600))
+	workspace, base = utils.LocalSignalConsoleOrigin()
+	assert.Equal(t, "https://my-workspace.ap1.alpacon.io", workspace)
+	assert.Equal(t, "alpacon.io", base)
+
+	require.NoError(t, os.WriteFile(file, []byte(`{"workspace_url":"http://10.0.0.5:8080"}`), 0600))
+	workspace, base = utils.LocalSignalConsoleOrigin()
+	assert.Equal(t, "http://10.0.0.5:8080", workspace)
+	assert.Empty(t, base)
+}
+
 func TestHostFromURL(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -104,7 +125,6 @@ func TestRootRegistersAPICommand(t *testing.T) {
 }
 
 func TestRootVersionFlagBehavesLikeTheVersionCommand(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name  string
 		cmd   []string
@@ -123,12 +143,9 @@ func TestRootVersionFlagBehavesLikeTheVersionCommand(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			run := func(t *testing.T, args []string) (string, string, int) {
 				t.Helper()
-				return runHelperProcess(t, "TestUpdateCommandHelperProcess", "update-helper", args,
-					"GO_WANT_UPDATE_HELPER=1", homeEnvVar()+"="+t.TempDir(),
-					"ALPACON_TEST_LATEST_RELEASE=1.4.0", "ALPACON_TEST_CURRENT_VERSION=1.3.0")
+				return runVersionCommand(t, args, false)
 			}
 
 			wantOut, wantErr, wantCode := run(t, tc.cmd)
@@ -136,7 +153,6 @@ func TestRootVersionFlagBehavesLikeTheVersionCommand(t *testing.T) {
 
 			for name, flag := range tc.flags {
 				t.Run(name, func(t *testing.T) {
-					t.Parallel()
 					gotOut, gotErr, gotCode := run(t, flag)
 
 					assert.Equal(t, wantCode, gotCode)
@@ -303,4 +319,27 @@ func TestKeepWithOwnParserHandsAnUnknownFlagBeforeASubcommandToTheParent(t *test
 			assert.Equal(t, tt.want, cmd.Name())
 		})
 	}
+}
+
+func TestRejectUnknownSubcommandsRespectsCommandSettings(t *testing.T) {
+	t.Parallel()
+	child := func() *cobra.Command { return &cobra.Command{Use: "child", Run: func(*cobra.Command, []string) {}} }
+	root := &cobra.Command{Use: "root"}
+	declared := &cobra.Command{Use: "declared", Args: cobra.MaximumNArgs(1)}
+	ownParser := &cobra.Command{Use: "own-parser", DisableFlagParsing: true}
+	parent := &cobra.Command{Use: "parent"}
+	nested := &cobra.Command{Use: "nested"}
+	declared.AddCommand(child())
+	ownParser.AddCommand(child())
+	nested.AddCommand(child())
+	parent.AddCommand(nested)
+	root.AddCommand(declared, ownParser, parent)
+
+	rejectUnknownSubcommands(root)
+
+	assert.Nil(t, root.Args)
+	assert.Nil(t, ownParser.Args)
+	require.NoError(t, declared.ValidateArgs([]string{"word"}))
+	require.ErrorContains(t, parent.ValidateArgs([]string{"word"}), "unknown command")
+	assert.ErrorContains(t, nested.ValidateArgs([]string{"word"}), "unknown command")
 }

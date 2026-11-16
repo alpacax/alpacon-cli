@@ -10,11 +10,13 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -42,6 +44,14 @@ var (
 	// ansiEscapeRE matches ANSI/VT escape sequences: CSI, OSC (BEL or ST), DCS/SOS/PM/APC string controls (ST), and Fe/Fs/nF sequences.
 	ansiEscapeRE = regexp.MustCompile(`\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|[PX^_][^\x1b]*\x1b\\|\[[\x30-\x3f]*[\x20-\x2f]*[@-~]|[\x20-\x2f]*[\x40-\x7e])`)
 )
+
+// ErrNoChanges reports that an edit left nothing to apply.
+var ErrNoChanges = errors.New("no changes made")
+
+type editFile interface {
+	io.WriteCloser
+	Name() string
+}
 
 // ShowLogo renders the Pacabot mascot with up to 3 lines of text, beside the art when the terminal
 // is wide enough and below it otherwise, so wrapped lines cannot break the half-block pixel art.
@@ -159,20 +169,23 @@ func ExtractWorkspaceName(workspaceURL string) string {
 	return ""
 }
 
-func SplitAndParseInt(input string) []int {
+func notIntegersError() *ExitError {
+	return newExitError(ExitCodeGeneralError, true, "Invalid input: only integers allowed.", nil)
+}
+
+// ParseIntList parses a comma-separated list of integers, or returns the exit-1 failure on any other value.
+func ParseIntList(input string) ([]int, error) {
 	var intValues []int
 
 	for stringValue := range strings.SplitSeq(input, ",") {
-		trimmedString := strings.TrimSpace(stringValue)
-
-		intValue, err := strconv.Atoi(trimmedString)
+		intValue, err := strconv.Atoi(strings.TrimSpace(stringValue))
 		if err != nil {
-			CliErrorWithExit("Invalid input: only integers allowed.")
+			return nil, notIntegersError()
 		}
 		intValues = append(intValues, intValue)
 	}
 
-	return intValues
+	return intValues, nil
 }
 
 // FormatTimestamp renders a server timestamp in the local zone.
@@ -491,10 +504,12 @@ func BoolPointerToString(value *bool) string {
 	return "false"
 }
 
-func BuildURL(basePath, relativePath string, params map[string]string) string {
+// BuildURL joins relativePath onto basePath with a trailing slash and params as the query, or returns
+// the parse error when basePath is not a URL.
+func BuildURL(basePath, relativePath string, params map[string]string) (string, error) {
 	u, err := url.Parse(basePath)
 	if err != nil {
-		CliErrorWithExit("Failed to parse base URL")
+		return "", err
 	}
 
 	u.Path = path.Join(u.Path, relativePath)
@@ -508,7 +523,7 @@ func BuildURL(basePath, relativePath string, params map[string]string) string {
 	}
 
 	u.RawQuery = q.Encode()
-	return u.String()
+	return u.String(), nil
 }
 
 // SetQuery changes only the query string, leaving an invalid URL for the caller to handle.
@@ -581,6 +596,14 @@ func SanitizeTerminalText(s string) string {
 	return StripControlChars(StripFormatAndANSI(s))
 }
 
+// SanitizeTerminalOneLine fits free text, such as an approver's reason or an
+// agent's tunnel failure, onto one terminal line: line breaks, tabs and runs of
+// space become one space. Whitespace is folded before sanitizing, since SanitizeTerminalText drops
+// \t, \r and \n and would run the words on either side together.
+func SanitizeTerminalOneLine(s string) string {
+	return strings.Join(strings.Fields(SanitizeTerminalText(strings.Join(strings.Fields(s), " "))), " ")
+}
+
 // SanitizeTerminalLine is SanitizeTerminalText plus the answer to whether it had
 // to take anything out. A \n counts as altered here: the caller's value is one
 // line by contract, so a newline in it is a forged line and not a line ending
@@ -604,66 +627,158 @@ func SanitizeTerminalBlock(s string) (clean string, altered bool) {
 	return clean, clean != normalized
 }
 
-// ProcessEditedData facilitates user modifications to original data,
-// formats it, supports editing via a temp file, compares the edited data against the original,
-// and parses it into JSON. If no changes are made, the update is aborted and an error is returned.
+func SanitizeTerminalBlockKeepingTabs(s string) string {
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		segments := strings.Split(StripFormatAndANSI(line), "\t")
+		for j, segment := range segments {
+			segments[j] = StripControlChars(segment)
+		}
+		lines[i] = strings.Join(segments, "\t")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// ReportNoChanges prints the no-change notice and returns true when err is ErrNoChanges; the caller
+// then ends on exit 0.
+func ReportNoChanges(err error) bool {
+	if !errors.Is(err, ErrNoChanges) {
+		return false
+	}
+	CliInfo("No changes made. Aborting update.")
+	return true
+}
+
+// ProcessEditedData opens originalData as pretty JSON in the editor and returns the edited JSON,
+// or ErrNoChanges when the bytes are unchanged.
 func ProcessEditedData(originalData []byte) (any, error) {
+	return processEditedData(originalData, openInEditor)
+}
+
+func processEditedData(originalData []byte, edit func(path string) error) (any, error) {
 	prettyJSON, err := PrettyJSON(originalData)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("format response JSON: %w", err)
 	}
 
-	tmpFile, err := CreateAndEditTempFile(prettyJSON.Bytes())
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = os.Remove(tmpFile) }()
-
-	editedContent, err := os.ReadFile(tmpFile)
+	editedContent, err := editInTempFile(prettyJSON.Bytes(), edit)
 	if err != nil {
 		return nil, err
 	}
 
 	if bytes.Equal(prettyJSON.Bytes(), editedContent) {
-		CliInfoWithExit("No changes made. Aborting update.")
+		return nil, ErrNoChanges
 	}
 
 	var jsonData any
-	err = json.Unmarshal(editedContent, &jsonData)
-	if err != nil {
-		return nil, err
+	if err := json.Unmarshal(editedContent, &jsonData); err != nil {
+		return nil, fmt.Errorf("parse edited JSON: %w", err)
 	}
-
 	return jsonData, nil
 }
 
-func CreateAndEditTempFile(data []byte) (string, error) {
-	tmpl, err := os.CreateTemp("", "example.*.json")
-	if err != nil {
-		return "", errors.New("failed to create temp file for update")
-	}
-	defer func() { _ = tmpl.Close() }()
-
-	if _, err = tmpl.Write(data); err != nil {
-		return "", err
-	}
-
-	if err = tmpl.Close(); err != nil {
-		return "", err
-	}
-
+func openInEditor(path string) error {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = "vi"
 	}
-	cmd := exec.Command(editor, tmpl.Name())
+	cmd := exec.Command(editor, path)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
-	if err = cmd.Run(); err != nil {
-		return "", err
+	return cmd.Run()
+}
+
+func editInTempFile(data []byte, edit func(path string) error) ([]byte, error) {
+	f, err := os.CreateTemp("", "example.*.json")
+	if err != nil {
+		return nil, fmt.Errorf("create temp file: %w", err)
+	}
+	return editTempFile(f, data, edit)
+}
+
+// editTempFile removes the temp file on every return path.
+func editTempFile(f editFile, data []byte, edit func(path string) error) ([]byte, error) {
+	stop := cleanupOnSignal(func() {
+		_ = f.Close() // Windows refuses to remove a file that is still open
+		_ = os.Remove(f.Name())
+	})
+	defer func() {
+		_ = os.Remove(f.Name())
+		stop() // only after the remove, so a signal in between still cleans up
+	}()
+
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("write temp file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return nil, fmt.Errorf("close temp file: %w", err)
 	}
 
-	return tmpl.Name(), nil
+	if err := edit(f.Name()); err != nil {
+		return nil, fmt.Errorf("run editor: %w", err)
+	}
+
+	edited, err := os.ReadFile(f.Name())
+	if err != nil {
+		return nil, fmt.Errorf("read edited file: %w", err)
+	}
+	return edited, nil
+}
+
+// editorSignals end the process while the edit runs; Go exits on them without running defers.
+var editorSignals = []os.Signal{os.Interrupt, syscall.SIGHUP, syscall.SIGTERM}
+
+// cleanupOnSignal runs cleanup and re-raises the signal if one in editorSignals arrives before stop.
+// stop returns once the watcher is gone, so a signal that raced it is re-raised, not dropped.
+func cleanupOnSignal(cleanup func()) (stop func()) {
+	sigs := make(chan os.Signal, 1)
+	for _, sig := range editorSignals {
+		if !signal.Ignored(sig) { // Notify would un-ignore a signal nohup asked to ignore
+			signal.Notify(sigs, sig)
+		}
+	}
+	done := make(chan struct{})
+	exited := make(chan struct{})
+	go func() {
+		sig := pendingSignal(sigs, done)
+		if sig == nil {
+			close(exited)
+			return
+		}
+		cleanup()
+		signal.Stop(sigs)
+		reraise(sig)
+	}()
+	return func() {
+		signal.Stop(sigs)
+		close(done)
+		<-exited
+	}
+}
+
+// pendingSignal waits for a signal or done; after done it still returns a signal already buffered.
+func pendingSignal(sigs <-chan os.Signal, done <-chan struct{}) os.Signal {
+	select {
+	case sig := <-sigs:
+		return sig
+	case <-done:
+		select {
+		case sig := <-sigs:
+			return sig
+		default:
+			return nil
+		}
+	}
+}
+
+// reraise ends the process with sig under its default action, or exits 1 where that cannot be sent.
+func reraise(sig os.Signal) {
+	WaitForTokenRefreshes()
+	if p, err := os.FindProcess(os.Getpid()); err == nil && p.Signal(sig) == nil {
+		time.Sleep(time.Second) // delivery is asynchronous; the default action ends the process here
+	}
+	Exit(1)
 }
 
 // SplitPath splits a "server:/path" target into its server name and remote path.
@@ -715,10 +830,35 @@ func SplitAndTrim(s, sep string) []string {
 	return result
 }
 
-// RequirePositiveInt exits with a usage error when an integer flag is not positive.
-func RequirePositiveInt(flagName string, value int) {
+// CheckPositiveInt returns the usage failure for an integer flag that is not positive, or nil.
+func CheckPositiveInt(flagName string, value int) error {
 	if value <= 0 {
-		CliUsageErrorWithExit("--%s must be a positive integer.", flagName)
+		return NewUsageExitError("--%s must be a positive integer.", flagName)
+	}
+	return nil
+}
+
+func RejectUnknownSubcommand(notes ...string) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		err := cobra.NoArgs(cmd, args)
+		if err == nil {
+			return nil
+		}
+		if cmd.SuggestionsMinimumDistance <= 0 {
+			cmd.SuggestionsMinimumDistance = 2
+		}
+		var message strings.Builder
+		message.WriteString(err.Error())
+		for _, note := range notes {
+			message.WriteString("\n" + note)
+		}
+		if names := cmd.SuggestionsFor(args[0]); len(names) > 0 {
+			message.WriteString("\n\nDid you mean this?\n")
+			for _, name := range names {
+				message.WriteString("\t" + name + "\n")
+			}
+		}
+		return errors.New(message.String())
 	}
 }
 

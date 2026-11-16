@@ -21,34 +21,37 @@ var userDeleteCmd = &cobra.Command{
 	alpacon user delete john -y
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		userName := args[0]
 
 		yes, _ := cmd.Flags().GetBool("yes")
 		if !yes {
-			utils.ConfirmAction("Delete user '%s'?", userName)
+			if proceed, err := utils.Confirm("Delete user '%s'?", userName); err != nil || !proceed {
+				return err
+			}
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if err := alpaconClient.LoadCurrentUser(); err != nil {
-			utils.CliErrorWithExit("Failed to load current user: %s", err)
+			return utils.NewExitError("Failed to load current user: %s", err)
 		}
 
 		if alpaconClient.Privileges == "general" {
-			utils.CliErrorWithExit("You do not have the permission to delete users.")
+			return utils.NewExitError("You do not have the permission to delete users.")
 		}
 
 		err = iam.DeleteUser(alpaconClient, userName)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to delete the user: %s", err)
+			return utils.NewExitError("Failed to delete the user: %s", err)
 		}
 
 		utils.CliSuccess("User deleted: %s", userName)
-	},
+		return nil
+	}),
 }
 
 func init() {

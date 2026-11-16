@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 type RoleResponse struct {
@@ -94,15 +95,15 @@ type RoleAttributes struct {
 }
 
 type UserRoleAttributes struct {
-	Role      string `json:"role"`
-	Scope     string `json:"scope"`
-	GrantedAt string `json:"granted_at" table:"Granted At"`
+	Role      string          `json:"role"`
+	Scope     string          `json:"scope"`
+	GrantedAt utils.Timestamp `json:"granted_at" table:"Granted At"`
 }
 
 type RoleHolderAttributes struct {
-	User      string `json:"user"`
-	Scope     string `json:"scope"`
-	GrantedAt string `json:"granted_at" table:"Granted At"`
+	User      string          `json:"user"`
+	Scope     string          `json:"scope"`
+	GrantedAt utils.Timestamp `json:"granted_at" table:"Granted At"`
 }
 
 type RoleScopeAttributes struct {
@@ -112,12 +113,12 @@ type RoleScopeAttributes struct {
 }
 
 type RoleAuditAttributes struct {
-	Action    string `json:"action"`
-	Role      string `json:"role"`
-	Scope     string `json:"scope"`
-	ChangedBy string `json:"changed_by" table:"Changed By"`
-	Reason    string `json:"reason"`
-	At        string `json:"at"`
+	Action    string          `json:"action"`
+	Role      string          `json:"role"`
+	Scope     string          `json:"scope"`
+	ChangedBy string          `json:"changed_by" table:"Changed By"`
+	Reason    string          `json:"reason"`
+	At        utils.Timestamp `json:"at"`
 }
 
 // EffectivePermissionsResponse omits object-scoped bindings from Roles: their number grows with the

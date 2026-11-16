@@ -18,6 +18,7 @@ import (
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/alpacax/alpacon-cli/pkg/httpclient"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
@@ -92,6 +93,7 @@ var axisDisplayNames = map[string]string{
 var refreshAccessToken = (*AlpaconClient).refreshLocked
 
 type apiError struct {
+	origin  localsignal.ConsoleOrigin
 	message string
 	code    string
 	source  string
@@ -141,8 +143,10 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 
 	client := &AlpaconClient{
 		HTTPClient:    httpClient,
+		login:         &validConfig,
 		BaseURL:       validConfig.WorkspaceURL,
 		WorkspaceName: validConfig.WorkspaceIdentity(),
+		BaseDomain:    validConfig.BaseDomain,
 		Token:         validConfig.Token,
 		UserAgent:     utils.GetUserAgent(),
 		Insecure:      validConfig.Insecure,
@@ -155,7 +159,7 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 		}
 		spinner := utils.NewSpinner("Refreshing access token...")
 		spinner.Start()
-		tokenRes, err := auth0.RefreshAccessToken(validConfig.WorkspaceURL, httpClient, validConfig.RefreshToken)
+		tokenRes, err := auth0.RefreshAccessToken(validConfig.WorkspaceURL, httpClient, validConfig)
 		spinner.Stop()
 		if err != nil {
 			if auth0.IsRefreshTokenRejected(err) {
@@ -511,7 +515,8 @@ func (ac *AlpaconClient) renewAccessTokenWithin(ctx context.Context, sent string
 		return ac.renewAccessToken(sent)
 	}
 	renewed := make(chan bool, 1)
-	go func() { renewed <- ac.renewAccessToken(sent) }()
+	finish := utils.BeginTokenRefresh()
+	go func() { defer finish(); renewed <- ac.renewAccessToken(sent) }()
 	select {
 	case ok := <-renewed:
 		return ok
@@ -592,6 +597,7 @@ func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, er
 		return nil, redirectRefusedStatus(resp), utils.WithRedirectStatus(utils.RedactURLError(err), resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	warnWorkSessionRequiredSoon(resp.Header)
 
 	respBody, err := readJSONResponse(resp)
 	if err != nil {
@@ -619,6 +625,7 @@ func (ac *AlpaconClient) withRefusalNextFor(err error) error {
 	if ac.dropsRefusalNext {
 		ae.next = ""
 	}
+	ae.origin = ac.LocalSignalOrigin()
 	ae.nextUnderAPIToken = ac.AccessToken() == "" && ac.Token != ""
 	return err
 }
@@ -882,6 +889,7 @@ func (ac *AlpaconClient) rawRoundTrip(req *http.Request) (*RawResponse, error) {
 		return nil, utils.WithRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	warnWorkSessionRequiredSoon(resp.Header)
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
@@ -906,6 +914,11 @@ func (ac *AlpaconClient) SendGetRequestWithContext(ctx context.Context, url stri
 
 // SendPostRequest sends body as JSON in a POST request to the workspace.
 func (ac *AlpaconClient) SendPostRequest(url string, body any) ([]byte, error) {
+	return ac.SendPostRequestWithContext(context.Background(), url, body)
+}
+
+// SendPostRequestWithContext is SendPostRequest bounded by ctx, as SendGetRequestWithContext is.
+func (ac *AlpaconClient) SendPostRequestWithContext(ctx context.Context, url string, body any) ([]byte, error) {
 	jsonValue, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -915,7 +928,7 @@ func (ac *AlpaconClient) SendPostRequest(url string, body any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ac.sendRequest(req)
+	return ac.sendRequest(req.WithContext(ctx))
 }
 
 // SendPostRequestWithStatus is SendPostRequest plus the response's HTTP status code. Use it only
@@ -1044,6 +1057,7 @@ func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, e
 		return nil, utils.WithRedirectStatus(utils.RedactURLError(err), resp)
 	}
 
+	warnWorkSessionRequiredSoon(resp.Header)
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
@@ -1080,8 +1094,12 @@ func (ac *AlpaconClient) IsUsingHTTPS() (bool, error) {
 // RefreshToken refreshes the access token using the stored refresh token.
 // Uses ac.BaseURL (not config's WorkspaceURL) to stay consistent with the client's target.
 func (ac *AlpaconClient) RefreshToken() error {
+	sent := ac.AccessToken()
 	ac.refreshMu.Lock()
 	defer ac.refreshMu.Unlock()
+	if ac.AccessToken() != sent {
+		return nil
+	}
 	return ac.refreshLocked()
 }
 
@@ -1117,10 +1135,18 @@ func (ac *AlpaconClient) refreshLocked() error {
 	if err != nil {
 		return err
 	}
+	if ac.login != nil && !cfg.SameLogin(*ac.login) {
+		return config.ErrLoginChanged
+	}
+	if cfg.WorkspaceURL == ac.BaseURL && cfg.AccessToken != ac.AccessToken() && cfg.AccessToken != "" && !isAccessTokenExpired(cfg) {
+		ac.SetAccessToken(cfg.AccessToken)
+		return nil
+	}
 	if cfg.RefreshToken == "" {
 		return errors.New("no refresh token stored; run 'alpacon login' to authenticate again")
 	}
-	tokenRes, err := auth0.RefreshAccessToken(ac.BaseURL, ac.HTTPClient, cfg.RefreshToken)
+	cfg.WorkspaceURL = ac.BaseURL
+	tokenRes, err := auth0.RefreshAccessToken(ac.BaseURL, ac.HTTPClient, cfg)
 	if err != nil {
 		return err
 	}
@@ -1256,6 +1282,27 @@ func errorExtraFields(body []byte) map[string]any {
 	if decoder.Decode(&parsed) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 		return nil
 	}
+	// Keep environment values out of the JSON error's server fields as well.
+	if code := stringField(parsed, "code"); code == "command_dangerous_env" || code == "command_invalid_env" {
+		fields, _ := parsed["field_errors"].(map[string]any)
+		clean := make(map[string]any)
+		if message := strings.TrimSpace(stringField(parsed, "message")); message != "" && message != "Invalid input." {
+			clean["message"] = message
+		}
+		if messages := fieldErrorMessages(map[string]any{"non_field_errors": fields["non_field_errors"]}); len(messages) > 0 {
+			entries := make([]map[string]string, 0, len(messages))
+			for _, message := range messages {
+				if message == "" || message == "Invalid input." {
+					continue
+				}
+				entries = append(entries, map[string]string{"code": code, "message": message})
+			}
+			if len(entries) > 0 {
+				clean["field_errors"] = map[string]any{"non_field_errors": entries}
+			}
+		}
+		parsed = clean
+	}
 	if _, isEnvelopeCode := parsed["code"].(string); isEnvelopeCode {
 		delete(parsed, "code")
 	}
@@ -1281,6 +1328,44 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 	source = stringField(parsed, "source")
 	gate, missing = parseGateAndMissing(parsed)
 	axis = stringField(parsed, "axis")
+
+	// Environment refusals name keys and reasons in these messages. Do not render
+	// other validation fields, which may contain environment values.
+	if code == "command_dangerous_env" || code == "command_invalid_env" {
+		if message := strings.TrimSpace(stringField(parsed, "message")); message != "" && message != "Invalid input." {
+			return message, code, source, gate, axis, missing, true
+		}
+		if fields, ok := parsed["field_errors"].(map[string]any); ok {
+			if messages := fieldErrorMessages(map[string]any{"non_field_errors": fields["non_field_errors"]}); len(messages) > 0 {
+				var meaningful []string
+				for _, message := range messages {
+					if message != "" && message != "Invalid input." {
+						meaningful = append(meaningful, message)
+					}
+				}
+				if len(meaningful) > 0 {
+					return strings.Join(meaningful, "; "), code, source, gate, axis, missing, true
+				}
+			}
+		}
+		return codeOnlyMessage(code), code, source, gate, axis, missing, true
+	}
+
+	if statusCode == http.StatusBadRequest {
+		if code == utils.ApplicationSystemUserNotFound {
+			return codeOnlyMessage(code), code, source, gate, axis, missing, true
+		}
+		fieldErrors, _ := parsed["field_errors"].(map[string]any)
+		for _, field := range []string{"username", "groupname"} {
+			entries, _ := fieldErrors[field].([]any)
+			for _, entry := range entries {
+				item, _ := entry.(map[string]any)
+				if stringField(item, "code") == utils.ServiceTokenAccountNotOwn {
+					return strings.Join(fieldErrorMessages(fieldErrors), "; "), code, source, gate, axis, missing, true
+				}
+			}
+		}
+	}
 
 	if detail := strings.TrimSpace(stringField(parsed, "detail")); detail != "" {
 		return detail, code, source, gate, axis, missing, true
@@ -1309,7 +1394,7 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 		}
 		// A refusal's string "hint" reaches the output sanitized through ErrorHint; rendering it
 		// here would print it a second time, raw.
-		if field == "hint" && utils.IsRefusalStatus(statusCode) {
+		if (field == "hint" || field == "console_url") && utils.IsRefusalStatus(statusCode) {
 			if _, isString := parsed[field].(string); isString {
 				continue
 			}
@@ -1356,7 +1441,7 @@ func isEnvelopeOnly(parsed map[string]any, statusCode int) bool {
 			if _, ok := value.(string); !ok {
 				return false
 			}
-		case "hint":
+		case "hint", "console_url":
 			if !utils.IsRefusalStatus(statusCode) {
 				return false
 			}
@@ -1433,6 +1518,9 @@ func fieldErrorMessages(raw any) []string {
 				continue
 			}
 			message := stringField(fields, "message")
+			if (path == "username" || path == "groupname") && stringField(fields, "code") == utils.ServiceTokenAccountNotOwn {
+				message = utils.ServiceTokenAccountMessage(path)
+			}
 			if message == "" {
 				continue
 			}
@@ -1458,6 +1546,12 @@ func codeOnlyMessage(code string) string {
 // bare code would not; known is false for a code it has none for.
 func codeSentence(code string) (sentence string, known bool) {
 	switch code {
+	case "command_dangerous_env":
+		return "The server refused environment variables that can change which program runs. Remove them, or set them inside the command (env NAME=value cmd).", true
+	case "command_invalid_env":
+		return "The server refused the command's environment: names must use letters, digits and underscores, values must be strings of at most 4096 characters, and at most 64 variables are allowed.", true
+	case utils.ApplicationSystemUserNotFound:
+		return "the service token's application cannot run as that account on that server—run as an account bound to the application or as its own account, and check that it is provisioned there", true
 	case utils.APINotFound:
 		return "the requested resource was not found", true
 	case utils.APIRateLimited:

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
+	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
@@ -812,6 +813,9 @@ func TestFetchFromURL_ClientErrorNoRetry(t *testing.T) {
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				requestCount.Add(1)
 				w.WriteHeader(tt.status)
+				if tt.status == http.StatusForbidden {
+					_, _ = w.Write([]byte(`{"code":"refused","gate":"risk","console_url":"https://console.example/transfers/1"}`))
+				}
 			}))
 			defer ts.Close()
 
@@ -820,6 +824,12 @@ func TestFetchFromURL_ClientErrorNoRetry(t *testing.T) {
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantErr)
+			if tt.status == http.StatusForbidden {
+				var refusal fetchStatusError
+				require.ErrorAs(t, err, &refusal)
+				assert.Equal(t, "risk", refusal.ErrorGate())
+				assert.Equal(t, "https://console.example/transfers/1", refusal.ErrorFields()["console_url"])
+			}
 			assert.Equal(t, int32(1), requestCount.Load(), "a fatal client error fails the same way on retry")
 			_, statErr := os.Stat(dest)
 			assert.True(t, os.IsNotExist(statErr))
@@ -894,7 +904,7 @@ func TestSaveDownloadedURL_RecursiveUsesTempArchive(t *testing.T) {
 	existingArchive := filepath.Join(dest, "folder.zip")
 	require.NoError(t, os.WriteFile(existingArchive, []byte("existing-archive"), 0644))
 
-	savedPath, written, err := saveDownloadedURL(ts.Client(), ts.URL, dest, "/remote/folder", true, 1)
+	savedPath, written, err := saveDownloadedURL(ts.Client(), ts.URL, dest, remoteFile{path: "/remote/folder", name: "folder"}, true, 1)
 	require.NoError(t, err)
 	assert.Equal(t, dest, savedPath)
 	assert.Equal(t, int64(len(zipContent)), written)
@@ -910,6 +920,178 @@ func TestSaveDownloadedURL_RecursiveUsesTempArchive(t *testing.T) {
 	matches, globErr := filepath.Glob(filepath.Join(dest, ".alpacon-download-*.zip"))
 	require.NoError(t, globErr)
 	assert.Empty(t, matches)
+}
+
+func TestSaveDownloadedURL_NamesTheFileAfterTheLastRemoteElement(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		remotePath string
+		platform   string
+		wantName   string
+		unixOnly   bool // a Windows client splits a backslash and a drive in any name
+	}{
+		{name: "windows backslash path", remotePath: `C:\Users\alice\report.txt`, platform: "windows", wantName: "report.txt"},
+		{name: "windows forward slash path", remotePath: "C:/Users/alice/report.txt", platform: "windows", wantName: "report.txt"},
+		{name: "windows lowercase drive", remotePath: `d:\logs\app.log`, platform: "windows", wantName: "app.log"},
+		{name: "windows unc path", remotePath: `\\fileserver\share\docs\report.txt`, platform: "windows", wantName: "report.txt"},
+		{name: "windows drive relative path", remotePath: "C:report.txt", platform: "windows", wantName: "report.txt"},
+		{name: "windows rooted path without a drive", remotePath: `\Users\alice\report.txt`, platform: "windows", wantName: "report.txt"},
+		{name: "windows relative path", remotePath: `Documents\report.txt`, platform: "windows", wantName: "report.txt"},
+		{name: "linux path", remotePath: "/home/alice/report.txt", platform: "debian", wantName: "report.txt"},
+		{name: "linux file name holding a backslash", remotePath: `/home/alice/a\b.txt`, platform: "debian", wantName: `a\b.txt`, unixOnly: true},
+		{name: "linux file name with a drive-like colon", remotePath: "a:notes.txt", platform: "debian", wantName: "a:notes.txt", unixOnly: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if tt.unixOnly && runtime.GOOS == "windows" {
+				t.Skip("a Windows client cannot keep a backslash or a drive in a file name")
+			}
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("downloaded"))
+			}))
+			defer ts.Close()
+			dest := t.TempDir()
+			src := newRemoteFile(tt.remotePath, server.ServerRef{Platform: tt.platform})
+
+			savedPath, _, err := saveDownloadedURL(ts.Client(), ts.URL, dest, src, false, 1)
+
+			require.NoError(t, err)
+			assert.Equal(t, filepath.Join(dest, tt.wantName), savedPath)
+			content, readErr := os.ReadFile(filepath.Join(dest, tt.wantName))
+			require.NoError(t, readErr)
+			assert.Equal(t, "downloaded", string(content))
+		})
+	}
+}
+
+func TestSaveDownloadedURL_RefusesARemoteNameThatLeavesDest(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		remotePath string
+		platform   string
+	}{
+		{name: "linux parent element", remotePath: "/home/alice/..", platform: "debian"},
+		{name: "linux root", remotePath: "/", platform: "debian"},
+		{name: "windows parent element", remotePath: `C:\Users\..`, platform: "windows"},
+		{name: "windows drive root", remotePath: `C:\`, platform: "windows"},
+		{name: "windows unc share root", remotePath: `\\fileserver\share`, platform: "windows"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("downloaded"))
+			}))
+			defer ts.Close()
+			parent := t.TempDir()
+			dest := filepath.Join(parent, "missing", "dl") + string(filepath.Separator)
+			src := newRemoteFile(tt.remotePath, server.ServerRef{Platform: tt.platform})
+
+			_, _, err := saveDownloadedURL(ts.Client(), ts.URL, dest, src, false, 1)
+
+			require.ErrorContains(t, err, "names no file to save")
+			assert.True(t, utils.IsUsageError(err), "want a usage error, got %v", err)
+			entries, readErr := os.ReadDir(parent)
+			require.NoError(t, readErr)
+			assert.Empty(t, entries)
+		})
+	}
+}
+
+func TestDownloadFile_SendsTheLastRemoteElementByTheServersRules(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		platform   string
+		remotePath string
+		wantName   string
+		unixOnly   bool // a Windows client splits a backslash and a drive in any name
+	}{
+		{name: "windows drive path", platform: "windows", remotePath: `C:\Users\alice\report.txt`, wantName: "report.txt"},
+		{name: "windows rooted path without a drive", platform: "windows", remotePath: `\Users\alice\report.txt`, wantName: "report.txt"},
+		{name: "linux file name with a drive-like colon", platform: "debian", remotePath: "a:notes.txt", wantName: "a:notes.txt", unixOnly: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if tt.unixOnly && runtime.GOOS == "windows" {
+				t.Skip("a Windows client cannot keep a backslash or a drive in a file name")
+			}
+			serverResp := api.ListResponse[server.ServerDetails]{
+				Count:   1,
+				Results: []server.ServerDetails{{ID: "srv-123", Name: "my-server", Platform: tt.platform}},
+			}
+			var gotName atomic.Value
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.Contains(r.URL.Path, "/api/servers/servers"):
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(serverResp)
+				case r.URL.Path == "/api/webftp/downloads/" && r.Method == http.MethodPost:
+					var req DownloadRequest
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						t.Errorf("decode download request: %v", err)
+					}
+					gotName.Store(req.Name)
+					w.WriteHeader(http.StatusBadRequest)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			_ = DownloadFile(ac, []string{"my-server:" + tt.remotePath}, t.TempDir(), "", "", false, "") // the mock refuses the create
+
+			assert.Equal(t, tt.wantName, gotName.Load())
+		})
+	}
+}
+
+func TestDownloadFile_RefusesANameThatLeavesDestBeforeAskingTheServer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		platform   string
+		remotePath string
+	}{
+		{name: "windows drive root", platform: "windows", remotePath: `C:\`},
+		{name: "windows parent element", platform: "windows", remotePath: `C:\Users\alice\..`},
+		{name: "linux parent element", platform: "debian", remotePath: "/home/alice/.."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			serverResp := api.ListResponse[server.ServerDetails]{
+				Count:   1,
+				Results: []server.ServerDetails{{ID: "srv-123", Name: "my-server", Platform: tt.platform}},
+			}
+			var downloads atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.Contains(r.URL.Path, "/api/servers/servers"):
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(serverResp)
+				case strings.HasPrefix(r.URL.Path, "/api/webftp/downloads/"):
+					downloads.Add(1)
+					w.WriteHeader(http.StatusBadRequest)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := DownloadFile(ac, []string{"my-server:" + tt.remotePath}, t.TempDir(), "", "", false, "")
+
+			require.ErrorContains(t, err, "names no file to save")
+			assert.True(t, utils.IsUsageError(err), "want a usage error, got %v", err)
+			assert.Zero(t, downloads.Load())
+		})
+	}
 }
 
 func TestDownloadFile_InputValidation(t *testing.T) {
@@ -1815,6 +1997,74 @@ func noDownloadRequestClient(t *testing.T) *client.AlpaconClient {
 	return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 }
 
+func TestCompleteDownloads_DoNotFetchARefusedCommand(t *testing.T) {
+	t.Parallel()
+	statuses := []string{"rejected", "denied"}
+	for _, status := range statuses {
+		t.Run("single "+status, func(t *testing.T) {
+			t.Parallel()
+			ac := commandOutcomeClient(t, status, nil)
+			fetched := false
+
+			var err error
+			synctest.Test(t, func(t *testing.T) {
+				_, err = completeSingleDownloadWith(ac, "server-1", []byte(`{"id":"download-1","command":"cmd-1","download_url":"https://files.example/a"}`), func(string) (int64, error) {
+					fetched = true
+					return 0, nil
+				})
+			})
+
+			var rejected *event.CommandRejectedError
+			require.ErrorAs(t, err, &rejected)
+			assert.False(t, fetched, "a refused command must not fetch the file")
+		})
+		t.Run("bulk "+status, func(t *testing.T) {
+			t.Parallel()
+			var fetched atomic.Bool
+			ac := commandOutcomeClient(t, status, func() { fetched.Store(true) })
+
+			dest := t.TempDir()
+
+			var err error
+			synctest.Test(t, func(t *testing.T) {
+				err = completeBulkDownload(ac, "server-1", []byte(`{"id":"download-1","command":"cmd-1","download_url":"`+ac.BaseURL+`/download"}`), []string{"/a", "/b"}, dest)
+			})
+
+			var rejected *event.CommandRejectedError
+			require.ErrorAs(t, err, &rejected)
+			assert.False(t, fetched.Load(), "a refused command must not fetch the archive")
+		})
+	}
+}
+
+func commandOutcomeClient(t *testing.T, status string, fetched func()) *client.AlpaconClient {
+	t.Helper()
+	zipBody := createTestZip(t, map[string]string{"a": "content"})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/events/commands/cmd-1/":
+			outcome := map[string]any{"id": "cmd-1", "status": status, "result": "account denied"}
+			if status == "denied" {
+				outcome["denial_code"] = "account_not_resolved"
+			} else {
+				outcome["rejection_cause"] = "risk_denied"
+			}
+			_ = json.NewEncoder(w).Encode(outcome)
+		case "/download":
+			if fetched != nil {
+				fetched()
+			}
+			w.Header().Set("Content-Type", "application/zip")
+			_, _ = w.Write(zipBody)
+		default:
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true), Message: "completed"})
+		}
+	})
+	// In memory, so the poll's first tick runs on the synctest clock.
+	return &client.AlpaconClient{HTTPClient: testutil.HandlerClient(handler), BaseURL: testutil.StubBaseURL}
+}
+
 func TestCompleteDownload_RefusesAServerIDThatIsNotOneSegment(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -1829,7 +2079,7 @@ func TestCompleteDownload_RefusesAServerIDThatIsNotOneSegment(t *testing.T) {
 			t.Parallel()
 			ac := noDownloadRequestClient(t)
 
-			_, err := completeSingleDownload(ac, "server-1", []byte(tc.body), "/remote/file", t.TempDir(), false)
+			_, err := completeSingleDownload(ac, "server-1", []byte(tc.body), remoteFile{path: "/remote/file", name: "file"}, t.TempDir(), false)
 
 			require.ErrorIs(t, err, api.ErrUnusableID)
 			assert.NotErrorIs(t, err, utils.ErrInvalidID)

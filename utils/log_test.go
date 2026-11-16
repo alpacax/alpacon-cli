@@ -136,6 +136,38 @@ func TestCliMessage_StripsColorFromArguments(t *testing.T) {
 	assert.Equal(t, "Save this key: secret", cliMessage("Save this key: %s", Green("secret")))
 }
 
+func TestCliMessage_KeepsTabsButStripsControlCharacters(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		format string
+		input  string
+		want   string
+	}{
+		{name: "tab in the format", format: "Did you mean this?\n\t%s\n", input: "switch", want: "Did you mean this?\n\tswitch\n"},
+		{name: "tab in an argument", format: "%s", input: "a\tb", want: "a\tb"},
+		{name: "double", format: "%s", input: "a\t\tb", want: "a\t\tb"},
+		{name: "leading", format: "%s", input: "\tlead", want: "\tlead"},
+		{name: "trailing", format: "%s", input: "trail\t", want: "trail\t"},
+		{name: "only a tab", format: "%s", input: "\t", want: "\t"},
+		{name: "bare escape", format: "%s", input: "a\x1b\tb", want: "a\tb"},
+		{name: "bell", format: "%s", input: "\a\t\a", want: "\t"},
+		{name: "color between tabs", format: "%s", input: "\t\x1b[31m\t", want: "\t\t"},
+		{name: "crlf", format: "%s", input: "a\r\n\tb", want: "a\n\tb"},
+		{name: "title sequence holding a tab", format: "%s", input: "\x1b]0;title\tmore\x07tail", want: "tail"},
+		{name: "link sequence holding a tab", format: "%s", input: "\x1b]8;;http://evil\tx\x1b\\link", want: "link"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := cliMessage(tt.format, tt.input)
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 // The break is gated on a running spinner, not a terminal, and is a newline rather than an erase
 // escape, which would take streamed stdout with it.
 func TestCliWarning_BreaksTheLineOnlyWhileASpinnerRuns(t *testing.T) {

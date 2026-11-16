@@ -141,6 +141,8 @@ type fileDownloadServer struct {
 	steps           []string
 	downloadRequest map[string]any
 	commandBody     []byte
+	denialCode      string
+	denialResult    string
 }
 
 func (s *fileDownloadServer) record(step string) {
@@ -166,6 +168,12 @@ func newFileDownloadServer(s *fileDownloadServer, content []byte, failure string
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"id":"dl-1","command":"cmd-dl-1","download_url":"http://` + r.Host + `/s3/deploy.sh"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-dl-1/":
+			if s.denialCode != "" {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"id": "cmd-dl-1", "status": "denied", "denial_code": s.denialCode, "result": s.denialResult,
+				})
+				return
+			}
 			if failure != "" {
 				_ = json.NewEncoder(w).Encode(map[string]any{"id": "cmd-dl-1", "status": "failed", "result": failure})
 				return
@@ -194,7 +202,6 @@ func newFileDownloadServer(s *fileDownloadServer, content []byte, failure string
 // end: the script is read from the --file path as the run-as account, with no
 // local copy, and the bytes read are the bytes submitted for review.
 func TestExecFileFromServerSubmitsTheDownloadedBytes(t *testing.T) {
-	t.Parallel()
 	content := "#!/bin/bash\nset -euo pipefail\necho deploy\n"
 	var s fileDownloadServer
 	ts := newFileDownloadServer(&s, []byte(content), "")
@@ -229,7 +236,6 @@ func TestExecFileFromServerSubmitsTheDownloadedBytes(t *testing.T) {
 // read, is empty, or exceeds the content ceiling stops the run before the
 // submission.
 func TestExecFileFromServerRefusalsNeverSubmit(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		content []byte
@@ -254,7 +260,6 @@ func TestExecFileFromServerRefusalsNeverSubmit(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var s fileDownloadServer
 			ts := newFileDownloadServer(&s, tt.content, tt.failure)
 			defer ts.Close()
@@ -271,9 +276,26 @@ func TestExecFileFromServerRefusalsNeverSubmit(t *testing.T) {
 	}
 }
 
-// newHeldScriptServer parks a command line at awaiting_approval; suggestion,
-// when non-empty, is the raw file_execution_suggestion on the command detail.
-func newHeldScriptServer(suggestion string) *httptest.Server {
+func TestExecFileFromServerDeniedExitsNotApproved(t *testing.T) {
+	var s fileDownloadServer
+	s.denialCode = "account_not_resolved"
+	s.denialResult = "The execution account could not be resolved."
+	ts := newFileDownloadServer(&s, nil, "")
+	defer ts.Close()
+
+	stdout, stderr, exitCode := runExecHelper(t, ts.URL, "--file", "/opt/deploy.sh", "--from-server", "prod")
+
+	assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "stderr: %s", stderr)
+	assert.Empty(t, strings.TrimSuffix(stdout, "PASS\n"))
+	assert.Contains(t, stderr, "The execution account could not be resolved.")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	assert.Equal(t, []string{"download-create"}, s.steps)
+}
+
+// newHeldScriptServer parks a command line at awaiting_approval with the given
+// raw detail fields appended, e.g. `,"file_execution_suggestion":{...}`.
+func newHeldScriptServer(fields string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -282,11 +304,7 @@ func newHeldScriptServer(suggestion string) *httptest.Server {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
 			_, _ = w.Write([]byte(`[{"id":"cmd-1"}]`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
-			detail := `{"id":"cmd-1","status":"awaiting_approval"`
-			if suggestion != "" {
-				detail += `,"file_execution_suggestion":` + suggestion
-			}
-			_, _ = w.Write([]byte(detail + "}"))
+			_, _ = w.Write([]byte(`{"id":"cmd-1","status":"awaiting_approval"` + fields + `}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -299,20 +317,17 @@ const heldScriptSuggestionLine = "alpacon exec -u root --file /opt/deploy.sh --f
 // the server reads as a script gets the --file --from-server form of it under
 // the pending message, in both output formats.
 func TestExecHeldScriptPrintsTheFromServerSuggestion(t *testing.T) {
-	t.Parallel()
-	ts := newHeldScriptServer(`{"path":"/opt/deploy.sh","interpreter":"/bin/bash","args":["--fast"]}`)
+	ts := newHeldScriptServer(`,"file_execution_suggestion":{"path":"/opt/deploy.sh","interpreter":"/bin/bash","args":["--fast"]}`)
 	// The subtests run in parallel, after this function returns.
 	t.Cleanup(ts.Close)
 
 	t.Run("table", func(t *testing.T) {
-		t.Parallel()
 		_, stderr, exitCode := runExecHelper(t, ts.URL, "root@prod", "--", "bash", "/opt/deploy.sh", "--fast")
 		assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
 		assert.Contains(t, stderr, "alpacon exec logs cmd-1")
 		assert.Contains(t, stderr, "  "+heldScriptSuggestionLine+"  # ")
 	})
 	t.Run("json", func(t *testing.T) {
-		t.Parallel()
 		stdout, _, exitCode := runExecHelper(t, ts.URL, "--output", "json", "root@prod", "--", "bash", "/opt/deploy.sh", "--fast")
 		assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
 		var got pendingApprovalSignal
@@ -327,8 +342,7 @@ func TestExecHeldScriptPrintsTheFromServerSuggestion(t *testing.T) {
 // command line whose interpreter was a bare name gets the --from-server line
 // with an --interpreter placeholder and the 'command -v' hint to fill it.
 func TestExecHeldScriptWithBareInterpreterPrintsAPlaceholder(t *testing.T) {
-	t.Parallel()
-	ts := newHeldScriptServer(`{"path":"/opt/deploy.sh","interpreter":null,"interpreter_name":"bash","args":["--fast"]}`)
+	ts := newHeldScriptServer(`,"file_execution_suggestion":{"path":"/opt/deploy.sh","interpreter":null,"interpreter_name":"bash","args":["--fast"]}`)
 	defer ts.Close()
 
 	_, stderr, exitCode := runExecHelper(t, ts.URL, "root@prod", "--", "bash", "/opt/deploy.sh", "--fast")
@@ -340,7 +354,6 @@ func TestExecHeldScriptWithBareInterpreterPrintsAPlaceholder(t *testing.T) {
 // TestExecHeldCommandWithoutSuggestionKeepsTodaysHint pins that a held command
 // the server made no suggestion for prints no --from-server line.
 func TestExecHeldCommandWithoutSuggestionKeepsTodaysHint(t *testing.T) {
-	t.Parallel()
 	ts := newHeldScriptServer("")
 	defer ts.Close()
 

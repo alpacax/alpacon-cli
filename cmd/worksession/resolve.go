@@ -5,7 +5,6 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
-	"github.com/alpacax/alpacon-cli/utils"
 )
 
 // WorkSessionEnvVar is the environment variable consulted when no --work-session flag is given.
@@ -33,13 +32,4 @@ func resolveFrom(flagValue string, readConfig func() (string, error)) (string, e
 func sessionResolvableBeforeClient(flagValue string) bool {
 	uuid, err := resolveFrom(flagValue, config.GetActiveWorkSession)
 	return err == nil && uuid != ""
-}
-
-// ResolveOrExit resolves the work-session UUID and exits on error.
-func ResolveOrExit(ac *client.AlpaconClient, flagValue string) string {
-	uuid, err := Resolve(ac, flagValue)
-	if err != nil {
-		utils.CliErrorWithExit("%s", err)
-	}
-	return uuid
 }

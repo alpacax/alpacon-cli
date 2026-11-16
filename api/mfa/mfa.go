@@ -90,7 +90,7 @@ func ErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHan
 			return HandleMFAError(ac, serverName)
 		},
 		OnUsernameRequired: func() error {
-			_, err := iam.HandleUsernameRequired()
+			_, err := iam.HandleUsernameRequired(ac)
 			return err
 		},
 		RetryOperation: retry,
@@ -250,7 +250,11 @@ func fetchMFALink(ac *client.AlpaconClient, params map[string]string) (string, e
 		return "", err
 	}
 
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(mfaURL, "", params))
+	linkURL, err := utils.BuildURL(mfaURL, "", params)
+	if err != nil {
+		return "", err
+	}
+	responseBody, err := ac.SendGetRequest(linkURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to get the MFA URL: %w", err)
 	}

@@ -50,7 +50,11 @@ func FetchPagesUpTo[T any](ac *client.AlpaconClient, endpoint string, params map
 	for page := 1; len(result) < limit; page++ {
 		params["page"] = strconv.Itoa(page)
 
-		responseBody, err := ac.SendGetRequest(utils.BuildURL(endpoint, "", params))
+		pageURL, err := utils.BuildURL(endpoint, "", params)
+		if err != nil {
+			return nil, err
+		}
+		responseBody, err := ac.SendGetRequest(pageURL)
 		if err != nil {
 			return nil, fmt.Errorf("fetching page %d from %s: %w", page, endpoint, err)
 		}
@@ -132,7 +136,11 @@ func walkCursorPages[T any](ac *client.AlpaconClient, endpoint string, params ma
 		params["page_size"] = strconv.Itoa(min(maxPageSize, limit-len(result)))
 		params["cursor"] = cursor
 
-		responseBody, err := ac.SendGetRequest(utils.BuildURL(endpoint, "", params))
+		pageURL, err := utils.BuildURL(endpoint, "", params)
+		if err != nil {
+			return result, err
+		}
+		responseBody, err := ac.SendGetRequest(pageURL)
 		if err != nil {
 			return result, fmt.Errorf("fetching cursor page from %s: %w", endpoint, err)
 		}

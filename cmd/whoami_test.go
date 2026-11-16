@@ -344,6 +344,12 @@ func TestSummarizeWorkSessionJSON(t *testing.T) {
 				Servers: []types.ServerSummary{{ID: "s-1", Name: "web-01"}}, ExpiresAt: time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)},
 			want: `{"id":"ws-s","status":"active","scopes":["websh"],"servers":["web-01"],"expires_at":"2026-06-01T12:00:00Z"}`,
 		},
+		{
+			name: "server session with servers the caller does not reach",
+			ws: &wsapi.WorkSession{ID: "ws-s", Status: "active", Scopes: []string{"websh"},
+				Servers: []types.ServerSummary{{ID: "s-1", Name: "web-01"}}, ServersHidden: new(2), ClustersHidden: new(0)},
+			want: `{"id":"ws-s","status":"active","scopes":["websh"],"servers":["web-01"],"servers_hidden":2,"clusters_hidden":0}`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -368,9 +374,9 @@ func TestIsWorksessionRequired(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "Token only → not required",
+			name: "Token only → required",
 			cfg:  config.Config{Token: "abc123"},
-			want: false,
+			want: true,
 		},
 		{
 			name: "no tokens → not required",
@@ -400,7 +406,10 @@ func TestPrintWhoami_StripsControlSequences(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := testutil.CaptureStdout(t, func() { printWhoami(tt.output) })
+			var err error
+			got := testutil.CaptureStdout(t, func() { err = printWhoami(tt.output) })
+
+			require.NoError(t, err)
 			assert.NotContains(t, got, "\x1b")
 			assert.NotContains(t, got, "\r")
 			assert.Contains(t, got, "prod-workspace")
@@ -411,7 +420,11 @@ func TestPrintWhoami_StripsControlSequences(t *testing.T) {
 
 func TestPrintWhoami_KeepsOneLinePerField(t *testing.T) {
 	// A newline inside a value would forge an identity line the account does not have.
-	plain := testutil.CaptureStdout(t, func() { printWhoami(whoamiOutput{Shell: "/bin/bash"}) })
-	forged := testutil.CaptureStdout(t, func() { printWhoami(whoamiOutput{Shell: "/bin/bash\nRole:        owner"}) })
+	var plainErr, forgedErr error
+	plain := testutil.CaptureStdout(t, func() { plainErr = printWhoami(whoamiOutput{Shell: "/bin/bash"}) })
+	forged := testutil.CaptureStdout(t, func() { forgedErr = printWhoami(whoamiOutput{Shell: "/bin/bash\nRole:        owner"}) })
+
+	require.NoError(t, plainErr)
+	require.NoError(t, forgedErr)
 	assert.Equal(t, strings.Count(plain, "\n"), strings.Count(forged, "\n"))
 }

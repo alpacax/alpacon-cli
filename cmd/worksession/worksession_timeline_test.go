@@ -129,7 +129,7 @@ func TestFormatDetails_Command(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, formatDetails(&tc.item))
+			assert.Equal(t, tc.want, formatDetails(&tc.item).String())
 		})
 	}
 }
@@ -172,7 +172,7 @@ func TestFormatDetails_Sessions(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, formatDetails(&tc.item))
+			assert.Equal(t, tc.want, formatDetails(&tc.item).String())
 		})
 	}
 }
@@ -197,7 +197,7 @@ func TestFormatDetails_Files(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, formatDetails(&tc.item))
+			assert.Equal(t, tc.want, formatDetails(&tc.item).String())
 		})
 	}
 }
@@ -230,7 +230,7 @@ func TestFormatDetails_SudoGrant(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, formatDetails(&tc.item))
+			assert.Equal(t, tc.want, formatDetails(&tc.item).String())
 		})
 	}
 }
@@ -238,18 +238,18 @@ func TestFormatDetails_SudoGrant(t *testing.T) {
 func TestFormatDetails_Unknown(t *testing.T) {
 	t.Parallel()
 	item := wsapi.TimelineItem{Type: "unknown_event"}
-	assert.Empty(t, formatDetails(&item))
+	assert.Empty(t, formatDetails(&item).String())
 }
 
 func TestPrintTimelineTableTo_StripsControlSequences(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
 	printTimelineTableTo(&buf, []wsapi.TimelineAttributes{{
-		Time:    "2024-01-15 10:30:00",
+		Time:    utils.ParseLocalTimestamp("2024-01-15T10:30:00Z"),
 		Type:    "websh",
 		Server:  "web-01\x1b[2K\rdb-prod",
 		User:    "alice\nroot",
-		Details: "opened",
+		Details: utils.Truncate("opened", 6),
 	}})
 
 	got := buf.String()
@@ -282,9 +282,11 @@ func TestPrintRecordingsSectionTo_StripsControlSequences(t *testing.T) {
 // too, so the JSON goes out escaped rather than verbatim.
 func TestOutputTimelineJSON_EscapesFormatChars(t *testing.T) {
 	rows := []wsapi.TimelineAttributes{{Server: "prod\u202edb"}}
+	var err error
 	out := testutil.CaptureStdout(t, func() {
-		outputTimelineJSON(rows, nil, "ses-1", nil)
+		err = outputTimelineJSON(rows, nil, "ses-1", nil)
 	})
+	require.NoError(t, err)
 	assert.NotContains(t, out, "\u202e")
 	assert.Contains(t, out, `\u202e`)
 }
@@ -292,18 +294,22 @@ func TestOutputTimelineJSON_EscapesFormatChars(t *testing.T) {
 // outputTimelineJSON must emit recordings as [] not null when the session has no
 // terminal.
 func TestOutputTimelineJSON_RecordingsEmptyArrayNotNull(t *testing.T) {
+	var err error
 	out := testutil.CaptureStdout(t, func() {
-		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, "ses-1", nil)
+		err = outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, "ses-1", nil)
 	})
+	require.NoError(t, err)
 	var result map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal([]byte(out), &result))
 	assert.Equal(t, "[]", string(result["recordings"]), "recordings must be [] not null")
 }
 
 func TestOutputTimelineJSON_BothKeysPresent(t *testing.T) {
+	var err error
 	out := testutil.CaptureStdout(t, func() {
-		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, "ses-1", nil)
+		err = outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, "ses-1", nil)
 	})
+	require.NoError(t, err)
 	var keys map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal([]byte(out), &keys))
 	_, hasTimeline := keys["timeline"]
@@ -382,7 +388,6 @@ func timelinePagingServer(t *testing.T) (*httptest.Server, func() []*url.URL) {
 // `next`, asks every page to leave the recordings out, reads no recording, and
 // drops the recording an old server embeds anyway.
 func TestTimelineDefaultWalksTheCursorAndFetchesNoRecording(t *testing.T) {
-	t.Parallel()
 	ts, requests := timelinePagingServer(t)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, "timeline", "ses-1")
@@ -406,7 +411,6 @@ func TestTimelineDefaultWalksTheCursorAndFetchesNoRecording(t *testing.T) {
 }
 
 func TestTimelineRecordingsSectionReadsTheChunkCount(t *testing.T) {
-	t.Parallel()
 	ts, _ := timelinePagingServer(t)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, "timeline", "ses-1")
@@ -442,7 +446,6 @@ func TestTimelineRecordingsSectionReadsTheChunkCount(t *testing.T) {
 }
 
 func TestTimelineJSONRecordingsReadTheChunkCount(t *testing.T) {
-	t.Parallel()
 	ts, _ := timelinePagingServer(t)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, "timeline", "ses-1")
@@ -455,7 +458,7 @@ func TestTimelineJSONRecordingsReadTheChunkCount(t *testing.T) {
 	assert.NotContains(t, stdout, "websh_record", "an embedded recording is not a timeline row")
 	entry := func(index int, id, timestamp, total, status string) string {
 		return fmt.Sprintf(`{"index":%d,"websh_session_id":%q,"time":%q,"server":"web-01","record_chunks_total":%s,"status":%q}`,
-			index, id, formatTimestamp(timestamp), total, status)
+			index, id, timestamp, total, status)
 	}
 	assert.JSONEq(t, "["+strings.Join([]string{
 		entry(1, "wsh-1", "2024-01-15T10:30:01Z", "3", "3 chunks"),
@@ -467,7 +470,6 @@ func TestTimelineJSONRecordingsReadTheChunkCount(t *testing.T) {
 }
 
 func TestTimelineNoRecordsHidesTheTableSection(t *testing.T) {
-	t.Parallel()
 	ts, _ := timelinePagingServer(t)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, "timeline", "ses-1", "--no-records")
@@ -479,7 +481,6 @@ func TestTimelineNoRecordsHidesTheTableSection(t *testing.T) {
 }
 
 func TestTimelineNoRecordsGivesAnEmptyJSONRecordingsList(t *testing.T) {
-	t.Parallel()
 	ts, _ := timelinePagingServer(t)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, "timeline", "ses-1", "--no-records")
@@ -495,7 +496,6 @@ func TestTimelineNoRecordsGivesAnEmptyJSONRecordingsList(t *testing.T) {
 
 // The pages read before a failure are not the timeline: the command fails and prints none of them.
 func TestTimelineFailsWhenALaterPageFails(t *testing.T) {
-	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -581,10 +581,115 @@ func TestTimelineShowsRejectionCauseAndGate(t *testing.T) {
 
 			row := projectTimelineAttributes(&item, nil)
 
-			assert.Equal(t, tc.wantDetails, row.Details)
+			assert.Equal(t, tc.wantDetails, row.Details.String())
 			raw, err := json.Marshal(row)
 			require.NoError(t, err)
-			assert.JSONEq(t, fmt.Sprintf(`{"timestamp":"","type":"command","server":"","user":"","details":%q%s}`, tc.wantDetails, tc.wantExtra), string(raw))
+			assert.JSONEq(t, fmt.Sprintf(`{"id":"","timestamp":null,"type":"command","server":"","user":"","details":%q%s}`, tc.wantDetails, tc.wantExtra), string(raw))
+		})
+	}
+}
+
+func TestTimelineShowsSudoRefusal(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		wire        string
+		wantDetails string
+		wantExtra   string
+	}{
+		{
+			name:        "refused sudo on a failed command",
+			wire:        `{"type":"command","line":"sudo systemctl restart chronyd","success":false,"verification_status":"approved","sudo_refusal_reason":"work_session_scope_not_allowed"}`,
+			wantDetails: "[sudo denied: work_session_scope_not_allowed] sudo systemctl restart chronyd",
+			wantExtra:   `,"sudo_refusal_reason":"work_session_scope_not_allowed"`,
+		},
+		{
+			name:        "refused sudo on a command that still exited 0",
+			wire:        `{"type":"command","line":"sudo a; sudo b","success":true,"sudo_refusal_reason":"sudo_risk_denied"}`,
+			wantDetails: "[sudo denied: sudo_risk_denied] sudo a; sudo b",
+			wantExtra:   `,"sudo_refusal_reason":"sudo_risk_denied"`,
+		},
+		{
+			name:        "a rejection before the run wins over the refusal",
+			wire:        `{"type":"command","line":"sudo su","success":false,"verification_status":"rejected","rejection_cause":"risk_denied","rejection_gate":"risk","sudo_refusal_reason":"sudo_risk_denied"}`,
+			wantDetails: "[rejected: risk_denied, gate risk] sudo su",
+			wantExtra:   `,"rejection_cause":"risk_denied","rejection_gate":"risk","sudo_refusal_reason":"sudo_risk_denied"`,
+		},
+		{
+			name:        "a denied command stays denied",
+			wire:        `{"type":"command","line":"sudo su","denied":true,"sudo_refusal_reason":"sudo_risk_denied"}`,
+			wantDetails: "[denied] sudo su",
+			wantExtra:   `,"sudo_refusal_reason":"sudo_risk_denied"`,
+		},
+		{
+			name:        "null reason keeps the result and the null",
+			wire:        `{"type":"command","line":"ls","success":false,"sudo_refusal_reason":null}`,
+			wantDetails: "[failed] ls",
+			wantExtra:   `,"sudo_refusal_reason":null`,
+		},
+		{
+			name:        "server without the field is unchanged",
+			wire:        `{"type":"command","line":"ls","success":false}`,
+			wantDetails: "[failed] ls",
+			wantExtra:   ``,
+		},
+		{
+			name:        "control characters in the reason are stripped",
+			wire:        `{"type":"command","line":"ls","success":false,"sudo_refusal_reason":"bad\u001b[2Jcode"}`,
+			wantDetails: "[sudo denied: badcode] ls",
+			wantExtra:   `,"sudo_refusal_reason":"bad\u001b[2Jcode"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var item wsapi.TimelineItem
+			require.NoError(t, json.Unmarshal([]byte(tc.wire), &item))
+
+			row := projectTimelineAttributes(&item, nil)
+
+			assert.Equal(t, tc.wantDetails, row.Details.String())
+			raw, err := json.Marshal(row)
+			require.NoError(t, err)
+			assert.JSONEq(t, fmt.Sprintf(`{"id":"","timestamp":null,"type":"command","server":"","user":"","details":%q%s}`, tc.wantDetails, tc.wantExtra), string(raw))
+		})
+	}
+}
+
+func TestProjectTimelineAttributes_JSONKeepsUTCTimeAndFullDetails(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("y", 80)
+	tests := []struct {
+		name      string
+		wire      string
+		wantTable string
+		wantJSON  string
+	}{
+		{
+			name:      "command line is whole and time is UTC",
+			wire:      `{"type":"command","id":"550e8400-e29b-41d4-a716-446655440000","line":"` + long + `","success":true,"timestamp":"2026-11-07T18:30:45+09:00"}`,
+			wantTable: "[ok] " + strings.Repeat("y", 60) + "...",
+			wantJSON:  `{"id":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2026-11-07T09:30:45Z","type":"command","server":"","user":"","details":"[ok] ` + long + `"}`,
+		},
+		{
+			name:      "sudo command is whole",
+			wire:      `{"type":"sudo_grant","grant_type":"once","status":"granted","command":"` + long + `"}`,
+			wantTable: "once: granted — " + strings.Repeat("y", 40) + "...",
+			wantJSON:  `{"id":"","timestamp":null,"type":"sudo grant","server":"","user":"","details":"once: granted — ` + long + `"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var item wsapi.TimelineItem
+			require.NoError(t, json.Unmarshal([]byte(tt.wire), &item))
+
+			row := projectTimelineAttributes(&item, nil)
+
+			raw, err := json.Marshal(row)
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.wantJSON, string(raw))
+			assert.Equal(t, tt.wantTable, row.Details.String())
 		})
 	}
 }

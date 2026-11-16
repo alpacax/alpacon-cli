@@ -1,15 +1,19 @@
 package kube
 
 import (
+	"slices"
+
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-// exitNotEnabled ends the command with exit 1. The refusal is expected, not a
-// CLI fault, so it leaves out the "report an issue" footer CliErrorWithExit adds.
-func exitNotEnabled() {
-	utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, kubernetes.SurfaceNotEnabledMessage)
+var gatePassThrough = []string{"credentials", "logout"}
+
+// notEnabledError is exit 1 without NewExitError's "report an issue" footer: the refusal is
+// expected, not a CLI fault.
+func notEnabledError() error {
+	return utils.NewExitErrorWithCode(utils.ExitCodeGeneralError, kubernetes.SurfaceNotEnabledMessage)
 }
 
 // ApplySurfaceGate replaces KubeCmd under root with a hidden stand-in when the workspace has not
@@ -25,32 +29,45 @@ func exitNotEnabled() {
 // current workspace's answer says nothing about it. kube logout stays for the same reason: it cleans up
 // such a context and its saved token, and needs the server only for a best-effort close.
 func ApplySurfaceGate(root *cobra.Command, enabled bool) {
-	applySurfaceGate(root, KubeCmd, enabled, kubeCredentialsCmd, kubeLogoutCmd)
+	applySurfaceGate(root, KubeCmd, enabled, gatePassThrough...)
 }
 
-// applySurfaceGate moves keep, children of real, under the stand-in.
-func applySurfaceGate(root, real *cobra.Command, enabled bool, keep ...*cobra.Command) {
+// applySurfaceGate moves the children of real named keep under the stand-in.
+func applySurfaceGate(root, real *cobra.Command, enabled bool, keep ...string) {
 	if enabled {
 		return
 	}
-	// The children kept under the stand-in would inherit its help, which only
-	// refuses; they keep the help they had.
-	help := root.HelpFunc()
 	root.RemoveCommand(real)
 	disabled := newDisabledKubeCmd(real)
-	for _, child := range keep {
+	for _, child := range real.Commands() {
+		if !slices.Contains(keep, child.Name()) {
+			continue
+		}
 		real.RemoveCommand(child)
-		child.SetHelpFunc(help)
 		disabled.AddCommand(child)
 	}
 	root.AddCommand(disabled)
+	refuseHelpTopic(root, disabled)
+}
+
+// refuseHelpTopic makes 'alpacon help kube' return the not-enabled failure. Cobra's help command
+// calls the topic's help function, which has no error to return, so the refusal runs before it.
+func refuseHelpTopic(root, disabled *cobra.Command) {
+	root.InitDefaultHelpCmd()
+	help, _, _ := root.Find([]string{"help"}) // InitDefaultHelpCmd has just added it
+	help.PreRunE = func(cmd *cobra.Command, args []string) error {
+		if topic, _, err := root.Find(args); err == nil && topic == disabled {
+			return notEnabledError()
+		}
+		return nil
+	}
 }
 
 // newDisabledKubeCmd answers every path under real's name and aliases with the
 // not-enabled message: no flag parsing and arbitrary args, so nothing Cobra
 // checks first can fail.
 func newDisabledKubeCmd(real *cobra.Command) *cobra.Command {
-	disabled := &cobra.Command{
+	return &cobra.Command{
 		Use:                real.Use,
 		Aliases:            real.Aliases,
 		Short:              real.Short,
@@ -58,13 +75,8 @@ func newDisabledKubeCmd(real *cobra.Command) *cobra.Command {
 		DisableFlagParsing: true,
 		Args:               cobra.ArbitraryArgs,
 		ValidArgsFunction:  cobra.NoFileCompletions,
-		Run: func(cmd *cobra.Command, args []string) {
-			exitNotEnabled()
-		},
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return notEnabledError()
+		}),
 	}
-	// 'alpacon help kube' reaches the command through Find and calls its help.
-	disabled.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		exitNotEnabled()
-	})
-	return disabled
 }

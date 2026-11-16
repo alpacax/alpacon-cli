@@ -27,10 +27,10 @@ The [N] beside each terminal in 'alpacon work-session timeline' is its --index.`
 	Example: `  alpacon work-session recording 550e8400-e29b-41d4-a716-446655440000
   alpacon work-session recording 550e8400-e29b-41d4-a716-446655440000 --index 2
   alpacon work-session rec 550e8400-e29b-41d4-a716-446655440000`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opRecording, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewEnvelopeExitError(opRecording, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		sessionID := args[0]
@@ -39,29 +39,30 @@ The [N] beside each terminal in 'alpacon work-session timeline' is its --index.`
 		// per-session records route, so one recording costs one session's bytes.
 		terminals, err := wsapi.ListTerminalSessionIDs(ac, sessionID)
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opRecording, err, "Failed to retrieve work session timeline: %s.", err)
+			return utils.NewEnvelopeExitError(opRecording, err, "Failed to retrieve work session timeline: %s.", err)
 		}
 
 		// No terminals is a not-found state (no error_code); a bad --index is a usage_error.
 		if len(terminals) == 0 {
-			utils.CliErrorEnvelopeWithExit(opRecording, nil, "No recordings found for session %s.", sessionID)
+			return utils.NewEnvelopeExitError(opRecording, nil, "No recordings found for session %s.", sessionID)
 		}
 
 		if terminalIndex < 1 || terminalIndex > len(terminals) {
-			utils.CliUsageErrorEnvelopeWithExit(opRecording, "Terminal index %d out of range (session has %d terminal(s)).", terminalIndex, len(terminals))
+			return utils.NewUsageEnvelopeExitError(opRecording, "Terminal index %d out of range (session has %d terminal(s)).", terminalIndex, len(terminals))
 		}
 
 		record, addedAt, found, err := wsapi.GetTerminalRecording(ac, sessionID, terminals[terminalIndex-1])
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opRecording, err, "Failed to retrieve recording: %s.", err)
+			return utils.NewEnvelopeExitError(opRecording, err, "Failed to retrieve recording: %s.", err)
 		}
 		if !found {
-			utils.CliErrorEnvelopeWithExit(opRecording, nil, "Terminal %d of %d in session %s has no recording; try another --index.", terminalIndex, len(terminals), sessionID)
+			return utils.NewEnvelopeExitError(opRecording, nil, "Terminal %d of %d in session %s has no recording; try another --index.", terminalIndex, len(terminals), sessionID)
 		}
 
 		printRecordingHeader(os.Stdout, addedAt, terminalIndex, len(terminals))
 		printRecordingContent(os.Stdout, record)
-	},
+		return nil
+	}),
 }
 
 func init() {

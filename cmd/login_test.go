@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -527,6 +529,18 @@ func TestPromptForLoginTarget(t *testing.T) {
 			{prompt: "Region [us1] (us1, ap1): ", defaultValue: "us1"},
 		}, calls)
 	})
+	t.Run("no input for a required workspace returns the prompt failure", func(t *testing.T) {
+		noInput := errors.New("no input received")
+		failRequired := func(string) (string, error) { return "", noInput }
+		unused := func(promptText, _ string) (string, error) {
+			t.Errorf("unexpected prompt %q after the required prompt failed", promptText)
+			return "", nil
+		}
+
+		_, _, _, err := promptForLoginTargetWithPrompts(config.Config{}, unused, failRequired)
+
+		require.ErrorIs(t, err, noInput)
+	})
 }
 
 func TestValidateInteractiveLoginTargetPrompt(t *testing.T) {
@@ -557,7 +571,6 @@ func TestValidateInteractiveLoginTargetPrompt(t *testing.T) {
 }
 
 func TestLoginNonInteractiveNoTargetCommand(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name string
 		args []string
@@ -829,19 +842,19 @@ func runPromptForLoginTarget(t *testing.T, cfg config.Config, responses ...strin
 		return response
 	}
 
-	promptWithDefault := func(promptText, defaultValue string) string {
+	promptWithDefault := func(promptText, defaultValue string) (string, error) {
 		calls = append(calls, promptCall{prompt: promptText, defaultValue: defaultValue})
 		response := nextResponse()
 		if response == "" {
-			return defaultValue
+			return defaultValue, nil
 		}
-		return response
+		return response, nil
 	}
-	promptRequired := func(promptText string) string {
+	promptRequired := func(promptText string) (string, error) {
 		calls = append(calls, promptCall{prompt: promptText, required: true})
 		response := nextResponse()
 		require.NotEmpty(t, response, "fake required prompt response cannot be empty")
-		return response
+		return response, nil
 	}
 
 	workspaceURL, workspaceName, baseDomain, err = promptForLoginTargetWithPrompts(cfg, promptWithDefault, promptRequired)
@@ -853,25 +866,41 @@ func runLoginCommandHelper(t *testing.T, args []string) (stdout, stderr string, 
 	t.Helper()
 
 	home := t.TempDir()
+	t.Setenv(homeEnvVar(), home)
 	writeLoginCommandTestConfig(t, home)
 
-	return runHelperProcess(t, "TestLoginCommandHelperProcess", "login-helper", args,
-		"GO_WANT_LOGIN_HELPER=1",
-		homeEnvVar()+"="+home,
-	)
-}
+	token := ""
+	noBrowserValue := false
+	for i, arg := range args {
+		switch arg {
+		case "-t", "--token":
+			if i+1 < len(args) {
+				token = args[i+1]
+			}
+		case "--no-browser":
+			noBrowserValue = true
+		}
+	}
+	require.NoError(t, loginCmd.Flags().Set("token", token))
+	require.NoError(t, loginCmd.Flags().Set("no-browser", fmt.Sprintf("%t", noBrowserValue)))
+	t.Cleanup(func() {
+		require.NoError(t, loginCmd.Flags().Set("token", ""))
+		require.NoError(t, loginCmd.Flags().Set("no-browser", "false"))
+	})
 
-func TestLoginCommandHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_LOGIN_HELPER") != "1" {
-		return
+	var runErr error
+	stdout, stderr = testutil.CaptureOutput(t, func() {
+		runErr = loginCmd.RunE(loginCmd, nil)
+		if exitErr, ok := errors.AsType[*utils.ExitError](runErr); ok {
+			utils.FprintExitError(os.Stderr, exitErr)
+		}
+	})
+	if runErr == nil {
+		return stdout, stderr, 0
 	}
-	args, ok := helperArgsAfter(os.Args, "login-helper")
-	if !ok {
-		os.Exit(99)
-	}
-	os.Args = append([]string{"alpacon"}, args...)
-	Execute()
-	os.Exit(0)
+	exitErr, ok := errors.AsType[*utils.ExitError](runErr)
+	require.True(t, ok)
+	return stdout, stderr, exitErr.Code
 }
 
 func writeLoginCommandTestConfig(t *testing.T, home string) {
@@ -1038,4 +1067,60 @@ func TestLoginVerificationFailure_ServerHintReplacesTheLocalSentence(t *testing.
 			assert.Contains(t, tt.message(plain), "Please try logging in again.")
 		})
 	}
+}
+
+func TestIsWorkspaceNotFound_DecidesOnTheStatusNotTheText(t *testing.T) {
+	t.Parallel()
+	notFound := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(notFound.Close)
+	closed := httptest.NewServer(http.NotFoundHandler())
+	unreachable := closed.URL + "/team404"
+	closed.Close()
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{name: "workspace answers 404", url: notFound.URL, want: true},
+		{name: "unreachable workspace with 404 in its URL", url: unreachable, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := auth0.FetchAuthEnv(tt.url, notFound.Client())
+			require.Error(t, err)
+
+			got := isWorkspaceNotFound(err)
+
+			assert.Equal(t, tt.want, got, "error: %q", err.Error())
+		})
+	}
+}
+
+// Serial: reassigns the promptPassword seam.
+func TestPromptForCredentialsReturnsPasswordPromptFailure(t *testing.T) {
+	saved := promptPassword
+	t.Cleanup(func() { promptPassword = saved })
+	interrupted := utils.NewSilentExitError(utils.ExitCodeGeneralError)
+	promptPassword = func(string) (string, error) { return "", interrupted }
+
+	username, password, err := promptForCredentials("alice", "")
+
+	assert.Same(t, interrupted, err)
+	assert.Empty(t, username)
+	assert.Empty(t, password)
+}
+
+// Serial: reassigns the promptPassword seam.
+func TestPromptForCredentialsReturnsTypedPassword(t *testing.T) {
+	saved := promptPassword
+	t.Cleanup(func() { promptPassword = saved })
+	promptPassword = func(string) (string, error) { return "pw", nil }
+
+	username, password, err := promptForCredentials("alice", "")
+
+	require.NoError(t, err)
+	assert.Equal(t, "alice", username)
+	assert.Equal(t, "pw", password)
 }

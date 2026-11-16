@@ -370,17 +370,17 @@ func TestToEntryAttributes(t *testing.T) {
 	require.Len(t, attributes, 2)
 	assert.Equal(t, "deploy-bot", attributes[0].Principal)
 	assert.Equal(t, "web-01, gone", attributes[0].Servers, "an id with no name is shown as it is")
-	assert.Equal(t, "never", attributes[0].ExpiresAt)
+	assert.Equal(t, "never", attributes[0].ExpiresAt.String())
 	assert.Equal(t, "legacy (api_token)", attributes[1].Principal)
 	assert.Equal(t, "all servers", attributes[1].Servers)
-	assert.Equal(t, utils.TimeUtils(time.Date(2027, 1, 15, 10, 0, 0, 0, time.UTC)), attributes[1].ExpiresAt)
+	assert.Equal(t, utils.TimeUtils(time.Date(2027, 1, 15, 10, 0, 0, 0, time.UTC)), attributes[1].ExpiresAt.String())
 }
 
 func TestEntryAttributes_JSONFieldNames(t *testing.T) {
 	t.Parallel()
 	body, err := json.Marshal(EntryAttributes{ID: "e1", Principal: "deploy-bot", Command: "uptime"})
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"id": "e1", "principal": "deploy-bot", "command_pattern": "uptime", "username": "", "groupname": "", "servers": "", "enabled": false, "expires_at": "", "created_by": ""}`, string(body))
+	assert.JSONEq(t, `{"id": "e1", "principal": "deploy-bot", "command_pattern": "uptime", "username": "", "groupname": "", "servers": "", "enabled": false, "expires_at": null, "created_by": ""}`, string(body))
 }
 
 // The console never issues an api_token entry nor shows one on a personal API
@@ -433,5 +433,42 @@ func TestAdminAttributes_JSONFieldNames(t *testing.T) {
 	t.Parallel()
 	body, err := json.Marshal(AdminAttributes{ID: "grant-1", Subject: "auth0|alice", Email: "alice@example.com"})
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"id": "grant-1", "subject": "auth0|alice", "email": "alice@example.com", "granted_by": "", "created_at": ""}`, string(body))
+	assert.JSONEq(t, `{"id": "grant-1", "subject": "auth0|alice", "email": "alice@example.com", "granted_by": "", "created_at": null}`, string(body))
+}
+
+func TestToEntryAttributesKeepsRawExpiryJSON(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		expiry *string
+		want   string
+		text   string
+	}{
+		{"nil", nil, `null`, "never"},
+		{"empty", new(""), `null`, "never"},
+		{"unparsed", new("unknown time"), `"unknown time"`, "unknown time"},
+		{"non UTC", new("2026-11-07T18:30:45+09:00"), `"2026-11-07T09:30:45Z"`, utils.TimeUtils(time.Date(2026, 11, 7, 9, 30, 45, 0, time.UTC))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			entries := []EntryResponse{{PrincipalType: PrincipalTypeServiceToken, ExpiresAt: tt.expiry}}
+			rows := ToEntryAttributes(entries, nil, nil)
+			body, err := json.Marshal(rows)
+			require.NoError(t, err)
+			assert.JSONEq(t, `[{"id":"","principal":"","command_pattern":"","username":"","groupname":"","servers":"all servers","enabled":false,"expires_at":`+tt.want+`,"created_by":""}]`, string(body))
+			assert.Equal(t, tt.text, rows[0].ExpiresAt.String())
+		})
+	}
+}
+
+func TestToAdminAttributesKeepsRawCreatedAtJSON(t *testing.T) {
+	t.Parallel()
+	admins := []AdminResponse{{CreatedAt: "2026-11-07T18:30:45+09:00"}, {CreatedAt: "unknown time"}, {CreatedAt: ""}}
+
+	rows := ToAdminAttributes(admins)
+	body, err := json.Marshal(rows)
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `[{"id":"","subject":"","email":"","granted_by":"","created_at":"2026-11-07T09:30:45Z"},{"id":"","subject":"","email":"","granted_by":"","created_at":"unknown time"},{"id":"","subject":"","email":"","granted_by":"","created_at":null}]`, string(body))
 }

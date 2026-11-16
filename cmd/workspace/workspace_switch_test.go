@@ -321,3 +321,17 @@ func TestRenewWorkspaceClaimClassifiesTheServersAnswer(t *testing.T) {
 		})
 	}
 }
+
+// Serial: sets HOME, swaps os.Stderr and runs a package-level command.
+func TestWorkspaceSwitch_ToTheCurrentWorkspaceSucceedsWithANotice(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, config.CreateConfig("https://prev.us1.alpacon.io", "prev", "", "", "access-token", "refresh-token", "alpacon.io", 3600, false))
+
+	var err error
+	_, stderr := testutil.CaptureOutput(t, func() {
+		err = workspaceSwitchCmd.RunE(workspaceSwitchCmd, []string{"prev"})
+	})
+
+	require.NoError(t, err)
+	assert.Contains(t, stderr, `Already on workspace "prev".`)
+}

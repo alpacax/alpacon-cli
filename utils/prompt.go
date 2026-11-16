@@ -12,62 +12,83 @@ import (
 	"golang.org/x/term"
 )
 
-func PromptForPassword(promptText string) string {
+// stdin is the one buffered reader every prompt on os.Stdin shares, since a pipe hands over many
+// lines per read and a dropped reader loses the rest. A swapped os.Stdin gets a fresh one.
+var stdin struct {
+	file   *os.File
+	reader *bufio.Reader
+}
+
+// PromptForPassword reads a password after promptText; Ctrl+C returns a silent exit-1 failure.
+func PromptForPassword(promptText string) (string, error) {
 	_, _ = fmt.Fprint(TrackedStderr(), promptText)
+
+	if !term.IsTerminal(int(os.Stdin.Fd())) { // nothing to hide, and ReadPassword refuses a pipe
+		line, _ := lineReader(os.Stdin).ReadString('\n')
+		return strings.TrimSpace(line), nil
+	}
 
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		bytePassword, err := term.ReadPassword(int(os.Stdin.Fd()))
 		if err != nil {
-			return ""
+			return "", nil
 		}
 		_, _ = fmt.Fprintln(TrackedStderr())
-		return strings.TrimSpace(string(bytePassword))
+		return strings.TrimSpace(string(bytePassword)), nil
 	}
 	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
+	return readRawPassword(os.Stdin, TrackedStderr())
+}
 
+// readRawPassword reads a password typed in raw mode from r, echoing a mask to w.
+func readRawPassword(r io.Reader, w io.Writer) (string, error) {
 	var password []byte
 	buf := make([]byte, 1)
 	for {
-		_, err := os.Stdin.Read(buf)
+		_, err := r.Read(buf)
 		if err != nil {
 			break
 		}
 		switch buf[0] {
 		case '\n', '\r':
-			_, _ = fmt.Fprint(TrackedStderr(), "\r\n")
-			return strings.TrimSpace(string(password))
+			_, _ = fmt.Fprint(w, "\r\n")
+			return strings.TrimSpace(string(password)), nil
 		case 127, '\b': // backspace
 			if len(password) > 0 {
 				password = password[:len(password)-1]
-				_, _ = fmt.Fprint(TrackedStderr(), "\b \b")
+				_, _ = fmt.Fprint(w, "\b \b")
 			}
 		case 3: // Ctrl+C
-			_, _ = fmt.Fprint(TrackedStderr(), "\r\n")
-			_ = term.Restore(int(os.Stdin.Fd()), oldState)
-			os.Exit(1)
+			_, _ = fmt.Fprint(w, "\r\n")
+			return "", NewSilentExitError(ExitCodeGeneralError)
 		default:
 			if buf[0] >= 32 {
 				password = append(password, buf[0])
-				_, _ = fmt.Fprint(TrackedStderr(), "*")
+				_, _ = fmt.Fprint(w, "*")
 			}
 		}
 	}
 
-	_, _ = fmt.Fprintln(TrackedStderr())
-	return strings.TrimSpace(string(password))
+	_, _ = fmt.Fprintln(w)
+	return strings.TrimSpace(string(password)), nil
 }
 
-func PromptForInput(promptText string) string {
+// ReadInput reads one line from stdin after promptText, or returns the exit-1 failure on no input.
+func ReadInput(promptText string) (string, error) {
 	input, err := promptForInput(os.Stdin, promptText)
 	if err != nil {
-		CliErrorWithExit("No input received.")
+		return "", noInputError()
 	}
-	return input
+	return input, nil
+}
+
+func noInputError() *ExitError {
+	return newExitError(ExitCodeGeneralError, true, "No input received.", nil)
 }
 
 func promptForInput(r io.Reader, promptText string) (string, error) {
-	reader := bufio.NewReader(r)
+	reader := lineReader(r)
 	_, _ = fmt.Fprint(TrackedStderr(), promptText)
 	line, err := reader.ReadString('\n')
 	noteEchoedNewline(r, err)
@@ -78,6 +99,16 @@ func promptForInput(r io.Reader, promptText string) (string, error) {
 	return input, nil
 }
 
+func lineReader(r io.Reader) *bufio.Reader {
+	if r != os.Stdin {
+		return bufio.NewReader(r)
+	}
+	if stdin.file != os.Stdin {
+		stdin.file, stdin.reader = os.Stdin, bufio.NewReader(os.Stdin)
+	}
+	return stdin.reader
+}
+
 // noteEchoedNewline records the Enter a terminal echoes, which lands on stderr only when stderr is that terminal.
 func noteEchoedNewline(r io.Reader, readErr error) {
 	if f, ok := r.(*os.File); ok && readErr == nil && term.IsTerminal(int(f.Fd())) && term.IsTerminal(int(os.Stderr.Fd())) {
@@ -85,65 +116,83 @@ func noteEchoedNewline(r io.Reader, readErr error) {
 	}
 }
 
-func PromptForRequiredInput(promptText string) string {
+// ReadRequiredInput is ReadInput that asks again on an empty line.
+func ReadRequiredInput(promptText string) (string, error) {
+	return readRequiredInput(os.Stdin, promptText)
+}
+
+func readRequiredInput(r io.Reader, promptText string) (string, error) {
 	for {
-		input := PromptForInput(promptText)
+		input, err := promptForInput(r, promptText)
+		if err != nil {
+			return "", noInputError()
+		}
 		if input != "" {
-			return input
+			return input, nil
 		}
 		CliWarning("This field is required. Please enter a value.")
 	}
 }
 
-// PromptForInputWithDefault prompts for input and returns the default if empty.
-func PromptForInputWithDefault(promptText, defaultValue string) string {
-	input := PromptForInput(promptText)
-	if input == "" {
-		return defaultValue
+func ReadInputWithDefault(promptText, defaultValue string) (string, error) {
+	input, err := ReadInput(promptText)
+	if err != nil {
+		return "", err
 	}
-	return input
+	if input == "" {
+		return defaultValue, nil
+	}
+	return input, nil
 }
 
-func PromptForRequiredIntInput(promptText string) int {
+func ReadRequiredIntInput(promptText string) (int, error) {
 	for {
-		inputStr := PromptForInput(promptText)
+		inputStr, err := ReadInput(promptText)
+		if err != nil {
+			return 0, err
+		}
 		inputInt, err := strconv.Atoi(inputStr)
 		if err != nil {
 			CliWarning("Only integers are allowed. Please try again.")
 			continue
 		}
-		return inputInt
+		return inputInt, nil
 	}
 }
 
-func PromptForIntInput(promptText string, defaultValue int) int {
-	inputStr := PromptForInput(promptText)
-	inputStr = strings.TrimSpace(inputStr)
-	if inputStr == "" {
-		return defaultValue
+func ReadIntInput(promptText string, defaultValue int) (int, error) {
+	inputStr, err := ReadInputWithDefault(promptText, strconv.Itoa(defaultValue))
+	if err != nil {
+		return 0, err
 	}
 	inputInt, err := strconv.Atoi(inputStr)
 	if err != nil {
 		CliWarning("Invalid input. Using default value: %d", defaultValue)
-		return defaultValue
+		return defaultValue, nil
 	}
-	return inputInt
+	return inputInt, nil
 }
 
-func PromptForListInput(promptText string) []string {
-	return SplitAndTrim(PromptForInput(promptText), ",")
+// Confirm asks msg as a yes/no question before a destructive action. A decline prints the cancel
+// notice and returns false, which the caller ends on with exit 0; a non-interactive run returns the exit-2 failure.
+func Confirm(msg string, args ...any) (bool, error) {
+	return confirm(IsInteractiveShell(), os.Stdin, msg, args...)
 }
 
-// ConfirmAction prompts the user for confirmation before a destructive action.
-// In non-interactive mode (piped stdin, CI, etc.), it exits and asks for --yes flag.
-// Returns on confirm; exits the program on decline.
-func ConfirmAction(msg string, args ...any) {
-	if !IsInteractiveShell() {
-		CliErrorWithCode(ExitCodeUsageError, ErrorCodeConfirmationRequired, "This operation requires confirmation. Use --yes (-y) to skip the prompt in non-interactive mode.")
+func confirm(interactive bool, r io.Reader, msg string, args ...any) (bool, error) {
+	if !interactive {
+		return false, confirmationRequiredError()
 	}
-	if !PromptForBool(confirmPrompt(msg, args...)) {
-		CliInfoWithExit("Operation cancelled.")
+	if !promptForBool(r, confirmPrompt(msg, args...)) {
+		CliInfo("Operation cancelled.")
+		return false, nil
 	}
+	return true, nil
+}
+
+func confirmationRequiredError() *ExitError {
+	return &ExitError{Code: ExitCodeUsageError, errorCode: ErrorCodeConfirmationRequired,
+		msg: "This operation requires confirmation. Use --yes (-y) to skip the prompt in non-interactive mode."}
 }
 
 // confirmPrompt formats a confirmation prompt without control characters, so a
@@ -158,7 +207,7 @@ func PromptForBool(prompt string) bool {
 }
 
 func promptForBool(r io.Reader, prompt string) bool {
-	reader := bufio.NewReader(r)
+	reader := lineReader(r)
 
 	for {
 		_, _ = fmt.Fprintf(TrackedStderr(), "%s [y/n]: ", prompt)

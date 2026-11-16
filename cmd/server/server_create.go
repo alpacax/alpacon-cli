@@ -63,54 +63,66 @@ var serverCreateCmd = &cobra.Command{
 	alpacon server create --method ansible --platform debian --token prod-token
 	alpacon server create -m ansible -p windows -t prod-token --json
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if refusal := flagRefusal(cmd, utils.IsInteractiveShell()); refusal != "" {
-			utils.CliUsageErrorWithExit("%s", refusal)
+			return utils.NewUsageExitError("%s", refusal)
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		method := resolveMethod(cmd)
-		platform := resolvePlatform(cmd, method)
-		serverName := resolveName(cmd)
-		tokenID := resolveTokenID(cmd, alpaconClient)
+		method, err := resolveMethod(cmd)
+		if err != nil {
+			return err
+		}
+		platform, err := resolvePlatform(cmd, method)
+		if err != nil {
+			return err
+		}
+		serverName, err := resolveName(cmd)
+		if err != nil {
+			return err
+		}
+		tokenID, err := resolveTokenID(cmd, alpaconClient)
+		if err != nil {
+			return err
+		}
 
 		switch method {
 		case "ansible":
 			guide, err := server.GetAnsibleRegistrationGuideJSON(alpaconClient, platform, serverName, tokenID)
 			if err != nil {
-				utils.CliErrorWithExit("Failed to retrieve the installation guide: %s.", err)
+				return utils.NewExitError("Failed to retrieve the installation guide: %s.", err)
 			}
 			if createJSON {
-				writeJSONGuide(guide)
-				return
+				return writeJSONGuide(guide)
 			}
 			displayAnsibleGuideFromJSON(guide)
 		case "token-install":
 			guide, err := server.GetRegistrationGuideJSON(alpaconClient, platform, serverName, tokenID)
 			if err != nil {
-				utils.CliErrorWithExit("Failed to retrieve the installation guide: %s.", err)
+				return utils.NewExitError("Failed to retrieve the installation guide: %s.", err)
 			}
 			if createJSON {
-				writeJSONGuide(guide)
-				return
+				return writeJSONGuide(guide)
 			}
 			displayGuideFromJSON(guide)
 		default:
-			utils.CliErrorWithExit("Unknown registration method %q. Valid values: %s.", method, validMethodsList)
+			return utils.NewExitError("Unknown registration method %q. Valid values: %s.", method, validMethodsList)
 		}
-	},
+		return nil
+	}),
 }
 
-func writeJSONGuide(v any) {
+func writeJSONGuide(v any) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(v); err != nil {
-		utils.CliErrorWithExit("Failed to encode guide as JSON: %s.", err)
+		return utils.NewExitError("Failed to encode guide as JSON: %s.", err)
 	}
+	return nil
 }
 
 func init() {
@@ -125,25 +137,25 @@ func init() {
 
 // resolveMethod returns --method, token-install in a non-interactive shell, or the
 // user's choice.
-func resolveMethod(cmd *cobra.Command) string {
+func resolveMethod(cmd *cobra.Command) (string, error) {
 	if cmd.Flags().Changed("method") {
 		if refusal := methodRefusal(createMethod); refusal != "" {
-			utils.CliUsageErrorWithExit("%s", refusal)
+			return "", utils.NewUsageExitError("%s", refusal)
 		}
-		return createMethod
+		return createMethod, nil
 	}
 	if !utils.IsInteractiveShell() {
-		return "token-install"
+		return "token-install", nil
 	}
 	return selectMethod()
 }
 
-func resolvePlatform(cmd *cobra.Command, method string) string {
+func resolvePlatform(cmd *cobra.Command, method string) (string, error) {
 	if cmd.Flags().Changed("platform") {
 		if refusal := platformRefusal(method, createPlatform); refusal != "" {
-			utils.CliUsageErrorWithExit("%s", refusal)
+			return "", utils.NewUsageExitError("%s", refusal)
 		}
-		return createPlatform
+		return createPlatform, nil
 	}
 	return selectPlatform(method)
 }
@@ -195,28 +207,28 @@ func platformsForMethod(method string) ([]string, string) {
 
 // resolveName returns --name or prompts for one. With --token or --new-token the
 // caller is scripting, so it returns empty and the server falls back to the hostname.
-func resolveName(cmd *cobra.Command) string {
+func resolveName(cmd *cobra.Command) (string, error) {
 	if cmd.Flags().Changed("name") {
-		return createName
+		return createName, nil
 	}
 	if cmd.Flags().Changed("token") || cmd.Flags().Changed("new-token") {
-		return ""
+		return "", nil
 	}
 	return promptForServerName()
 }
 
 // resolveTokenID returns the UUID of the --token token, of one created for
 // --new-token, or of the user's interactive choice.
-func resolveTokenID(cmd *cobra.Command, ac *client.AlpaconClient) string {
+func resolveTokenID(cmd *cobra.Command, ac *client.AlpaconClient) (string, error) {
 	if cmd.Flags().Changed("token") {
 		token, err := server.GetRegistrationTokenByName(ac, createTokenName)
 		if err != nil {
 			if errors.Is(err, server.ErrRegistrationTokenNotFound) {
-				utils.CliErrorWithExit("Registration token %q not found.", createTokenName)
+				return "", utils.NewExitError("Registration token %q not found.", createTokenName)
 			}
-			utils.CliErrorWithExit("Failed to retrieve registration token %q: %s.", createTokenName, err)
+			return "", utils.NewExitError("Failed to retrieve registration token %q: %s.", createTokenName, err)
 		}
-		return token.ID
+		return token.ID, nil
 	}
 	if cmd.Flags().Changed("new-token") {
 		return createTokenAndWarn(ac, createNewTokenName)
@@ -226,57 +238,64 @@ func resolveTokenID(cmd *cobra.Command, ac *client.AlpaconClient) string {
 
 // selectMethod prompts the user to choose a registration method.
 // Empty input defaults to token-install to preserve existing muscle memory.
-func selectMethod() string {
+func selectMethod() (string, error) {
 	fmt.Fprintln(os.Stderr, "Registration method:")
 	fmt.Fprintln(os.Stderr, "  [1] Token install")
 	fmt.Fprintln(os.Stderr, "  [2] Ansible")
 	for {
-		input := strings.TrimSpace(utils.PromptForInput("Method [1]: "))
+		input, err := utils.ReadInput("Method [1]: ")
+		if err != nil {
+			return "", err
+		}
 		switch input {
 		case "", "1", "token-install":
-			return "token-install"
+			return "token-install", nil
 		case "2", "ansible":
-			return "ansible"
+			return "ansible", nil
 		}
 		utils.CliWarning("Invalid selection. Enter 1 or 2.")
 	}
 }
 
-func selectPlatform(method string) string {
+func selectPlatform(method string) (string, error) {
 	allowed, list := platformsForMethod(method)
 	if !utils.IsInteractiveShell() {
-		utils.CliUsageErrorWithExit("Non-interactive mode requires --platform. Valid values: %s.", list)
+		return "", utils.NewUsageExitError("Non-interactive mode requires --platform. Valid values: %s.", list)
 	}
-	return promptPlatform(allowed, list, utils.PromptForInput)
+	return promptPlatform(allowed, list, utils.ReadInput)
 }
 
-func promptPlatform(allowed []string, list string, prompt func(string) string) string {
+func promptPlatform(allowed []string, list string, prompt func(string) (string, error)) (string, error) {
 	for {
-		platform := strings.ToLower(strings.TrimSpace(prompt(fmt.Sprintf("Platform (%s): ", list))))
+		input, err := prompt(fmt.Sprintf("Platform (%s): ", list))
+		if err != nil {
+			return "", err
+		}
+		platform := strings.ToLower(strings.TrimSpace(input))
 		if slices.Contains(allowed, platform) {
-			return platform
+			return platform, nil
 		}
 		utils.CliWarning("Invalid platform. Valid values: %s.", list)
 	}
 }
 
-func promptForServerName() string {
+func promptForServerName() (string, error) {
 	if !utils.IsInteractiveShell() {
-		return ""
+		return "", nil
 	}
 	fmt.Fprintln(os.Stderr, "Server name (optional—hostname will be used if not specified):")
-	return strings.TrimSpace(utils.PromptForInput("Server Name: "))
+	return utils.ReadInput("Server Name: ")
 }
 
 // selectOrCreateToken lists existing registration tokens and lets the user pick one
 // or create a new one. Returns the selected or newly created token UUID.
-func selectOrCreateToken(ac *client.AlpaconClient) string {
+func selectOrCreateToken(ac *client.AlpaconClient) (string, error) {
 	if !utils.IsInteractiveShell() {
-		utils.CliUsageErrorWithExit("Non-interactive mode requires --token or --new-token.")
+		return "", utils.NewUsageExitError("Non-interactive mode requires --token or --new-token.")
 	}
 	tokens, err := server.ListRegistrationTokens(ac)
 	if err != nil {
-		utils.CliErrorWithExit("Failed to retrieve registration tokens: %s.", err)
+		return "", utils.NewExitError("Failed to retrieve registration tokens: %s.", err)
 	}
 
 	if len(tokens) == 0 {
@@ -287,7 +306,10 @@ func selectOrCreateToken(ac *client.AlpaconClient) string {
 	printTokenChoices(os.Stderr, tokens)
 
 	for {
-		input := strings.TrimSpace(utils.PromptForRequiredInput("Token: "))
+		input, err := utils.ReadRequiredInput("Token: ")
+		if err != nil {
+			return "", err
+		}
 
 		if input == "+" {
 			return createNewToken(ac)
@@ -295,7 +317,7 @@ func selectOrCreateToken(ac *client.AlpaconClient) string {
 
 		idx, err := strconv.Atoi(input)
 		if err == nil && idx >= 1 && idx <= len(tokens) {
-			return tokens[idx-1].ID
+			return tokens[idx-1].ID, nil
 		}
 		utils.CliWarning("Invalid selection. Enter a number from the list or '+' to create a new token.")
 	}
@@ -311,18 +333,21 @@ func printTokenChoices(w io.Writer, tokens []server.RegistrationTokenDetails) {
 	_, _ = fmt.Fprintln(w, "  [+] Create new token")
 }
 
-func createNewToken(ac *client.AlpaconClient) string {
-	name := utils.PromptForRequiredInput("Token name: ")
+func createNewToken(ac *client.AlpaconClient) (string, error) {
+	name, err := utils.ReadRequiredInput("Token name: ")
+	if err != nil {
+		return "", err
+	}
 	return createTokenAndWarn(ac, name)
 }
 
-func createTokenAndWarn(ac *client.AlpaconClient, name string) string {
+func createTokenAndWarn(ac *client.AlpaconClient, name string) (string, error) {
 	response, err := server.CreateRegistrationToken(ac, server.RegistrationTokenRequest{Name: name})
 	if err != nil {
-		utils.CliErrorWithExit("Failed to create the registration token: %s.", err)
+		return "", utils.NewExitError("Failed to create the registration token: %s.", err)
 	}
 	warnTokenKey("New token created. Save the key now—it will not be shown again", response.Key)
-	return response.ID
+	return response.ID, nil
 }
 
 func printGuideHeader(platformLabel, serverName, alpaconURL string) {

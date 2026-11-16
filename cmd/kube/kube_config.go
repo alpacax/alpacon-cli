@@ -1,8 +1,10 @@
 package kube
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/signal"
@@ -31,12 +33,12 @@ type kubeConfigFlagValues struct {
 	proxyPort   int
 }
 
-var kubeConfigFlags kubeConfigFlagValues
-
-var kubeConfigCmd = &cobra.Command{
-	Use:   "config CLUSTER",
-	Short: "Write a kubeconfig context for a cluster",
-	Long: `Open a kube session on a cluster and write a context named alpacon-CLUSTER
+func newKubeConfigCmd(newClient clientFactory) *cobra.Command {
+	var flags kubeConfigFlagValues
+	cmd := &cobra.Command{
+		Use:   "config CLUSTER",
+		Short: "Write a kubeconfig context for a cluster",
+		Long: `Open a kube session on a cluster and write a context named alpacon-CLUSTER
 into your kubeconfig, then make it the current context so kubectl, k9s, and
 other clients use it right away. The session runs under --work-session, or
 the WorkSession ALPACON_WORK_SESSION names, which must target the cluster with
@@ -56,18 +58,19 @@ when the WorkSession ends; run this command again for a new one.
 
 Use --proxy-port to send kubectl through 'alpacon kube proxy' on that local
 port instead of connecting to the cluster's proxy host directly.`,
-	Example: `  alpacon kube config prod-east
+		Example: `  alpacon kube config prod-east
   alpacon kube config prod-east --work-session 3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47
   alpacon kube config prod-east --kubeconfig ~/.kube/alpacon
   alpacon kube config prod-east --proxy-port 18443`,
-	Args: cobra.ExactArgs(1),
-	Run:  runKubeConfig,
-}
-
-func init() {
-	kubeConfigCmd.Flags().StringVar(&kubeConfigFlags.workSession, "work-session", "", "WorkSession ID to open the kube session under; it must target the cluster (default: ALPACON_WORK_SESSION)")
-	kubeConfigCmd.Flags().StringVar(&kubeConfigFlags.kubeconfig, "kubeconfig", "", "kubeconfig file to write (default: the file kubectl writes)")
-	kubeConfigCmd.Flags().IntVar(&kubeConfigFlags.proxyPort, "proxy-port", 0, "route kubectl through 'alpacon kube proxy' on this local port")
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return runKubeConfig(cmd, args[0], flags, newClient)
+		}),
+	}
+	cmd.Flags().StringVar(&flags.workSession, "work-session", "", "WorkSession ID to open the kube session under; it must target the cluster (default: ALPACON_WORK_SESSION)")
+	cmd.Flags().StringVar(&flags.kubeconfig, "kubeconfig", "", "kubeconfig file to write (default: the file kubectl writes)")
+	cmd.Flags().IntVar(&flags.proxyPort, "proxy-port", 0, "route kubectl through 'alpacon kube proxy' on this local port")
+	return cmd
 }
 
 // kubeConfigResult is what 'kube config' reports. It never holds the token.
@@ -80,7 +83,12 @@ type kubeConfigResult struct {
 	ProxyURL        string    `json:"proxy_url"`
 	TokenExpiresAt  time.Time `json:"token_expires_at"`
 	PreviousContext string    `json:"previous_context"`
+	// RBACDriftWarning is the server's rbac_drift_warning on the opened
+	// session, passed through as it came; null when the session opened
+	// without one or the server is older than the field.
+	RBACDriftWarning json.RawMessage `json:"rbac_drift_warning"`
 
+	clusterName    string // the cluster as the user named it, for the drift warning
 	replacedServer string // host of an entry with the same name that pointed elsewhere
 	plaintext      bool   // the proxy URL is http, so the token travels unencrypted
 }
@@ -97,38 +105,38 @@ type sessionCreateError struct{ err error }
 func (e *sessionCreateError) Error() string { return e.err.Error() }
 func (e *sessionCreateError) Unwrap() error { return e.err }
 
-func runKubeConfig(cmd *cobra.Command, args []string) {
-	clusterName := strings.TrimSpace(args[0]) // as kube login and logout read it
+func runKubeConfig(cmd *cobra.Command, cluster string, flags kubeConfigFlagValues, newClient clientFactory) error {
+	clusterName := strings.TrimSpace(cluster) // as kube login and logout read it
 	proxyPort := 0
 	if cmd.Flags().Changed("proxy-port") {
-		if err := validatePort(kubeConfigFlags.proxyPort); err != nil {
-			utils.CliUsageErrorWithExit("--proxy-port %s.", err)
+		if err := validatePort(flags.proxyPort); err != nil {
+			return utils.NewUsageExitError("--proxy-port %s.", err)
 		}
-		proxyPort = kubeConfigFlags.proxyPort
+		proxyPort = flags.proxyPort
 	}
 
-	ac, err := client.NewAlpaconAPIClient()
+	ac, err := newClient()
 	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 	// The active WorkSession is not a fallback: it can only hold a server
 	// session, which no kube session opens under. Without either, the server
 	// refuses with the gate code and the hint names 'kube login'.
-	workSessionID := kubeConfigFlags.workSession
+	workSessionID := flags.workSession
 	if workSessionID == "" {
 		workSessionID = os.Getenv(worksession.WorkSessionEnvVar)
 	}
 
-	path, err := kubeconfig.ResolvePath(kubeConfigFlags.kubeconfig)
+	path, err := kubeconfig.ResolvePath(flags.kubeconfig)
 	if err != nil {
-		utils.CliErrorWithExit("Failed to find the kubeconfig: %s.", err)
+		return utils.NewExitError("Failed to find the kubeconfig: %s.", err)
 	}
 	// The file is opened, locked, and checked before the session exists: its
 	// token is handed out once, so a file it cannot be written to must be
 	// found out while there is still nothing to lose.
 	held, err := holdKubeconfig(path, func(msg string) { utils.CliErrorWithExit("%s", msg) })
 	if err != nil {
-		utils.CliErrorWithExit("Failed to open the kubeconfig: %s.", err)
+		return utils.NewExitError("Failed to open the kubeconfig: %s.", err)
 	}
 	defer held.done()
 
@@ -139,14 +147,13 @@ func runKubeConfig(cmd *cobra.Command, args []string) {
 		proxyPort:     proxyPort,
 		interrupted:   held.interrupt.fired.Load,
 	})
-	// The file is written or abandoned either way, so nothing below needs the
-	// lock, and a failed write to stdout cannot strand it.
-	held.done()
 	if err != nil {
-		exitKubeConfigError(err, clusterName, workSessionID)
+		return kubeConfigError(err, clusterName, workSessionID)
 	}
+	// A write to a closed pipe ends the process with SIGPIPE, skipping the defer and leaving the lock file.
+	held.done()
 
-	printKubeConfigResult(result, ac.Insecure)
+	return printKubeConfigResult(cmd.OutOrStdout(), result, ac.Insecure)
 }
 
 // interruptedMessage is how a command ends on a second Ctrl+C.
@@ -160,11 +167,8 @@ type heldKubeconfig struct {
 	release   func()
 }
 
-// holdKubeconfig opens and locks the kubeconfig at path and watches for
-// Ctrl+C. Every exit after it runs through os.Exit, which skips deferred
-// calls, so each releases the lock first, a second Ctrl+C included, before
-// quit ends the command with interruptedMessage: a lock left behind would
-// block kubectl's own writes to the file.
+// holdKubeconfig opens and locks the kubeconfig and watches for Ctrl+C. A second Ctrl+C exits from the
+// watcher, where no deferred done runs, so it releases the lock first, which kubectl's own writes wait on.
 func holdKubeconfig(path string, quit func(msg string)) (*heldKubeconfig, error) {
 	editor, err := kubeconfig.Open(path)
 	if err != nil {
@@ -222,35 +226,37 @@ func watchInterrupt(firstNotice string, quit func()) *interruptWatch {
 	return w
 }
 
-func exitKubeConfigError(err error, clusterName, workSessionID string) {
+func kubeConfigError(err error, clusterName, workSessionID string) error {
 	var lookupErr *clusterLookupError
 	if errors.As(err, &lookupErr) {
 		// The cluster list answers 404 only when the surface is off.
 		if kubernetes.IsSurfaceOff(lookupErr.err) {
-			exitNotEnabled()
+			return notEnabledError()
 		}
-		utils.CliErrorWithExit("Failed to find the cluster: %s.", lookupErr.err)
+		return utils.NewExitError("Failed to find the cluster: %s.", lookupErr.err)
 	}
 
-	exitKubeSessionError(err, clusterName, workSessionID, func(_ error, format string, args ...any) {
-		utils.CliErrorWithExit(format, args...)
-	})
+	// An empty operation keeps the command's name in the --output json envelope.
+	return kubeSessionError(err, clusterName, workSessionID, "")
 }
 
-// exitKubeSessionError reports a failure of openKubeSession through fail,
-// which ends the command: a WorkSession gate refusal exits 3 on its own, a
-// refusal the server names gets its hint, and anything else says the
-// kubeconfig was not written.
-func exitKubeSessionError(err error, clusterName, workSessionID string, fail func(err error, format string, args ...any)) {
+// kubeSessionError is openKubeSession's failure, an envelope under operation: a gate refusal exits 3, a
+// refusal the server names gets its hint, and anything else says the kubeconfig was not written.
+func kubeSessionError(err error, clusterName, workSessionID, operation string) error {
+	fail := func(err error, format string, args ...any) error {
+		return utils.NewEnvelopeExitError(operation, err, format, args...)
+	}
 	var createErr *sessionCreateError
 	if errors.As(err, &createErr) {
-		utils.HandleWorkSessionError(createErr.err, utils.OperationKube, clusterName, config.ResolveAuthMethod(), workSessionID)
-		if hint := kubeSessionErrorHint(createErr.err, clusterName); hint != "" {
-			fail(createErr.err, "Failed to open a kube session: %s.", hint)
+		if gateErr := utils.WorkSessionExitError(createErr.err, utils.OperationKube, clusterName, config.ResolveAuthMethod(), workSessionID); gateErr != nil {
+			return gateErr
 		}
-		fail(createErr.err, "Failed to open a kube session: %s.", utils.InteractiveOnly(createErr.err, "open a kube session"))
+		if hint := kubeSessionErrorHint(createErr.err, clusterName); hint != "" {
+			return fail(createErr.err, "Failed to open a kube session: %s.", hint)
+		}
+		return fail(createErr.err, "Failed to open a kube session: %s.", utils.InteractiveOnly(createErr.err, "open a kube session"))
 	}
-	fail(err, "The kubeconfig was not written: %s.", err)
+	return fail(err, "The kubeconfig was not written: %s.", err)
 }
 
 // kubeSessionErrorHint says what to do about a refusal the server names with
@@ -269,6 +275,8 @@ func kubeSessionErrorHint(err error, clusterName string) string {
 		return "the cluster's agent did not accept the session, so it was closed; try again"
 	case utils.KubeSessionPrincipalNotSupported:
 		return "this account has no user name a kube session can act as; log in as a user"
+	case utils.ClusterRBACDrift:
+		return fmt.Sprintf("cluster %s has RBAC bindings outside Alpacon that grant sessions more than Alpacon does, and the workspace policy refuses new sessions on it until a cluster admin removes them", clusterName)
 	}
 	return ""
 }
@@ -374,16 +382,18 @@ func openKubeSession(ac *client.AlpaconClient, editor *kubeconfig.Editor, opts k
 	}
 
 	return &kubeConfigResult{
-		Context:         entry.Name,
-		Kubeconfig:      opts.kubeconfig,
-		KubeSessionID:   session.ID,
-		ClusterID:       clusterID,
-		WorkSessionID:   opts.workSessionID,
-		ProxyURL:        session.ProxyURL,
-		TokenExpiresAt:  session.TokenExpiredAt,
-		PreviousContext: previous,
-		replacedServer:  replaced,
-		plaintext:       plaintext,
+		Context:          entry.Name,
+		Kubeconfig:       opts.kubeconfig,
+		KubeSessionID:    session.ID,
+		ClusterID:        clusterID,
+		WorkSessionID:    opts.workSessionID,
+		ProxyURL:         session.ProxyURL,
+		TokenExpiresAt:   session.TokenExpiredAt,
+		PreviousContext:  previous,
+		RBACDriftWarning: session.RBACDriftWarning,
+		clusterName:      opts.clusterName,
+		replacedServer:   replaced,
+		plaintext:        plaintext,
 	}, nil
 }
 
@@ -412,18 +422,19 @@ func validatePort(port int) error {
 	return nil
 }
 
-func printKubeConfigResult(result *kubeConfigResult, insecure bool) {
+func printKubeConfigResult(stdout io.Writer, result *kubeConfigResult, insecure bool) error {
 	printKubeConfigWarnings(result, insecure)
 
 	if utils.OutputFormat == utils.OutputFormatJSON {
-		if err := utils.PrintJSONValue(os.Stdout, result); err != nil {
-			utils.CliErrorWithExit("Failed to print the result: %s.", err)
+		if err := utils.PrintJSONValue(stdout, result); err != nil {
+			return utils.NewExitError("Failed to print the result: %s.", err)
 		}
-		return
+		return nil
 	}
 
 	utils.CliInfo("Context %q written to %s (token expires %s).", result.Context, result.Kubeconfig, formatTime(&result.TokenExpiresAt, time.Local))
 	printKubeConfigNext(result)
+	return nil
 }
 
 // printKubeConfigWarnings says what about the written context the user may
@@ -441,6 +452,30 @@ func printKubeConfigWarnings(result *kubeConfigResult, insecure bool) {
 	if kubeconfig.Shadowed(result.Kubeconfig) {
 		utils.CliWarning("KUBECONFIG lists files before %s; kubectl takes current-context and %s from the first file that sets them.", result.Kubeconfig, result.Context)
 	}
+	if line := rbacDriftWarningLine(result.clusterName, result.RBACDriftWarning); line != "" {
+		utils.CliWarning("%s", line)
+	}
+}
+
+// rbacDriftWarningLine says that the session opened on a cluster whose RBAC
+// bindings made outside Alpacon widen what its identity may do, or returns ""
+// when the session carries no such warning. The session is open, so this is
+// information, not a failure. The counts are named when they can be read, as
+// a lower bound when the cluster's check did not finish.
+func rbacDriftWarningLine(clusterName string, raw json.RawMessage) string {
+	warning, present := kubernetes.ParseRBACDriftWarning(raw)
+	if !present {
+		return ""
+	}
+	detail := ""
+	if counts := kubernetes.ExternalGrantCounts(warning); counts != "" {
+		if warning.Incomplete {
+			detail = fmt.Sprintf(" (external grants: at least %s; the cluster's check did not finish)", counts)
+		} else {
+			detail = fmt.Sprintf(" (external grants: %s)", counts)
+		}
+	}
+	return fmt.Sprintf("Cluster %q has RBAC bindings made outside Alpacon that widen what this session's identity may do%s; the workspace policy allows the session anyway.", clusterName, detail)
 }
 
 func printKubeConfigNext(result *kubeConfigResult) {

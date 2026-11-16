@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -88,10 +87,21 @@ func TestBuildURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := BuildURL(tt.basePath, tt.relativePath, tt.params)
+			result, err := BuildURL(tt.basePath, tt.relativePath, tt.params)
+
+			require.NoError(t, err)
 			assert.Contains(t, result, tt.wantSuffix)
 		})
 	}
+}
+
+func TestBuildURL_ReturnsTheParseErrorForABaseThatIsNotAURL(t *testing.T) {
+	t.Parallel()
+
+	got, err := BuildURL("https://[::1", "/oauth/token", nil)
+
+	assert.Empty(t, got)
+	assert.EqualError(t, err, `parse "https://[::1": missing ']' in host`)
 }
 
 func TestSetQuery(t *testing.T) {
@@ -698,26 +708,6 @@ func TestSanitizeTerminalText(t *testing.T) {
 	}
 }
 
-func TestRequirePositiveIntExitsWithUsageErrorCode(t *testing.T) {
-	t.Parallel()
-	helper := osexec.Command(os.Args[0], "-test.run=^TestRequirePositiveIntHelperProcess$")
-	helper.Env = append(os.Environ(), "GO_WANT_REQUIRE_POSITIVE_INT_HELPER=1")
-
-	err := helper.Run()
-
-	var exitErr *osexec.ExitError
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, ExitCodeUsageError, exitErr.ExitCode())
-}
-
-// Serial: the child process reaches an os.Exit, and the parent's own run returns at once.
-func TestRequirePositiveIntHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_REQUIRE_POSITIVE_INT_HELPER") != "1" {
-		return
-	}
-	RequirePositiveInt("tail", 0)
-}
-
 func TestRequireSubcommandPrintsHelpAndPointsToIt(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -808,6 +798,51 @@ func TestSanitizeTerminalLine(t *testing.T) {
 	}
 }
 
+func TestSanitizeTerminalOneLine(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "folds line breaks and runs of space into one space",
+			input: "Add a guard\n\non line 23.   Then resend.",
+			want:  "Add a guard on line 23. Then resend.",
+		},
+		{
+			name:  "keeps a tab between words as a space",
+			input: "check\tpermissions",
+			want:  "check permissions",
+		},
+		{
+			name:  "keeps a carriage return between words as a space",
+			input: "first line\r\nsecond\rthird",
+			want:  "first line second third",
+		},
+		{
+			name:  "drops an ANSI escape without joining the words around it",
+			input: "rotate the key\x1b[2K now",
+			want:  "rotate the key now",
+		},
+		{
+			name:  "folds the double space an escape between spaces leaves behind",
+			input: "rotate the key \x1b[2K now",
+			want:  "rotate the key now",
+		},
+		{
+			name:  "returns empty for whitespace only",
+			input: " \t\n ",
+			want:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, SanitizeTerminalOneLine(tt.input))
+		})
+	}
+}
+
 func TestSanitizeTerminalBlock(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -862,6 +897,77 @@ func TestSanitizeTerminalBlock(t *testing.T) {
 
 			assert.Equal(t, tt.wantClean, clean)
 			assert.Equal(t, tt.wantAltered, altered)
+		})
+	}
+}
+
+func TestRejectUnknownSubcommandRefusesAWordWithNotesAndCloseNames(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		notes []string
+		word  string
+		want  string
+	}{
+		{name: "close word", word: "lst", want: "unknown command \"lst\" for \"group\"\n\nDid you mean this?\n\tls\n"},
+		{name: "far word", word: "zzzzzz", want: "unknown command \"zzzzzz\" for \"group\""},
+		{name: "note on a far word", notes: []string{"guidance"}, word: "zzzzzz", want: "unknown command \"zzzzzz\" for \"group\"\nguidance"},
+		{name: "note before close names", notes: []string{"guidance"}, word: "lst", want: "unknown command \"lst\" for \"group\"\nguidance\n\nDid you mean this?\n\tls\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			group := &cobra.Command{Use: "group"}
+			group.AddCommand(&cobra.Command{Use: "ls", Run: func(*cobra.Command, []string) {}})
+
+			err := RejectUnknownSubcommand(tt.notes...)(group, []string{tt.word})
+
+			assert.EqualError(t, err, tt.want)
+		})
+	}
+}
+
+func TestRejectUnknownSubcommandPassesWhenNoWordIsGiven(t *testing.T) {
+	t.Parallel()
+	group := &cobra.Command{Use: "group"}
+	group.AddCommand(&cobra.Command{Use: "ls", Run: func(*cobra.Command, []string) {}})
+
+	err := RejectUnknownSubcommand("guidance")(group, nil)
+
+	assert.NoError(t, err)
+}
+
+func TestParseIntList(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		input   string
+		want    []int
+		wantErr bool
+	}{
+		{"one index", "1", []int{1}, false},
+		{"indexes with spaces", " 1, 2 ,3", []int{1, 2, 3}, false},
+		{"a word among them", "1,x", nil, true},
+		{"empty input", "", nil, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := ParseIntList(tt.input)
+
+			if !tt.wantErr {
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, got)
+				return
+			}
+			exitErr, ok := errors.AsType[*ExitError](err)
+			require.True(t, ok, "want an ExitError, got %v", err)
+			assert.Equal(t, ExitCodeGeneralError, exitErr.Code)
+			assert.Equal(t, "Invalid input: only integers allowed.", exitErr.Error())
+			assert.True(t, exitErr.footer, "the failure keeps its report-an-issue footer")
+			assert.Nil(t, got)
 		})
 	}
 }

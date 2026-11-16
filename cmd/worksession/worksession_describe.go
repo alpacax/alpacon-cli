@@ -22,24 +22,23 @@ var workSessionDescribeCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 	Example: `  alpacon work-session describe 550e8400-e29b-41d4-a716-446655440000
   alpacon work-session desc 550e8400-e29b-41d4-a716-446655440000`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opDescribe, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewEnvelopeExitError(opDescribe, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
 			body, err := wsapi.GetWorkSessionRaw(ac, args[0])
 			if err != nil {
-				utils.CliErrorEnvelopeWithExit(opDescribe, err, "Failed to retrieve work session: %s.", err)
+				return utils.NewEnvelopeExitError(opDescribe, err, "Failed to retrieve work session: %s.", err)
 			}
-			utils.PrintJson(body)
-			return
+			return utils.PrintJson(body)
 		}
 
 		session, err := wsapi.GetWorkSession(ac, args[0])
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opDescribe, err, "Failed to retrieve work session: %s.", err)
+			return utils.NewEnvelopeExitError(opDescribe, err, "Failed to retrieve work session: %s.", err)
 		}
 
 		createdBy := ""
@@ -65,8 +64,8 @@ var workSessionDescribeCmd = &cobra.Command{
 			{"Status", session.Status},
 			{"Requester type", session.RequesterType},
 			{"Scopes", strings.Join(session.Scopes, ", ")},
-			{"Servers", strings.Join(wsapi.ServerNames(session), ", ")},
-			{"Clusters", strings.Join(wsapi.ClusterNames(session), ", ")},
+			{"Servers", wsapi.ServerList(session)},
+			{"Clusters", wsapi.ClusterList(session)},
 			{"Created by", createdBy},
 			{"Assigned user", assignedUser},
 			{"Expires at", wsapi.FormatExpiresAt(session.ExpiresAt)},
@@ -75,7 +74,9 @@ var workSessionDescribeCmd = &cobra.Command{
 			{"Added at", session.AddedAt.Local().Format("2006-01-02 15:04")},
 		}
 
-		utils.PrintTable(rows)
+		if err := utils.PrintTable(rows); err != nil {
+			return err
+		}
 
 		if block := formatAdjustments(session.Adjustments); block != "" {
 			fmt.Printf("\nAdjustments:\n%s\n", block)
@@ -83,5 +84,6 @@ var workSessionDescribeCmd = &cobra.Command{
 		if block := formatRecommendations(session.Recommendations); block != "" {
 			fmt.Printf("\nRecommendations:\n%s\n", block)
 		}
-	},
+		return nil
+	}),
 }

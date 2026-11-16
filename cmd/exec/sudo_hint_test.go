@@ -250,7 +250,7 @@ func TestPendingSudoDenial(t *testing.T) {
 			wantHintContains: "--title",
 		},
 		{
-			// HandlePendingApproval's own message already says "re-run after
+			// pendingApprovalFailure's own message already says "re-run after
 			// approval", so returning this entry's guidance would print it twice.
 			name:        "withholds the hint for a code whose only way out is the wait",
 			output:      denialLine("SUDO_APPROVAL_REQUIRED"),
@@ -587,7 +587,7 @@ func TestPendingSudoDenialDefersToTheServerHint(t *testing.T) {
 	assert.Contains(t, hint, "--title")
 }
 
-// TestRemoteFailureReportDefersToTheServerHint drives what HandleCommandResult
+// TestRemoteFailureReportDefersToTheServerHint drives what commandResultFailure
 // prints for a failed command. The server's hint carries no punctuation rule,
 // so one ending in "!" or in nothing at all still stands in for the local
 // sentence, over a terminal's CRLF line endings as well.

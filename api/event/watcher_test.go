@@ -523,3 +523,31 @@ func TestWatcher_SessionCreateRetryableStatusIsRetried(t *testing.T) {
 		})
 	}
 }
+
+func TestWatcher_StopEndsTheListenerWhileTheSubscriptionGoesUnanswered(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		mux := http.NewServeMux()
+		ts := testutil.NewPipeServer(t, mux)
+		mux.HandleFunc("POST "+eventSessionsURL, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(EventSessionResponse{ID: "session", WebsocketURL: ts.WebsocketURL("/ws/"), ChannelID: "channel"})
+		})
+		mux.HandleFunc(eventSubscriptionsURL, func(http.ResponseWriter, *http.Request) { <-release })
+		upgrader := websocket.Upgrader{}
+		mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {
+			if conn, err := upgrader.Upgrade(w, r, nil); err == nil {
+				holdOpen(conn, 0)
+			}
+		})
+		w := NewWatcher(&client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, "work_session", "ws-uuid")
+		w.Start()
+		connected := w.WaitConnected(time.Second)
+
+		w.Close() // a subscription request Stop cannot cancel leaves this blocked: the bubble deadlocks
+
+		assert.False(t, connected)
+		close(release)
+	})
+}

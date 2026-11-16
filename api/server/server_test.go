@@ -12,8 +12,9 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api"
-	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -41,7 +42,6 @@ func TestGetServerList_PaginationBug(t *testing.T) {
 					ID:       fmt.Sprintf("id-%d", i),
 					Name:     fmt.Sprintf("server-%d", i),
 					RemoteIP: "10.0.0.1",
-					Owner:    types.UserSummary{Name: "admin"},
 				})
 			}
 		case "2":
@@ -50,7 +50,6 @@ func TestGetServerList_PaginationBug(t *testing.T) {
 					ID:       fmt.Sprintf("id-p2-%d", i),
 					Name:     fmt.Sprintf("server-p2-%d", i),
 					RemoteIP: "10.0.0.2",
-					Owner:    types.UserSummary{Name: "admin"},
 				})
 			}
 		}
@@ -423,8 +422,12 @@ func TestGetRegistrationTokenAttributes_ExpiresNever(t *testing.T) {
 	if len(attrs) != 1 {
 		t.Fatalf("expected 1 attribute, got %d", len(attrs))
 	}
-	if attrs[0].ExpiresAt != "never" {
+	if attrs[0].ExpiresAt.String() != "never" {
 		t.Errorf("expected ExpiresAt %q, got %q", "never", attrs[0].ExpiresAt)
+	}
+	body, err := json.Marshal(attrs[0].ExpiresAt)
+	if err != nil || string(body) != "null" {
+		t.Errorf("expected expires_at null in JSON, got %s (err %v)", body, err)
 	}
 }
 
@@ -690,6 +693,45 @@ func TestGetServerIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 	}
 }
 
+func TestGetServerByName_ReturnsTheIDAndWhetherPathsFollowWindowsRules(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		id          string
+		platform    string
+		wantWindows bool
+		wantErr     bool
+	}{
+		{name: "windows server", id: "id-1", platform: "windows", wantWindows: true},
+		{name: "linux server", id: "id-1", platform: "debian"},
+		{name: "no platform reported", id: "id-1"},
+		{name: "padded id", id: " id-1 ", platform: "windows", wantWindows: true},
+		{name: "parent traversal id", id: "../x", platform: "windows", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.ListResponse[ServerDetails]{Count: 1, Results: []ServerDetails{{ID: tt.id, Name: "my-server", Platform: tt.platform}}})
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			srv, err := GetServerByName(ac, "my-server")
+
+			if tt.wantErr {
+				require.ErrorIs(t, err, api.ErrUnusableID)
+				assert.Empty(t, srv.ID)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, "id-1", srv.ID)
+			assert.Equal(t, tt.wantWindows, srv.Windows())
+		})
+	}
+}
+
 func TestDeleteRegistrationToken_DeletesOnlyAOneSegmentTokenID(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ name, id, wantDelete string }{
@@ -742,4 +784,70 @@ func TestGetServerNames_WalksEveryPage(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"a": "web-01", "b": "web-02"}, names)
 	assert.Equal(t, 2, requests)
+}
+
+func TestGetServerListOutputsRowsWithoutOwner(t *testing.T) {
+	oldFormat := utils.OutputFormat
+	t.Cleanup(func() { utils.OutputFormat = oldFormat })
+	tests := []struct {
+		name        string
+		ownerSuffix string
+	}{
+		{name: "owner omitted"},
+		{name: "legacy owner ignored", ownerSuffix: `,"owner":{"name":"legacy-user"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"count":1,"results":[{"name":"my-server","remote_ip":"192.0.2.1","os_name":"Linux","os_version":"1","is_connected":true` + tt.ownerSuffix + `}]}`))
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			rows, err := GetServerList(ac)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+				t.Run(format, func(t *testing.T) {
+					utils.OutputFormat = format
+					output := testutil.CaptureStdout(t, func() { assert.NoError(t, utils.PrintTable(rows)) })
+					assert.NotContains(t, strings.ToLower(output), "owner")
+					assert.NotContains(t, output, "legacy-user")
+					assert.Contains(t, output, "my-server")
+					if format == utils.OutputFormatJSON {
+						assert.JSONEq(t, `[{"name":"my-server","ip":"192.0.2.1","os":"Linux 1","connected":true}]`, output)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestGetRegistrationTokenAttributes_JSONNormalizesExpiry(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/api/iam/groups/") {
+			_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"count":2,"results":[
+			{"id":"tok-1","name":"offset","expires_at":"2026-11-07T18:30:45+09:00","enabled":true},
+			{"id":"tok-2","name":"blank","expires_at":"","enabled":true}
+		]}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	attrs, err := GetRegistrationTokenAttributes(ac)
+	require.NoError(t, err)
+	body, err := json.Marshal(attrs)
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{"name":"offset","allowed_groups":"","expires_at":"2026-11-07T09:30:45Z","enabled":true},
+		{"name":"blank","allowed_groups":"","expires_at":null,"enabled":true}
+	]`, string(body))
+	assert.Equal(t, "2026-11-07T18:30:45+09:00", attrs[0].ExpiresAt.String())
+	assert.Empty(t, attrs[1].ExpiresAt.String(), "an empty expires_at keeps the blank cell it had before")
 }

@@ -12,6 +12,11 @@ import (
 	"slices"
 )
 
+const (
+	ServiceTokenAccountNotOwn     = "service_token_account_not_own"
+	ApplicationSystemUserNotFound = "application_system_user_not_found"
+)
+
 // Synthetic error_code values: the CLI's own, for failures the server sent no code for.
 const (
 	ErrorCodeUsage                = "usage_error" // local validation that never reached the server
@@ -134,6 +139,18 @@ type fieldsCarrier interface {
 	ErrorFields() map[string]any
 }
 
+// HasFieldErrorCode reports whether the server's field_errors list an entry for field with code.
+func HasFieldErrorCode(err error, field, code string) bool {
+	fieldErrors, _ := serverErrorFields(err)["field_errors"].(map[string]any)
+	entries, _ := fieldErrors[field].([]any)
+	for _, entry := range entries {
+		if item, ok := entry.(map[string]any); ok && item["code"] == code {
+			return true
+		}
+	}
+	return false
+}
+
 func serverErrorFields(err error) map[string]any {
 	for e := range errorChain(err) {
 		if carrier, ok := e.(fieldsCarrier); ok {
@@ -143,4 +160,12 @@ func serverErrorFields(err error) map[string]any {
 		}
 	}
 	return nil
+}
+
+// ServiceTokenAccountMessage describes the fixed account on a service token's ACL.
+func ServiceTokenAccountMessage(field string) string {
+	if field == "groupname" {
+		return "the group must be the token's application account's own group (code: " + ServiceTokenAccountNotOwn + ")"
+	}
+	return "the account must be the token's application account (code: " + ServiceTokenAccountNotOwn + ")"
 }

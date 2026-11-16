@@ -18,30 +18,34 @@ var authorityDownloadCrlCmd = &cobra.Command{
 	alpacon authority download-crl "Root CA" --out=/path/to/revoked.crl
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		authorityName := args[0]
 		filePath, _ := cmd.Flags().GetString("out")
 		if filePath == "" {
-			filePath = promptForCRL()
+			var err error
+			if filePath, err = promptForCRL(); err != nil {
+				return err
+			}
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		authorityID, err := cert.GetAuthorityIDByName(alpaconClient, authorityName)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to find authority: %s.", err)
+			return utils.NewExitError("Failed to find authority: %s.", err)
 		}
 
 		err = cert.DownloadCRL(alpaconClient, authorityID, filePath)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to download the CRL from authority: %s.", err)
+			return utils.NewExitError("Failed to download the CRL from authority: %s.", err)
 		}
 
 		utils.CliSuccess("CRL downloaded: %s", filePath)
-	},
+		return nil
+	}),
 }
 
 func init() {
@@ -49,6 +53,6 @@ func init() {
 	authorityDownloadCrlCmd.Flags().StringVarP(&filePath, "out", "o", "", "path where CRL should be stored")
 }
 
-func promptForCRL() string {
-	return utils.PromptForRequiredInput("Path to CRL file (e.g., /path/to/revoked.crl, recommended extension: .crl): ")
+func promptForCRL() (string, error) {
+	return utils.ReadRequiredInput("Path to CRL file (e.g., /path/to/revoked.crl, recommended extension: .crl): ")
 }

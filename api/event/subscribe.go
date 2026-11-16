@@ -47,9 +47,9 @@ type EventSubscriptionRequest struct {
 }
 
 // CreateEventSession creates a new event session and returns the WebSocket URL
-// and channel ID for subscribing to events.
-func CreateEventSession(ac *client.AlpaconClient) (*EventSessionResponse, error) {
-	respBody, err := ac.SendPostRequest(eventSessionsURL, struct{}{})
+// and channel ID for subscribing to events. ctx bounds the request.
+func CreateEventSession(ctx context.Context, ac *client.AlpaconClient) (*EventSessionResponse, error) {
+	respBody, err := ac.SendPostRequestWithContext(ctx, eventSessionsURL, struct{}{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create event session: %w", err)
 	}
@@ -64,15 +64,15 @@ func CreateEventSession(ac *client.AlpaconClient) (*EventSessionResponse, error)
 
 // SubscribeEvent subscribes the given channel to eventType events, scoped to targetID
 // (a websh session for sudo, a command for command_output, a work session for
-// work_session). An empty targetID is omitted, which only some event types allow.
-func SubscribeEvent(ac *client.AlpaconClient, channelID string, eventType EventType, targetID string) error {
+// work_session). An empty targetID is omitted, which only some event types allow. ctx bounds the request.
+func SubscribeEvent(ctx context.Context, ac *client.AlpaconClient, channelID string, eventType EventType, targetID string) error {
 	req := &EventSubscriptionRequest{
 		Channel:   channelID,
 		EventType: eventType,
 		TargetID:  targetID,
 	}
 
-	_, err := ac.SendPostRequest(eventSubscriptionsURL, req)
+	_, err := ac.SendPostRequestWithContext(ctx, eventSubscriptionsURL, req)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to %s events: %w", eventType, err)
 	}

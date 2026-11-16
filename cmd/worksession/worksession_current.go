@@ -2,6 +2,7 @@ package worksession
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -16,23 +17,27 @@ var workSessionCurrentCmd = &cobra.Command{
 	Use:     "current",
 	Short:   "Show the active work-session in this workspace",
 	Example: `  alpacon work-session current`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		// Checked before any client exists so an unset 'current' neither logs in nor refreshes a token.
 		if uuid, err := config.GetActiveWorkSession(); err != nil {
-			utils.CliErrorEnvelopeWithExit(opCurrent, err, "%s", err)
+			return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
 		} else if uuid == "" {
 			printNoActiveSession()
-			return
+			return nil
 		}
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			err = fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
-			utils.CliErrorEnvelopeWithExit(opCurrent, err, "%s", err)
+			return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
 		}
 		if err := printCurrent(ac); err != nil {
-			utils.CliErrorEnvelopeWithExit(opCurrent, err, "%s", err)
+			if exitErr, ok := errors.AsType[*utils.ExitError](err); ok { // PrintJson's failure names no operation
+				return exitErr
+			}
+			return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
 		}
-	},
+		return nil
+	}),
 }
 
 // RunCurrent returns the active work-session UUID and its server-side details.
@@ -87,8 +92,7 @@ func WriteCurrentRaw(ac *client.AlpaconClient, uuid string) error {
 	if json.Unmarshal(body, &session) == nil {
 		warnIfEnded(uuid, session.Status)
 	}
-	utils.PrintJson(body)
-	return nil
+	return utils.PrintJson(body)
 }
 
 // WriteCurrentTable projects the session through ProjectAttributes so the columns match
@@ -101,8 +105,7 @@ func WriteCurrentTable(ac *client.AlpaconClient, uuid string) error {
 	rows := []wsapi.WorkSessionAttributes{wsapi.ProjectAttributes(ws)}
 	MarkActive(rows, uuid)
 	warnIfEnded(uuid, ws.Status)
-	utils.PrintTable(rows)
-	return nil
+	return utils.PrintTable(rows)
 }
 
 func warnIfEnded(uuid, status string) {

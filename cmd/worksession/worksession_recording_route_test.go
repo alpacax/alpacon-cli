@@ -72,7 +72,6 @@ func recordingRouteServer(t *testing.T, recordsStatus int) (*httptest.Server, fu
 }
 
 func TestRecordingIndex_WalksTimelineOnceThenOnlyThatSessionsRecords(t *testing.T) {
-	t.Parallel()
 	ts, requests := recordingRouteServer(t, 0)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL,
@@ -104,7 +103,6 @@ func TestRecordingIndex_WalksTimelineOnceThenOnlyThatSessionsRecords(t *testing.
 }
 
 func TestRecordingIndex_PlanLimitOnRecordsRoute(t *testing.T) {
-	t.Parallel()
 	ts, _ := recordingRouteServer(t, http.StatusPaymentRequired)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL,
@@ -117,7 +115,6 @@ func TestRecordingIndex_PlanLimitOnRecordsRoute(t *testing.T) {
 }
 
 func TestRecordingIndex_PastLastTerminalMakesNoRecordsRequest(t *testing.T) {
-	t.Parallel()
 	ts, requests := recordingRouteServer(t, 0)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL,
@@ -132,7 +129,6 @@ func TestRecordingIndex_PastLastTerminalMakesNoRecordsRequest(t *testing.T) {
 }
 
 func TestRecordingIndex_BelowOneMakesNoRecordsRequest(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		index string
@@ -141,7 +137,6 @@ func TestRecordingIndex_BelowOneMakesNoRecordsRequest(t *testing.T) {
 		{name: "negative", index: "-1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			ts, requests := recordingRouteServer(t, 0)
 
 			stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL,
@@ -158,7 +153,6 @@ func TestRecordingIndex_BelowOneMakesNoRecordsRequest(t *testing.T) {
 }
 
 func TestRecordingIndex_TerminalWithoutRecording(t *testing.T) {
-	t.Parallel()
 	ts, _ := recordingRouteServer(t, 0)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL,
@@ -170,7 +164,6 @@ func TestRecordingIndex_TerminalWithoutRecording(t *testing.T) {
 }
 
 func TestRecordingIndex_SessionWithoutTerminals(t *testing.T) {
-	t.Parallel()
 	ts, requests := recordingRouteServer(t, 0)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL,
@@ -185,7 +178,6 @@ func TestRecordingIndex_SessionWithoutTerminals(t *testing.T) {
 }
 
 func TestRecordingIndex_RecordsRouteServerError(t *testing.T) {
-	t.Parallel()
 	ts, _ := recordingRouteServer(t, http.StatusInternalServerError)
 
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL,

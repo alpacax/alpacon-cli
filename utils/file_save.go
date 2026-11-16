@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"time"
 )
 
@@ -121,16 +120,15 @@ func warnKeptWiderMode(fileName string, replacing bool, keptPerm, newFilePerm os
 }
 
 // keptModeIsWider reports whether keptPerm leaves the content readable to
-// accounts newFilePerm would shut out. Windows has no Unix modes—os.Stat
-// synthesizes 0666 for every file without the read-only attribute—so the
-// comparison would fire on every overwrite there, and removing the file is no
-// remedy for an ACL anyway.
+// accounts newFilePerm would shut out. On Windows os.Stat synthesizes 0666 for
+// every file without the read-only attribute, so the comparison would fire on
+// every overwrite there, and removing the file is no remedy for an ACL anyway.
 //
 // newFilePerm is the mode a new file is requested at, before the umask narrows
 // it, so a restrictive umask can only silence a warning that was due—never
 // invent one.
 func keptModeIsWider(keptPerm, newFilePerm os.FileMode) bool {
-	if runtime.GOOS == "windows" {
+	if !HasUnixModes() {
 		return false
 	}
 	const groupOtherRead = os.FileMode(0044)

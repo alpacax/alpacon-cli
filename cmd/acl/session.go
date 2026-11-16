@@ -37,17 +37,22 @@ var (
 	now                = time.Now
 )
 
-func openLedger() *ledgerSession {
+func openLedger() (*ledgerSession, error) {
 	session, err := newLedgerSession()
 	if err != nil {
-		utils.CliErrorWithExit("%s", sentence(upperFirst(err.Error())))
+		return nil, utils.NewExitError("%s", sentence(upperFirst(err.Error())))
 	}
-	return session
+	return session, nil
 }
 
 // newLedgerSession checks the workspace uses the ledger, authorizes the signer
 // when nothing usable is cached, and confirms the Command ACL admin role here.
 func newLedgerSession() (*ledgerSession, error) {
+	return newLedgerSessionWithCheck(nil)
+}
+
+// newLedgerSessionWithCheck validates workspace data before contacting the signer.
+func newLedgerSessionWithCheck(check func(*ledgerSession) error) (*ledgerSession, error) {
 	cfg, err := loadConfig()
 	if err != nil {
 		return nil, errors.New("not logged in. Run 'alpacon login' first")
@@ -65,6 +70,13 @@ func newLedgerSession() (*ledgerSession, error) {
 	}
 	workspaceID := envInfo.Auth0.WorkspaceID
 
+	session := &ledgerSession{workspaceID: workspaceID, workspaceURL: cfg.WorkspaceURL}
+	if check != nil {
+		if err := check(session); err != nil {
+			return nil, err
+		}
+	}
+
 	target := config.SignerTarget{URL: client.SignerURL(), Audience: client.SignerAudience()}
 	if err = client.CheckSignerURL(target.URL); err != nil {
 		return nil, err
@@ -78,13 +90,9 @@ func newLedgerSession() (*ledgerSession, error) {
 		}
 	}
 
-	session := &ledgerSession{
-		signer:       client.NewSignerClient(token),
-		token:        token,
-		fresh:        !cached,
-		workspaceID:  workspaceID,
-		workspaceURL: cfg.WorkspaceURL,
-	}
+	session.signer = client.NewSignerClient(token)
+	session.token = token
+	session.fresh = !cached
 
 	capability, err := acl.GetCapability(session.signer)
 	if err != nil {
@@ -175,9 +183,9 @@ func (s *ledgerSession) workspaceAPI() (*client.AlpaconClient, error) {
 	return ac, nil
 }
 
-func (s *ledgerSession) fail(action string, err error) {
+func (s *ledgerSession) fail(action string, err error) error {
 	s.dropRefusedToken(err)
-	utils.CliErrorWithExit("%s", s.errorMessage(action, err))
+	return utils.NewExitError("%s", s.errorMessage(action, err))
 }
 
 // dropRefusedToken removes the cached signer token after the signer answered

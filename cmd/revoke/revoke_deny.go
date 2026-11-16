@@ -15,19 +15,20 @@ var revokeDenyCmd = &cobra.Command{
 	`,
 	Example: `alpacon revoke deny 550e8400-e29b-41d4-a716-446655440000`,
 	Args:    cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		requestId := args[0]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		_, err = cert.DenyRevokeRequest(alpaconClient, requestId)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to deny the revoke request: %s.", err)
+			return utils.NewExitError("Failed to deny the revoke request: %s.", err)
 		}
 
 		utils.CliSuccess("Revoke request denied. Run 'alpacon revoke ls' to verify status.")
-	},
+		return nil
+	}),
 }

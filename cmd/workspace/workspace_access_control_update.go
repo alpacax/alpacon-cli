@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"errors"
+
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/client"
@@ -23,25 +25,28 @@ from the CLI; edits that tighten these settings or leave them unchanged are save
 	Example: `
 	alpacon workspace access-control update
 	alpacon ws acl update`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if !utils.IsInteractiveShell() {
-			utils.CliErrorWithExit("This command requires an interactive terminal.")
+			return utils.NewExitError("This command requires an interactive terminal.")
 		}
 
 		// No IsSaaS() gate, unlike the sibling authentication update: the server
 		// serves access-control on self-hosted workspaces too.
 		if _, err := config.LoadConfig(); err != nil {
-			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+			return utils.NewExitError("Not logged in. Run 'alpacon login' first.")
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		data, err := workspace.EditAccessControl(alpaconClient)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to prepare access control update: %s.", err)
+			if utils.ReportNoChanges(err) {
+				return nil
+			}
+			return utils.NewExitError("Failed to prepare access control update: %s.", err)
 		}
 
 		var accessControlDetail []byte
@@ -52,11 +57,14 @@ from the CLI; edits that tighten these settings or leave them unchanged are save
 				return err
 			}))
 			if err != nil {
-				utils.CliErrorWithExit("Failed to update access control settings: %s.", err)
+				if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+					return exitErr
+				}
+				return utils.NewExitError("Failed to update access control settings: %s.", err)
 			}
 		}
 
 		utils.CliSuccess("Access control settings updated.")
-		utils.PrintJson(accessControlDetail)
-	},
+		return utils.PrintJson(accessControlDetail)
+	}),
 }

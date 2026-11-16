@@ -2,18 +2,24 @@ package kube
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/alpacax/alpacon-cli/pkg/kubeconfig"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -503,6 +509,42 @@ func TestResumeActionKeepsTheKubeconfigAndProxy(t *testing.T) {
 				t.Skip("quoting follows the platform's shell")
 			}
 			assert.Equal(t, tt.want, resumeAction(tt.in, "ws-1").Command)
+		})
+	}
+}
+
+func TestWaitForWorkSessionReturnsARefusalInsteadOfExiting(t *testing.T) {
+	cases := []struct {
+		name     string
+		status   int
+		body     string
+		wantCode int
+		wantText string
+	}{
+		{name: "rejected", status: http.StatusOK, body: `{"id":"550e8400-e29b-41d4-a716-446655440000","status":"rejected"}`, wantCode: utils.ExitCodeNotApproved, wantText: "work session was rejected"},
+		{name: "polling_failed", status: http.StatusBadRequest, body: `{"detail":"bad"}`, wantCode: utils.ExitCodeGeneralError, wantText: "polling failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			ws := &wsapi.WorkSession{ID: "550e8400-e29b-41d4-a716-446655440000", Status: "pending"}
+			in := kubeLoginInput{cluster: "prod-east", waitTimeout: time.Minute}
+
+			var err error
+			_, stderr := testutil.CaptureOutput(t, func() { _, err = waitForWorkSession(ac, in, ws, true) })
+
+			var exitErr *utils.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, tc.wantCode, exitErr.Code)
+			var failure strings.Builder
+			utils.FprintExitError(&failure, exitErr)
+			assert.Contains(t, stderr+failure.String(), tc.wantText) // what cmd.Execute leaves on stderr
 		})
 	}
 }

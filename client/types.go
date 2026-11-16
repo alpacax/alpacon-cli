@@ -3,12 +3,15 @@ package client
 import (
 	"net/http"
 	"sync"
+
+	"github.com/alpacax/alpacon-cli/config"
 )
 
 type AlpaconClient struct {
 	HTTPClient    *http.Client
 	BaseURL       string
 	WorkspaceName string // the workspace BaseURL points at; config can be rewritten mid-flight
+	BaseDomain    string // loaded with BaseURL, so console links use the same workspace identity
 	Token         string
 	accessToken   string
 	Privileges    string
@@ -32,8 +35,10 @@ type AlpaconClient struct {
 	// has no timeout (no HTTP client on that path sets one), so it never runs under tokenMu,
 	// which every request takes.
 	refreshMu sync.Mutex
-	loadOnce  sync.Once
-	loadErr   error
+	// login pins the identity across refreshes, including rotations on disk.
+	login    *config.Config
+	loadOnce sync.Once
+	loadErr  error
 }
 
 type RawResponse struct {

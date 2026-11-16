@@ -2,8 +2,12 @@ package kube
 
 import (
 	"bytes"
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api/kubernetes"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,7 +17,7 @@ import (
 // the package-level KubeCmd; cmd/kube_gate_test.go covers the real tree.
 func newGateTree() (root, real *cobra.Command) {
 	root = &cobra.Command{Use: "alpacon", Run: func(*cobra.Command, []string) {}}
-	real = &cobra.Command{Use: "kube", Aliases: []string{"k8s", "clusters"}, Short: "Access Kubernetes clusters", Args: cobra.NoArgs}
+	real = &cobra.Command{Use: "kube", Aliases: []string{"k8s", "clusters"}, Short: "Access Kubernetes clusters"}
 	real.AddCommand(&cobra.Command{Use: "ls", Run: func(*cobra.Command, []string) {}})
 	real.AddCommand(&cobra.Command{Use: "describe CLUSTER", Run: func(*cobra.Command, []string) {}})
 	root.AddCommand(real)
@@ -99,7 +103,7 @@ func TestApplySurfaceGate_DisabledKeepsAPassThroughChild(t *testing.T) {
 	keep := &cobra.Command{Use: "credentials", Hidden: true, Run: func(*cobra.Command, []string) { ran = true }}
 	real.AddCommand(keep)
 
-	applySurfaceGate(root, real, false, keep)
+	applySurfaceGate(root, real, false, keep.Name())
 
 	found, _, err := root.Find([]string{"kube", "credentials", "--cluster", "prod-east"})
 	require.NoError(t, err)
@@ -110,28 +114,96 @@ func TestApplySurfaceGate_DisabledKeepsAPassThroughChild(t *testing.T) {
 	assert.True(t, ran, "the kept child runs instead of the not-enabled notice")
 }
 
-// Serial: it moves the package-level commands, and puts them back afterwards.
 func TestApplySurfaceGate_DisabledKeepsCredentialsAndLogout(t *testing.T) {
+	t.Parallel()
 	root := &cobra.Command{Use: "alpacon"}
-	root.AddCommand(KubeCmd)
-	t.Cleanup(func() {
-		for _, parent := range []*cobra.Command{kubeCredentialsCmd.Parent(), kubeLogoutCmd.Parent()} {
-			if parent != nil && parent != KubeCmd {
-				parent.RemoveCommand(kubeCredentialsCmd, kubeLogoutCmd)
-			}
-		}
-		KubeCmd.AddCommand(kubeCredentialsCmd, kubeLogoutCmd)
-		root.RemoveCommand(KubeCmd)
-	})
+	real := newKubeCmd(nil)
+	root.AddCommand(real)
+	kept := map[string]*cobra.Command{}
+	for _, name := range []string{"credentials", "logout", "sessions"} {
+		found, _, err := real.Find([]string{name})
+		require.NoError(t, err)
+		kept[name] = found
+	}
 
-	ApplySurfaceGate(root, false)
+	applySurfaceGate(root, real, false, gatePassThrough...)
 
-	for path, want := range map[string]*cobra.Command{"credentials": kubeCredentialsCmd, "logout": kubeLogoutCmd} {
+	for _, path := range []string{"credentials", "logout"} {
 		found, _, err := root.Find([]string{"kube", path})
 		require.NoError(t, err)
-		assert.Same(t, want, found)
+		assert.Same(t, kept[path], found)
 	}
 	found, _, err := root.Find([]string{"kube", "sessions"})
 	require.NoError(t, err)
-	assert.NotSame(t, kubeSessionsCmd, found, "sessions needs the workspace, so the stand-in answers it")
+	assert.NotSame(t, kept["sessions"], found, "sessions needs the workspace, so the stand-in answers it")
+}
+
+// 'alpacon help kube', by name or alias and with a subcommand, returns the
+// not-enabled failure for cmd.Execute to print.
+func TestApplySurfaceGate_DisabledHelpTopicReturnsNotEnabled(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{{"help", "kube"}, {"help", "k8s", "ls"}} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			t.Parallel()
+			root, real := newGateTree()
+			applySurfaceGate(root, real, false)
+			var out bytes.Buffer
+			root.SetOut(&out)
+			root.SetErr(&out)
+			root.SilenceErrors, root.SilenceUsage = true, true // as RootCmd sets them
+			root.SetArgs(args)
+
+			err := root.Execute()
+
+			exitErr, ok := errors.AsType[*utils.ExitError](err)
+			require.True(t, ok, "want an ExitError, got %v", err)
+			assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
+			assert.Equal(t, kubernetes.SurfaceNotEnabledMessage, exitErr.Error())
+			assert.Empty(t, out.String())
+		})
+	}
+}
+
+func TestApplySurfaceGate_DisabledHelpTopicOfKeptChildPrintsHelp(t *testing.T) {
+	t.Parallel()
+	root, real := newGateTree()
+	real.AddCommand(&cobra.Command{Use: "logout", Short: "Remove kube contexts", Run: func(*cobra.Command, []string) {}})
+	applySurfaceGate(root, real, false, "logout")
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"help", "kube", "logout"})
+
+	err := root.Execute()
+
+	require.NoError(t, err)
+	assert.Contains(t, out.String(), "Remove kube contexts")
+}
+
+func TestApplySurfaceGate_DisabledHelpTopicOfOtherCommandPrintsHelp(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "another command", args: []string{"help", "server"}, want: "Manage registered servers"},
+		{name: "unknown topic", args: []string{"help", "bogus"}, want: "Unknown help topic"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			root, real := newGateTree()
+			applySurfaceGate(root, real, false)
+			var out bytes.Buffer
+			root.SetOut(&out)
+			root.SetErr(&out)
+			root.SetArgs(tt.args)
+
+			err := root.Execute()
+
+			require.NoError(t, err)
+			assert.Contains(t, out.String(), tt.want)
+			assert.NotContains(t, out.String(), kubernetes.SurfaceNotEnabledMessage)
+		})
+	}
 }

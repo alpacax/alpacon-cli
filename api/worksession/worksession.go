@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,13 +42,15 @@ func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType, assigne
 // ProjectAttributes converts a WorkSession into its table row.
 func ProjectAttributes(ws *WorkSession) WorkSessionAttributes {
 	return WorkSessionAttributes{
-		ID:          ws.ID,
-		Description: utils.TruncateString(ws.Description, 70),
-		Status:      ws.Status,
-		Scopes:      strings.Join(ws.Scopes, ", "),
-		Servers:     strings.Join(ServerNames(ws), ", "),
-		Clusters:    strings.Join(ClusterNames(ws), ", "),
-		ExpiresAt:   FormatExpiresAt(ws.ExpiresAt),
+		ID:             ws.ID,
+		Description:    utils.Truncate(ws.Description, 70),
+		Status:         ws.Status,
+		Scopes:         strings.Join(ws.Scopes, ", "),
+		Servers:        utils.Annotate(strings.Join(ServerNames(ws), ", "), ServerList(ws)),
+		Clusters:       utils.Annotate(strings.Join(ClusterNames(ws), ", "), ClusterList(ws)),
+		ExpiresAt:      utils.NewTimestamp(ws.ExpiresAt, FormatExpiresAt(ws.ExpiresAt)),
+		ServersHidden:  ws.ServersHidden,
+		ClustersHidden: ws.ClustersHidden,
 	}
 }
 
@@ -76,6 +79,23 @@ func ClusterNames(ws *WorkSession) []string {
 		names[i] = c.Name
 	}
 	return names
+}
+
+// ServerList is the servers ws targets as one line for a reader, saying how many more the
+// caller does not reach, such as "web-1 and 1 more".
+func ServerList(ws *WorkSession) string {
+	return utils.JoinReached(ServerNames(ws), ws.ServersHidden, "server")
+}
+
+// ClusterList is ServerList for the cluster a kube session targets.
+func ClusterList(ws *WorkSession) string {
+	return utils.JoinReached(ClusterNames(ws), ws.ClustersHidden, "cluster")
+}
+
+// IsClusterSession reports whether ws targets a cluster, counting one the caller does not
+// reach, which the server leaves out of Clusters.
+func IsClusterSession(ws *WorkSession) bool {
+	return len(ws.Clusters) > 0 || utils.HiddenCount(ws.ClustersHidden) > 0
 }
 
 // TargetsCluster reports whether ws names clusterID among its targets.
@@ -173,11 +193,16 @@ func UpdateWorkSession(ac *client.AlpaconClient, id string, req WorkSessionUpdat
 }
 
 func GetWorkSession(ac *client.AlpaconClient, id string) (*WorkSession, error) {
+	return GetWorkSessionWithContext(context.Background(), ac, id)
+}
+
+// GetWorkSessionWithContext is GetWorkSession bounded by ctx.
+func GetWorkSessionWithContext(ctx context.Context, ac *client.AlpaconClient, id string) (*WorkSession, error) {
 	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
 		return nil, err
 	}
-	body, err := ac.SendGetRequest(api.IDURL(workSessionURL, pathID, "", nil))
+	body, err := ac.SendGetRequestWithContext(ctx, api.IDURL(workSessionURL, pathID, "", nil))
 	if err != nil {
 		return nil, err
 	}

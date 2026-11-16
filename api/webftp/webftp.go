@@ -55,7 +55,8 @@ func GetWebFTPLogList(ac *client.AlpaconClient, tail int, serverName string, use
 			Success:  entry.Success,
 			User:     entryUserName,
 			RemoteIP: entry.RemoteIP,
-			AddedAt:  utils.TimeUtils(entry.AddedAt),
+			Message:  entry.Message,
+			AddedAt:  utils.RelativeTime(entry.AddedAt),
 		})
 	}
 

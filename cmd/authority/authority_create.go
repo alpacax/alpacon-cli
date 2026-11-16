@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/alpacax/alpacon-cli/api/cert"
-	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -17,50 +16,66 @@ var authorityCreateCmd = &cobra.Command{
 	Short: "Create a new certificate authority",
 	Long: `
   	Initializes a new certificate authority within the system, allowing you to sign and manage certificates and define their policies.
+
+	CA creation requires an Alpacon API that accepts requests without an owner field.
 	`,
 	Example: `alpacon authority create`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		authorityRequest := promptForAuthority(alpaconClient)
+		authorityRequest, err := promptForAuthority(alpaconClient)
+		if err != nil {
+			return err
+		}
 
 		response, err := cert.CreateAuthority(alpaconClient, authorityRequest)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to create the new authority: %s.", err)
+			return utils.NewExitError("Failed to create the new authority: %s.", err)
 		}
 
 		installAuthorityInfo(response)
-	},
+		return nil
+	}),
 }
 
-func promptForAuthority(ac *client.AlpaconClient) cert.AuthorityRequest {
+func promptForAuthority(ac *client.AlpaconClient) (cert.AuthorityRequest, error) {
 	var authorityRequest cert.AuthorityRequest
+	var err error
 
-	authorityRequest.Name = utils.PromptForRequiredInput("Common name for the CA. (e.g., AlpacaX Root CA): ")
-	authorityRequest.Organization = utils.PromptForRequiredInput("Organization name that this CA belongs to. (e.g., AlpacaX): ")
-	authorityRequest.Domain = utils.PromptForRequiredInput("Domain name of the root certificate: ")
-	authorityRequest.RootValidDays = utils.PromptForIntInput("Root certificate validity in days (default: 3650): ", 365*10)
-	authorityRequest.DefaultValidDays = utils.PromptForIntInput("Child certificate validity in days (default: 365): ", 365)
-	authorityRequest.MaxValidDays = utils.PromptForIntInput("Maximum valid days that users can request (default: 730): ", 365*2)
+	if authorityRequest.Name, err = utils.ReadRequiredInput("Common name for the CA. (e.g., AlpacaX Root CA): "); err != nil {
+		return cert.AuthorityRequest{}, err
+	}
+	if authorityRequest.Organization, err = utils.ReadRequiredInput("Organization name that this CA belongs to. (e.g., AlpacaX): "); err != nil {
+		return cert.AuthorityRequest{}, err
+	}
+	if authorityRequest.Domain, err = utils.ReadRequiredInput("Domain name of the root certificate: "); err != nil {
+		return cert.AuthorityRequest{}, err
+	}
+	if authorityRequest.RootValidDays, err = utils.ReadIntInput("Root certificate validity in days (default: 3650): ", 365*10); err != nil {
+		return cert.AuthorityRequest{}, err
+	}
+	if authorityRequest.DefaultValidDays, err = utils.ReadIntInput("Child certificate validity in days (default: 365): ", 365); err != nil {
+		return cert.AuthorityRequest{}, err
+	}
+	if authorityRequest.MaxValidDays, err = utils.ReadIntInput("Maximum valid days that users can request (default: 730): ", 365*2); err != nil {
+		return cert.AuthorityRequest{}, err
+	}
 
-	agent := utils.PromptForRequiredInput("Name of server to run this CA on: ")
+	agent, err := utils.ReadRequiredInput("Name of server to run this CA on: ")
+	if err != nil {
+		return cert.AuthorityRequest{}, err
+	}
 	agentID, err := server.GetServerIDByName(ac, agent)
 	if err != nil {
-		utils.CliErrorWithExit("Failed to retrieve the server %s", err)
+		return cert.AuthorityRequest{}, utils.NewExitError("Failed to retrieve the server %s", err)
 	}
 	authorityRequest.Agent = agentID
 
-	owner := utils.PromptForRequiredInput("Owner(username): ")
-	authorityRequest.Owner, err = iam.GetUserIDByName(ac, owner)
-	if err != nil {
-		utils.CliErrorWithExit("Failed to retrieve the user %s", err)
-	}
-
-	return authorityRequest
+	return authorityRequest, nil
 }
 
 func installAuthorityInfo(response cert.AuthorityCreateResponse) {

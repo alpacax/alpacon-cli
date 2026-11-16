@@ -48,7 +48,7 @@ func TestUsernameGetCommand_StripsControlSequences(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	require.NoError(t, config.CreateConfig(ts.URL, "ws", "token", "", "", "", "", 0, false))
 
-	got := testutil.CaptureStdout(t, func() { usernameGetCmd.Run(usernameGetCmd, nil) })
+	got := testutil.CaptureStdout(t, func() { assert.NoError(t, usernameGetCmd.RunE(usernameGetCmd, nil)) })
 
 	assert.NotContains(t, got, "\x1b")
 	assert.NotContains(t, got, "\r")

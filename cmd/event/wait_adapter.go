@@ -1,6 +1,7 @@
 package event
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -46,8 +47,8 @@ func workSessionStatusSubType(status string) string {
 }
 
 func workSessionCatchUp(ac *client.AlpaconClient, targetID string) eventapi.CatchUpFunc {
-	return func() (string, error) {
-		session, err := wsapi.GetWorkSession(ac, targetID)
+	return func(ctx context.Context) (string, error) {
+		session, err := wsapi.GetWorkSessionWithContext(ctx, ac, targetID)
 		if err != nil {
 			return "", err
 		}

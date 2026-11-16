@@ -692,3 +692,13 @@ func TestSendRequest_OlderServerRefusalsKeepTodaysOutput(t *testing.T) {
 		})
 	}
 }
+
+func TestRefusalConsoleURLIsMetadata(t *testing.T) {
+	t.Parallel()
+	base := checkAuthStatus(http.StatusForbidden, []byte(`{"code":"future_denied","gate":"risk"}`))
+	linked := checkAuthStatus(http.StatusForbidden, []byte(`{"code":"future_denied","gate":"risk","console_url":"https://console.example/commands/1"}`))
+	assert.Equal(t, base.Error(), linked.Error())
+	var fields interface{ ErrorFields() map[string]any }
+	require.ErrorAs(t, linked, &fields)
+	assert.Equal(t, "https://console.example/commands/1", fields.ErrorFields()["console_url"])
+}

@@ -29,10 +29,11 @@ func GetSystemLogList(ac *client.AlpaconClient, serverName string, tail int) ([]
 	var logList []LogAttributes
 	for _, log := range entries {
 		logList = append(logList, LogAttributes{
+			ID:      log.ID,
 			Program: log.Program,
 			Level:   getLogLevel(log.Level),
 			Message: fmt.Sprintf("[%s] %s", log.Process, log.Msg),
-			Date:    utils.TimeUtils(log.Date),
+			Date:    utils.RelativeTime(log.Date),
 		})
 	}
 

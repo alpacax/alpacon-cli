@@ -20,7 +20,7 @@ var tokenCreateCmd = &cobra.Command{
 	alpacon token create --name ci-token --scopes "server:read"
 	alpacon token create --name audit-token --scopes "server:read,role_audit_log:read"
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
 		limit, _ := cmd.Flags().GetBool("limit")
 		expiresAt, _ := cmd.Flags().GetInt("expiration-in-days")
@@ -30,9 +30,8 @@ var tokenCreateCmd = &cobra.Command{
 		var err error
 
 		if name == "" {
-			tokenRequest, err = promptForToken()
-			if err != nil {
-				utils.CliErrorWithExit("During token input: %v. Check your input and try again.", err)
+			if tokenRequest, err = promptForToken(); err != nil {
+				return err
 			}
 		} else {
 			tokenRequest = auth.APITokenRequest{Name: name}
@@ -46,17 +45,18 @@ var tokenCreateCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		token, err := auth.CreateAPIToken(alpaconClient, tokenRequest)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to create API token %s.", err)
+			return utils.NewExitError("Failed to create API token %s.", err)
 		}
 
 		utils.CliSuccess("API token created: %s", token)
 		utils.CliWarning("This token cannot be retrieved again after you exit.")
-	},
+		return nil
+	}),
 }
 
 func init() {
@@ -72,22 +72,35 @@ func init() {
 
 func promptForToken() (auth.APITokenRequest, error) {
 	var tokenRequest auth.APITokenRequest
-	tokenRequest.Name = utils.PromptForRequiredInput("Token name: ")
-	if utils.PromptForBool("Set a shorter expiration than the workspace's maximum token lifetime?") {
-		tokenRequest.ExpiresAt = utils.TimeFormat(promptForExpiryDays())
+	var err error
+	if tokenRequest.Name, err = utils.ReadRequiredInput("Token name: "); err != nil {
+		return tokenRequest, err
 	}
-	scopes := utils.PromptForListInput("Scopes (comma-separated, default: the scopes your roles allow): ")
-	if len(scopes) > 0 {
-		tokenRequest.Scopes = scopes
+	if utils.PromptForBool("Set a shorter expiration than the workspace's maximum token lifetime?") {
+		days, err := promptForExpiryDays()
+		if err != nil {
+			return tokenRequest, err
+		}
+		tokenRequest.ExpiresAt = utils.TimeFormat(days)
+	}
+	scopes, err := utils.ReadInput("Scopes (comma-separated, default: the scopes your roles allow): ")
+	if err != nil {
+		return tokenRequest, err
+	}
+	if list := utils.SplitAndTrim(scopes, ","); len(list) > 0 {
+		tokenRequest.Scopes = list
 	}
 	return tokenRequest, nil
 }
 
-func promptForExpiryDays() int {
+func promptForExpiryDays() (int, error) {
 	for {
-		days := utils.PromptForRequiredIntInput("Valid days for the token: ")
+		days, err := utils.ReadRequiredIntInput("Valid days for the token: ")
+		if err != nil {
+			return 0, err
+		}
 		if days > 0 {
-			return days
+			return days, nil
 		}
 		utils.CliWarning("Enter a number of days greater than 0.")
 	}

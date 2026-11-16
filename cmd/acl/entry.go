@@ -34,33 +34,57 @@ var entryListCmd = &cobra.Command{
 	Aliases: []string{"list"},
 	Short:   "List pre-approved commands",
 	Long: `List the workspace's active pre-approved commands, or one service token's
-with --token. Revoked entries are not listed.`,
+with --token. Revoked entries are not listed. APPLIES is yes when the entry
+applies, no when it does not, and blank when the application account cannot be
+resolved.`,
 	Example: `  alpacon acl entry ls
   alpacon acl entry ls --token deploy-bot
   alpacon acl entry ls --output json`,
 	Args: cobra.NoArgs,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		tokenRef, _ := cmd.Flags().GetString("token")
 
-		session := openLedger()
+		session, err := openLedger()
+		if err != nil {
+			return err
+		}
 		principalID := ""
 		if tokenRef != "" {
-			var err error
 			if principalID, err = session.listFilterID(tokenRef); err != nil {
-				utils.CliErrorWithExit("Failed to find service token %q: %s.", tokenRef, err)
+				return utils.NewExitError("Failed to find service token %q: %s.", tokenRef, err)
 			}
 		}
 
 		entries, err := acl.ListEntries(session.signer, session.workspaceID, principalID)
 		if err != nil {
-			session.fail("list pre-approved commands", err)
+			return session.fail("list pre-approved commands", err)
 		}
 
-		tokenNames, serverNames := session.workspaceNames(entries)
-		utils.PrintTable(acl.ToEntryAttributes(entries, tokenNames, serverNames))
-	},
+		tokenNames, serverNames, tokenAccounts := session.workspaceNames(entries)
+		return utils.PrintTable(ledgerEntryAttributes(entries, tokenNames, serverNames, tokenAccounts))
+	}),
 }
 
 func init() {
 	entryListCmd.Flags().String("token", "", "List only this service token's entries (name or ID)")
+}
+
+func ledgerEntryAttributes(entries []acl.EntryResponse, tokenNames, serverNames, tokenAccounts map[string]string) []acl.EntryAttributes {
+	rows := acl.ToEntryAttributes(entries, tokenNames, serverNames)
+	for i, entry := range entries {
+		if username := tokenAccounts[entry.PrincipalID]; entry.PrincipalType == acl.PrincipalTypeServiceToken && username != "" {
+			applies := accountMatches(entry.Username, username) && accountMatches(entry.Groupname, username)
+			rows[i].AppliesToToken = &applies
+			if applies {
+				rows[i].Applies = "yes"
+			} else {
+				rows[i].Applies = "no"
+			}
+		}
+	}
+	return rows
+}
+
+func accountMatches(value, own string) bool {
+	return value == "" || value == "*" || value == own
 }

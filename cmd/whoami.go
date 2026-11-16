@@ -25,10 +25,10 @@ and permissions. Useful for verifying context before running infrastructure
 commands, especially for AI agents and operators managing multiple workspaces.`,
 	Example: `  alpacon whoami
   alpacon whoami --output json`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.LoadConfig()
 		if err != nil {
-			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' to authenticate.")
+			return utils.NewExitError("Not logged in. Run 'alpacon login' to authenticate.")
 		}
 
 		worksessionRequired := isWorksessionRequired(cfg)
@@ -47,8 +47,7 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 			utils.CliWarning("Could not create authenticated API client: %s", err)
 			utils.CliWarning("Showing local config only. Server fields are unavailable.")
 			warnIfExpiringSoon(cfg)
-			printWhoami(output)
-			return
+			return printWhoami(output)
 		}
 
 		// Only a service token can be an application principal. It has no user profile,
@@ -64,16 +63,14 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 				utils.CliWarning("Unexpected principal type %q for service token.", who.PrincipalType)
 			}
 			warnIfExpiringSoon(cfg)
-			printWhoami(output)
-			return
+			return printWhoami(output)
 		}
 
 		user, err := iam.GetCurrentUser(ac)
 		if err != nil {
 			utils.CliWarning("Could not fetch user info: %s", err)
 			warnIfExpiringSoon(cfg)
-			printWhoami(output)
-			return
+			return printWhoami(output)
 		}
 
 		output.Username = user.Username
@@ -102,8 +99,8 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 		}
 
 		warnIfExpiringSoon(cfg)
-		printWhoami(output)
-	},
+		return printWhoami(output)
+	}),
 }
 
 // summarizeWorkSession is what whoami reports of the work session in use.
@@ -113,12 +110,14 @@ func summarizeWorkSession(ws *wsapi.WorkSession) *activeWorkSessionSummary {
 		expiresAt = ws.ExpiresAt.UTC().Format(time.RFC3339)
 	}
 	return &activeWorkSessionSummary{
-		ID:        ws.ID,
-		Status:    ws.Status,
-		Scopes:    ws.Scopes,
-		Servers:   wsapi.ServerNames(ws),
-		Clusters:  wsapi.ClusterNames(ws),
-		ExpiresAt: expiresAt,
+		ID:             ws.ID,
+		Status:         ws.Status,
+		Scopes:         ws.Scopes,
+		Servers:        wsapi.ServerNames(ws),
+		Clusters:       wsapi.ClusterNames(ws),
+		ExpiresAt:      expiresAt,
+		ServersHidden:  ws.ServersHidden,
+		ClustersHidden: ws.ClustersHidden,
 	}
 }
 
@@ -129,6 +128,10 @@ type activeWorkSessionSummary struct {
 	Servers   []string `json:"servers"`
 	Clusters  []string `json:"clusters,omitempty"`
 	ExpiresAt string   `json:"expires_at,omitempty"`
+	// ServersHidden and ClustersHidden count the targets Servers and Clusters leave out
+	// because the caller does not reach them.
+	ServersHidden  *int `json:"servers_hidden,omitempty"`
+	ClustersHidden *int `json:"clusters_hidden,omitempty"`
 }
 
 type whoamiOutput struct {
@@ -234,8 +237,11 @@ func isTokenAuth(cfg config.Config) bool {
 	return cfg.Token != "" && cfg.AccessToken == ""
 }
 
+// isWorksessionRequired describes command and REST transfer creation, not reads
+// or the approval state of the selected session. The server decides admission.
 func isWorksessionRequired(cfg config.Config) bool {
-	return cfg.AccessToken != ""
+	method := config.GetAuthMethod(cfg)
+	return method == "Browser login" || method == "Token"
 }
 
 func warnIfExpiringSoon(cfg config.Config) {
@@ -319,15 +325,14 @@ func formatWSRequired(required bool, active *activeWorkSessionSummary) string {
 	return fmt.Sprintf("yes—active session %s (%s)", active.ID, active.Status)
 }
 
-func printWhoami(output whoamiOutput) {
+func printWhoami(output whoamiOutput) error {
 	if utils.OutputFormat == utils.OutputFormatJSON {
 		// MarshalJSON normalizes, so no need to pre-normalize here.
 		body, err := json.Marshal(output)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to marshal whoami: %s", err)
+			return utils.NewExitError("Failed to marshal whoami: %s", err)
 		}
-		utils.PrintJson(body)
-		return
+		return utils.PrintJson(body)
 	}
 
 	output = output.normalized()
@@ -374,4 +379,5 @@ func printWhoami(output whoamiOutput) {
 		// control sequence here rewrites the identity lines being read.
 		fmt.Fprintf(os.Stdout, "%-*s%s\n", pad, l.label+":", utils.SanitizeTerminalText(l.value))
 	}
+	return nil
 }

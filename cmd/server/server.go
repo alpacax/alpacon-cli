@@ -9,9 +9,6 @@ var ServerCmd = &cobra.Command{
 	Use:     "server",
 	Aliases: []string{"servers"},
 	Short:   "Manage registered servers",
-	// NoArgs makes an unrecognized subcommand (a removed one included) fail as
-	// "unknown command" instead of falling through to the help below.
-	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return utils.RequireSubcommand(cmd)
 	},

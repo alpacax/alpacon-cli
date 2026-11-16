@@ -11,11 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/alpacax/alpacon-cli/api/event"
 	ftpapi "github.com/alpacax/alpacon-cli/api/ftp"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -47,6 +49,8 @@ changes back to the original path when the editor exits.
 The command uses the same WebFTP transport and permission behavior as 'alpacon cp'.
 Use -u/--username and -g/--groupname the same way you would with 'alpacon cp'.
 Interactive browser login requires an active WorkSession with the webftp scope.
+Exit code 3 indicates a WorkSession gate denial; run with --output json to
+parse a machine-readable diagnostic on stderr.
 
 The file is downloaded in full before editing; files larger than 10 MB prompt
 for confirmation (skipped with --force) before opening in the editor.
@@ -59,7 +63,7 @@ redirections, or '&&' will not work.`,
   alpacon edit my-server:/etc/nginx/nginx.conf --editor "code --wait"
   alpacon edit my-server:/var/log/large.txt --force`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		editorFlag, _ := cmd.Flags().GetString("editor")
 		usernameFlag, _ := cmd.Flags().GetString("username")
 		groupname, _ := cmd.Flags().GetString("groupname")
@@ -68,16 +72,19 @@ redirections, or '&&' will not work.`,
 
 		target, err := parseEditTarget(args[0], usernameFlag)
 		if err != nil {
-			utils.CliUsageErrorWithExit("%s", err)
+			return utils.NewUsageExitError("%s", err)
 		}
 
 		authMethod := config.ResolveAuthMethod()
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
-		workSessionID := worksession.ResolveOrExit(alpaconClient, flagWorkSession)
+		workSessionID, err := worksession.Resolve(alpaconClient, flagWorkSession)
+		if err != nil {
+			return utils.NewExitError("%s", err)
+		}
 
 		deps := realEditDeps(alpaconClient, groupname)
 		result, err := runEdit(editOptions{
@@ -87,20 +94,30 @@ redirections, or '&&' will not work.`,
 			WorkSessionID: workSessionID,
 		}, deps)
 		if err != nil {
+			if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+				return exitErr
+			}
 			printPreservedTempPath(result)
-			utils.HandleWorkSessionError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID)
+			if exitErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID); exitErr != nil {
+				return exitErr
+			}
+			var rejected *event.CommandRejectedError
+			if errors.As(err, &rejected) {
+				return utils.NewEnvelopeExitErrorWithCode(rejected.ExitCode(), "edit", err, "Failed to edit '%s:%s': %s", target.Server, target.RemotePath, rejected)
+			}
 			if refusedForWantOfForce(err, utils.IsInteractiveShell()) {
 				err = utils.MarkUsageError(err)
 			}
-			utils.CliErrorWithExit("Failed to edit '%s:%s': %s", target.Server, target.RemotePath, err)
+			return utils.NewExitError("Failed to edit '%s:%s': %s", target.Server, target.RemotePath, err)
 		}
 
 		if !result.Changed {
 			utils.CliInfo("No changes")
-			return
+			return nil
 		}
 		utils.CliSuccess("Uploaded changes to %s:%s", target.Server, target.RemotePath)
-	},
+		return nil
+	}),
 }
 
 type editTarget struct {
@@ -149,6 +166,10 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 					return retryErr
 				}))
 			}
+			if _, mfaFailed := errors.AsType[*utils.ExitError](err); !mfaFailed { // its cause is the MFA lookup's, not a refusal of this request
+				err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
+				utils.SignalRefusal(err)
+			}
 			return downloaded, err
 		},
 		upload: func(target editTarget, localPath, workSessionID string) error {
@@ -158,6 +179,10 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 					return ftpapi.UploadLocalFileAs(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, workSessionID)
 				}))
 			}
+			if _, mfaFailed := errors.AsType[*utils.ExitError](err); !mfaFailed { // its cause is the MFA lookup's, not a refusal of this request
+				err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
+				utils.SignalRefusal(err)
+			}
 			return err
 		},
 		runEditor:    runLocalEditor,
@@ -166,7 +191,8 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 }
 
 func parseEditTarget(arg, usernameFlag string) (editTarget, error) {
-	if !utils.IsRemoteTarget(arg) {
+	// Not utils.IsRemoteTarget: the argument is always remote, so "h:/etc/x" is not a drive path.
+	if !strings.Contains(arg, ":") {
 		return editTarget{}, fmt.Errorf("remote path must be in format [USER@]SERVER:PATH")
 	}
 	sshTarget := utils.ParseSSHTarget(arg)

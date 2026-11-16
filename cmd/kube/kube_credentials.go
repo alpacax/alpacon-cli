@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -24,31 +25,32 @@ const execCredentialVersion = "client.authentication.k8s.io/v1"
 // that stops answering delays kubectl by at most this much.
 const retrieveTimeout = 5 * time.Second
 
-var kubeCredentialsCluster string
-
 var (
 	errNoAnswer = errors.New("no answer")
 	// errCallInterrupted is a call a first Ctrl+C gave up on.
 	errCallInterrupted = errors.New("interrupted")
 )
 
-var kubeCredentialsCmd = &cobra.Command{
-	Use:   "credentials",
-	Short: "Print the token kubectl uses for a cluster",
-	Long: `Print a client.authentication.k8s.io/v1 ExecCredential holding the token of
+func newKubeCredentialsCmd() *cobra.Command {
+	var cluster string
+	cmd := &cobra.Command{
+		Use:   "credentials",
+		Short: "Print the token kubectl uses for a cluster",
+		Long: `Print a client.authentication.k8s.io/v1 ExecCredential holding the token of
 the kube session 'alpacon kube login' opened for the cluster. kubectl runs this
 command itself, through the context kube login writes; you do not run it.
 
 Each run checks the session with the server. A session that has ended, or whose
 work session has expired, exits 3 and says to run 'alpacon kube login' again.`,
-	Hidden: true,
-	Args:   cobra.NoArgs,
-	Run:    runKubeCredentials,
-}
-
-func init() {
-	kubeCredentialsCmd.Flags().StringVar(&kubeCredentialsCluster, "cluster", "", "cluster whose saved kube session to use")
-	_ = kubeCredentialsCmd.MarkFlagRequired("cluster")
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return runKubeCredentials(cmd.OutOrStdout(), strings.TrimSpace(cluster))
+		}),
+	}
+	cmd.Flags().StringVar(&cluster, "cluster", "", "cluster whose saved kube session to use")
+	_ = cmd.MarkFlagRequired("cluster")
+	return cmd
 }
 
 // execCredential is the object kubectl reads from the command's stdout.
@@ -111,17 +113,16 @@ func sessionGoneMessage(cluster string, err error) (string, []any) {
 	return "The server refused to check the kube session for %s, so the saved token is not used: %s. Resolve that refusal, then %s.", []any{cluster, refused.err, relogin}
 }
 
-func runKubeCredentials(cmd *cobra.Command, args []string) {
-	cluster := strings.TrimSpace(kubeCredentialsCluster)
+func runKubeCredentials(stdout io.Writer, cluster string) error {
 	relogin := fmt.Sprintf("run 'alpacon kube login %s'", shellQuote(cluster))
 
 	store, err := defaultKubeSessionStore()
 	if err != nil {
-		utils.CliErrorWithExit("Failed to find the home directory: %s.", err)
+		return utils.NewExitError("Failed to find the home directory: %s.", err)
 	}
 	records, err := store.records(cluster)
 	if err != nil {
-		utils.CliErrorWithExit("Failed to read the saved kube sessions: %s.", err)
+		return utils.NewExitError("Failed to read the saved kube sessions: %s.", err)
 	}
 
 	// Read without the network: the config names the logged-in workspace, and
@@ -134,7 +135,7 @@ func runKubeCredentials(cmd *cobra.Command, args []string) {
 	}
 	record := pickRecord(records, clusterServer(os.Getenv("KUBERNETES_EXEC_INFO")), workspaceURL)
 	if record == nil {
-		utils.CliErrorWithExitCode(utils.ExitCodeWorkSessionDenied, "No kube session is saved for %s; %s.", cluster, relogin)
+		return utils.NewExitErrorWithCode(utils.ExitCodeWorkSessionDenied, "No kube session is saved for %s; %s.", cluster, relogin)
 	}
 
 	var retrieve func() (*kubernetes.KubeSessionDetail, error)
@@ -152,7 +153,7 @@ func runKubeCredentials(cmd *cobra.Command, args []string) {
 	credential, checkErr := resolveCredential(record, time.Now(), retrieve)
 	if errors.Is(checkErr, errSessionGone) {
 		msg, msgArgs := sessionGoneMessage(cluster, checkErr)
-		utils.CliErrorWithExitCode(utils.ExitCodeWorkSessionDenied, msg, msgArgs...)
+		return utils.NewExitErrorWithCode(utils.ExitCodeWorkSessionDenied, msg, msgArgs...)
 	}
 	if checkErr != nil {
 		utils.CliWarning("Could not check the kube session for %s (%s); using the saved token until it expires.", cluster, checkErr)
@@ -162,9 +163,10 @@ func runKubeCredentials(cmd *cobra.Command, args []string) {
 		saveMovedExpiry(store, login, record, credential)
 	}
 
-	if err := utils.PrintJSONValue(os.Stdout, credential); err != nil {
-		utils.CliErrorWithExit("Failed to print the credential: %s.", err)
+	if err := utils.PrintJSONValue(stdout, credential); err != nil {
+		return utils.NewExitError("Failed to print the credential: %s.", err)
 	}
+	return nil
 }
 
 // resolveCredential builds what kubectl receives. The token is always the saved

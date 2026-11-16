@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,9 +14,10 @@ import (
 
 const serviceTokenURL = "/api/auth/service-tokens/tokens/"
 
-type serviceTokenSummary struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+type ServiceToken struct {
+	ID          string             `json:"id"`
+	Name        string             `json:"name"`
+	Application *WhoamiApplication `json:"application"`
 }
 
 // ErrNotAServiceToken reports an id that names no service token in the
@@ -25,6 +27,12 @@ var ErrNotAServiceToken = errors.New("no service token in this workspace has tha
 // ResolveServiceTokenID returns a service token's id. An id is confirmed by a
 // lookup, so a personal API token's is refused; a name must match exactly once.
 func ResolveServiceTokenID(ac *client.AlpaconClient, nameOrID string) (string, error) {
+	token, err := ResolveServiceToken(ac, nameOrID)
+	return token.ID, err
+}
+
+// ResolveServiceToken reads a service token and its bound application.
+func ResolveServiceToken(ac *client.AlpaconClient, nameOrID string) (ServiceToken, error) {
 	nameOrID = strings.TrimSpace(nameOrID)
 	if utils.IsUUID(nameOrID) {
 		return confirmServiceTokenID(ac, nameOrID)
@@ -32,16 +40,16 @@ func ResolveServiceTokenID(ac *client.AlpaconClient, nameOrID string) (string, e
 
 	name, err := api.RequireName(nameOrID, "service token name is required")
 	if err != nil {
-		return "", err
+		return ServiceToken{}, err
 	}
-	tokens, err := api.FetchAllPages[serviceTokenSummary](ac, serviceTokenURL, map[string]string{"name": name})
+	tokens, err := api.FetchAllPages[ServiceToken](ac, serviceTokenURL, map[string]string{"name": name})
 	if err != nil {
-		return "", err
+		return ServiceToken{}, err
 	}
 
 	// Compared here rather than trusted to the server's filter, so a filter
 	// that matched loosely cannot land an entry on another token.
-	var matches []serviceTokenSummary
+	var matches []ServiceToken
 	for _, token := range tokens {
 		if token.Name == name {
 			matches = append(matches, token)
@@ -49,41 +57,40 @@ func ResolveServiceTokenID(ac *client.AlpaconClient, nameOrID string) (string, e
 	}
 	switch len(matches) {
 	case 0:
-		return "", errors.New("no service token found with the given name")
+		return ServiceToken{}, errors.New("no service token found with the given name")
 	case 1:
 		pathID, err := api.RequireResponseID(matches[0].ID, "service token")
 		if err != nil {
-			return "", err
+			return ServiceToken{}, err
 		}
-		return pathID.String(), nil
+		matches[0].ID = pathID.String()
+		return matches[0], nil
 	default:
-		return "", fmt.Errorf("%d service tokens are named %q; pass the ID instead", len(matches), name)
+		return ServiceToken{}, fmt.Errorf("%d service tokens are named %q; pass the ID instead", len(matches), name)
 	}
 }
 
-func confirmServiceTokenID(ac *client.AlpaconClient, id string) (string, error) {
+func confirmServiceTokenID(ac *client.AlpaconClient, id string) (ServiceToken, error) {
 	pathID, err := api.RequireID(id, "service token")
 	if err != nil {
-		return "", err
+		return ServiceToken{}, err
 	}
-	if _, err = ac.SendGetRequest(api.IDURL(serviceTokenURL, pathID, "", nil)); err != nil {
+	body, err := ac.SendGetRequest(api.IDURL(serviceTokenURL, pathID, "", nil))
+	if err != nil {
 		if utils.HTTPStatusCode(err) == http.StatusNotFound {
-			return "", ErrNotAServiceToken
+			return ServiceToken{}, ErrNotAServiceToken
 		}
-		return "", err
+		return ServiceToken{}, err
 	}
-	return pathID.String(), nil
+	var token ServiceToken
+	if err = json.Unmarshal(body, &token); err != nil {
+		return ServiceToken{}, err
+	}
+	token.ID = pathID.String()
+	return token, nil
 }
 
-// GetServiceTokenNames maps every service token's id to its name.
-func GetServiceTokenNames(ac *client.AlpaconClient) (map[string]string, error) {
-	tokens, err := api.FetchAllPages[serviceTokenSummary](ac, serviceTokenURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	names := make(map[string]string, len(tokens))
-	for _, token := range tokens {
-		names[token.ID] = token.Name
-	}
-	return names, nil
+// GetServiceTokens lists the workspace's service tokens and their applications.
+func GetServiceTokens(ac *client.AlpaconClient) ([]ServiceToken, error) {
+	return api.FetchAllPages[ServiceToken](ac, serviceTokenURL, nil)
 }

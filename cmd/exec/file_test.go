@@ -661,7 +661,6 @@ func newFileLaneServer(capture *fileLaneHelperCapture, respond func(w http.Respo
 // the body carries the file object with the local bytes verbatim and none of
 // the keys the server refuses, and the job id is printed as for any detach.
 func TestExecFileDetachSubmitsFileLane(t *testing.T) {
-	t.Parallel()
 	var capture fileLaneHelperCapture
 	ts := newFileLaneServer(&capture, func(w http.ResponseWriter) {
 		_, _ = w.Write([]byte(`[{"id":"cmd-file-1","shell":"file"}]`))
@@ -696,12 +695,10 @@ func TestExecFileDetachSubmitsFileLane(t *testing.T) {
 // through the real exec command: table mode prints the sentence and the hint
 // rather than the raw code, and JSON mode carries the code in the envelope.
 func TestExecFileRefusalPrintsGuidance(t *testing.T) {
-	t.Parallel()
 	script := filepath.Join(t.TempDir(), "deploy.sh")
 	require.NoError(t, os.WriteFile(script, []byte("#!/bin/bash\necho hi\n"), 0o600))
 
 	t.Run("table", func(t *testing.T) {
-		t.Parallel()
 		var capture fileLaneHelperCapture
 		ts := newFileLaneServer(&capture, func(w http.ResponseWriter) {
 			w.WriteHeader(http.StatusBadRequest)
@@ -719,7 +716,6 @@ func TestExecFileRefusalPrintsGuidance(t *testing.T) {
 	})
 
 	t.Run("json", func(t *testing.T) {
-		t.Parallel()
 		var capture fileLaneHelperCapture
 		ts := newFileLaneServer(&capture, func(w http.ResponseWriter) {
 			w.WriteHeader(http.StatusBadRequest)
@@ -748,7 +744,6 @@ func TestExecFileRefusalPrintsGuidance(t *testing.T) {
 // TestExecFileLocalRefusalNeverReachesServer pins that a local refusal—an
 // empty script here—exits before any request is made.
 func TestExecFileLocalRefusalNeverReachesServer(t *testing.T) {
-	t.Parallel()
 	var capture fileLaneHelperCapture
 	ts := newFileLaneServer(&capture, func(w http.ResponseWriter) {
 		_, _ = w.Write([]byte(`[{"id":"cmd-file-1"}]`))
@@ -809,7 +804,6 @@ func TestFileExecInlineCredentialRefusal(t *testing.T) {
 // file lane's hint and not the shell lane's --env example, and JSON mode keeps
 // the server's code in the envelope.
 func TestExecFileInlineCredentialPrintsFileLaneHint(t *testing.T) {
-	t.Parallel()
 	script := filepath.Join(t.TempDir(), "rotate.sh")
 	require.NoError(t, os.WriteFile(script, []byte("#!/bin/bash\nmysql -pSecret -e 'select 1'\n"), 0o600))
 	respond := func(w http.ResponseWriter) {
@@ -818,7 +812,6 @@ func TestExecFileInlineCredentialPrintsFileLaneHint(t *testing.T) {
 	}
 
 	t.Run("table", func(t *testing.T) {
-		t.Parallel()
 		var capture fileLaneHelperCapture
 		ts := newFileLaneServer(&capture, respond)
 		defer ts.Close()
@@ -834,7 +827,6 @@ func TestExecFileInlineCredentialPrintsFileLaneHint(t *testing.T) {
 	})
 
 	t.Run("detach", func(t *testing.T) {
-		t.Parallel()
 		var capture fileLaneHelperCapture
 		ts := newFileLaneServer(&capture, respond)
 		defer ts.Close()
@@ -849,7 +841,6 @@ func TestExecFileInlineCredentialPrintsFileLaneHint(t *testing.T) {
 	})
 
 	t.Run("json", func(t *testing.T) {
-		t.Parallel()
 		var capture fileLaneHelperCapture
 		ts := newFileLaneServer(&capture, respond)
 		defer ts.Close()

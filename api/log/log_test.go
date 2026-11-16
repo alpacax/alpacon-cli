@@ -121,3 +121,30 @@ func TestGetSystemLogList_KeepsEntriesReadBeforeAFailure(t *testing.T) {
 	require.Len(t, logs, 1)
 	assert.Equal(t, "[main] first", logs[0].Message)
 }
+
+func TestGetSystemLogList_JSONKeepsEntryID(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/api/servers/servers") {
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"my-server"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"results":[
+			{"id":123,"program":"sshd","level":20,"process":"main","msg":"accepted","date":"2026-11-07T09:30:45Z"},
+			{"id":124,"program":"sshd","level":20,"process":"main","msg":"accepted","date":"2026-11-07T09:30:45Z"}
+		]}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	logs, err := GetSystemLogList(ac, "my-server", 2)
+
+	require.NoError(t, err)
+	body, err := json.Marshal(logs)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{"id":123,"program":"sshd","level":"INFO","message":"[main] accepted","date":"2026-11-07T09:30:45Z"},
+		{"id":124,"program":"sshd","level":"INFO","message":"[main] accepted","date":"2026-11-07T09:30:45Z"}
+	]`, string(body))
+}

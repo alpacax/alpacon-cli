@@ -105,14 +105,12 @@ func newFileUploadServer(s *fileUploadServer, status string) *httptest.Server {
 // before the submission, without overwrite unless asked, and the bytes written
 // are the bytes submitted for review.
 func TestExecFileUploadWritesThenSubmitsTheSameBytes(t *testing.T) {
-	t.Parallel()
 	script := filepath.Join(t.TempDir(), "deploy.sh")
 	content := "#!/bin/bash\nset -euo pipefail\necho deploy\n"
 	require.NoError(t, os.WriteFile(script, []byte(content), 0o600))
 
 	for name, overwrite := range map[string]bool{"keep_existing": false, "overwrite": true} {
 		t.Run(name, func(t *testing.T) {
-			t.Parallel()
 			var s fileUploadServer
 			ts := newFileUploadServer(&s, `{"success":true}`)
 			defer ts.Close()
@@ -152,7 +150,6 @@ func TestExecFileUploadWritesThenSubmitsTheSameBytes(t *testing.T) {
 // for MFA is sent again once MFA completes, and that nothing after the accepted
 // create repeats: one write, then the submission.
 func TestExecFileUploadRetriesTheCreateAfterMFA(t *testing.T) {
-	t.Parallel()
 	script := filepath.Join(t.TempDir(), "deploy.sh")
 	content := "#!/bin/bash\necho hi\n"
 	require.NoError(t, os.WriteFile(script, []byte(content), 0o600))
@@ -161,10 +158,8 @@ func TestExecFileUploadRetriesTheCreateAfterMFA(t *testing.T) {
 	ts := newFileUploadServer(&s, `{"success":true}`)
 	defer ts.Close()
 
-	_, stderr, exitCode := runHelperProcess(t, ts.URL,
-		"TestExecCommandWorkSessionGateHelperProcess", execWorkSessionHelperMarker,
-		[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1", "ALPACON_NO_BROWSER=1"},
-		[]string{"--detach", "--upload", "--file", "/opt/deploy.sh", "--file-from", script, "prod"})
+	t.Setenv("ALPACON_NO_BROWSER", "1")
+	_, stderr, exitCode := runExecHelper(t, ts.URL, "--detach", "--upload", "--file", "/opt/deploy.sh", "--file-from", script, "prod")
 	assert.Equal(t, 0, exitCode, "stderr: %s", stderr)
 
 	s.mu.Lock()
@@ -177,7 +172,6 @@ func TestExecFileUploadRetriesTheCreateAfterMFA(t *testing.T) {
 // stops the run before the submission, and that a refusal of an existing file
 // names --overwrite as the way to replace it.
 func TestExecFileUploadRefusedExistingFileNeverSubmits(t *testing.T) {
-	t.Parallel()
 	script := filepath.Join(t.TempDir(), "deploy.sh")
 	require.NoError(t, os.WriteFile(script, []byte("#!/bin/bash\necho hi\n"), 0o600))
 
@@ -200,7 +194,6 @@ func TestExecFileUploadRefusedExistingFileNeverSubmits(t *testing.T) {
 // TestExecFileUploadFailureSanitizesTheAgentMessage pins that an escape
 // sequence in the agent's refusal never reaches the terminal raw.
 func TestExecFileUploadFailureSanitizesTheAgentMessage(t *testing.T) {
-	t.Parallel()
 	script := filepath.Join(t.TempDir(), "deploy.sh")
 	require.NoError(t, os.WriteFile(script, []byte("#!/bin/bash\necho hi\n"), 0o600))
 

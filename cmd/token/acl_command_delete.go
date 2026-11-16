@@ -20,29 +20,32 @@ personal API token has no command list on the ledger.`,
 	Example: `  alpacon token acl command delete 550e8400-e29b-41d4-a716-446655440000
   alpacon token acl command rm 550e8400-e29b-41d4-a716-446655440000`,
 	Args: cobra.ExactArgs(1),
-	Run:  runCommandAclDelete,
+	RunE: utils.WithExitError(runCommandAclDelete),
 }
 
 func init() {
 	aclCommandDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 }
 
-func runCommandAclDelete(cmd *cobra.Command, args []string) {
+func runCommandAclDelete(cmd *cobra.Command, args []string) error {
 	aclID := args[0]
 	yes, _ := cmd.Flags().GetBool("yes")
 
 	if !yes {
-		utils.ConfirmAction("Delete command ACL '%s'?", aclID)
+		if proceed, err := utils.Confirm("Delete command ACL '%s'?", aclID); err != nil || !proceed {
+			return err
+		}
 	}
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %v. Consider re-logging.", err)
+		return utils.NewExitError("Connection to Alpacon API failed: %v. Consider re-logging.", err)
 	}
 
 	if err = security.DeleteCommandAcl(alpaconClient, aclID); err != nil {
-		utils.CliErrorWithExit("Failed to delete command ACL: %v.", err)
+		return utils.NewExitError("Failed to delete command ACL: %v.", err)
 	}
 
 	utils.CliSuccess("Command ACL deleted: %s", aclID)
+	return nil
 }

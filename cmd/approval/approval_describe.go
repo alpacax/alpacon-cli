@@ -28,24 +28,23 @@ requested changes. Use --output json to print the full raw response.`,
 	Args: cobra.ExactArgs(1),
 	Example: `  alpacon approval describe 550e8400-e29b-41d4-a716-446655440000
   alpacon approval desc 550e8400-e29b-41d4-a716-446655440000`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
 			body, err := approvalapi.GetApprovalRequestRaw(ac, args[0])
 			if err != nil {
-				utils.CliErrorWithExit("Failed to retrieve approval request: %s.", err)
+				return utils.NewExitError("Failed to retrieve approval request: %s.", err)
 			}
-			utils.PrintJson(body)
-			return
+			return utils.PrintJson(body)
 		}
 
 		req, err := approvalapi.GetApprovalRequest(ac, args[0])
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve approval request: %s.", err)
+			return utils.NewExitError("Failed to retrieve approval request: %s.", err)
 		}
 
 		fe := fileExecutionOf(req)
@@ -55,12 +54,15 @@ requested changes. Use --output json to print the full raw response.`,
 		if fe != nil {
 			script, hasScript = fileExecutionScript(fe)
 		}
-		utils.PrintTable(rows)
+		if err := utils.PrintTable(rows); err != nil {
+			return err
+		}
 		if hasScript {
 			fmt.Println()
 			fmt.Println(script)
 		}
-	},
+		return nil
+	}),
 }
 
 func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecution) []describeRow {
@@ -87,6 +89,10 @@ func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecutio
 		{"Reviewed by", reviewedBy},
 		{"Reviewed at", reviewedAt},
 		{"Added at", req.AddedAt.Local().Format("2006-01-02 15:04")},
+	}
+	if note := utils.SanitizeTerminalOneLine(req.RejectionNote); note != "" {
+		// The approver's own words, stripped of terminal escapes like any server value.
+		rows = append(rows, describeRow{"Rejection reason", note})
 	}
 	rows = append(rows, contextRows(req.Metadata)...)
 	if fe != nil {
@@ -198,7 +204,7 @@ func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 	}
 	if s := meta.Sudo; s != nil {
 		add("Sudo command", s.Command)
-		add("  Run as", s.RunAs)
+		add("Run as", s.RunAs)
 		add("Purpose", s.Purpose)
 		add("Server", s.ServerName)
 		add("Risk level", s.RiskLevel)
@@ -218,11 +224,14 @@ func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 		add("  Title", ch.Title)
 		add("  Description", ch.Description)
 		add("  Scopes", joinClean(ch.Scopes, ", "))
-		servers := make([]string, len(ch.Servers))
-		for i, sv := range ch.Servers {
-			servers[i] = sv.Name
+		servers := make([]string, 0, len(ch.Servers))
+		for _, sv := range ch.Servers {
+			if name := utils.SanitizeTerminalText(sv.Name); name != "" {
+				servers = append(servers, name)
+			}
 		}
-		add("  Servers", joinClean(servers, ", "))
+		// The count keeps the row when every requested server is one the caller does not reach.
+		add("  Servers", utils.JoinReached(servers, ch.ServersHidden, "server"))
 		policies := make([]string, len(ch.SudoPolicies))
 		for i, p := range ch.SudoPolicies {
 			policies[i] = joinClean(p.Commands, ", ")

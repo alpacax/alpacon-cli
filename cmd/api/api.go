@@ -24,9 +24,7 @@ import (
 )
 
 var (
-	ApiCmd           = newCommand()
-	newAPIClient     = client.NewAlpaconAPIClient
-	exitAPI          = os.Exit
+	ApiCmd           = newCommand(client.NewAlpaconAPIClient)
 	isStdoutTerminal = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
 )
 
@@ -90,7 +88,7 @@ func (f *fieldFlag) Set(value string) error {
 	return nil
 }
 
-func newCommand() *cobra.Command {
+func newCommand(newAPIClient func() (*client.AlpaconClient, error)) *cobra.Command {
 	var opts options
 	cmd := &cobra.Command{
 		Use:   "api ENDPOINT",
@@ -100,40 +98,43 @@ func newCommand() *cobra.Command {
 			"to stdout, while `HTTP <code>` goes to stderr and the command exits 1. An MFA-required response opens the workspace\n" +
 			"MFA link and retries once MFA completes, like other commands—unless the request carries its own -H Authorization header.",
 		Example: "  alpacon api /api/iam/users/\n  alpacon api -X POST -F name=my-server /api/servers/servers/\n  alpacon api -i /api/iam/users/-/",
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				utils.CliUsageErrorWithExit("expected one ENDPOINT")
+				return utils.NewUsageExitError("expected one ENDPOINT")
 			}
 			opts.Endpoint = args[0]
 			opts.MethodSet = cmd.Flags().Changed("method")
-			request, code, err := prepareRequest(opts, os.Stdin)
+			request, code, err := prepareRequest(opts, cmd.InOrStdin())
 			if err != nil {
-				utils.CliErrorWithExitCode(code, "%s", err)
+				return utils.NewExitErrorWithCode(code, "%s", err)
 			}
 			ac, err := newAPIClient()
 			if err != nil {
-				utils.CliErrorWithExit("Connection to Alpacon API failed: %s", err)
+				return utils.NewExitError("Connection to Alpacon API failed: %s", err)
 			}
 			code, err = runAPI(ac, opts, request, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if err != nil {
+				if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+					return exitErr
+				}
 				if statusErr, ok := err.(*httpStatusError); ok {
 					if _, writeErr := fmt.Fprintf(cmd.ErrOrStderr(), "HTTP %d\n", statusErr.status); writeErr != nil {
-						utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "%s", writeErr)
+						return utils.NewExitErrorWithCode(utils.ExitCodeGeneralError, "%s", writeErr)
 					}
 					if statusErr.location != "" {
 						if _, writeErr := fmt.Fprintf(cmd.ErrOrStderr(), "redirect to %s not followed\n", safeTerminal(statusErr.location)); writeErr != nil {
-							utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "%s", writeErr)
+							return utils.NewExitErrorWithCode(utils.ExitCodeGeneralError, "%s", writeErr)
 						}
 					}
-					exitAPI(utils.ExitCodeGeneralError)
-					return
+					return utils.NewSilentExitError(utils.ExitCodeGeneralError)
 				}
-				utils.CliErrorWithExitCode(code, "%s", err)
+				return utils.NewExitErrorWithCode(code, "%s", err)
 			}
 			if code != 0 {
-				exitAPI(code)
+				return utils.NewSilentExitError(code)
 			}
-		},
+			return nil
+		}),
 	}
 	cmd.Flags().StringVarP(&opts.Method, "method", "X", "GET", "HTTP method")
 	cmd.Flags().VarP(&fieldFlag{fields: &opts.Fields}, "raw-field", "f", "String field (key=value)")
@@ -266,6 +267,9 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 			return nil
 		}
 		handleErr := utils.HandleCommonErrors(utils.MarkSubmission(mfaRequiredError{}), "", mfa.WorkspaceErrorCallbacks(ac, retry))
+		if exitErr, ok := errors.AsType[*utils.ExitError](handleErr); ok {
+			return exitErr.Code, exitErr
+		}
 		if _, err := stderr.Write(lastAttempt.Bytes()); err != nil {
 			return utils.ExitCodeGeneralError, err
 		}
@@ -286,6 +290,7 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 		}
 	}
 
+	utils.SignalResponse(response.StatusCode, response.Body, ac)
 	if err := writeAPIResponse(opts, response, stdout); err != nil {
 		return utils.ExitCodeGeneralError, err
 	}
@@ -351,22 +356,13 @@ func writeAPIResponse(opts options, response *client.RawResponse, stdout io.Writ
 					output = formatted.Bytes()
 				}
 			}
-			output = []byte(sanitizeTerminalBodyKeepingTabs(string(output)))
+			output = []byte(utils.SanitizeTerminalBlockKeepingTabs(string(output)))
 		}
 		if _, err := stdout.Write(output); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// SanitizeTerminalBlock strips tabs, so each tab-separated segment is sanitized on its own.
-func sanitizeTerminalBodyKeepingTabs(body string) string {
-	segments := strings.Split(body, "\t")
-	for i, segment := range segments {
-		segments[i], _ = utils.SanitizeTerminalBlock(segment)
-	}
-	return strings.Join(segments, "\t")
 }
 
 func parseHeaders(raw []string) (http.Header, error) {

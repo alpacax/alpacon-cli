@@ -22,7 +22,7 @@ Groupname semantics: "" = no group restriction, "*" = any group, exact name = ma
   alpacon token acl file add my-api-token --path "/var/log/*" --action download --username root
   alpacon token acl file add my-api-token --path "*" --action "*" --username "*" --groupname "*"`,
 	Args: cobra.ExactArgs(1),
-	Run:  runFileAclAdd,
+	RunE: utils.WithExitError(runFileAclAdd),
 }
 
 func init() {
@@ -34,7 +34,7 @@ func init() {
 	_ = aclFileAddCmd.MarkFlagRequired("action")
 }
 
-func runFileAclAdd(cmd *cobra.Command, args []string) {
+func runFileAclAdd(cmd *cobra.Command, args []string) error {
 	tokenArg := args[0]
 	path, _ := cmd.Flags().GetString("path")
 	action, _ := cmd.Flags().GetString("action")
@@ -42,17 +42,17 @@ func runFileAclAdd(cmd *cobra.Command, args []string) {
 	groupname, _ := cmd.Flags().GetString("groupname")
 
 	if action != security.FileAclActionUpload && action != security.FileAclActionDownload && action != security.FileAclActionAll {
-		utils.CliUsageErrorWithExit("--action must be one of: upload, download, *.")
+		return utils.NewUsageExitError("--action must be one of: upload, download, *.")
 	}
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %v. Consider re-logging.", err)
+		return utils.NewExitError("Connection to Alpacon API failed: %v. Consider re-logging.", err)
 	}
 
 	tokenID, err := auth.ResolveTokenID(alpaconClient, tokenArg)
 	if err != nil {
-		utils.CliErrorWithExit("Failed to resolve token: %v.", err)
+		return utils.NewExitError("Failed to resolve token: %v.", err)
 	}
 
 	if err = security.AddFileAcl(alpaconClient, security.FileAclRequest{
@@ -62,8 +62,9 @@ func runFileAclAdd(cmd *cobra.Command, args []string) {
 		Username:  username,
 		Groupname: groupname,
 	}); err != nil {
-		utils.CliErrorWithExit("Failed to add file ACL: %v.", err)
+		return utils.NewExitError("Failed to add file ACL: %v.", err)
 	}
 
 	utils.CliSuccess("File ACL added to token %s: %s [%s]", tokenArg, path, action)
+	return nil
 }

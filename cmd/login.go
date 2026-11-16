@@ -13,13 +13,14 @@ import (
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cloud"
 	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
 const (
-	defaultBaseDomain = "alpacon.io"
+	defaultBaseDomain = cloud.DefaultBaseDomain
 
 	whoamiVerified = "verified"
 	whoamiFallback = "fallback"
@@ -85,20 +86,20 @@ with the saved target as the default. Non-interactive login requires a HOST or
   # Alpacon Cloud via direct URL with an API token (deprecated; prefer --workspace/--region)
   alpacon login myworkspace.us1.alpacon.io -t <api-token>`,
 	Args: cobra.MaximumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		workspaceURL, workspaceName, baseDomain, ok, err := resolveLoginTarget(args, workspaceFlag, regionFlag)
 		if err != nil {
-			utils.CliUsageErrorWithExit("%s", err.Error())
+			return utils.NewUsageExitError("%s", err.Error())
 		}
 
 		if !ok {
 			if err := validateInteractiveLoginTargetPrompt(utils.IsInteractiveShell()); err != nil {
-				utils.CliUsageErrorWithExit("%s", err.Error())
+				return utils.NewUsageExitError("%s", err.Error())
 			}
 			cfg, _ := config.LoadConfig()
 			workspaceURL, workspaceName, baseDomain, err = promptForLoginTarget(cfg)
 			if err != nil {
-				utils.CliErrorWithExit("%s", err.Error())
+				return utils.NewExitError("%s", err.Error())
 			}
 		}
 
@@ -106,10 +107,10 @@ with the saved target as the default. Non-interactive login requires a HOST or
 
 		envInfo, err := auth0.FetchAuthEnv(workspaceURL, httpClient)
 		if err != nil {
-			if strings.Contains(err.Error(), "404") {
-				utils.CliErrorWithExit("Workspace not found. Please check your workspace name and region")
+			if isWorkspaceNotFound(err) {
+				return utils.NewExitError("Workspace not found. Please check your workspace name and region")
 			}
-			utils.CliErrorWithExit("Workspace '%s' is unreachable or returned an error: %v", workspaceURL, err)
+			return utils.NewExitError("Workspace '%s' is unreachable or returned an error: %v", workspaceURL, err)
 		}
 
 		username, _ := cmd.Flags().GetString("username")
@@ -121,7 +122,7 @@ with the saved target as the default. Non-interactive login requires a HOST or
 		if envInfo.Auth0.Method == "auth0" && token == "" {
 			deviceCode, err := auth0.RequestDeviceCode(workspaceName, httpClient, envInfo)
 			if err != nil {
-				utils.CliErrorWithExit("Device code request failed. %v", err)
+				return utils.NewExitError("Device code request failed. %v", err)
 			}
 
 			promptURI := printDeviceCodePrompt(os.Stderr, deviceCode.VerificationURIComplete, deviceCode.UserCode)
@@ -131,17 +132,19 @@ with the saved target as the default. Non-interactive login requires a HOST or
 
 			tokenRes, err := auth0.PollForToken(deviceCode, envInfo)
 			if err != nil {
-				utils.CliErrorWithExit("%s", err.Error())
+				return utils.NewExitError("%s", err.Error())
 			}
 
 			err = config.CreateConfig(workspaceURL, workspaceName, "", "", tokenRes.AccessToken, tokenRes.RefreshToken, baseDomain, tokenRes.ExpiresIn, insecure)
 			if err != nil {
-				utils.CliErrorWithExit("Failed to save config: %v", err)
+				return utils.NewExitError("Failed to save config: %v", err)
 			}
 
 		} else {
 			if (username == "" || password == "") && token == "" {
-				username, password = promptForCredentials(username, password)
+				if username, password, err = promptForCredentials(username, password); err != nil {
+					return err
+				}
 			}
 
 			loginRequest := &auth.LoginRequest{
@@ -155,9 +158,9 @@ with the saved target as the default. Non-interactive login requires a HOST or
 			err = auth.LoginAndSaveCredentials(loginRequest, token, insecure)
 			if err != nil {
 				if token == "" && utils.HTTPStatusCode(err) == http.StatusNotFound {
-					utils.CliErrorWithExit("Login endpoint not found. This workspace may not support username/password login")
+					return utils.NewExitError("Login endpoint not found. This workspace may not support username/password login")
 				}
-				utils.CliErrorWithExit("%s", loginFailureMessage(err))
+				return utils.NewExitError("%s", loginFailureMessage(err))
 			}
 
 		}
@@ -166,7 +169,7 @@ with the saved target as the default. Non-interactive login requires a HOST or
 
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 		who, whoErr := auth.GetWhoami(ac)
 		switch classifyWhoamiVerification(whoErr) {
@@ -176,13 +179,16 @@ with the saved target as the default. Non-interactive login requires a HOST or
 			}
 		case whoamiFallback:
 			// Old server without whoami: fall back to legacy prefix-based verification.
-			verifyLoginLegacy(ac, token)
+			if err := verifyLoginLegacy(ac, token); err != nil {
+				return err
+			}
 		default:
-			utils.CliErrorWithExit("%s", utils.Reword(whoErr, whoamiFailureMessage(whoErr)))
+			return utils.NewExitError("%s", utils.Reword(whoErr, whoamiFailureMessage(whoErr)))
 		}
 
 		utils.CliSuccess("Login succeeded!")
-	},
+		return nil
+	}),
 }
 
 func init() {
@@ -210,20 +216,23 @@ func persistWorkspaceEnv(workspaceURL string, envInfo *auth0.AuthEnvResponse) {
 }
 
 func promptForLoginTarget(cfg config.Config) (workspaceURL, workspaceName, baseDomain string, err error) {
-	return promptForLoginTargetWithPrompts(cfg, utils.PromptForInputWithDefault, utils.PromptForRequiredInput)
+	return promptForLoginTargetWithPrompts(cfg, utils.ReadInputWithDefault, utils.ReadRequiredInput)
 }
 
 func promptForLoginTargetWithPrompts(
 	cfg config.Config,
-	promptWithDefault func(promptText, defaultValue string) string,
-	promptRequired func(promptText string) string,
+	promptWithDefault func(promptText, defaultValue string) (string, error),
+	promptRequired func(promptText string) (string, error),
 ) (workspaceURL, workspaceName, baseDomain string, err error) {
 	if cfg.WorkspaceURL != "" && !isCloudWorkspaceURL(cfg.WorkspaceURL) {
 		savedURL := formatHostURL(cfg.WorkspaceURL)
-		host := promptWithDefault(
+		host, err := promptWithDefault(
 			fmt.Sprintf("Host [%s]: ", savedURL),
 			savedURL,
 		)
+		if err != nil {
+			return "", "", "", err
+		}
 		if err := validateHostTarget(host); err != nil {
 			return "", "", "", err
 		}
@@ -241,18 +250,26 @@ func promptForLoginTargetWithPrompts(
 
 	defaultWorkspace, defaultRegion := cloudLoginDefaults(cfg)
 	if defaultWorkspace == "" {
-		workspaceName = promptRequired("Workspace name: ")
+		if workspaceName, err = promptRequired("Workspace name: "); err != nil {
+			return "", "", "", err
+		}
 	} else {
-		workspaceName = promptWithDefault(
+		workspaceName, err = promptWithDefault(
 			fmt.Sprintf("Workspace name [%s]: ", defaultWorkspace),
 			defaultWorkspace,
 		)
+		if err != nil {
+			return "", "", "", err
+		}
 	}
 
-	region := promptWithDefault(
+	region, err := promptWithDefault(
 		fmt.Sprintf("Region [%s] (%s): ", defaultRegion, cloudRegionsHint()),
 		defaultRegion,
 	)
+	if err != nil {
+		return "", "", "", err
+	}
 	workspaceName = strings.TrimSpace(workspaceName)
 	region = strings.TrimSpace(region)
 	if err := validateCloudTargetParts(workspaceName, region); err != nil {
@@ -268,16 +285,24 @@ func validateInteractiveLoginTargetPrompt(isInteractive bool) error {
 	return errors.New("login target is required in non-interactive mode. Pass a HOST or use --workspace and --region; use -t with an explicit target for CI/CD or automation")
 }
 
-func promptForCredentials(username, password string) (string, string) {
+var promptPassword = utils.PromptForPassword // a seam: a test cannot type Ctrl+C into a terminal
+
+func promptForCredentials(username, password string) (string, string, error) {
 	if username == "" {
-		username = utils.PromptForRequiredInput("Username: ")
+		var err error
+		if username, err = utils.ReadRequiredInput("Username: "); err != nil {
+			return "", "", err
+		}
 	}
 
 	if password == "" {
-		password = utils.PromptForPassword("Password: ")
+		var err error
+		if password, err = promptPassword("Password: "); err != nil {
+			return "", "", err
+		}
 	}
 
-	return username, password
+	return username, password, nil
 }
 
 func cloudRegionsHint() string {
@@ -470,6 +495,10 @@ func unsupportedHostTargetError() error {
 	return errors.New("URL credentials, paths, queries, and fragments are not supported, and the scheme must be http or https. For Alpacon Cloud use 'alpacon login --workspace <name> --region <region>'; for self-hosted pass only the host, with optional http/https scheme and port (e.g. 'alpacon login alpacon.example.com')")
 }
 
+func isWorkspaceNotFound(err error) bool {
+	return utils.HTTPStatusCode(err) == http.StatusNotFound
+}
+
 // formatHostURL normalizes a host argument into a full URL. Loopback hosts
 // (localhost, 127.0.0.1, ::1) default to http://, everything else to https://.
 func formatHostURL(host string) string {
@@ -539,17 +568,18 @@ func classifyWhoamiVerification(whoErr error) string {
 }
 
 // verifyLoginLegacy is the pre-whoami verification used against servers without the whoami endpoint.
-func verifyLoginLegacy(ac *client.AlpaconClient, token string) {
+func verifyLoginLegacy(ac *client.AlpaconClient, token string) error {
 	if config.IsServiceToken(token) {
 		utils.CliInfo("Authenticated with a service token. Service tokens are application principals and have no user profile, so user details are unavailable.")
-		return
+		return nil
 	}
 	if err := ac.LoadCurrentUser(); err != nil {
 		if shouldFailOnProfileError(token) {
-			utils.CliErrorWithExit("%s", utils.Reword(err, profileFailureMessage(err)))
+			return utils.NewExitError("%s", utils.Reword(err, profileFailureMessage(err)))
 		}
 		utils.CliInfo("Could not preload your user profile; continuing since the credential was verified.")
 	}
+	return nil
 }
 
 // shouldFailOnProfileError reports whether a failed user-profile load aborts login. It is consulted

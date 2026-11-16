@@ -75,24 +75,30 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return utils.SetOutputFormat(utils.OutputFormat)
 	},
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if showVersion {
-			runVersion()
-			return
+			return runVersion()
 		}
 		utils.ShowLogo(buildWelcomeLines())
-	},
+		return nil
+	}),
 }
 
 func Execute() {
 	kube.ApplySurfaceGate(RootCmd, kubernetesSurfaceEnabled())
 	RootCmd.InitDefaultCompletionCmd()
+	rejectUnknownSubcommands(RootCmd)
 	markHookErrors(RootCmd)
 	keepWithOwnParser(RootCmd, os.Args[1:])
 	cmd, err := RootCmd.ExecuteC()
+	exitErr, isExitErr := errors.AsType[*utils.ExitError](err)
 	switch {
 	case err == nil:
+		utils.WaitForTokenRefreshes()
 		return
+	case isExitErr: // a converted command's failure, printed after its deferred calls ran
+		utils.PrintExitError(exitErr)
+		utils.Exit(exitErr.Code)
 	case !errors.As(err, new(hookError)):
 		utils.CliParseErrorWithExit(cmd, utils.OutputFormatIn(os.Args[1:]), err.Error())
 	case utils.IsUsageError(err):
@@ -133,6 +139,16 @@ func knownFlag(c *cobra.Command, arg string) bool {
 	return len(arg) == 2 && c.Flags().ShorthandLookup(arg[1:]) != nil
 }
 
+// rejectUnknownSubcommands does below the root what Cobra does only at the root, for each group that leaves Args and flag parsing to Cobra.
+func rejectUnknownSubcommands(c *cobra.Command) {
+	if c.HasParent() && c.HasSubCommands() && c.Args == nil && !c.DisableFlagParsing {
+		c.Args = utils.RejectUnknownSubcommand()
+	}
+	for _, sub := range c.Commands() {
+		rejectUnknownSubcommands(sub)
+	}
+}
+
 // hookError marks an error a command's own hook returned; any other error is Cobra rejecting the command line.
 type hookError struct{ err error }
 
@@ -171,6 +187,13 @@ func kubernetesSurfaceEnabled() bool {
 }
 
 func init() {
+	utils.LocalSignalConsoleOrigin = func() (string, string) {
+		cfg, err := config.LoadConfig()
+		if err != nil {
+			return "", ""
+		}
+		return cfg.WorkspaceURL, cfg.BaseDomain
+	}
 	RootCmd.PersistentFlags().StringVar(
 		&utils.OutputFormat, "output", utils.OutputFormatTable,
 		"Output format: table or json",

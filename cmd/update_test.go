@@ -7,9 +7,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/pkg/selfupdate"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -182,11 +184,7 @@ func TestUpdateCommandRefusesAPositionalArgument(t *testing.T) {
 	assert.NoError(t, updateCmd.Args(updateCmd, nil))
 }
 
-// These tests drive the real command in a child process: Run ends in an os.Exit
-// after its first branch, so deleting the dev-build guard or the os.Exit(8) leaves
-// every in-process test green.
 func TestUpdateCommandRefusesADevBuild(t *testing.T) {
-	t.Parallel()
 	stderr, exitCode := runUpdateCommandHelper(t, []string{"update"})
 
 	assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
@@ -195,7 +193,6 @@ func TestUpdateCommandRefusesADevBuild(t *testing.T) {
 }
 
 func TestUpdateCommandCheckExitsEightWhenANewerReleaseExists(t *testing.T) {
-	t.Parallel()
 	stderr, exitCode := runUpdateCommandHelper(t, []string{"update", "--check"},
 		"ALPACON_TEST_CURRENT_VERSION=1.0.0",
 		"ALPACON_TEST_LATEST_RELEASE=9.9.9",
@@ -206,7 +203,6 @@ func TestUpdateCommandCheckExitsEightWhenANewerReleaseExists(t *testing.T) {
 }
 
 func TestUpdateCommandCheckExitsZeroWhenAlreadyCurrent(t *testing.T) {
-	t.Parallel()
 	stderr, exitCode := runUpdateCommandHelper(t, []string{"update", "--check"},
 		"ALPACON_TEST_CURRENT_VERSION=9.9.9",
 		"ALPACON_TEST_LATEST_RELEASE=9.9.9",
@@ -218,19 +214,18 @@ func TestUpdateCommandCheckExitsZeroWhenAlreadyCurrent(t *testing.T) {
 
 func runUpdateCommandHelper(t *testing.T, args []string, env ...string) (stderr string, exitCode int) {
 	t.Helper()
+	t.Setenv(homeEnvVar(), t.TempDir())
 
-	helperEnv := append([]string{"GO_WANT_UPDATE_HELPER=1", homeEnvVar() + "=" + t.TempDir()}, env...)
-	_, stderr, exitCode = runHelperProcess(t, "TestUpdateCommandHelperProcess", "update-helper", args, helperEnv...)
-	return stderr, exitCode
-}
-
-func TestUpdateCommandHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_UPDATE_HELPER") != "1" {
-		return
+	values := make(map[string]string, len(env))
+	for _, item := range env {
+		key, value, ok := strings.Cut(item, "=")
+		require.True(t, ok)
+		values[key] = value
 	}
-	latest := os.Getenv("ALPACON_TEST_LATEST_RELEASE")
-	fails := os.Getenv("ALPACON_TEST_RELEASE_FAILS") == "1"
+	latest := values["ALPACON_TEST_LATEST_RELEASE"]
+	fails := values["ALPACON_TEST_RELEASE_FAILS"] == "1"
 	if latest != "" || fails {
+		oldReleaseAPIURL := selfupdate.DefaultReleaseAPIURL
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if fails {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -240,16 +235,31 @@ func TestUpdateCommandHelperProcess(t *testing.T) {
 		}))
 		defer ts.Close()
 		selfupdate.DefaultReleaseAPIURL = ts.URL
-		utils.Version = os.Getenv("ALPACON_TEST_CURRENT_VERSION")
+		t.Cleanup(func() {
+			selfupdate.DefaultReleaseAPIURL = oldReleaseAPIURL
+		})
 	}
 
-	args, ok := helperArgsAfter(os.Args, "update-helper")
-	if !ok {
-		os.Exit(99)
+	oldVersion := utils.Version
+	utils.Version = values["ALPACON_TEST_CURRENT_VERSION"]
+	if utils.Version == "" {
+		utils.Version = "dev"
 	}
-	os.Args = append([]string{"alpacon"}, args...)
-	Execute()
-	os.Exit(0)
+	t.Cleanup(func() { utils.Version = oldVersion })
+
+	var runErr error
+	_, stderr = testutil.CaptureOutput(t, func() {
+		runErr = executeRootCommand(t, args)
+		if exitErr, ok := errors.AsType[*utils.ExitError](runErr); ok {
+			utils.FprintExitError(os.Stderr, exitErr)
+		}
+	})
+	if runErr == nil {
+		return stderr, 0
+	}
+	exitErr, ok := errors.AsType[*utils.ExitError](runErr)
+	require.True(t, ok)
+	return stderr, exitErr.Code
 }
 
 func TestUpdateFailureMessageSaysWhyTheBinaryWasLeftAlone(t *testing.T) {

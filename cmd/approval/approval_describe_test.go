@@ -204,7 +204,7 @@ func TestContextRows(t *testing.T) {
 			body: `{"metadata":{"sudo":{"command":"apt update","runas":"root","purpose":"patch openssl","server_name":"my-server"}}}`,
 			want: []describeRow{
 				{"Sudo command", "apt update"},
-				{"  Run as", "root"},
+				{"Run as", "root"},
 				{"Purpose", "patch openssl"},
 				{"Server", "my-server"},
 			},
@@ -214,7 +214,7 @@ func TestContextRows(t *testing.T) {
 			body: `{"metadata":{"sudo":{"command":"apt update","runas":"root","purpose":null}}}`,
 			want: []describeRow{
 				{"Sudo command", "apt update"},
-				{"  Run as", "root"},
+				{"Run as", "root"},
 			},
 		},
 		{
@@ -222,7 +222,7 @@ func TestContextRows(t *testing.T) {
 			body: `{"metadata":{"sudo":{"command":"apt update","runas":"root"}}}`,
 			want: []describeRow{
 				{"Sudo command", "apt update"},
-				{"  Run as", "root"},
+				{"Run as", "root"},
 			},
 		},
 		{
@@ -277,6 +277,21 @@ func TestContextRows(t *testing.T) {
 				{"  Sudo policies", "apt update, apt upgrade; reboot"},
 				{"  Target account", "alice"},
 			},
+		},
+		{
+			name: "names and hidden",
+			body: `{"metadata":{"changes":{"servers":[{"id":"s-1","name":"my-server"}],"servers_hidden":2}}}`,
+			want: []describeRow{{"Requested changes", ""}, {"  Servers", "my-server and 2 more"}},
+		},
+		{
+			name: "all hidden",
+			body: `{"metadata":{"changes":{"servers":[],"servers_hidden":1}}}`,
+			want: []describeRow{{"Requested changes", ""}, {"  Servers", "1 server you cannot access"}},
+		},
+		{
+			name: "zero hidden",
+			body: `{"metadata":{"changes":{"servers":[],"servers_hidden":0}}}`,
+			want: nil,
 		},
 		{
 			name: "changes with no renderable key shows no header",
@@ -373,7 +388,29 @@ func TestApprovalDescribeJSONPreservesSudoRunAs(t *testing.T) {
 	t.Cleanup(func() { utils.OutputFormat = previousFormat })
 
 	stdout := testutil.CaptureStdout(t, func() {
-		approvalDescribeCmd.Run(approvalDescribeCmd, []string{"apr-abc"})
+		assert.NoError(t, approvalDescribeCmd.RunE(approvalDescribeCmd, []string{"apr-abc"}))
 	})
 	assert.JSONEq(t, response, stdout)
+}
+
+func TestDescribeShowsTheApproverReasonOnOneLine(t *testing.T) {
+	t.Parallel()
+	req := decodeFixture(t, `{"id":"apr-2","request_type":"command_exec","status":"rejected","rejection_note":"Add a guard\non line 23.\u001b[2K"}`)
+
+	rows := rowMap(describeRows(req, nil))
+
+	assert.Equal(t, "Add a guard on line 23.", rows["Rejection reason"])
+}
+
+func TestDescribeLeavesOutAnEmptyReason(t *testing.T) {
+	t.Parallel()
+	for _, body := range []string{
+		`{"id":"apr-3","status":"rejected","rejection_note":""}`,
+		`{"id":"apr-3","status":"rejected"}`,
+		`{"id":"apr-3","status":"rejected","rejection_note":"  \n "}`,
+		`{"id":"apr-3","status":"rejected","rejection_note":"\u001b[2K"}`,
+	} {
+		rows := rowMap(describeRows(decodeFixture(t, body), nil))
+		assert.NotContains(t, rows, "Rejection reason", body)
+	}
 }

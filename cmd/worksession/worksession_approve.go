@@ -23,9 +23,9 @@ the CLI credential channel. Use 'alpacon work-session ls' to track status.`,
 	Args: cobra.ArbitraryArgs,
 	Example: `  # Approve in the Alpacon console (web), then track status here:
   alpacon work-session ls --status active`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		// Exit non-zero so a script that expected the approval to happen does not
 		// mistake this for success—the CLI must never pretend to approve.
-		utils.CliErrorWithExit("%s", approveRejectExcludedMessage)
-	},
+		return utils.NewExitError("%s", approveRejectExcludedMessage)
+	}),
 }

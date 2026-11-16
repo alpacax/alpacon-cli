@@ -18,16 +18,17 @@ Cancelling a work_session request also cancels the linked work
 session.`,
 	Args:    cobra.ExactArgs(1),
 	Example: `  alpacon approval cancel 550e8400-e29b-41d4-a716-446655440000`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if err := approvalapi.CancelRequest(ac, args[0]); err != nil {
-			utils.CliErrorWithExit("Failed to cancel request: %s.", err)
+			return utils.NewExitError("Failed to cancel request: %s.", err)
 		}
 
 		utils.CliSuccess("Approval request %s cancelled.", args[0])
-	},
+		return nil
+	}),
 }

@@ -27,7 +27,7 @@ func closedPortURL(t *testing.T) string {
 // The tunnel session exists once the server accepted its create. A dial to the
 // proxy that fails after that is the tunnel's result: the MFA wait must not take
 // the refused connection for a refused create and leave another session behind.
-// Serial: it points HOME at a temp config and reassigns tunnelFlags.
+// Serial: it points HOME at a temp config.
 func TestExecuteTunnel_MFAWaitDoesNotCreateAnotherSessionAfterAFailedDial(t *testing.T) {
 	wsURL := closedPortURL(t)
 	var creates atomic.Int32
@@ -57,14 +57,10 @@ func TestExecuteTunnel_MFAWaitDoesNotCreateAnotherSessionAfterAFailedDial(t *tes
 	t.Setenv("ALPACON_NO_BROWSER", "1")
 	require.NoError(t, config.CreateConfig(ts.URL, "my-workspace", "api-token", "", "", "", "", 0, false))
 
-	saved := tunnelFlags
-	t.Cleanup(func() { tunnelFlags = saved })
-	tunnelFlags = tunnelFlagValues{localPort: "0", remotePort: "5432"}
-
 	ac, err := client.NewAlpaconAPIClient()
 	require.NoError(t, err)
 
-	err = executeTunnel(ac, "my-server", nil)
+	err = executeTunnel(ac, tunnelFlagValues{localPort: "0", remotePort: "5432"}, "my-server", nil)
 
 	require.ErrorContains(t, err, "failed to connect to proxy server")
 	assert.Equal(t, int32(1), creates.Load()-1, "one accepted tunnel session")

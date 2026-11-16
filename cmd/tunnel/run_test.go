@@ -243,15 +243,10 @@ func TestMonitorLocalCommandReturnsErrorWhenTunnelCloses(t *testing.T) {
 }
 
 func TestExecuteTunnelRunWithInvocationInvalidRemotePort(t *testing.T) {
-	originalFlags := tunnelFlags
-	t.Cleanup(func() {
-		tunnelFlags = originalFlags
-	})
+	t.Parallel()
+	flags := tunnelFlagValues{localPort: "5432", remotePort: "invalid"}
 
-	tunnelFlags.localPort = "5432"
-	tunnelFlags.remotePort = "invalid"
-
-	exitCode, err := executeTunnelRunWithInvocation(&client.AlpaconClient{}, "prod-db", []string{"psql"})
+	exitCode, err := executeTunnelRunWithInvocation(&client.AlpaconClient{}, flags, "prod-db", []string{"psql"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

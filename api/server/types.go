@@ -3,7 +3,7 @@ package server
 import (
 	"time"
 
-	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 type ServerAttributes struct {
@@ -11,7 +11,6 @@ type ServerAttributes struct {
 	IP        string `json:"ip" table:"IP"`
 	OS        string `json:"os" table:"OS"`
 	Connected bool   `json:"connected"`
-	Owner     string `json:"owner"`
 }
 
 // RegistrationTokenRequest is used to create a new server registration token.
@@ -44,14 +43,13 @@ type RegistrationTokenDetails struct {
 	AddedAt       string   `json:"added_at"`
 }
 
-// RegistrationTokenAttributes is the table/JSON projection used by 'server token ls'.
-// AllowedGroups is one comma-separated string of group names, or the UUIDs that could not be
-// resolved, and ExpiresAt is the raw timestamp or "never".
+// RegistrationTokenAttributes is the 'server token ls' row. AllowedGroups joins group names, or
+// the UUIDs left unresolved; a token without ExpiresAt shows "never" in a table and null in JSON.
 type RegistrationTokenAttributes struct {
-	Name          string `json:"name"`
-	AllowedGroups string `json:"allowed_groups" table:"Allowed Groups"`
-	ExpiresAt     string `json:"expires_at" table:"Expires At"`
-	Enabled       bool   `json:"enabled"`
+	Name          string          `json:"name"`
+	AllowedGroups string          `json:"allowed_groups" table:"Allowed Groups"`
+	ExpiresAt     utils.Timestamp `json:"expires_at" table:"Expires At"`
+	Enabled       bool            `json:"enabled"`
 }
 
 // RegistrationMethodGuideRequest is the request body for the guide API.
@@ -99,20 +97,29 @@ type serverActionRequest struct {
 }
 
 type ServerDetails struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	RemoteIP         string            `json:"remote_ip"`
-	IsConnected      bool              `json:"is_connected"`
-	Commissioned     bool              `json:"commissioned"`
-	Starred          bool              `json:"starred"`
-	CPUPhysicalCores int               `json:"cpu_physical_cores"`
-	CPULogicalCores  int               `json:"cpu_logical_cores"`
-	CPUType          string            `json:"cpu_type"`
-	PhysicalMemory   int64             `json:"physical_memory"`
-	OSName           string            `json:"os_name"`
-	OSVersion        string            `json:"os_version"`
-	Load             float64           `json:"load"`
-	BootTime         time.Time         `json:"boot_time"`
-	Owner            types.UserSummary `json:"owner"`
-	Groups           []string          `json:"groups"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	RemoteIP         string    `json:"remote_ip"`
+	IsConnected      bool      `json:"is_connected"`
+	Commissioned     bool      `json:"commissioned"`
+	Starred          bool      `json:"starred"`
+	CPUPhysicalCores int       `json:"cpu_physical_cores"`
+	CPULogicalCores  int       `json:"cpu_logical_cores"`
+	CPUType          string    `json:"cpu_type"`
+	PhysicalMemory   int64     `json:"physical_memory"`
+	OSName           string    `json:"os_name"`
+	OSVersion        string    `json:"os_version"`
+	Platform         string    `json:"platform"`
+	Load             float64   `json:"load"`
+	BootTime         time.Time `json:"boot_time"`
+	Groups           []string  `json:"groups"`
 }
+
+// ServerRef is a resolved server: its ID and the platform its Alpamon registered with.
+type ServerRef struct {
+	ID       string
+	Platform string
+}
+
+// Windows reports whether the server's paths follow Windows rules.
+func (s ServerRef) Windows() bool { return s.Platform == "windows" }

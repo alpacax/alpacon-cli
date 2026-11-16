@@ -300,7 +300,7 @@ func (e *refusedError) ErrorGate() string         { return e.gate }
 func (e *refusedError) ErrorMissing() []string    { return nil }
 func (e *refusedError) RetryAfter() time.Duration { return e.retryAfter }
 
-func TestRefusalNextActions_NextMustBeASelfRelativePath(t *testing.T) {
+func TestRefusalNextActions_NextMustBeASafeAPIPathArgument(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string

@@ -18,25 +18,28 @@ The token is resolved by name—UUID input is not supported.`,
     alpacon server token rm my-token
     alpacon server token delete my-token -y`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
 		yes, _ := cmd.Flags().GetBool("yes")
 		if !yes {
-			utils.ConfirmAction("Delete registration token '%s'?", name)
+			if proceed, err := utils.Confirm("Delete registration token '%s'?", name); err != nil || !proceed {
+				return err
+			}
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if err := serverAPI.DeleteRegistrationToken(alpaconClient, name); err != nil {
-			utils.CliErrorWithExit("Failed to delete the registration token: %s.", err)
+			return utils.NewExitError("Failed to delete the registration token: %s.", err)
 		}
 
 		utils.CliSuccess("Registration token deleted: %s", name)
-	},
+		return nil
+	}),
 }
 
 func init() {

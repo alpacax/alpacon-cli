@@ -21,7 +21,7 @@ var AuditCmd = &cobra.Command{
 	alpacon audit --tail 10 --user admin
 	alpacon audit --tail=50 --app=cert --model=authority
 	`,
-	Run: runAudit,
+	RunE: utils.WithExitError(runAudit),
 }
 
 func init() {
@@ -36,18 +36,20 @@ func init() {
 	AuditCmd.Flags().StringVarP(&model, "model", "m", "", "Filter by model")
 }
 
-func runAudit(cmd *cobra.Command, args []string) {
+func runAudit(cmd *cobra.Command, args []string) error {
 	tail, _ := cmd.Flags().GetInt("tail")
-	utils.RequirePositiveInt("tail", tail)
+	if err := utils.CheckPositiveInt("tail", tail); err != nil {
+		return err
+	}
 	userName, _ := cmd.Flags().GetString("user")
 	app, _ := cmd.Flags().GetString("app")
 	model, _ := cmd.Flags().GetString("model")
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 
 	auditList, err := audit.GetAuditLogList(alpaconClient, tail, userName, app, model)
-	utils.PrintListOrExit(auditList, err, "Failed to get audit logs")
+	return utils.PrintList(auditList, err, "Failed to get audit logs")
 }

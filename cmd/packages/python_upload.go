@@ -19,19 +19,20 @@ var pythonPackageUploadCmd = &cobra.Command{
 	alpacon package python upload /home/alpacon/alpamon-1.1.0-py3-none-any.whl
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		file := args[0]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = packages.UploadPackage(alpaconClient, file, "python")
 		if err != nil {
-			utils.CliErrorWithExit("Failed to upload the Python package to Alpacon: %s.", err)
+			return utils.NewExitError("Failed to upload the Python package to Alpacon: %s.", err)
 		}
 
 		utils.CliSuccess("Package uploaded: %s", file)
-	},
+		return nil
+	}),
 }

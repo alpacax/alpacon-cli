@@ -1,13 +1,10 @@
 package exec
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	osexec "os/exec"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/utils"
@@ -106,40 +103,12 @@ func newInlineCredentialDenialServer() *httptest.Server {
 // the envelope carries the server's error_code with a plain (non-special)
 // exit code 1—this refusal is not a WorkSession gate or a pending approval.
 func TestExecInlineCredentialDenialExits1WithJSONErrorCode(t *testing.T) {
-	t.Parallel()
 	ts := newInlineCredentialDenialServer()
 	defer ts.Close()
 
-	home := t.TempDir()
-	writeExecCommandTestConfig(t, home, ts.URL)
-
-	helper := osexec.Command(
-		os.Args[0],
-		"-test.run=^TestExecCommandWorkSessionGateHelperProcess$",
-		"--",
-		"exec-worksession-helper",
-		"--output",
-		"json",
-		"prod",
-		"--",
-		"mysql",
-		"-pSecret",
-	)
-	helper.Env = append(os.Environ(),
-		"GO_WANT_EXEC_WORKSESSION_HELPER=1",
-		"ALPACON_WORK_SESSION=",
-		"HOME="+home,
-	)
-	var stdout, stderr bytes.Buffer
-	helper.Stdout = &stdout
-	helper.Stderr = &stderr
-
-	err := helper.Run()
-	require.Error(t, err)
-	var exitErr *osexec.ExitError
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, 1, exitErr.ExitCode(), "inline-credential refusal uses the general failure exit code, not a dedicated one")
-	assert.Empty(t, stdout.String())
+	stdout, stderr, exitCode := runExecHelper(t, ts.URL, "--output", "json", "prod", "--", "mysql", "-pSecret")
+	assert.Equal(t, 1, exitCode, "inline-credential refusal uses the general failure exit code, not a dedicated one")
+	assert.Empty(t, stdout)
 
 	var envelope struct {
 		OK        bool   `json:"ok"`
@@ -147,51 +116,25 @@ func TestExecInlineCredentialDenialExits1WithJSONErrorCode(t *testing.T) {
 		ErrorCode string `json:"error_code"`
 		Message   string `json:"message"`
 	}
-	require.NoError(t, json.Unmarshal(stderr.Bytes(), &envelope), "stderr: %s", stderr.String())
+	require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), "stderr: %s", stderr)
 	assert.False(t, envelope.OK)
 	assert.Equal(t, 1, envelope.ExitCode)
 	assert.Equal(t, utils.CommandInlineCredential, envelope.ErrorCode)
-	assert.NotContains(t, stderr.String(), "-pSecret", "the rejected command line must never be echoed back")
+	assert.NotContains(t, stderr, "-pSecret", "the rejected command line must never be echoed back")
 }
 
 // TestExecInlineCredentialDenialTablePrintsHint drives the same denial in the
 // default table output and asserts the human-facing error + hint, and that the
 // rejected command line is never echoed.
 func TestExecInlineCredentialDenialTablePrintsHint(t *testing.T) {
-	t.Parallel()
 	ts := newInlineCredentialDenialServer()
 	defer ts.Close()
 
-	home := t.TempDir()
-	writeExecCommandTestConfig(t, home, ts.URL)
+	stdout, stderr, exitCode := runExecHelper(t, ts.URL, "prod", "--", "mysql", "-pSecret")
+	assert.Equal(t, 1, exitCode)
+	assert.Empty(t, stdout)
 
-	helper := osexec.Command(
-		os.Args[0],
-		"-test.run=^TestExecCommandWorkSessionGateHelperProcess$",
-		"--",
-		"exec-worksession-helper",
-		"prod",
-		"--",
-		"mysql",
-		"-pSecret",
-	)
-	helper.Env = append(os.Environ(),
-		"GO_WANT_EXEC_WORKSESSION_HELPER=1",
-		"ALPACON_WORK_SESSION=",
-		"HOME="+home,
-	)
-	var stdout, stderr bytes.Buffer
-	helper.Stdout = &stdout
-	helper.Stderr = &stderr
-
-	err := helper.Run()
-	require.Error(t, err)
-	var exitErr *osexec.ExitError
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, 1, exitErr.ExitCode())
-	assert.Empty(t, stdout.String())
-
-	out := stderr.String()
+	out := stderr
 	assert.Contains(t, out, "credential", "should explain the refusal reason")
 	assert.Contains(t, out, "Hint:")
 	assert.Contains(t, out, "--env")
@@ -202,7 +145,6 @@ func TestExecInlineCredentialDenialTablePrintsHint(t *testing.T) {
 // another code, or none, takes the generic failure path: a plain "Error: ..." line and no
 // credential hint.
 func TestExecNonInlineCredentialErrorFallsThroughUnchanged(t *testing.T) {
-	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -217,33 +159,10 @@ func TestExecNonInlineCredentialErrorFallsThroughUnchanged(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	home := t.TempDir()
-	writeExecCommandTestConfig(t, home, ts.URL)
+	_, stderr, exitCode := runExecHelper(t, ts.URL, "prod", "id")
+	assert.Equal(t, 1, exitCode)
 
-	helper := osexec.Command(
-		os.Args[0],
-		"-test.run=^TestExecCommandWorkSessionGateHelperProcess$",
-		"--",
-		"exec-worksession-helper",
-		"prod",
-		"id",
-	)
-	helper.Env = append(os.Environ(),
-		"GO_WANT_EXEC_WORKSESSION_HELPER=1",
-		"ALPACON_WORK_SESSION=",
-		"HOME="+home,
-	)
-	var stdout, stderr bytes.Buffer
-	helper.Stdout = &stdout
-	helper.Stderr = &stderr
-
-	err := helper.Run()
-	require.Error(t, err)
-	var exitErr *osexec.ExitError
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, 1, exitErr.ExitCode())
-
-	out := stderr.String()
+	out := stderr
 	assert.Contains(t, out, "some other rejection")
 	assert.NotContains(t, out, "Hint:", "unrelated errors must not surface the credential hint")
 	assert.NotContains(t, out, "--env")

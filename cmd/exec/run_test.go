@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -192,6 +193,131 @@ func stubApprovalWaitSeams(t *testing.T, interval time.Duration, code string) *e
 	return &event.RemoteCommandError{Output: denialLine(code), ExitCode: 1, CommandID: "cmd-1"}
 }
 
+func TestRunExecWithApprovalWait_NullHeldAfterCancelDoesNotEndTheWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+		denial.Held = &utils.HeldRequest{ApprovalRequest: heldRequestUUID, StatusPath: heldStatusPath}
+		submits := 0
+		runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+			submits++
+			return denial
+		}
+		polls := 0
+		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+			polls++
+			status, requestID := "pending_approval", heldRequestUUID
+			return event.EventDetails{SudoGrantStatus: &status, SudoApprovalRequestID: &requestID}, nil
+		}
+
+		err := RunExecWithApprovalWait(nil, "srv", "sudo reboot", "", "", nil, "", "", 80*time.Millisecond, io.Discard)
+
+		var remoteErr *event.RemoteCommandError
+		require.ErrorAs(t, err, &remoteErr)
+		assert.Equal(t, 1, submits)
+		assert.Greater(t, polls, 1)
+		assert.Equal(t, heldRequestUUID, remoteErr.ApprovalRequestID)
+		assert.Nil(t, remoteErr.Held)
+		assert.NotNil(t, denial.Held, "the caller's denial is copied, not changed")
+	})
+}
+
+func TestRunExecWithApprovalWait_TimeoutCarriesTheLatestHeld(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+		runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+			return denial
+		}
+		held := &utils.HeldRequest{ApprovalRequest: heldRequestUUID, StatusPath: heldStatusPath}
+		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+			status := "pending_approval"
+			return event.EventDetails{SudoGrantStatus: &status, Held: held}, nil
+		}
+
+		err := RunExecWithApprovalWait(nil, "srv", "sudo reboot", "", "", nil, "", "", 80*time.Millisecond, io.Discard)
+
+		var remoteErr *event.RemoteCommandError
+		require.ErrorAs(t, err, &remoteErr)
+		assert.Same(t, held, remoteErr.Held)
+	})
+}
+
+func TestRunExecWithApprovalWait_ExpiredDeadlineDoesNotClaimApprovalWasLate(t *testing.T) {
+	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+		return denial
+	}
+	past := time.Date(2001, 11, 6, 17, 20, 0, 0, time.UTC)
+	polls := 0
+	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+		polls++
+		if polls == 1 {
+			status := "pending_approval"
+			return event.EventDetails{SudoGrantStatus: &status, Held: &utils.HeldRequest{ApprovalRequest: heldRequestUUID, ExpiresAt: &past, StatusPath: heldStatusPath}}, nil
+		}
+		status := "authorized"
+		return event.EventDetails{SudoGrantStatus: &status}, nil
+	}
+
+	stderr := captureStderr(t, func() {
+		_ = RunExecWithApprovalWait(nil, "srv", "sudo reboot", "", "", nil, "", "", time.Minute, io.Discard)
+	})
+
+	assert.Contains(t, stderr, "The approval deadline (2001-11-06T17:20:00Z) has passed and the command was denied again.")
+	assert.Contains(t, stderr, "Re-run the command to request a new approval.")
+	assert.NotContains(t, stderr, "granted after")
+}
+
+func TestRunExecWithApprovalWait_DeadlineCanPassDuringTheRerun(t *testing.T) {
+	stderr := captureStderr(t, func() {
+		synctest.Test(t, func(t *testing.T) {
+			denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+			expiresAt := time.Now().Add(15 * time.Millisecond)
+			denial.Held = &utils.HeldRequest{ApprovalRequest: heldRequestUUID, ExpiresAt: &expiresAt}
+			submits := 0
+			var rerunStarted time.Time
+			runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+				submits++
+				if submits == 2 {
+					rerunStarted = time.Now()
+					time.Sleep(20 * time.Millisecond)
+				}
+				return denial
+			}
+			getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+				status := "authorized"
+				return event.EventDetails{SudoGrantStatus: &status}, nil
+			}
+
+			_ = RunExecWithApprovalWait(nil, "srv", "sudo reboot", "", "", nil, "", "", time.Minute, io.Discard)
+
+			assert.Equal(t, 2, submits)
+			assert.True(t, rerunStarted.Before(expiresAt), "re-run started at %s, deadline %s", rerunStarted, expiresAt)
+		})
+	})
+	assert.Contains(t, stderr, "has passed and the command was denied again.")
+	assert.NotContains(t, stderr, "granted after")
+	assert.NotContains(t, stderr, "passed before the re-run")
+}
+
+func TestRunExecWithApprovalWait_ApprovalWithNoDeadlineKeepsTheReusedGrantWarning(t *testing.T) {
+	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+	denial.Held = &utils.HeldRequest{ApprovalRequest: heldRequestUUID, StatusPath: heldStatusPath}
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+		return denial
+	}
+	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+		status := "authorized"
+		return event.EventDetails{SudoGrantStatus: &status}, nil
+	}
+
+	stderr := captureStderr(t, func() {
+		_ = RunExecWithApprovalWait(nil, "srv", "sudo reboot", "", "", nil, "", "", time.Minute, io.Discard)
+	})
+
+	assert.Contains(t, stderr, "the grant appears already used or expired")
+	assert.NotContains(t, stderr, "deadline")
+}
+
 func TestRunExecWithApprovalWait_PollsTheCommandDetailInsteadOfResubmitting(t *testing.T) {
 	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 
@@ -355,7 +481,7 @@ func TestRunExecWithApprovalWait_TimesOutAfterWindow(t *testing.T) {
 		err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
 		elapsed := time.Since(start)
 
-		assert.Same(t, denial, err, "timeout returns the last pending denial for the caller's handler")
+		require.ErrorIs(t, err, denial, "timeout returns the last pending denial for the caller's handler")
 		assert.Equal(t, waitTimeout, elapsed, "loop must wait exactly the anchored window before timing out")
 	})
 }
@@ -414,6 +540,27 @@ func TestIsPollFailure(t *testing.T) {
 			assert.Equal(t, tt.want, isPollFailure(tt.err))
 		})
 	}
+}
+
+func TestRunWithApprovalWait_DeniedCommandDoesNotResubmit(t *testing.T) {
+	t.Parallel()
+	var details event.EventDetails
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"id":"cmd-1",
+		"status":"denied",
+		"denial_code":"account_not_resolved",
+		"result":"Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED)."
+	}`), &details))
+	runs := 0
+
+	err := runWithApprovalWait(nil, func() error {
+		runs++
+		return details.Rejection()
+	}, time.Minute, io.Discard)
+
+	var denied *event.CommandRejectedError
+	require.ErrorAs(t, err, &denied)
+	assert.Equal(t, 1, runs, "a terminal denial must not wait or submit the command again")
 }
 
 func TestRunExecWithApprovalWait_TransientPollFailureKeepsWaiting(t *testing.T) {
@@ -475,7 +622,7 @@ func TestRunExecWithApprovalWait_TimeoutReportsThePendingDenial(t *testing.T) {
 
 		err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
 
-		assert.Same(t, denial, err, "a timed-out wait reports the pending denial, not the last poll failure")
+		require.ErrorIs(t, err, denial, "a timed-out wait reports the pending denial, not the last poll failure")
 	})
 }
 
@@ -501,7 +648,7 @@ func TestRunExecWithApprovalWait_GivesUpAfterConsecutivePollFailures(t *testing.
 
 	// The request is still open, so giving up must exit on the pending contract
 	// like the timeout does; the transport detail rides on the warning line.
-	assert.Same(t, denial, err, "an unreachable server leaves the approval request open")
+	require.ErrorIs(t, err, denial, "an unreachable server leaves the approval request open")
 	assert.Contains(t, stderr, "server said 502")
 	assert.Equal(t, utils.MaxConsecutivePollFailures, polls, "the bounded run of failed polls")
 }
@@ -682,20 +829,30 @@ func TestRunExecWithApprovalWait_ThrottleWarnsOnce(t *testing.T) {
 // command's own grant status, so a reviewer's rejection is visible on the very
 // next tick.
 func TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	origin := utils.LocalSignalConsoleOrigin
+	t.Cleanup(func() { utils.LocalSignalConsoleOrigin = origin })
+	utils.LocalSignalConsoleOrigin = func() (string, string) { return "https://console.example", "" }
 	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 		return denial
 	}
 	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 		status := "rejected"
-		return event.EventDetails{SudoGrantStatus: &status}, nil
+		return event.EventDetails{SudoGrantStatus: &status, CommandRejection: event.CommandRejection{RejectionGate: types.SentString{Value: "approval", Sent: true}}, ConsoleURL: "https://console.example/commands/1"}, nil
 	}
 	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
 		t.Fatal("stream must not run for a rejected command")
 		return nil
 	}
 
-	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+	var err error
+	stderr := captureStderr(t, func() {
+		err = RunExecWithApprovalWait(&client.AlpaconClient{BaseURL: "https://console.example"}, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+	})
+	assert.Contains(t, stderr, "==== ALPACON: COMMAND DENIED ====\n")
+	assert.Contains(t, stderr, "\nhttps://console.example/commands/1\n")
 
 	var rejected *event.CommandRejectedError
 	require.ErrorAs(t, err, &rejected)
@@ -751,14 +908,14 @@ func TestPollApprovalOnceLegacyExpiry(t *testing.T) {
 				}, nil
 			}
 
-			outcome, requestID, rejected, err := pollApprovalOnce(nil, "cmd-1")
+			read, err := pollApprovalOnce(nil, "cmd-1")
 			require.NoError(t, err)
-			assert.Equal(t, tc.want, outcome)
-			assert.Equal(t, "apr-1", requestID)
-			assert.Equal(t, tc.cause, rejected.Cause)
-			assert.Equal(t, "cmd-1", rejected.CommandID)
-			assert.True(t, rejected.SudoGrant)
-			assert.True(t, rejected.Expired)
+			assert.Equal(t, tc.want, read.outcome)
+			assert.Equal(t, "apr-1", read.requestID)
+			assert.Equal(t, tc.cause, read.rejected.Cause)
+			assert.Equal(t, "cmd-1", read.rejected.CommandID)
+			assert.True(t, read.rejected.SudoGrant)
+			assert.True(t, read.rejected.Expired)
 		})
 	}
 }
@@ -784,11 +941,11 @@ func TestPollApprovalOnceSettlesACompletedSignatureRefusal(t *testing.T) {
 				}, nil
 			}
 
-			outcome, _, rejected, err := pollApprovalOnce(nil, "cmd-1")
+			read, err := pollApprovalOnce(nil, "cmd-1")
 
 			require.NoError(t, err)
-			assert.Equal(t, tc.want, outcome)
-			assert.Equal(t, tc.cause, rejected.Cause)
+			assert.Equal(t, tc.want, read.outcome)
+			assert.Equal(t, tc.cause, read.rejected.Cause)
 		})
 	}
 }

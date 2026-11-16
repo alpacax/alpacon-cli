@@ -113,11 +113,12 @@ func activeWorkSessionSetMessage(successPrefix, id, desc string) string {
 		utils.SanitizeTerminalText(successPrefix), utils.SanitizeTerminalText(id), suffix)
 }
 
-func printWorkSessionMutationJSON(output workSessionMutationOutput) {
+func printWorkSessionMutationJSON(output workSessionMutationOutput) error {
 	if err := utils.PrintJSONValue(os.Stdout, output); err != nil {
 		// Keeps stderr structured even though marshalling failed.
-		utils.CliErrorEnvelopeWithExit(output.Operation, err, "Failed to marshal work-session result: %s", err)
+		return utils.NewEnvelopeExitError(output.Operation, err, "Failed to marshal work-session result: %s", err)
 	}
+	return nil
 }
 
 func formatAdjustments(adj *wsapi.Adjustments) string {
@@ -131,7 +132,7 @@ func formatAdjustments(adj *wsapi.Adjustments) string {
 	}
 	if adj.Servers != nil {
 		lines = append(lines, fmt.Sprintf("  servers: %s → %s",
-			joinServerNames(adj.Servers.Old), joinServerNames(adj.Servers.New)))
+			joinServerNames(adj.Servers.Old, adj.Servers.OldHidden), joinServerNames(adj.Servers.New, adj.Servers.NewHidden)))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -177,13 +178,15 @@ func joinOrNone(items []string) string {
 	return strings.Join(sanitized, ", ")
 }
 
-func joinServerNames(servers []types.ServerSummary) string {
-	if len(servers) == 0 {
+// joinServerNames says "none" only when the server counted no server it left unnamed, since an
+// approver's side can name nothing the caller reaches and still hold servers.
+func joinServerNames(servers []types.ServerSummary, hidden *int) string {
+	if len(servers) == 0 && utils.HiddenCount(hidden) == 0 {
 		return "none"
 	}
 	names := make([]string, len(servers))
 	for i, s := range servers {
 		names[i] = utils.SanitizeTerminalText(s.Name)
 	}
-	return strings.Join(names, ", ")
+	return utils.JoinReached(names, hidden, "server")
 }

@@ -170,3 +170,20 @@ func TestGetWebFTPLogList_KeepsEntriesReadBeforeAFailure(t *testing.T) {
 	require.Len(t, logs, 1)
 	assert.Equal(t, "report.csv", logs[0].FileName)
 }
+
+func TestGetWebFTPLogList_JSONKeepsFailureMessage(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"file_name":"a.txt","action":"upload","success":false,"message":"permission denied","added_at":"2026-11-07T09:30:45Z"}]}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	logs, err := GetWebFTPLogList(ac, 1, "", "", "")
+
+	require.NoError(t, err)
+	body, err := json.Marshal(logs)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[{"server":"","file_name":"a.txt","action":"upload","size":0,"success":false,"user":"","remote_ip":"","message":"permission denied","added_at":"2026-11-07T09:30:45Z"}]`, string(body))
+}

@@ -18,25 +18,29 @@ var certDownloadCmd = &cobra.Command{
 	alpacon cert download 550e8400-e29b-41d4-a716-446655440000 --out=/path/to/certificate.crt
 	`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		certId := args[0]
 		filePath, _ := cmd.Flags().GetString("out")
 		if filePath == "" {
-			filePath = promptForCertificate()
+			var err error
+			if filePath, err = promptForCertificate(); err != nil {
+				return err
+			}
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = cert.DownloadCertificate(alpaconClient, certId, filePath)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to download the certificate from authority: %s.", err)
+			return utils.NewExitError("Failed to download the certificate from authority: %s.", err)
 		}
 
 		utils.CliSuccess("Certificate downloaded: %s", filePath)
-	},
+		return nil
+	}),
 }
 
 func init() {
@@ -44,6 +48,6 @@ func init() {
 	certDownloadCmd.Flags().StringVarP(&filePath, "out", "o", "", "path where certificate should be stored")
 }
 
-func promptForCertificate() string {
-	return utils.PromptForRequiredInput("Path to certificate (e.g., /path/to/certificate.crt, recommended extension: .crt): ")
+func promptForCertificate() (string, error) {
+	return utils.ReadRequiredInput("Path to certificate (e.g., /path/to/certificate.crt, recommended extension: .crt): ")
 }

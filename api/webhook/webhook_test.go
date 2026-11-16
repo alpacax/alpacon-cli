@@ -70,31 +70,55 @@ func TestGetWebhookList_Pagination(t *testing.T) {
 	}
 }
 
-func TestCreateWebhook_SendsOwner(t *testing.T) {
+func TestCreateWebhook_SendsOwnerlessBody(t *testing.T) {
 	t.Parallel()
-	var sent map[string]any
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
-			t.Errorf("failed to decode request body: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":"wh-1","name":"my-webhook","url":"https://hooks.slack.com/services/T00/B00/xxx","provider":"slack","ssl_verify":true,"enabled":true}`))
-	}))
-	defer ts.Close()
+	tests := []struct {
+		name      string
+		sslVerify bool
+		enabled   bool
+	}{
+		{name: "enabled with SSL verification", sslVerify: true, enabled: true},
+		{name: "disabled without SSL verification", sslVerify: false, enabled: false},
+	}
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	err := CreateWebhook(ac, WebhookCreateRequest{
-		Name:      "my-webhook",
-		URL:       "https://hooks.slack.com/services/T00/B00/xxx",
-		Provider:  "slack",
-		SSLVerify: true,
-		Enabled:   true,
-		Owner:     "user-1",
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "my-webhook", sent["name"])
-	assert.Equal(t, "user-1", sent["owner"])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var sent map[string]any
+			var method, path string
+			var decodeErr error
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				method = r.Method
+				path = r.URL.Path
+				decodeErr = json.NewDecoder(r.Body).Decode(&sent)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"id":"wh-1","name":"my-webhook","url":"https://example.com/hook","provider":"custom"}`))
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			err := CreateWebhook(ac, WebhookCreateRequest{
+				Name:      "my-webhook",
+				URL:       "https://example.com/hook",
+				Provider:  "custom",
+				SSLVerify: tt.sslVerify,
+				Enabled:   tt.enabled,
+			})
+
+			require.NoError(t, err)
+			require.NoError(t, decodeErr)
+			assert.Equal(t, http.MethodPost, method)
+			assert.Equal(t, "/api/notifications/webhooks/", path)
+			assert.Equal(t, map[string]any{
+				"name":       "my-webhook",
+				"url":        "https://example.com/hook",
+				"provider":   "custom",
+				"ssl_verify": tt.sslVerify,
+				"enabled":    tt.enabled,
+			}, sent)
+		})
+	}
 }
 
 func TestGetWebhookList_HasNoOwner(t *testing.T) {

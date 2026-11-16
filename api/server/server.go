@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -51,7 +52,6 @@ func GetServerList(ac *client.AlpaconClient) ([]ServerAttributes, error) {
 			IP:        server.RemoteIP,
 			OS:        fmt.Sprintf("%s %s", server.OSName, server.OSVersion),
 			Connected: server.IsConnected,
-			Owner:     server.Owner.Name,
 		})
 	}
 
@@ -105,7 +105,21 @@ func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, err
 	return pathID.String(), nil
 }
 
+// GetServerByName resolves a server's ID and platform in one request.
+func GetServerByName(ac *client.AlpaconClient, serverName string) (ServerRef, error) {
+	pathID, result, err := resolveServer(ac, serverName)
+	if err != nil {
+		return ServerRef{}, err
+	}
+	return ServerRef{ID: pathID.String(), Platform: result.Platform}, nil
+}
+
 func serverPathIDByName(ac *client.AlpaconClient, serverName string) (api.PathID, error) {
+	pathID, _, err := resolveServer(ac, serverName)
+	return pathID, err
+}
+
+func resolveServer(ac *client.AlpaconClient, serverName string) (api.PathID, ServerDetails, error) {
 	result, err := api.ResolveByName[ServerDetails](ac, api.ResolveByNameOptions{
 		Endpoint:    serverURL,
 		FilterKey:   "name",
@@ -114,10 +128,10 @@ func serverPathIDByName(ac *client.AlpaconClient, serverName string) (api.PathID
 		NotFoundMsg: "no server found with the given name",
 	})
 	if err != nil {
-		return api.PathID{}, err
+		return api.PathID{}, ServerDetails{}, err
 	}
-
-	return api.RequireResponseID(result.ID, "server")
+	pathID, err := api.RequireResponseID(result.ID, "server")
+	return pathID, *result, err
 }
 
 // ResolveServerNames converts server names to their UUIDs, one request per name.
@@ -269,9 +283,9 @@ func GetRegistrationTokenAttributes(ac *client.AlpaconClient) ([]RegistrationTok
 				names = append(names, id)
 			}
 		}
-		expires := "never"
+		expires := utils.NewTimestamp(time.Time{}, "never")
 		if t.ExpiresAt != nil {
-			expires = *t.ExpiresAt
+			expires = utils.ParseTimestamp(*t.ExpiresAt)
 		}
 		out = append(out, RegistrationTokenAttributes{
 			Name:          t.Name,
@@ -299,7 +313,10 @@ func fetchRegistrationGuide[T any](ac *client.AlpaconClient, guideURL, platform,
 		RegistrationToken: tokenID,
 	}
 
-	url := utils.BuildURL(guideURL, "", map[string]string{"response_type": "json"})
+	url, err := utils.BuildURL(guideURL, "", map[string]string{"response_type": "json"})
+	if err != nil {
+		return response, err
+	}
 	body, err := ac.SendPostRequest(url, req)
 	if err != nil {
 		return response, err

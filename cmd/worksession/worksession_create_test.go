@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -263,20 +264,19 @@ func TestPollForApproval_SustainedThrottleDoesNotTripTheFailureCap(t *testing.T)
 	throttled := utils.MaxConsecutivePollFailures + 1
 
 	requests := 0
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
 		requests++
 		if requests <= throttled {
-			w.WriteHeader(http.StatusTooManyRequests)
-			return
+			return http.StatusTooManyRequests, ""
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"approved"}`))
-	}))
-	defer ts.Close()
+		return http.StatusOK, `{"id":"ws-uuid","status":"approved"}`
+	})}
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
-	session, err := WaitForApproval(ac, "ws-uuid", false, interval, timeout)
+	var session *wsapi.WorkSession
+	var err error
+	synctest.Test(t, func(*testing.T) {
+		session, err = WaitForApproval(ac, "ws-uuid", false, interval, timeout)
+	})
 
 	require.NoError(t, err)
 	require.NotNil(t, session)
@@ -323,23 +323,22 @@ func TestPollForApproval_ThrottleWarnsOnce(t *testing.T) {
 	throttled := utils.MaxConsecutivePollFailures + 1
 
 	requests := 0
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
 		requests++
 		if requests <= throttled {
-			w.WriteHeader(http.StatusTooManyRequests)
-			return
+			return http.StatusTooManyRequests, ""
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"approved"}`))
-	}))
-	defer ts.Close()
+		return http.StatusOK, `{"id":"ws-uuid","status":"approved"}`
+	})}
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
+	var err error
 	_, stderr := testutil.CaptureOutput(t, func() {
-		_, _ = WaitForApproval(ac, "ws-uuid", false, interval, timeout)
+		synctest.Test(t, func(*testing.T) {
+			_, err = WaitForApproval(ac, "ws-uuid", false, interval, timeout)
+		})
 	})
 
+	require.NoError(t, err, "the whole throttled stretch must run for the single warning to mean anything")
 	assert.Equal(t, 1, strings.Count(stderr, "rate limited by the server"))
 	assert.NotContains(t, stderr, "Poll failed")
 }
@@ -643,9 +642,11 @@ func TestWorkSessionCreateWaitPrintsAdvisories(t *testing.T) {
 	expiresAt = "2026-06-01T12:00:00Z"
 	wait = true
 
+	var runErr error
 	_, stderr := testutil.CaptureOutput(t, func() {
-		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
+		runErr = workSessionCreateCmd.RunE(workSessionCreateCmd, nil)
 	})
+	require.NoError(t, runErr)
 
 	assert.Contains(t, stderr, "approved")
 	assert.Contains(t, stderr, "Approver adjusted your request")
@@ -678,9 +679,11 @@ func TestWorkSessionCreateAutoApprovedPrintsAdvisories(t *testing.T) {
 	createServers = []string{"prod"}
 	expiresAt = "2026-06-01T12:00:00Z"
 
+	var runErr error
 	_, stderr := testutil.CaptureOutput(t, func() {
-		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
+		runErr = workSessionCreateCmd.RunE(workSessionCreateCmd, nil)
 	})
+	require.NoError(t, runErr)
 
 	assert.Contains(t, stderr, "Approver adjusted your request")
 	assert.Contains(t, stderr, "command, websh → command")
@@ -716,9 +719,11 @@ func TestWorkSessionCreateWaitJSONOutputIncludesAdjustments(t *testing.T) {
 	expiresAt = "2026-06-01T12:00:00Z"
 	wait = true
 
+	var runErr error
 	stdout, _ := testutil.CaptureOutput(t, func() {
-		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
+		runErr = workSessionCreateCmd.RunE(workSessionCreateCmd, nil)
 	})
+	require.NoError(t, runErr)
 
 	var got struct {
 		WorkSession struct {
@@ -895,7 +900,6 @@ func TestPollForApproval_PlainTimeoutCarriesNoHint(t *testing.T) {
 }
 
 func TestWorkSessionCreateUseWithoutAUsableLoginExitsOne(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name        string
 		config      string
@@ -910,7 +914,6 @@ func TestWorkSessionCreateUseWithoutAUsableLoginExitsOne(t *testing.T) {
 	for _, tt := range tests {
 		for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 			t.Run(tt.name+" "+outputFormat, func(t *testing.T) {
-				t.Parallel()
 				home := t.TempDir()
 				if tt.config != "" {
 					require.NoError(t, os.Mkdir(filepath.Join(home, ".alpacon"), 0o700))
@@ -941,7 +944,6 @@ func TestWorkSessionCreateUseWithoutAUsableLoginExitsOne(t *testing.T) {
 }
 
 func TestWorkSessionCreateUseReportsABadScopeBeforeAMissingLogin(t *testing.T) {
-	t.Parallel()
 
 	stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, append(agentHelperEnv(), "HOME="+t.TempDir()), utils.OutputFormatJSON,
 		"http://127.0.0.1:1", createArgs("--use", "--scope", "bogus")...)
@@ -955,10 +957,8 @@ func TestWorkSessionCreateUseReportsABadScopeBeforeAMissingLogin(t *testing.T) {
 }
 
 func TestWorkSessionCreateUseOnAPendingSessionReportsPendingApproval(t *testing.T) {
-	t.Parallel()
 	for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 		t.Run(outputFormat, func(t *testing.T) {
-			t.Parallel()
 			ts := newCreateServerAnswering(t, "pending", "pending")
 
 			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), outputFormat, ts.URL,
@@ -1002,7 +1002,6 @@ func TestWorkSessionCreateUseOnAPendingSessionReportsPendingApproval(t *testing.
 // The session outlives a refusal, so every path that reports one names the session and only the
 // follow-ups it can still take: not 'work-session use' (see TestRunUseSessionRefusesASettledSession).
 func TestWorkSessionCreateSettledRefusalNamesTheSession(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name         string
 		createStatus string
@@ -1016,7 +1015,6 @@ func TestWorkSessionCreateSettledRefusalNamesTheSession(t *testing.T) {
 	for _, tt := range tests {
 		for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 			t.Run(tt.name+" "+outputFormat, func(t *testing.T) {
-				t.Parallel()
 				ts := newCreateServerAnswering(t, tt.createStatus, tt.pollStatus)
 
 				stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), outputFormat, ts.URL, tt.args...)
@@ -1049,7 +1047,6 @@ func TestWorkSessionCreateSettledRefusalNamesTheSession(t *testing.T) {
 }
 
 func TestWorkSessionCreateWithoutUseReportsASettledSessionAsCreated(t *testing.T) {
-	t.Parallel()
 	ts := newCreateServerAnswering(t, "rejected", "rejected")
 
 	stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), utils.OutputFormatTable, ts.URL, createArgs()...)
@@ -1061,10 +1058,8 @@ func TestWorkSessionCreateWithoutUseReportsASettledSessionAsCreated(t *testing.T
 }
 
 func TestWorkSessionCreateUseOnAnUnknownStatusExitsGeneralError(t *testing.T) {
-	t.Parallel()
 	for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 		t.Run(outputFormat, func(t *testing.T) {
-			t.Parallel()
 			ts := newCreateServerAnswering(t, "paused", "paused")
 
 			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), outputFormat, ts.URL,
@@ -1083,6 +1078,35 @@ func TestWorkSessionCreateUseOnAnUnknownStatusExitsGeneralError(t *testing.T) {
 			assert.Equal(t, utils.ErrorCodeCLI, got.ErrorCode)
 			assert.Equal(t, opCreate, got.Context.Operation)
 			assert.Equal(t, message, got.Message)
+		})
+	}
+}
+
+func TestWaitExitErrorReturnsTheExitInsteadOfTakingIt(t *testing.T) {
+	session := &wsapi.WorkSession{ID: "550e8400-e29b-41d4-a716-446655440000"}
+	cases := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantText string
+	}{
+		{name: "settled", err: &terminalWaitError{message: "work session was rejected", sessionID: session.ID}, wantCode: utils.ExitCodeNotApproved, wantText: "work session was rejected"},
+		{name: "still_pending", err: &pendingWaitError{message: "timed out waiting for approval after 1s"}, wantCode: utils.ExitCodePendingApproval, wantText: "The outcome is still open"},
+		{name: "polling_failed", err: fmt.Errorf("polling failed: %w", os.ErrDeadlineExceeded), wantCode: utils.ExitCodeGeneralError, wantText: "polling failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var err error
+			_, stderr := testutil.CaptureOutput(t, func() {
+				err = WaitExitError(opCreate, session, utils.NextAction{}, tc.err)
+			})
+
+			var exitErr *utils.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			var rendered bytes.Buffer
+			utils.FprintExitError(&rendered, exitErr)
+			assert.Equal(t, tc.wantCode, exitErr.Code)
+			assert.Contains(t, stderr+rendered.String(), tc.wantText) // printed here or by the caller, never lost
 		})
 	}
 }

@@ -373,11 +373,11 @@ func PermissionPatternAttributesFrom(patterns *PermissionPatternsResponse) []Per
 
 // timestampIn blanks a missing timestamp: a zero time.Time formats as "0001-01-01 00:00",
 // which reads like a real grant date.
-func timestampIn(at time.Time, zone *time.Location) string {
+func timestampIn(at time.Time, zone *time.Location) utils.Timestamp {
 	if at.IsZero() {
-		return ""
+		return utils.NewTimestamp(at, "")
 	}
-	return at.In(zone).Format(timeLayout)
+	return utils.NewTimestamp(at, at.In(zone).Format(timeLayout))
 }
 
 // tierLabel names a scope tier for the sources that carry no id pair and so cannot use

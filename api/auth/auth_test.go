@@ -745,7 +745,7 @@ func TestLogout_RefusalKeepsTheHint(t *testing.T) {
 		}),
 	}
 
-	err := Logout(ac, configpkg.Config{})
+	err := Logout(ac)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to send post request")
 	assert.Equal(t, hint, utils.RefusalHint(err))
