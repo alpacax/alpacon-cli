@@ -344,6 +344,12 @@ func TestSummarizeWorkSessionJSON(t *testing.T) {
 				Servers: []types.ServerSummary{{ID: "s-1", Name: "web-01"}}, ExpiresAt: time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)},
 			want: `{"id":"ws-s","status":"active","scopes":["websh"],"servers":["web-01"],"expires_at":"2026-06-01T12:00:00Z"}`,
 		},
+		{
+			name: "server session with servers the caller does not reach",
+			ws: &wsapi.WorkSession{ID: "ws-s", Status: "active", Scopes: []string{"websh"},
+				Servers: []types.ServerSummary{{ID: "s-1", Name: "web-01"}}, ServersHidden: new(2), ClustersHidden: new(0)},
+			want: `{"id":"ws-s","status":"active","scopes":["websh"],"servers":["web-01"],"servers_hidden":2,"clusters_hidden":0}`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

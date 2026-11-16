@@ -224,11 +224,14 @@ func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 		add("  Title", ch.Title)
 		add("  Description", ch.Description)
 		add("  Scopes", joinClean(ch.Scopes, ", "))
-		servers := make([]string, len(ch.Servers))
-		for i, sv := range ch.Servers {
-			servers[i] = sv.Name
+		servers := make([]string, 0, len(ch.Servers))
+		for _, sv := range ch.Servers {
+			if name := utils.SanitizeTerminalText(sv.Name); name != "" {
+				servers = append(servers, name)
+			}
 		}
-		add("  Servers", joinClean(servers, ", "))
+		// The count keeps the row when every requested server is one the caller does not reach.
+		add("  Servers", utils.JoinReached(servers, ch.ServersHidden, "server"))
 		policies := make([]string, len(ch.SudoPolicies))
 		for i, p := range ch.SudoPolicies {
 			policies[i] = joinClean(p.Commands, ", ")
