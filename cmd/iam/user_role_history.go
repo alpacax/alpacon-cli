@@ -23,10 +23,9 @@ appears in their history rather than yours. What you can read also depends on yo
 account: an auditor of the whole workspace sees every change within the plan's
 audit window, and everyone else sees only rows that name them.
 
-This is the one 'alpacon user role' command an API token can reach on an Alpacon
-Cloud workspace. The audit log sits outside the gate that refuses tokens on the
-other RBAC routes, and asks instead for a token carrying the role_audit_log:read
-scope.`,
+This is the one 'alpacon user role' command an API token can reach. The audit log
+sits outside the gate that refuses tokens on the other RBAC routes, and asks
+instead for a token carrying the role_audit_log:read scope.`,
 	Example: `  alpacon user role history
   alpacon user role history john
   alpacon user role history john --tail 100`,

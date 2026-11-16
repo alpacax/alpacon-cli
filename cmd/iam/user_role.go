@@ -41,7 +41,7 @@ run 'alpacon login' first.
 
 'history' is the one exception. It reads the audit log, which sits outside the
 gate that refuses tokens elsewhere and asks instead for a token carrying the
-role_audit_log:read scope, on either deployment.`,
+role_audit_log:read scope.`,
 	Example: `  alpacon user role ls john
   alpacon user role catalog
   alpacon user role describe superuser
