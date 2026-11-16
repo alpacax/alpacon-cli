@@ -72,7 +72,7 @@ cmd/                 # Cobra command definitions
 api/                 # API client functions per domain
 client/              # HTTP client wrapper for Alpacon API
 config/              # Configuration management (credentials, workspace)
-pkg/                 # Internal packages (aiagent, cert, filelock, httpclient, kubeconfig, selfupdate, testutil, tunnel)
+pkg/                 # Internal packages (aiagent, cert, cmdtest, filelock, httpclient, kubeconfig, selfupdate, testutil, tunnel)
 utils/               # Shared utilities (output, prompts, errors, SSH parsing)
 install.ps1          # Windows installer, published as a release asset
 install.Tests.ps1    # Pester suite for the installer
@@ -185,6 +185,7 @@ _ = json.NewEncoder(w).Encode(resp)
 - A test that waits on a timer or a sleep runs under `testing/synctest` when everything inside it blocks only on channels, timers and `sync.Cond`: the fake clock makes the wait instant and an elapsed-time bound exact. A real socket never counts as durably blocked, so a server the test waits on, HTTP or WebSocket, runs on `testutil.NewPipeServer`, which serves over `net.Pipe` and is created inside the bubble; a listener built from a client whose `HTTPClient` is the pipe server's dials the WebSocket through the same pipe. A test stays on the real clock when the bubble would hold an `httptest.Server`, an OS pipe (`testutil.CaptureOutput`), a child process, or a contended `sync.Mutex`—Go does not count a mutex wait as durably blocked, so a regression that holds the lock makes the test hang instead of fail. A pipe that only receives what the bubble prints stays outside it: capture around `synctest.Test`, not inside. Where the code under test already takes a clock seam (`fakePollClock`, `pollSeams`), use that instead. The bubble's clock starts at a fixed instant long before the real one, so a time built before `synctest.Test` is far from the bubble's `time.Now()`; build it inside
 - API tests use `httptest.NewServer` with a minimal `*client.AlpaconClient` pointing at `ts.URL`
 - Command logic is extracted to helpers (e.g., `exec.ParseRemoteExecArgs`) for direct unit testing
+- A leaf command takes its API client through its constructor: `var xCmd = newXCmd(client.NewAlpaconAPIClient)` with `newXCmd(newClient clientFactory)`, the factory being a `func() (*client.AlpaconClient, error)` that most command packages name `clientFactory`, and `RunE` calls `newClient()`, never `client.NewAlpaconAPIClient()`. A command test passes a factory aimed at a test server: `pkg/cmdtest`'s `Server` answers fixed routes and counts the requests each got, `Fake.Factory` and `ClientFactory` build the factory, `NoClient` fails as a missing login does, and `Run` executes the command and returns the failure `cmd.Execute` would print with its exit code (safe under `t.Parallel`); `RunCaptured` and `RunJSON` also capture stdout and stderr, so they stay serial
 
 ### Assertion conventions (testify)
 
