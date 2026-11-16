@@ -734,3 +734,163 @@ func TestFetchAllPages_WalksEveryPageAtTheCap(t *testing.T) {
 	assert.Equal(t, []string{"100", "100", "100"}, rec.queried("page_size"))
 	assert.Equal(t, []string{"1", "2", "3"}, rec.queried("page"))
 }
+
+// reachPageServer answers page N with pages[N-1], so a test can vary the envelope per page.
+func reachPageServer(t *testing.T, pages []string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page, err := strconv.Atoi(r.URL.Query().Get("page"))
+		if err != nil || page < 1 || page > len(pages) {
+			t.Errorf("unexpected page %q", r.URL.Query().Get("page"))
+			http.Error(w, "unexpected page", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(pages[page-1]))
+	}))
+}
+
+func TestFetchPagesUpToWithReach_ReadsTheFirstPagesReach(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		pages []string
+		limit int
+		want  Reach
+		ids   []string
+	}{
+		{
+			name:  "a stated value",
+			pages: []string{`{"next":0,"reach":"bound","results":[{"id":"0"}]}`},
+			limit: 10,
+			want:  Reach{Raw: json.RawMessage(`"bound"`), Value: "bound"},
+			ids:   []string{"0"},
+		},
+		{
+			name:  "an empty page keeps its reach",
+			pages: []string{`{"next":0,"reach":"self","results":[]}`},
+			limit: 10,
+			want:  Reach{Raw: json.RawMessage(`"self"`), Value: "self"},
+			ids:   []string{},
+		},
+		{
+			name:  "an absent key is not stated",
+			pages: []string{`{"next":0,"results":[{"id":"0"}]}`},
+			limit: 10,
+			want:  Reach{},
+			ids:   []string{"0"},
+		},
+		{
+			name:  "a null value is not stated",
+			pages: []string{`{"next":0,"reach":null,"results":[{"id":"0"}]}`},
+			limit: 10,
+			want:  Reach{},
+			ids:   []string{"0"},
+		},
+		{
+			name:  "a value this build does not know is kept as sent",
+			pages: []string{`{"next":0,"reach":"tenant","results":[]}`},
+			limit: 10,
+			want:  Reach{Raw: json.RawMessage(`"tenant"`), Value: "tenant"},
+			ids:   []string{},
+		},
+		{
+			name:  "a non-string value is kept as its JSON text",
+			pages: []string{`{"next":0,"reach":{"kind":"org"},"results":[]}`},
+			limit: 10,
+			want:  Reach{Raw: json.RawMessage(`{"kind":"org"}`), Value: `{"kind":"org"}`},
+			ids:   []string{},
+		},
+		{
+			name: "pages that agree leave Changed unset",
+			pages: []string{
+				`{"next":2,"reach":"org","results":[{"id":"0"}]}`,
+				`{"next":0,"reach":"org","results":[{"id":"1"}]}`,
+			},
+			limit: 10,
+			want:  Reach{Raw: json.RawMessage(`"org"`), Value: "org"},
+			ids:   []string{"0", "1"},
+		},
+		{
+			name: "a later page that differs sets Changed and keeps the first value",
+			pages: []string{
+				`{"next":2,"reach":"bound","results":[{"id":"0"}]}`,
+				`{"next":0,"reach":"self","results":[{"id":"1"}]}`,
+			},
+			limit: 10,
+			want:  Reach{Raw: json.RawMessage(`"bound"`), Value: "bound", Changed: true},
+			ids:   []string{"0", "1"},
+		},
+		{
+			name: "a later page that states a value the first did not sets Changed",
+			pages: []string{
+				`{"next":2,"results":[{"id":"0"}]}`,
+				`{"next":0,"reach":"org","results":[{"id":"1"}]}`,
+			},
+			limit: 10,
+			want:  Reach{Changed: true},
+			ids:   []string{"0", "1"},
+		},
+		{
+			// The tail is met on page 1, so page 2 is never read: had it been, its self would set Changed.
+			name: "a page past the limit is not read",
+			pages: []string{
+				`{"next":2,"reach":"bound","results":[{"id":"0"}]}`,
+				`{"next":0,"reach":"self","results":[{"id":"1"}]}`,
+			},
+			limit: 1,
+			want:  Reach{Raw: json.RawMessage(`"bound"`), Value: "bound"},
+			ids:   []string{"0"},
+		},
+		{
+			name: "a later page that drops the key sets Changed",
+			pages: []string{
+				`{"next":2,"reach":"org","results":[{"id":"0"}]}`,
+				`{"next":0,"results":[{"id":"1"}]}`,
+			},
+			limit: 10,
+			want:  Reach{Raw: json.RawMessage(`"org"`), Value: "org", Changed: true},
+			ids:   []string{"0", "1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := reachPageServer(t, tt.pages)
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			items, reach, err := FetchPagesUpToWithReach[pageItem](ac, "/api/rbac/role-audit-logs/", nil, tt.limit)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, reach)
+			assert.Equal(t, tt.ids, servedIDs(items))
+		})
+	}
+}
+
+// FetchPagesUpToWithReach shares FetchPagesUpTo's walk, which the tests above cover; what it adds
+// on a failed page is that no reach comes back with the error.
+func TestFetchPagesUpToWithReach_AFailedPageReturnsNoReach(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "1" {
+			_, _ = w.Write([]byte(`{"next":2,"reach":"org","results":[{"id":"0"}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"detail":"internal server error"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	items, reach, err := FetchPagesUpToWithReach[pageItem](ac, "/api/rbac/role-audit-logs/", nil, 10)
+
+	require.ErrorContains(t, err, "fetching page 2 from /api/rbac/role-audit-logs/")
+	assert.Nil(t, items)
+	assert.Equal(t, Reach{}, reach)
+}
