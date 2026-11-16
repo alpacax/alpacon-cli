@@ -414,7 +414,7 @@ func TestOpenKubeSessionRestoresTheRecordWhenTheWriteFails(t *testing.T) {
 	ac := srv.start(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config")
-	editor := openEditor(t, path)
+	hold := openHold(t, path)
 	require.NoError(t, os.Chmod(dir, 0500))
 	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
 
@@ -433,7 +433,7 @@ func TestOpenKubeSessionRestoresTheRecordWhenTheWriteFails(t *testing.T) {
 		},
 	}
 
-	_, err := openKubeSession(ac, editor, kubeConfigOptions{clusterName: "prod-east", kubeconfig: path}, "c-prod", writer)
+	_, err := openKubeSession(ac, hold, kubeConfigOptions{clusterName: "prod-east", kubeconfig: path}, "c-prod", writer)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to write "+path)
@@ -450,7 +450,7 @@ func TestOpenKubeSessionClosesTheSessionWhenItCannotBeKept(t *testing.T) {
 	srv := newSessionServer()
 	ac := srv.start(t)
 	path := filepath.Join(t.TempDir(), "config")
-	editor := openEditor(t, path)
+	hold := openHold(t, path)
 	writer := kubeSessionWriter{
 		exec: credentialPlugin("prod-east"),
 		persist: func(*kubernetes.KubeSessionResponse) (func() error, error) {
@@ -458,7 +458,7 @@ func TestOpenKubeSessionClosesTheSessionWhenItCannotBeKept(t *testing.T) {
 		},
 	}
 
-	_, err := openKubeSession(ac, editor, kubeConfigOptions{clusterName: "prod-east", kubeconfig: path}, "c-prod", writer)
+	_, err := openKubeSession(ac, hold, kubeConfigOptions{clusterName: "prod-east", kubeconfig: path}, "c-prod", writer)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "disk full")

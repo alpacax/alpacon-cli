@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -16,7 +18,6 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/pkg/kubeconfig"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -42,11 +43,20 @@ type sessionServer struct {
 	// rbacDriftWarning is the created session's rbac_drift_warning as raw JSON;
 	// "" leaves the field out, as a server older than it does.
 	rbacDriftWarning string
+	// mfaCreates is how many creates, from the first, answer 401
+	// auth_mfa_required as a workspace requiring MFA for kube exec does. The
+	// createStatus answer, or the session, comes after them.
+	mfaCreates int
+	// onCreate, when set, runs as create number call (from 1) arrives, before
+	// it is answered.
+	onCreate      func(call int)
+	mfaLinkStatus int // 0 answers the MFA link request with a link
 
 	mu          sync.Mutex
 	createBody  map[string]any
 	createCalls int
 	closeCalls  []string
+	mfaLinks    []url.Values
 }
 
 func newSessionServer() *sessionServer {
@@ -55,7 +65,26 @@ func newSessionServer() *sessionServer {
 
 func (s *sessionServer) start(t *testing.T) *client.AlpaconClient {
 	t.Helper()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(s.handler(t))
+	t.Cleanup(ts.Close)
+	return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+}
+
+// startInMemory serves the same answers with no socket, so a test of the MFA
+// wait can run under testing/synctest. The client names a workspace, as every
+// MFA link must.
+func (s *sessionServer) startInMemory(t *testing.T) *client.AlpaconClient {
+	t.Helper()
+	return &client.AlpaconClient{
+		HTTPClient:    testutil.HandlerClient(s.handler(t)),
+		BaseURL:       testutil.StubBaseURL,
+		WorkspaceName: "my-workspace",
+	}
+}
+
+func (s *sessionServer) handler(t *testing.T) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/kubernetes/clusters/":
@@ -75,7 +104,16 @@ func (s *sessionServer) start(t *testing.T) *client.AlpaconClient {
 			s.mu.Lock()
 			s.createBody = body
 			s.createCalls++
+			call := s.createCalls
 			s.mu.Unlock()
+			if s.onCreate != nil {
+				s.onCreate(call)
+			}
+			if call <= s.mfaCreates {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"code":"auth_mfa_required","source":"kube_exec"}`))
+				return
+			}
 			if s.createStatus != 0 {
 				w.WriteHeader(s.createStatus)
 				_, _ = fmt.Fprintf(w, `{"code":%q}`, s.createCode)
@@ -101,13 +139,25 @@ func (s *sessionServer) start(t *testing.T) *client.AlpaconClient {
 				return
 			}
 			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/work-sessions/sessions/"):
+			// A WorkSession read that fails leaves kube login to the server's judgment.
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"detail":"Not found."}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/auth0/mfa/":
+			s.mu.Lock()
+			s.mfaLinks = append(s.mfaLinks, r.URL.Query())
+			s.mu.Unlock()
+			if s.mfaLinkStatus != 0 {
+				w.WriteHeader(s.mfaLinkStatus)
+				_, _ = w.Write([]byte(`{"code":"workspace_not_found"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"mfa_url":"https://auth.example.com/mfa?ticket=t-1"}`))
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.String())
 			w.WriteHeader(http.StatusInternalServerError)
 		}
-	}))
-	t.Cleanup(ts.Close)
-	return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	})
 }
 
 func (s *sessionServer) sentBody() map[string]any {
@@ -128,12 +178,18 @@ func (s *sessionServer) closes() int {
 	return len(s.closeCalls)
 }
 
-func openEditor(t *testing.T, path string) *kubeconfig.Editor {
+func (s *sessionServer) mfaLinkQueries() []url.Values {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.mfaLinks)
+}
+
+func openHold(t *testing.T, path string) *kubeconfigHold {
 	t.Helper()
-	editor, err := kubeconfig.Open(path)
+	hold, err := openKubeconfigHold(path)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = editor.Close() })
-	return editor
+	t.Cleanup(hold.close)
+	return hold
 }
 
 type testKubeconfig struct {
@@ -182,7 +238,7 @@ func TestOpenKubeConfigWritesTheSessionContext(t *testing.T) {
 			ac.Insecure = tt.insecure
 			path := filepath.Join(t.TempDir(), ".kube", "config")
 
-			result, err := openKubeConfig(ac, openEditor(t, path), kubeConfigOptions{
+			result, err := openKubeConfig(ac, openHold(t, path), kubeConfigOptions{
 				clusterName: "prod-east", workSessionID: tt.workSessionID, kubeconfig: path, proxyPort: tt.proxyPort,
 			})
 			require.NoError(t, err)
@@ -246,7 +302,7 @@ contexts:
 current-context: kind-dev
 `), 0600))
 
-	result, err := openKubeConfig(ac, openEditor(t, path), kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
+	result, err := openKubeConfig(ac, openHold(t, path), kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
 	require.NoError(t, err)
 
 	assert.Equal(t, "kind-dev", result.PreviousContext)
@@ -262,7 +318,7 @@ func TestOpenKubeConfigLookupFailureOpensNoSession(t *testing.T) {
 	ac := srv.start(t)
 	path := filepath.Join(t.TempDir(), "config")
 
-	_, err := openKubeConfig(ac, openEditor(t, path), kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
+	_, err := openKubeConfig(ac, openHold(t, path), kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
 
 	var lookupErr *clusterLookupError
 	require.ErrorAs(t, err, &lookupErr)
@@ -279,7 +335,7 @@ func TestOpenKubeConfigCreateRefusalWritesNothing(t *testing.T) {
 	ac := srv.start(t)
 	path := filepath.Join(t.TempDir(), "config")
 
-	_, err := openKubeConfig(ac, openEditor(t, path), kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
+	_, err := openKubeConfig(ac, openHold(t, path), kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
 
 	var createErr *sessionCreateError
 	require.ErrorAs(t, err, &createErr)
@@ -315,7 +371,7 @@ func TestOpenKubeConfigClosesASessionItCannotWrite(t *testing.T) {
 			ac := srv.start(t)
 			path := filepath.Join(t.TempDir(), "config")
 
-			_, err := openKubeConfig(ac, openEditor(t, path), kubeConfigOptions{
+			_, err := openKubeConfig(ac, openHold(t, path), kubeConfigOptions{
 				clusterName: "prod-east", kubeconfig: path, proxyPort: tt.proxyPort,
 			})
 
@@ -336,7 +392,7 @@ func TestOpenKubeConfigReportsAFailedClose(t *testing.T) {
 	ac := srv.start(t)
 	path := filepath.Join(t.TempDir(), "config")
 
-	_, err := openKubeConfig(ac, openEditor(t, path), kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
+	_, err := openKubeConfig(ac, openHold(t, path), kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "closing the kube session "+testSessionID+" also failed")
@@ -355,13 +411,13 @@ func TestOpenKubeConfigClosesTheSessionWhenTheWriteFails(t *testing.T) {
 	ac := srv.start(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config")
-	editor := openEditor(t, path)
+	hold := openHold(t, path)
 	// The directory turns read-only after the file was opened and checked, so
 	// only the write itself fails.
 	require.NoError(t, os.Chmod(dir, 0500))
 	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
 
-	_, err := openKubeConfig(ac, editor, kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
+	_, err := openKubeConfig(ac, hold, kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to write "+path)
@@ -375,7 +431,7 @@ func TestPlainHTTPProxyURLIsWrittenAndFlagged(t *testing.T) {
 	ac := srv.start(t)
 	path := filepath.Join(t.TempDir(), "config")
 
-	result, err := openKubeConfig(ac, openEditor(t, path), kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
+	result, err := openKubeConfig(ac, openHold(t, path), kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
 
 	require.NoError(t, err)
 	assert.True(t, result.plaintext, "an http proxy URL must be flagged: %s", result.ProxyURL)
@@ -404,7 +460,7 @@ func TestKubeSessionErrorHint(t *testing.T) {
 			ac := srv.start(t)
 			path := filepath.Join(t.TempDir(), "config")
 
-			_, err := openKubeConfig(ac, openEditor(t, path), kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
+			_, err := openKubeConfig(ac, openHold(t, path), kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
 			require.Error(t, err)
 
 			hint := kubeSessionErrorHint(err, "prod-east")
@@ -481,7 +537,7 @@ func TestKubeConfigResultJSONCarriesNoToken(t *testing.T) {
 	srv := newSessionServer()
 	ac := srv.start(t)
 	path := filepath.Join(t.TempDir(), "config")
-	result, err := openKubeConfig(ac, openEditor(t, path), kubeConfigOptions{
+	result, err := openKubeConfig(ac, openHold(t, path), kubeConfigOptions{
 		clusterName: "prod-east", workSessionID: "ws-1", kubeconfig: path,
 	})
 	require.NoError(t, err)
@@ -525,7 +581,7 @@ func TestOpenKubeConfigCarriesTheRBACDriftWarning(t *testing.T) {
 			ac := srv.start(t)
 			path := filepath.Join(t.TempDir(), "config")
 
-			result, err := openKubeConfig(ac, openEditor(t, path), kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
+			result, err := openKubeConfig(ac, openHold(t, path), kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
 			require.NoError(t, err)
 			assert.Equal(t, "prod-east", result.clusterName)
 
@@ -560,7 +616,7 @@ func TestOpenKubeConfigStopsAtAnInterrupt(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config")
 			interrupted := func() bool { return !tt.afterCreate || srv.creates() > 0 }
 
-			_, err := openKubeConfig(ac, openEditor(t, path), kubeConfigOptions{
+			_, err := openKubeConfig(ac, openHold(t, path), kubeConfigOptions{
 				clusterName: "prod-east", kubeconfig: path, interrupted: interrupted,
 			})
 
