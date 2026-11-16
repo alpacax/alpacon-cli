@@ -12,25 +12,29 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclServerAddCmd = &cobra.Command{
-	Use:   "add TOKEN",
-	Short: "Grant a token access to one or more servers",
-	Long: `Grant an API token access to servers. Without a ServerACL entry,
+var aclServerAddCmd = newAclServerAddCmd(client.NewAlpaconAPIClient)
+
+func newAclServerAddCmd(newClient clientFactory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add TOKEN",
+		Short: "Grant a token access to one or more servers",
+		Long: `Grant an API token access to servers. Without a ServerACL entry,
 the token is denied access to all servers (deny-by-default).
 
 Use --server for a single server or --servers for bulk operations.`,
-	Example: `  alpacon token acl server add my-api-token --server my-server
+		Example: `  alpacon token acl server add my-api-token --server my-server
   alpacon token acl server add my-api-token --servers web-01,web-02,web-03`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(runServerAclAdd),
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return runServerAclAdd(cmd, args, newClient)
+		}),
+	}
+	cmd.Flags().String("server", "", "Server name (single)")
+	cmd.Flags().String("servers", "", "Comma-separated server names (bulk)")
+	return cmd
 }
 
-func init() {
-	aclServerAddCmd.Flags().String("server", "", "Server name (single)")
-	aclServerAddCmd.Flags().String("servers", "", "Comma-separated server names (bulk)")
-}
-
-func runServerAclAdd(cmd *cobra.Command, args []string) error {
+func runServerAclAdd(cmd *cobra.Command, args []string, newClient clientFactory) error {
 	tokenArg := args[0]
 	serverName, _ := cmd.Flags().GetString("server")
 	serversCSV, _ := cmd.Flags().GetString("servers")
@@ -40,7 +44,7 @@ func runServerAclAdd(cmd *cobra.Command, args []string) error {
 		return utils.NewUsageExitError("%s.", err)
 	}
 
-	alpaconClient, err := client.NewAlpaconAPIClient()
+	alpaconClient, err := newClient()
 	if err != nil {
 		return utils.NewExitError("Connection to Alpacon API failed: %v. Consider re-logging.", err)
 	}

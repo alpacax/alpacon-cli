@@ -8,32 +8,36 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclServerDeleteCmd = &cobra.Command{
-	Use:     "delete ACL_ID_OR_TOKEN",
-	Aliases: []string{"rm"},
-	Short:   "Delete server ACL rule(s)",
-	Long: `Delete a server ACL by its ID (single delete), or revoke a token's access
+var aclServerDeleteCmd = newAclServerDeleteCmd(client.NewAlpaconAPIClient)
+
+func newAclServerDeleteCmd(newClient clientFactory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "delete ACL_ID_OR_TOKEN",
+		Aliases: []string{"rm"},
+		Short:   "Delete server ACL rule(s)",
+		Long: `Delete a server ACL by its ID (single delete), or revoke a token's access
 to multiple servers at once using --servers (bulk delete).`,
-	Example: `  # Single delete by ACL ID
+		Example: `  # Single delete by ACL ID
   alpacon token acl server delete 550e8400-e29b-41d4-a716-446655440000
 
   # Bulk delete: revoke token access to named servers
   alpacon token acl server delete my-api-token --servers web-01,web-02`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(runServerAclDelete),
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return runServerAclDelete(cmd, args, newClient)
+		}),
+	}
+	cmd.Flags().String("servers", "", "Comma-separated server names (bulk delete)")
+	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	return cmd
 }
 
-func init() {
-	aclServerDeleteCmd.Flags().String("servers", "", "Comma-separated server names (bulk delete)")
-	aclServerDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
-}
-
-func runServerAclDelete(cmd *cobra.Command, args []string) error {
+func runServerAclDelete(cmd *cobra.Command, args []string, newClient clientFactory) error {
 	arg := args[0]
 	serversCSV, _ := cmd.Flags().GetString("servers")
 	yes, _ := cmd.Flags().GetBool("yes")
 
-	alpaconClient, err := client.NewAlpaconAPIClient()
+	alpaconClient, err := newClient()
 	if err != nil {
 		return utils.NewExitError("Connection to Alpacon API failed: %v. Consider re-logging.", err)
 	}
