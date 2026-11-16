@@ -3248,3 +3248,76 @@ func TestAPIErrorFieldsKeepLargeIntegersVerbatim(t *testing.T) {
 	assert.JSONEq(t, `{"detail":"d","sequence":9007199254740993}`, string(encoded))
 	assert.Contains(t, string(encoded), "9007199254740993")
 }
+
+func TestRenewAccessTokenReusesTokenDifferentFromSent(t *testing.T) {
+	renewals := stubTokenRenewal(t, "unexpected")
+	ac := newBearerTestClient("https://myws.example.com", "already-renewed")
+	assert.True(t, ac.renewAccessToken("stale"), "a token different from the rejected request is reusable")
+	assert.Equal(t, "already-renewed", ac.AccessToken())
+	assert.Zero(t, *renewals)
+}
+
+// Serial: sets HOME and reads the pinned login through the production constructor.
+func TestRefreshLockedHonorsPinnedLoginAndWorkspace(t *testing.T) {
+	for _, tc := range []struct {
+		name                                 string
+		switchWorkspace, newLogin, newerDisk bool
+	}{
+		{name: "same login workspace switch", switchWorkspace: true},
+		{name: "another login", newLogin: true},
+		{name: "newer unexpired disk token", newerDisk: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			grants := 0
+			mux := http.NewServeMux()
+			ts := httptest.NewTLSServer(mux)
+			defer ts.Close()
+			mux.HandleFunc("/api/auth/env/", func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.WriteString(w, `{"auth0":{"client_id":"cli","domain":"`+strings.TrimPrefix(ts.URL, "https://")+`","schema_name":"first"}}`)
+			})
+			mux.HandleFunc("/oauth/token/", func(w http.ResponseWriter, r *http.Request) {
+				grants++
+				_, _ = io.WriteString(w, `{"access_token":"first-renewed","refresh_token":"rotated-refresh","expires_in":3600}`)
+			})
+			require.NoError(t, config.CreateConfig(ts.URL, "first", "", "", "first-access", "old-refresh", "", 3600, true))
+			started, err := config.LoadConfig()
+			require.NoError(t, err)
+			ac, err := NewAlpaconAPIClient()
+			require.NoError(t, err)
+			require.NotNil(t, ac.login)
+			assert.True(t, ac.login.SameLogin(started), "the constructor pins the login identity")
+			ac.HTTPClient = ts.Client()
+			if tc.switchWorkspace {
+				require.NoError(t, config.SwitchWorkspace(started, "https://second.example.com", "second", false, &config.RenewedToken{AccessToken: "second-access", ExpiresIn: 3600}))
+			}
+			if tc.newLogin {
+				require.NoError(t, config.CreateConfig(ts.URL, "first", "", "", "another-access", "another-refresh", "", 3600, true))
+			}
+			if tc.newerDisk {
+				require.NoError(t, config.SwitchWorkspace(started, ts.URL, "first", true, &config.RenewedToken{AccessToken: "newer-access", ExpiresIn: 3600}))
+			}
+			err = ac.refreshLocked()
+			saved, readErr := config.LoadConfig()
+			require.NoError(t, readErr)
+			switch {
+			case tc.newLogin:
+				require.ErrorIs(t, err, config.ErrLoginChanged)
+				require.ErrorContains(t, err, "You signed in again in another terminal; run the command again.")
+				assert.Equal(t, "another-access", saved.AccessToken)
+				assert.Zero(t, grants)
+			case tc.newerDisk:
+				require.NoError(t, err)
+				assert.Equal(t, "newer-access", ac.AccessToken())
+				assert.Zero(t, grants)
+			default:
+				require.NoError(t, err)
+				assert.Equal(t, "first-renewed", ac.AccessToken())
+				assert.Equal(t, "https://second.example.com", saved.WorkspaceURL)
+				assert.Equal(t, "second-access", saved.AccessToken)
+				assert.Equal(t, "rotated-refresh", saved.RefreshToken)
+				assert.Equal(t, 1, grants)
+			}
+		})
+	}
+}

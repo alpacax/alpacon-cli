@@ -2,7 +2,6 @@ package utils
 
 import (
 	"fmt"
-	"os"
 	"time"
 )
 
@@ -86,7 +85,7 @@ func CliErrorEnvelopeWithExitCode(code int, operation string, err error, format 
 	}
 	ExitWithFailureJSON(Failure{ExitCode: code, Operation: operation, Err: err, Message: fmt.Sprintf(format, args...), NextActions: RefusalNextActions(refusalGuidance(err, args))})
 	printCliError(refusalGuidance(err, args), format, args...)
-	os.Exit(code)
+	Exit(code)
 }
 
 // ExitIfUsageError exits 2 for a report that would exit 1 when err, or an error among args, answers

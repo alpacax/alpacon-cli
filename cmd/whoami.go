@@ -110,12 +110,14 @@ func summarizeWorkSession(ws *wsapi.WorkSession) *activeWorkSessionSummary {
 		expiresAt = ws.ExpiresAt.UTC().Format(time.RFC3339)
 	}
 	return &activeWorkSessionSummary{
-		ID:        ws.ID,
-		Status:    ws.Status,
-		Scopes:    ws.Scopes,
-		Servers:   wsapi.ServerNames(ws),
-		Clusters:  wsapi.ClusterNames(ws),
-		ExpiresAt: expiresAt,
+		ID:             ws.ID,
+		Status:         ws.Status,
+		Scopes:         ws.Scopes,
+		Servers:        wsapi.ServerNames(ws),
+		Clusters:       wsapi.ClusterNames(ws),
+		ExpiresAt:      expiresAt,
+		ServersHidden:  ws.ServersHidden,
+		ClustersHidden: ws.ClustersHidden,
 	}
 }
 
@@ -126,6 +128,10 @@ type activeWorkSessionSummary struct {
 	Servers   []string `json:"servers"`
 	Clusters  []string `json:"clusters,omitempty"`
 	ExpiresAt string   `json:"expires_at,omitempty"`
+	// ServersHidden and ClustersHidden count the targets Servers and Clusters leave out
+	// because the caller does not reach them.
+	ServersHidden  *int `json:"servers_hidden,omitempty"`
+	ClustersHidden *int `json:"clusters_hidden,omitempty"`
 }
 
 type whoamiOutput struct {

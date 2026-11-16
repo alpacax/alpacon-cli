@@ -81,3 +81,22 @@ func (t TruncatedText) String() string {
 func (t TruncatedText) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.full)
 }
+
+// AnnotatedText is a list cell whose table text adds a note to the value JSON carries, so a
+// table can say what the value leaves out without changing what a script reads.
+type AnnotatedText struct {
+	value     string
+	tableText string
+}
+
+func Annotate(value, tableText string) AnnotatedText {
+	return AnnotatedText{value: value, tableText: tableText}
+}
+
+func (t AnnotatedText) String() string {
+	return t.tableText
+}
+
+func (t AnnotatedText) MarshalJSON() ([]byte, error) {
+	return json.Marshal(t.value)
+}

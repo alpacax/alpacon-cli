@@ -98,7 +98,7 @@ func staleWorkspaceList(err error) error {
 func renewWorkspaceClaim(cfg config.Config, httpClient *http.Client) (*config.RenewedToken, error) {
 	spinner := utils.NewSpinner("Refreshing access token...")
 	spinner.Start()
-	tokenRes, err := auth0.RefreshAccessToken(cfg.WorkspaceURL, httpClient, cfg.RefreshToken)
+	tokenRes, err := auth0.RefreshAccessToken(cfg.WorkspaceURL, httpClient, cfg)
 	spinner.Stop()
 	if auth0.IsRefreshTokenRejected(err) {
 		return nil, fmt.Errorf("%w: %w", errRefreshRejected, err)

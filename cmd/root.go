@@ -94,10 +94,11 @@ func Execute() {
 	exitErr, isExitErr := errors.AsType[*utils.ExitError](err)
 	switch {
 	case err == nil:
+		utils.WaitForTokenRefreshes()
 		return
 	case isExitErr: // a converted command's failure, printed after its deferred calls ran
 		utils.PrintExitError(exitErr)
-		os.Exit(exitErr.Code)
+		utils.Exit(exitErr.Code)
 	case !errors.As(err, new(hookError)):
 		utils.CliParseErrorWithExit(cmd, utils.OutputFormatIn(os.Args[1:]), err.Error())
 	case utils.IsUsageError(err):

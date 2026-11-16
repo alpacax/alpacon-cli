@@ -56,7 +56,7 @@ func TestGetWorkSessionList(t *testing.T) {
 	assert.Equal(t, "ses-1", list[0].ID)
 	assert.Equal(t, "active", list[0].Status)
 	assert.Equal(t, "command, websh", list[0].Scopes)
-	assert.Equal(t, "web-01", list[0].Servers)
+	assert.Equal(t, "web-01", list[0].Servers.String())
 }
 
 func TestGetWorkSessionList_StatusFilter(t *testing.T) {
@@ -690,7 +690,7 @@ func TestProjectAttributesShowsTheCluster(t *testing.T) {
 		Scopes:   []string{"kube", "kube_exec"},
 		Clusters: []types.ClusterSummary{{ID: "c-1", Name: "prod-east"}},
 	})
-	assert.Equal(t, "prod-east", row.Clusters)
+	assert.Equal(t, "prod-east", row.Clusters.String())
 	assert.Empty(t, row.Servers)
 	assert.Empty(t, row.ExpiresAt.String(), "no expiry until a duration session activates")
 	assert.Equal(t, "kube, kube_exec", row.Scopes)
@@ -840,6 +840,174 @@ func TestProjectAttributesKeepsLocalExpiryTableText(t *testing.T) {
 			row := ProjectAttributes(&ws)
 
 			assert.Equal(t, tt.want, row.ExpiresAt.String())
+		})
+	}
+}
+
+// hiddenCountsDetail is a work session detail as Alpacon Server 2.48.0 renders it for a caller
+// who reaches one of two servers.
+const hiddenCountsDetail = `{
+	"id": "550e8400-e29b-41d4-a716-446655440000",
+	"status": "active",
+	"servers": [{"id": "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47", "name": "web-1"}],
+	"servers_hidden": 1,
+	"clusters": [],
+	"clusters_hidden": 0,
+	"adjustments": {"servers": {
+		"old": [{"id": "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47", "name": "web-1"}],
+		"new": [],
+		"old_hidden": 1,
+		"new_hidden": 1
+	}},
+	"pending_modification_request": {
+		"id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+		"changes": {"servers": [{"id": "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47", "name": "web-1"}], "servers_hidden": 2, "scopes": ["command"]},
+		"added_at": "2026-11-07T09:30:45Z",
+		"can_cancel": false
+	},
+	"account_flag": {"code": "account_bound_to_other_person", "servers": ["3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47"], "servers_hidden": 1}
+}`
+
+func TestWorkSessionDecodesHiddenCounts(t *testing.T) {
+	t.Parallel()
+	var ws WorkSession
+	require.NoError(t, json.Unmarshal([]byte(hiddenCountsDetail), &ws))
+
+	require.NotNil(t, ws.ServersHidden)
+	assert.Equal(t, 1, *ws.ServersHidden)
+	require.NotNil(t, ws.ClustersHidden)
+	assert.Equal(t, 0, *ws.ClustersHidden)
+	require.NotNil(t, ws.Adjustments.Servers.OldHidden)
+	assert.Equal(t, 1, *ws.Adjustments.Servers.OldHidden)
+	require.NotNil(t, ws.Adjustments.Servers.NewHidden)
+	assert.Equal(t, 1, *ws.Adjustments.Servers.NewHidden)
+	require.NotNil(t, ws.AccountFlag)
+	assert.Equal(t, "account_bound_to_other_person", ws.AccountFlag.Code)
+	require.NotNil(t, ws.AccountFlag.ServersHidden)
+	assert.Equal(t, 1, *ws.AccountFlag.ServersHidden)
+	require.NotNil(t, ws.PendingModificationRequest)
+	assert.JSONEq(t, `{"servers": [{"id": "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47", "name": "web-1"}], "servers_hidden": 2, "scopes": ["command"]}`,
+		string(ws.PendingModificationRequest.Changes))
+
+	assert.Equal(t, "web-1 and 1 more", ServerList(&ws))
+	assert.Empty(t, ClusterList(&ws))
+	assert.False(t, IsClusterSession(&ws))
+}
+
+// A typed re-marshal, as the create, update and use envelopes do, keeps every count as sent.
+func TestWorkSessionRemarshalKeepsHiddenCounts(t *testing.T) {
+	t.Parallel()
+	var ws WorkSession
+	require.NoError(t, json.Unmarshal([]byte(hiddenCountsDetail), &ws))
+	body, err := json.Marshal(ws)
+	require.NoError(t, err)
+
+	var got map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(body, &got))
+	assert.JSONEq(t, `1`, string(got["servers_hidden"]))
+	assert.JSONEq(t, `0`, string(got["clusters_hidden"]))
+	var adj struct {
+		Servers map[string]json.RawMessage `json:"servers"`
+	}
+	require.NoError(t, json.Unmarshal(got["adjustments"], &adj))
+	assert.JSONEq(t, `1`, string(adj.Servers["old_hidden"]))
+	assert.JSONEq(t, `1`, string(adj.Servers["new_hidden"]))
+	assert.JSONEq(t, `{
+		"id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+		"changes": {"servers": [{"id": "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47", "name": "web-1"}], "servers_hidden": 2, "scopes": ["command"]},
+		"added_at": "2026-11-07T09:30:45Z",
+		"can_cancel": false
+	}`, string(got["pending_modification_request"]))
+	assert.JSONEq(t, `{"code": "account_bound_to_other_person", "servers": ["3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47"], "servers_hidden": 1}`,
+		string(got["account_flag"]))
+}
+
+// A server that predates the counts sends none, and a re-marshal invents none.
+func TestWorkSessionRemarshalInventsNoCountForAnOlderServer(t *testing.T) {
+	t.Parallel()
+	var ws WorkSession
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"id": "550e8400-e29b-41d4-a716-446655440000",
+		"servers": [{"id": "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47", "name": "web-1"}],
+		"clusters": [],
+		"adjustments": {"servers": {"old": [], "new": []}},
+		"pending_modification_request": null
+	}`), &ws))
+	body, err := json.Marshal(ws)
+	require.NoError(t, err)
+
+	for _, key := range []string{`"servers_hidden"`, `"clusters_hidden"`, `"old_hidden"`, `"new_hidden"`, `"account_flag"`} {
+		assert.NotContains(t, string(body), key)
+	}
+	assert.Contains(t, string(body), `"pending_modification_request":null`)
+	assert.Equal(t, "web-1", ServerList(&ws))
+}
+
+func TestProjectAttributesSaysHowManyTheCallerDoesNotReach(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		ws           WorkSession
+		servers      string
+		clusters     string
+		jsonServers  string
+		jsonClusters string
+		jsonCounts   string
+	}{
+		{
+			name:        "names and one hidden",
+			ws:          WorkSession{Servers: []types.ServerSummary{{Name: "web-1"}}, ServersHidden: new(1), ClustersHidden: new(0)},
+			servers:     "web-1 and 1 more",
+			jsonServers: "web-1",
+			jsonCounts:  `,"servers_hidden":1,"clusters_hidden":0`,
+		},
+		{
+			name:       "every server hidden",
+			ws:         WorkSession{ServersHidden: new(2), ClustersHidden: new(0)},
+			servers:    "2 servers you cannot access",
+			jsonCounts: `,"servers_hidden":2,"clusters_hidden":0`,
+		},
+		{
+			name:       "cluster hidden",
+			ws:         WorkSession{ServersHidden: new(0), ClustersHidden: new(1)},
+			clusters:   "1 cluster you cannot access",
+			jsonCounts: `,"servers_hidden":0,"clusters_hidden":1`,
+		},
+		{
+			name:        "older server",
+			ws:          WorkSession{Servers: []types.ServerSummary{{Name: "web-1"}}},
+			servers:     "web-1",
+			jsonServers: "web-1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			row := ProjectAttributes(&tt.ws)
+			assert.Equal(t, tt.servers, row.Servers.String())
+			assert.Equal(t, tt.clusters, row.Clusters.String())
+			body, err := json.Marshal(row)
+			require.NoError(t, err)
+			assert.JSONEq(t, `{"id":"","status":"","scopes":"","servers":"`+tt.jsonServers+`","clusters":"`+tt.jsonClusters+`","expires_at":null,"description":""`+tt.jsonCounts+`}`, string(body))
+		})
+	}
+}
+
+func TestIsClusterSession(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		ws   WorkSession
+		want bool
+	}{
+		{"named cluster", WorkSession{Clusters: []types.ClusterSummary{{Name: "prod-east"}}}, true},
+		{"hidden cluster", WorkSession{ClustersHidden: new(1)}, true},
+		{"server session", WorkSession{Servers: []types.ServerSummary{{Name: "web-1"}}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, IsClusterSession(&tt.ws))
 		})
 	}
 }

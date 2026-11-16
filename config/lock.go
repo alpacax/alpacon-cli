@@ -18,7 +18,11 @@ const (
 // withConfigLock runs fn under the lock every config writer takes, giving up after lockTimeout.
 // Not reentrant: fn calling another writer times out on the lock it already holds.
 func withConfigLock(fn func() error) error {
-	lock, err := acquireConfigLock()
+	return withConfigLockTimeout(lockTimeout, fn)
+}
+
+func withConfigLockTimeout(timeout time.Duration, fn func() error) error {
+	lock, err := acquireConfigLockTimeout(timeout)
 	if err != nil {
 		return err
 	}
@@ -26,14 +30,14 @@ func withConfigLock(fn func() error) error {
 	return fn()
 }
 
-func acquireConfigLock() (*filelock.Lock, error) {
+func acquireConfigLockTimeout(timeout time.Duration) (*filelock.Lock, error) {
 	dir, err := configDir()
 	if err != nil {
 		return nil, err
 	}
 	lockPath := filepath.Join(dir, lockFileName)
 
-	deadline := time.Now().Add(lockTimeout)
+	deadline := time.Now().Add(timeout)
 	for {
 		lock, err := filelock.Acquire(lockPath, 0644) // stays empty; the 0700 directory keeps other accounts out
 		switch {
@@ -42,7 +46,7 @@ func acquireConfigLock() (*filelock.Lock, error) {
 		case !errors.Is(err, filelock.ErrLocked):
 			return nil, fmt.Errorf("failed to lock %s: %w", lockPath, err)
 		case !time.Now().Before(deadline):
-			return nil, fmt.Errorf("timed out after %s waiting for another alpacon process to release %s", lockTimeout, lockPath)
+			return nil, fmt.Errorf("timed out after %s waiting for another alpacon process to release %s", timeout, lockPath)
 		}
 		time.Sleep(lockRetryInterval)
 	}
