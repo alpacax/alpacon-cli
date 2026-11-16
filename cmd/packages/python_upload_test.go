@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
@@ -16,7 +17,10 @@ import (
 
 func TestPythonPackageUploadSendsTheFile(t *testing.T) {
 	t.Parallel()
-	received := make(chan string, 1)
+	var (
+		mu       sync.Mutex
+		received []string
+	)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		part, err := r.MultipartReader()
 		if r.Method != http.MethodPost || r.URL.Path != "/api/packages/python/entries/" || err != nil {
@@ -31,7 +35,9 @@ func TestPythonPackageUploadSendsTheFile(t *testing.T) {
 			return
 		}
 		body, _ := io.ReadAll(file)
-		received <- string(body)
+		mu.Lock()
+		received = append(received, string(body))
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{}`))
@@ -43,7 +49,9 @@ func TestPythonPackageUploadSendsTheFile(t *testing.T) {
 	failure, code := cmdtest.Run(newPythonPackageUploadCmd(cmdtest.ClientFactory(ts)), wheel)
 
 	assert.Equal(t, 0, code, failure)
-	assert.Equal(t, "wheel-content", <-received)
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{"wheel-content"}, received)
 }
 
 func TestPythonPackageUploadFails(t *testing.T) {
