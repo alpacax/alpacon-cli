@@ -258,7 +258,7 @@ func TestGetRoleHistory_StopsAtTailAndSendsNoOrdering(t *testing.T) {
 	entries, reach, err := GetRoleHistory(newTestClient(ts), userID, 2)
 	require.NoError(t, err)
 	assert.Len(t, entries, 2)
-	assert.Equal(t, ReachBound, reach.Value)
+	assert.Equal(t, Reach{Raw: json.RawMessage(`"bound"`), Value: ReachBound}, reach)
 
 	assert.Equal(t, userID, query.Get("user"))
 	assert.NotContains(t, query, "ordering")
@@ -315,9 +315,35 @@ func TestRoleAuditLogResponse_DecodesTargetAndErasure(t *testing.T) {
 			body: `{"scope":"global","context":{"erased":false}}`,
 		},
 		{
-			name:       "erased as a non-boolean value",
-			body:       `{"scope":"global","context":{"erased":{"by":"x"}}}`,
-			wantErased: true,
+			name: "erased null",
+			body: `{"scope":"global","context":{"erased":null}}`,
+		},
+		{
+			name: "erased as a value other than true",
+			body: `{"scope":"global","context":{"erased":"true"}}`,
+		},
+		{
+			name:     "a numeric object id is kept as its text",
+			body:     `{"scope":"object","context":{"scope_content_type":"servers.server","scope_object_id":42}}`,
+			wantType: new("servers.server"),
+			wantID:   new("42"),
+		},
+		{
+			name:     "a key of another shape reads as absent",
+			body:     `{"scope":"object","context":{"scope_content_type":"servers.server","scope_object_id":{"id":"x"}}}`,
+			wantType: new("servers.server"),
+		},
+		{
+			name: "a null object id",
+			body: `{"scope":"content_type","context":{"scope_object_id":null}}`,
+		},
+		{
+			name: "a context that is not an object",
+			body: `{"scope":"global","context":"servers.server"}`,
+		},
+		{
+			name: "a null context",
+			body: `{"scope":"global","context":null}`,
 		},
 	}
 
@@ -330,7 +356,7 @@ func TestRoleAuditLogResponse_DecodesTargetAndErasure(t *testing.T) {
 			assert.Equal(t, tt.wantType, entry.Context.ScopeContentType)
 			assert.Equal(t, tt.wantID, entry.Context.ScopeObjectID)
 			assert.Equal(t, tt.wantHidden, entry.TargetsHidden)
-			assert.Equal(t, tt.wantErased, entry.Context.IsErased())
+			assert.Equal(t, tt.wantErased, entry.Context.Erased)
 		})
 	}
 }
@@ -407,6 +433,26 @@ func TestAuditAttributesFrom_JSONKeepsAWithheldRowAsSent(t *testing.T) {
 		"action":"granted","role":"server:viewer","scope":"object",
 		"target_type":"servers.server","target_id":null,"targets_hidden":1,
 		"changed_by":"bob","reason":"","erased":false,"at":"2026-11-10T09:00:00Z"
+	}]`, string(body))
+}
+
+func TestAuditAttributesFrom_CarriesAnErasedRow(t *testing.T) {
+	t.Parallel()
+	added := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	rows := AuditAttributesFrom([]RoleAuditLogResponse{{
+		Action: "granted", RoleName: "operator", Scope: "global", Reason: "",
+		Context: AuditContext{Erased: true}, AddedAt: added,
+	}}, time.UTC)
+
+	require.Len(t, rows, 1)
+	assert.Equal(t, "(erased)", rows[0].ReasonCell)
+
+	body, err := json.Marshal(rows)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[{
+		"action":"granted","role":"operator","scope":"workspace",
+		"target_type":null,"target_id":null,"targets_hidden":0,
+		"changed_by":"","reason":"","erased":true,"at":"2026-11-10T09:00:00Z"
 	}]`, string(body))
 }
 

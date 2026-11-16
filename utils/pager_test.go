@@ -95,6 +95,7 @@ func TestWriteToPager_RecordsWhetherAPagerRan(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("PAGER", tt.pager)
+			lastOutputPaged.Store(!tt.want)
 
 			got := captureOutput(t, func(stdout *os.File) {
 				w, cleanup := writeToPager(true, func() (int, error) { return tt.height, nil }, stdout)

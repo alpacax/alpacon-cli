@@ -248,7 +248,7 @@ func AuditAttributesFrom(entries []RoleAuditLogResponse, zone *time.Location) []
 			changedBy = entry.ChangedBy.Label
 		}
 
-		erased := entry.Context.IsErased()
+		erased := entry.Context.Erased
 		result = append(result, RoleAuditAttributes{
 			Action:        entry.Action,
 			Role:          entry.RoleName,
@@ -268,9 +268,8 @@ func AuditAttributesFrom(entries []RoleAuditLogResponse, zone *time.Location) []
 	return result
 }
 
-// targetCell names a row's binding target as kind/id, or the kind alone for a binding on every
-// object of it. A withheld target shows its kind and the count in the id's place. This is not
-// ScopeLabel's "type:42/id": the audit row carries the kind's label, not its numeric id.
+// targetCell names a binding target as kind/id, the kind alone, or the kind and a hidden count;
+// unlike ScopeLabel's "type:42/id", the audit row carries the kind's label, not its numeric id.
 func targetCell(contentType, objectID *string, hidden int) string {
 	kind := ""
 	if contentType != nil {

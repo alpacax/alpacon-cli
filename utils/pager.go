@@ -34,9 +34,8 @@ func WriteToPager() (io.Writer, func()) {
 // lastOutputPaged records whether the latest WriteToPager cleanup handed its output to a pager.
 var lastOutputPaged atomic.Bool
 
-// LastOutputPaged reports whether the output WriteToPager last flushed went through a pager, so a
-// caller can repeat on stderr what the pager scrolled away. A fallback straight to stdout, when no
-// pager could be found or it failed, does not count.
+// LastOutputPaged reports whether WriteToPager's last flush ran a pager, not a stdout fallback, so
+// a caller can repeat on stderr what the pager scrolled away.
 func LastOutputPaged() bool {
 	return lastOutputPaged.Load()
 }

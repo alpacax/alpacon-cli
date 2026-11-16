@@ -60,29 +60,58 @@ type RoleAuditLogResponse struct {
 	ChangedBy   *AuditActor     `json:"changed_by"`
 	Reason      string          `json:"reason"`
 	Context     AuditContext    `json:"context"`
-	// TargetsHidden counts the binding targets the row withholds from this reader: the target's
-	// id is left out of Context and Reason is sent empty. A server that predates the field
-	// sends none, which decodes as 0.
+	// TargetsHidden counts the binding targets withheld from this reader, whose id is then left
+	// out of Context and whose Reason is sent empty; a server that predates it decodes as 0.
 	TargetsHidden int       `json:"targets_hidden"`
 	AddedAt       time.Time `json:"added_at"`
 }
 
-// AuditContext is the part of a row's context the CLI reads; the server may send more keys.
+// AuditContext is the part of a row's context the CLI reads; the server may send more keys. It
+// decodes leniently, a key of another shape reading as absent, so one odd row cannot fail a page.
 type AuditContext struct {
 	// ScopeContentType names the binding target's kind as a dotted label, e.g. servers.server.
 	// It stays on a row whose target is withheld: it names a kind, not an object.
-	ScopeContentType *string `json:"scope_content_type"`
-	// ScopeObjectID is the target's id, sent verbatim.
-	ScopeObjectID *string `json:"scope_object_id"`
+	ScopeContentType *string
+	// ScopeObjectID is the target's id as sent; a number is kept as its text.
+	ScopeObjectID *string
 	// Erased marks a row whose personal data was erased, so an empty Reason is not one never
-	// given. Kept raw so a value that is not a boolean cannot fail the whole page's decode.
-	Erased json.RawMessage `json:"erased"`
+	// given. Only a JSON true counts.
+	Erased bool
 }
 
-// IsErased reports whether the row's context marks it erased.
-func (c AuditContext) IsErased() bool {
-	value := bytes.TrimSpace(c.Erased)
-	return len(value) > 0 && !bytes.Equal(value, []byte("false")) && !bytes.Equal(value, []byte("null"))
+func (c *AuditContext) UnmarshalJSON(data []byte) error {
+	*c = AuditContext{}
+	var fields struct {
+		ScopeContentType json.RawMessage `json:"scope_content_type"`
+		ScopeObjectID    json.RawMessage `json:"scope_object_id"`
+		Erased           json.RawMessage `json:"erased"`
+	}
+	if json.Unmarshal(data, &fields) != nil {
+		return nil
+	}
+	c.ScopeContentType = looseString(fields.ScopeContentType)
+	c.ScopeObjectID = looseString(fields.ScopeObjectID)
+	c.Erased = bytes.Equal(bytes.TrimSpace(fields.Erased), []byte("true"))
+	return nil
+}
+
+// looseString reads a JSON string, or a number as its text; anything else, null included, is nil.
+func looseString(raw json.RawMessage) *string {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if decoder.Decode(&value) != nil {
+		return nil
+	}
+	switch v := value.(type) {
+	case string:
+		return &v
+	case json.Number:
+		text := v.String()
+		return &text
+	default:
+		return nil
+	}
 }
 
 type AuditPrincipal struct {
@@ -137,9 +166,9 @@ type RoleScopeAttributes struct {
 	ACL     string `json:"acl" table:"ACL"`
 }
 
-// RoleAuditAttributes keeps two cells for the table alone: Target and Reason there say "hidden"
-// and "withheld" in words, while JSON carries the fields as sent beside the counts that explain
-// them, so an empty reason stays "" and a withheld target stays null.
+// RoleAuditAttributes keeps Target and ReasonCell for the table alone, which word a hidden target
+// or a withheld or erased reason; JSON carries the fields as sent, so an empty reason stays "" and
+// a withheld target_id stays null.
 type RoleAuditAttributes struct {
 	Action        string          `json:"action"`
 	Role          string          `json:"role"`

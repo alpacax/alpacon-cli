@@ -82,7 +82,7 @@ func TestUserRoleHistory_TableSaysHowFarTheListReaches(t *testing.T) {
 		wantStderr string
 		hiddenRow  bool
 	}{
-		{name: "org", body: historyPage(`"org"`, hiddenRow), wantStderr: "Reach: org—every role change in this workspace", hiddenRow: true},
+		{name: "org", body: historyPage(`"org"`, hiddenRow), wantStderr: "Reach: org—you may read every role change in this workspace", hiddenRow: true},
 		{name: "bound", body: historyPage(`"bound"`, hiddenRow), wantStderr: "Reach: bound—beyond the changes that name you", hiddenRow: true},
 		{name: "self", body: historyPage(`"self"`, hiddenRow), wantStderr: "Reach: self—only changes that name you", hiddenRow: true},
 		{name: "an unknown value is shown as sent", body: historyPage(`"tenant"`, hiddenRow), wantStderr: "Reach: tenant—this version of alpacon does not recognize it, so the list may not be complete.", hiddenRow: true},
@@ -179,13 +179,23 @@ func TestUserRoleHistory_NoneExitsOne(t *testing.T) {
 
 			stdout, stderr, err := runHistory(t, ts, format)
 
-			assert.NotContains(t, stderr, "Reach:", "the command must exit before printing a reach line")
+			assert.Empty(t, stderr, "the command must exit before printing a reach line")
 			exitErr, ok := errors.AsType[*utils.ExitError](err)
 			require.True(t, ok, "want an ExitError, got %v", err)
 			assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
 			assert.Empty(t, stdout, "an empty list must not be printed as if it were the answer")
 			var printed bytes.Buffer
 			utils.FprintExitError(&printed, exitErr)
+			if format == utils.OutputFormatJSON {
+				var envelope struct {
+					ErrorCode string `json:"error_code"`
+					Message   string `json:"message"`
+				}
+				require.NoError(t, json.Unmarshal(printed.Bytes(), &envelope), printed.String())
+				assert.Equal(t, errorCodeReachNone, envelope.ErrorCode)
+				assert.Contains(t, envelope.Message, "may not read the role-change log (reach: none)")
+				return
+			}
 			assert.Contains(t, printed.String(), "may not read the role-change log (reach: none)")
 		})
 	}
@@ -208,6 +218,7 @@ func TestUserRoleHistory_ARefusalKeepsItsMessage(t *testing.T) {
 	var printed bytes.Buffer
 	utils.FprintExitError(&printed, exitErr)
 	assert.Contains(t, printed.String(), "Failed to retrieve the role history")
+	assert.Contains(t, printed.String(), "not an account you may read", "the refusal must be described, not dropped")
 }
 
 func TestReachLine(t *testing.T) {
@@ -218,12 +229,13 @@ func TestReachLine(t *testing.T) {
 		want           string
 		wantIncomplete bool
 	}{
-		{name: "org", reach: rbac.Reach{Value: rbac.ReachOrg, Stated: true}, want: "Reach: org—"},
-		{name: "bound", reach: rbac.Reach{Value: rbac.ReachBound, Stated: true}, want: "Reach: bound—"},
-		{name: "self", reach: rbac.Reach{Value: rbac.ReachSelf, Stated: true}, want: "Reach: self—"},
-		{name: "unknown", reach: rbac.Reach{Value: "tenant", Stated: true}, want: "Reach: tenant—", wantIncomplete: true},
+		{name: "org", reach: rbac.Reach{Raw: json.RawMessage(`"org"`), Value: rbac.ReachOrg}, want: "Reach: org—"},
+		{name: "bound", reach: rbac.Reach{Raw: json.RawMessage(`"bound"`), Value: rbac.ReachBound}, want: "Reach: bound—"},
+		{name: "self", reach: rbac.Reach{Raw: json.RawMessage(`"self"`), Value: rbac.ReachSelf}, want: "Reach: self—"},
+		{name: "unknown", reach: rbac.Reach{Raw: json.RawMessage(`"tenant"`), Value: "tenant"}, want: "Reach: tenant—", wantIncomplete: true},
 		{name: "not stated", reach: rbac.Reach{}, want: "The server did not say", wantIncomplete: true},
-		{name: "a control sequence in an unknown value is stripped", reach: rbac.Reach{Value: "x\x1b[31m\nred", Stated: true}, want: "Reach: x", wantIncomplete: true},
+		{name: "an empty string", reach: rbac.Reach{Raw: json.RawMessage(`""`)}, want: "Reach: (empty)—", wantIncomplete: true},
+		{name: "a control sequence in an unknown value is stripped", reach: rbac.Reach{Raw: json.RawMessage(`"x\u001b[31m\nred"`), Value: "x\x1b[31m\nred"}, want: "Reach: x", wantIncomplete: true},
 	}
 
 	for _, tt := range tests {
@@ -248,8 +260,42 @@ func TestReachLine(t *testing.T) {
 // describe the rows, not claim a binding the reader may not hold.
 func TestReachLine_BoundClaimsNoAuditorBinding(t *testing.T) {
 	t.Parallel()
-	line := reachLine(rbac.Reach{Value: rbac.ReachBound, Stated: true})
+	line := reachLine(rbac.Reach{Raw: json.RawMessage(`"bound"`), Value: rbac.ReachBound})
 
 	assert.NotContains(t, line, "you hold auditor")
 	assert.NotContains(t, line, "your auditor")
+}
+
+func TestNoticesToRepeat(t *testing.T) {
+	t.Parallel()
+	org := rbac.Reach{Raw: json.RawMessage(`"org"`), Value: rbac.ReachOrg}
+	bound := rbac.Reach{Raw: json.RawMessage(`"bound"`), Value: rbac.ReachBound}
+	tests := []struct {
+		name        string
+		reach       rbac.Reach
+		paged       bool
+		wantLine    bool
+		wantWarning bool
+	}{
+		{name: "org on screen", reach: org},
+		{name: "org paged", reach: org, paged: true},
+		{name: "bound on screen", reach: bound},
+		{name: "bound paged", reach: bound, paged: true, wantLine: true},
+		{name: "self paged", reach: rbac.Reach{Raw: json.RawMessage(`"self"`), Value: rbac.ReachSelf}, paged: true, wantLine: true},
+		{name: "unknown paged", reach: rbac.Reach{Raw: json.RawMessage(`"tenant"`), Value: "tenant"}, paged: true, wantLine: true},
+		{name: "not stated paged", reach: rbac.Reach{}, paged: true, wantLine: true},
+		{name: "org that changed on screen", reach: rbac.Reach{Raw: org.Raw, Value: org.Value, Changed: true}},
+		{name: "org that changed paged", reach: rbac.Reach{Raw: org.Raw, Value: org.Value, Changed: true}, paged: true, wantWarning: true},
+		{name: "bound that changed paged", reach: rbac.Reach{Raw: bound.Raw, Value: bound.Value, Changed: true}, paged: true, wantLine: true, wantWarning: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			line, warning := noticesToRepeat(tt.reach, tt.paged)
+
+			assert.Equal(t, tt.wantLine, line, "repeat the reach line")
+			assert.Equal(t, tt.wantWarning, warning, "repeat the warning")
+		})
+	}
 }

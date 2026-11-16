@@ -25,27 +25,21 @@ type Reach struct {
 	Raw json.RawMessage
 	// Value is Raw as a string, or Raw's JSON text when the server sent something else.
 	Value string
-	// Stated is false when the first page carried no reach, as on servers that predate it.
-	Stated bool
 	// Changed says a later page stated another value, or none: each page is resolved on its
 	// own, so access that changes during a multi-page read leaves the pages disagreeing.
 	Changed bool
 }
 
-// reachFromPages takes the first page's reach and compares the rest against it.
-func reachFromPages(pages []json.RawMessage) Reach {
-	if len(pages) == 0 {
-		return Reach{}
-	}
+// Stated is false when the first page carried no reach, as on servers that predate it.
+func (r Reach) Stated() bool {
+	return r.Raw != nil
+}
 
-	reach := parseReach(pages[0])
-	for _, page := range pages[1:] {
-		if other := parseReach(page); other.Stated != reach.Stated || other.Value != reach.Value {
-			reach.Changed = true
-			break
-		}
+// observe folds one more page's reach into r, which holds the first page's.
+func (r *Reach) observe(page Reach) {
+	if page.Stated() != r.Stated() || page.Value != r.Value {
+		r.Changed = true
 	}
-	return reach
 }
 
 func parseReach(raw json.RawMessage) Reach {
@@ -60,5 +54,5 @@ func parseReach(raw json.RawMessage) Reach {
 		value = text
 	}
 	// The decoder gave each page's RawMessage its own copy, so raw can be kept as is.
-	return Reach{Raw: raw, Value: value, Stated: true}
+	return Reach{Raw: raw, Value: value}
 }

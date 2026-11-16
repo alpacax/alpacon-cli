@@ -57,8 +57,9 @@ This is the one 'alpacon user role' command an API token can reach on an Alpacon
 Cloud workspace. The audit log sits outside the gate that refuses tokens on the
 other RBAC routes, and asks instead for a token carrying the role_audit_log:read
 scope. A personal token then reads what its account reaches. A service token is
-let in but reads nothing, and the command exits 1 saying so; name USER with one,
-since it has no account of its own for the command to default to.`,
+let in but reads nothing, so the command exits 1 saying so (error_code
+role_audit_reach_none), or fails earlier without USER, since the token has no
+account of its own to default to.`,
 		Example: `  alpacon user role history
   alpacon user role history john
   alpacon user role history john --tail 100
@@ -87,11 +88,11 @@ since it has no account of its own for the command to default to.`,
 
 			// The server admits the credential to an empty answer by construction, so the list
 			// says nothing about the user; reading it as "no changes" would be wrong.
-			if reach.Stated && reach.Value == rbac.ReachNone {
-				return utils.NewExitError("This credential may not read the role-change log (reach: none), so it says nothing about %s's roles. A service token gets this; run 'alpacon login' to read it as your account.", subj.Label)
+			if reach.Stated() && reach.Value == rbac.ReachNone {
+				return utils.NewExitErrorWithErrorCode(utils.ExitCodeGeneralError, errorCodeReachNone, "This credential may not read the role-change log (reach: none), so it says nothing about %s's roles. A service token gets this; run 'alpacon login' to read it as your account.", subj.Label)
 			}
 			if reach.Changed {
-				utils.CliWarning("The pages of the role history did not state the same reach, because your access or the server changed during the read, so the list may mix both.")
+				utils.CliWarning(reachChangedWarning)
 			}
 
 			rows := rbac.AuditAttributesFrom(entries, time.Local)
@@ -104,10 +105,12 @@ since it has no account of its own for the command to default to.`,
 			if err := utils.PrintTable(rows); err != nil {
 				return err
 			}
-			// A pager fills the screen with the table and scrolls the line above it away, and
-			// on a partial list that line is the only sign the list is partial.
-			if (!reach.Stated || reach.Value != rbac.ReachOrg) && utils.LastOutputPaged() {
+			repeatLine, repeatWarning := noticesToRepeat(reach, utils.LastOutputPaged())
+			if repeatLine {
 				_, _ = fmt.Fprintln(utils.TrackedStderr(), line)
+			}
+			if repeatWarning {
+				utils.CliWarning(reachChangedWarning)
 			}
 			return nil
 		}),
@@ -116,6 +119,21 @@ since it has no account of its own for the command to default to.`,
 	cmd.Flags().IntP("tail", "t", 25, "Number of entries to show, newest first")
 
 	return cmd
+}
+
+// errorCodeReachNone is the --output json error_code of a credential the log admits to an empty
+// answer, so a script can tell it from any other failure.
+const errorCodeReachNone = "role_audit_reach_none"
+
+const reachChangedWarning = "The pages of the role history did not state the same reach, because your access or the server changed during the read, so the list may mix both."
+
+// noticesToRepeat says what to print again below a table the pager showed, since the pager scrolls
+// the lines above it away: the reach line unless it is org, and the warning that pages disagreed.
+func noticesToRepeat(reach rbac.Reach, paged bool) (line, warning bool) {
+	if !paged {
+		return false, false
+	}
+	return !reach.Stated() || reach.Value != rbac.ReachOrg, reach.Changed
 }
 
 // roleHistoryOutput is the --output json document. Reach is the value as the server sent it,
@@ -135,23 +153,22 @@ func printRoleHistoryJSON(reach rbac.Reach, rows []rbac.RoleAuditAttributes) err
 	return nil
 }
 
-// reachLine says how far the list reaches, in the server's own word first; a stated none never
-// gets here, since the command exits on it. Only a value this build knows may go without saying
-// the list may be incomplete, and the bound line never says
-// "your groups" or that the reader holds an auditor binding: a reader can audit a group they do
-// not belong to, and a direct Application maintainer is bound without auditing any group.
+// reachLine says how far the reader may read, in the server's word; only a known value may omit
+// "may not be complete", and bound never claims an auditor binding, which a maintainer lacks.
 func reachLine(reach rbac.Reach) string {
-	if !reach.Stated {
+	if !reach.Stated() {
 		return "The server did not say how far this list reaches, so it may not be complete."
 	}
 
 	switch reach.Value {
 	case rbac.ReachOrg:
-		return "Reach: org—every role change in this workspace within the plan's audit window, and every change that names you."
+		return "Reach: org—you may read every role change in this workspace within the plan's audit window, and every change that names you."
 	case rbac.ReachBound:
 		return "Reach: bound—beyond the changes that name you, only changes recorded while their subject was in a group you audit through a binding on that group itself, within the plan's audit window. Rows outside that reach are not shown."
 	case rbac.ReachSelf:
 		return "Reach: self—only changes that name you, as the actor or the subject. Rows outside that reach are not shown."
+	case "":
+		return "Reach: (empty)—this version of alpacon does not recognize it, so the list may not be complete."
 	default:
 		return fmt.Sprintf("Reach: %s—this version of alpacon does not recognize it, so the list may not be complete.", utils.SanitizeServerHint(reach.Value))
 	}

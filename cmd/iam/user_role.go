@@ -96,10 +96,8 @@ func resolveSubject(ac *client.AlpaconClient, args []string) (subject, error) {
 	return subject{PK: userID, ID: userID, Label: args[0]}, nil
 }
 
-// canonicalUUID dashes and lowercases what IsUUID also accepts un-dashed and in either
-// case. The audit log's user filter is an exact compare against the canonical form, so a
-// non-canonical value matches nothing and 'user role history' prints its reach line over an
-// empty table and exits 0. The binding list's filter coerces the value itself.
+// canonicalUUID dashes and lowercases a UUID: the audit log's user filter compares exactly, so a
+// non-canonical value would match nothing and print an empty history.
 func canonicalUUID(id string) string {
 	hex := strings.ToLower(strings.ReplaceAll(id, "-", ""))
 	if len(hex) != 32 {

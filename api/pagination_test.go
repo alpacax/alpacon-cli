@@ -763,14 +763,14 @@ func TestFetchPagesUpToWithReach_ReadsTheFirstPagesReach(t *testing.T) {
 			name:  "a stated value",
 			pages: []string{`{"next":0,"reach":"bound","results":[{"id":"0"}]}`},
 			limit: 10,
-			want:  Reach{Raw: json.RawMessage(`"bound"`), Value: "bound", Stated: true},
+			want:  Reach{Raw: json.RawMessage(`"bound"`), Value: "bound"},
 			ids:   []string{"0"},
 		},
 		{
 			name:  "an empty page keeps its reach",
 			pages: []string{`{"next":0,"reach":"self","results":[]}`},
 			limit: 10,
-			want:  Reach{Raw: json.RawMessage(`"self"`), Value: "self", Stated: true},
+			want:  Reach{Raw: json.RawMessage(`"self"`), Value: "self"},
 			ids:   []string{},
 		},
 		{
@@ -791,14 +791,14 @@ func TestFetchPagesUpToWithReach_ReadsTheFirstPagesReach(t *testing.T) {
 			name:  "a value this build does not know is kept as sent",
 			pages: []string{`{"next":0,"reach":"tenant","results":[]}`},
 			limit: 10,
-			want:  Reach{Raw: json.RawMessage(`"tenant"`), Value: "tenant", Stated: true},
+			want:  Reach{Raw: json.RawMessage(`"tenant"`), Value: "tenant"},
 			ids:   []string{},
 		},
 		{
 			name:  "a non-string value is kept as its JSON text",
 			pages: []string{`{"next":0,"reach":{"kind":"org"},"results":[]}`},
 			limit: 10,
-			want:  Reach{Raw: json.RawMessage(`{"kind":"org"}`), Value: `{"kind":"org"}`, Stated: true},
+			want:  Reach{Raw: json.RawMessage(`{"kind":"org"}`), Value: `{"kind":"org"}`},
 			ids:   []string{},
 		},
 		{
@@ -808,7 +808,7 @@ func TestFetchPagesUpToWithReach_ReadsTheFirstPagesReach(t *testing.T) {
 				`{"next":0,"reach":"org","results":[{"id":"1"}]}`,
 			},
 			limit: 10,
-			want:  Reach{Raw: json.RawMessage(`"org"`), Value: "org", Stated: true},
+			want:  Reach{Raw: json.RawMessage(`"org"`), Value: "org"},
 			ids:   []string{"0", "1"},
 		},
 		{
@@ -818,7 +818,7 @@ func TestFetchPagesUpToWithReach_ReadsTheFirstPagesReach(t *testing.T) {
 				`{"next":0,"reach":"self","results":[{"id":"1"}]}`,
 			},
 			limit: 10,
-			want:  Reach{Raw: json.RawMessage(`"bound"`), Value: "bound", Stated: true, Changed: true},
+			want:  Reach{Raw: json.RawMessage(`"bound"`), Value: "bound", Changed: true},
 			ids:   []string{"0", "1"},
 		},
 		{
@@ -832,13 +832,24 @@ func TestFetchPagesUpToWithReach_ReadsTheFirstPagesReach(t *testing.T) {
 			ids:   []string{"0", "1"},
 		},
 		{
+			// The tail is met on page 1, so page 2 is never read: had it been, its self would set Changed.
+			name: "a page past the limit is not read",
+			pages: []string{
+				`{"next":2,"reach":"bound","results":[{"id":"0"}]}`,
+				`{"next":0,"reach":"self","results":[{"id":"1"}]}`,
+			},
+			limit: 1,
+			want:  Reach{Raw: json.RawMessage(`"bound"`), Value: "bound"},
+			ids:   []string{"0"},
+		},
+		{
 			name: "a later page that drops the key sets Changed",
 			pages: []string{
 				`{"next":2,"reach":"org","results":[{"id":"0"}]}`,
 				`{"next":0,"results":[{"id":"1"}]}`,
 			},
 			limit: 10,
-			want:  Reach{Raw: json.RawMessage(`"org"`), Value: "org", Stated: true, Changed: true},
+			want:  Reach{Raw: json.RawMessage(`"org"`), Value: "org", Changed: true},
 			ids:   []string{"0", "1"},
 		},
 	}
