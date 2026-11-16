@@ -400,7 +400,7 @@ func TestReportExit_ExitsLikeExecute(t *testing.T) {
 			probe := &cobra.Command{Use: "probe", Args: cobra.NoArgs, SilenceErrors: true, SilenceUsage: true,
 				RunE: func(*cobra.Command, []string) error { return tc.err }}
 			markRunErrors(probe)
-			probe.SetArgs(tc.args)
+			probe.SetArgs(append([]string{}, tc.args...)) // never nil, or Cobra reads os.Args[1:]
 			probe.SetOut(io.Discard)
 			probe.SetErr(io.Discard)
 

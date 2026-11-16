@@ -80,7 +80,7 @@ func NoClient() (*client.AlpaconClient, error) { return nil, ErrNoLogin }
 // its exit code. It captures nothing else, so it is safe under t.Parallel.
 func Run(cmd *cobra.Command, args ...string) (failure string, code int) {
 	cmd.SilenceErrors, cmd.SilenceUsage = true, true // as RootCmd is
-	cmd.SetArgs(args)
+	cmd.SetArgs(append([]string{}, args...))         // never nil, or Cobra reads os.Args[1:]
 	err := cmd.Execute()
 	if err == nil {
 		return "", 0
