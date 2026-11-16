@@ -7,39 +7,41 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var noteListCmd = &cobra.Command{
-	Use:     "ls",
-	Aliases: []string{"list"},
-	Short:   "List the newest notes",
-	Long: `Display notes stored on Alpacon, newest first.
+var noteListCmd = newNoteListCmd(client.NewAlpaconAPIClient)
+
+func newNoteListCmd(newClient clientFactory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List the newest notes",
+		Long: `Display notes stored on Alpacon, newest first.
 
 Use --tail to limit the output to the newest N notes, --server to scope to one server,
 and --pinned to show only pinned notes.`,
-	Example: `  alpacon note ls
+		Example: `  alpacon note ls
   alpacon note ls --tail 100
   alpacon note ls --server my-server
   alpacon note ls --pinned`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, _ []string) error {
-		tail, _ := cmd.Flags().GetInt("tail")
-		serverName, _ := cmd.Flags().GetString("server")
-		pinnedOnly, _ := cmd.Flags().GetBool("pinned")
+		RunE: utils.WithExitError(func(cmd *cobra.Command, _ []string) error {
+			tail, _ := cmd.Flags().GetInt("tail")
+			serverName, _ := cmd.Flags().GetString("server")
+			pinnedOnly, _ := cmd.Flags().GetBool("pinned")
 
-		return runNoteList(tail, serverName, pinnedOnly)
-	}),
+			return runNoteList(newClient, tail, serverName, pinnedOnly)
+		}),
+	}
+	cmd.Flags().IntP("tail", "t", 25, "Number of notes to show, newest first")
+	cmd.Flags().StringP("server", "s", "", "Specify server for notes")
+	cmd.Flags().Bool("pinned", false, "Show only pinned notes")
+	return cmd
 }
 
-func init() {
-	noteListCmd.Flags().IntP("tail", "t", 25, "Number of notes to show, newest first")
-	noteListCmd.Flags().StringP("server", "s", "", "Specify server for notes")
-	noteListCmd.Flags().Bool("pinned", false, "Show only pinned notes")
-}
-
-func runNoteList(tail int, serverName string, pinnedOnly bool) error {
+func runNoteList(newClient clientFactory, tail int, serverName string, pinnedOnly bool) error {
 	if err := utils.CheckPositiveInt("tail", tail); err != nil {
 		return err
 	}
 
-	alpaconClient, err := client.NewAlpaconAPIClient()
+	alpaconClient, err := newClient()
 	if err != nil {
 		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
