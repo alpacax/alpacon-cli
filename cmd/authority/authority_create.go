@@ -11,35 +11,39 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var authorityCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new certificate authority",
-	Long: `
+var authorityCreateCmd = newAuthorityCreateCmd(client.NewAlpaconAPIClient)
+
+func newAuthorityCreateCmd(newClient clientFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:   "create",
+		Short: "Create a new certificate authority",
+		Long: `
   	Initializes a new certificate authority within the system, allowing you to sign and manage certificates and define their policies.
 
 	CA creation requires an Alpacon API that accepts requests without an owner field.
 	`,
-	Example: `alpacon authority create`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+		Example: `alpacon authority create`,
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		authorityRequest, err := promptForAuthority(alpaconClient)
-		if err != nil {
-			return err
-		}
+			authorityRequest, err := promptForAuthority(alpaconClient)
+			if err != nil {
+				return err
+			}
 
-		response, err := cert.CreateAuthority(alpaconClient, authorityRequest)
-		if err != nil {
-			return utils.NewExitError("Failed to create the new authority: %s.", err)
-		}
+			response, err := cert.CreateAuthority(alpaconClient, authorityRequest)
+			if err != nil {
+				return utils.NewExitError("Failed to create the new authority: %s.", err)
+			}
 
-		installAuthorityInfo(response)
-		return nil
-	}),
+			installAuthorityInfo(response)
+			return nil
+		}),
+	}
 }
 
 func promptForAuthority(ac *client.AlpaconClient) (cert.AuthorityRequest, error) {

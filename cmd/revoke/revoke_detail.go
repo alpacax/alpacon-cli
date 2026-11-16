@@ -7,32 +7,36 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var revokeDetailCmd = &cobra.Command{
-	Use:     "describe REQUEST_ID",
-	Aliases: []string{"desc"},
-	Short:   "Show details of a revoke request",
-	Long: `
+var revokeDetailCmd = newRevokeDetailCmd(client.NewAlpaconAPIClient)
+
+func newRevokeDetailCmd(newClient clientFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:     "describe REQUEST_ID",
+		Aliases: []string{"desc"},
+		Short:   "Show details of a revoke request",
+		Long: `
 	The describe command fetches and displays detailed information about a specific certificate
 	revoke request, including its status, reason, and associated certificate details.
 	`,
-	Example: `
+		Example: `
 	alpacon revoke describe 550e8400-e29b-41d4-a716-446655440000
 	alpacon revoke desc 550e8400-e29b-41d4-a716-446655440000
 	`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		requestId := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			requestId := args[0]
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		requestDetail, err := cert.GetRevokeRequestDetail(alpaconClient, requestId)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve the revoke request details: %s.", err)
-		}
+			requestDetail, err := cert.GetRevokeRequestDetail(alpaconClient, requestId)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the revoke request details: %s.", err)
+			}
 
-		return utils.PrintJson(requestDetail)
-	}),
+			return utils.PrintJson(requestDetail)
+		}),
+	}
 }

@@ -7,35 +7,37 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var csrListCmd = &cobra.Command{
-	Use:     "ls",
-	Aliases: []string{"list"},
-	Short:   "List certificate signing requests",
-	Long: `
+var csrListCmd = newCsrListCmd(client.NewAlpaconAPIClient)
+
+func newCsrListCmd(newClient clientFactory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List certificate signing requests",
+		Long: `
 	Display CSRs, optionally filtered by status ('requested', 'signing', 'signed',
     'issued', 'failed', 'canceled', 'denied'). Use the --status flag to specify the status.
 	`,
-	Example: `
+		Example: `
 	alpacon csr ls
 	alpacon csr list
 	`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		status, _ := cmd.Flags().GetString("status")
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			status, _ := cmd.Flags().GetString("status")
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		csrList, err := cert.GetCSRList(alpaconClient, status)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve the csr list: %s.", err)
-		}
+			csrList, err := cert.GetCSRList(alpaconClient, status)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the csr list: %s.", err)
+			}
 
-		return utils.PrintTable(csrList)
-	}),
-}
-
-func init() {
-	csrListCmd.Flags().StringP("status", "s", "", "Specify the status of the CSR (e.g., 'denied', 'signed')")
+			return utils.PrintTable(csrList)
+		}),
+	}
+	cmd.Flags().StringP("status", "s", "", "Specify the status of the CSR (e.g., 'denied', 'signed')")
+	return cmd
 }
