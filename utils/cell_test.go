@@ -97,3 +97,26 @@ func TestPrintTableUsesCellTableTextAndRawJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestAnnotatedTextKeepsTheValueInJSON(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		cell AnnotatedText
+		json string
+		text string
+	}{
+		{"annotated", Annotate("web-1", "web-1 and 1 more"), `"web-1"`, "web-1 and 1 more"},
+		{"empty value", Annotate("", "1 server you cannot access"), `""`, "1 server you cannot access"},
+		{"zero value", AnnotatedText{}, `""`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			body, err := json.Marshal(tt.cell)
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.json, string(body))
+			assert.Equal(t, tt.text, tt.cell.String())
+		})
+	}
+}
