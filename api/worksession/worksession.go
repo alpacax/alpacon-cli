@@ -42,14 +42,13 @@ func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType, assigne
 // ProjectAttributes converts a WorkSession into its table row.
 func ProjectAttributes(ws *WorkSession) WorkSessionAttributes {
 	return WorkSessionAttributes{
-		ID:          ws.ID,
-		Description: utils.Truncate(ws.Description, 70),
-		Status:      ws.Status,
-		Scopes:      strings.Join(ws.Scopes, ", "),
-		Servers:     utils.Annotate(strings.Join(ServerNames(ws), ", "), ServerList(ws)),
-		Clusters:    utils.Annotate(strings.Join(ClusterNames(ws), ", "), ClusterList(ws)),
-		ExpiresAt:   utils.NewTimestamp(ws.ExpiresAt, FormatExpiresAt(ws.ExpiresAt)),
-		// Copied as sent: nil against an older server, so JSON gains no key it never had.
+		ID:             ws.ID,
+		Description:    utils.Truncate(ws.Description, 70),
+		Status:         ws.Status,
+		Scopes:         strings.Join(ws.Scopes, ", "),
+		Servers:        utils.Annotate(strings.Join(ServerNames(ws), ", "), ServerList(ws)),
+		Clusters:       utils.Annotate(strings.Join(ClusterNames(ws), ", "), ClusterList(ws)),
+		ExpiresAt:      utils.NewTimestamp(ws.ExpiresAt, FormatExpiresAt(ws.ExpiresAt)),
 		ServersHidden:  ws.ServersHidden,
 		ClustersHidden: ws.ClustersHidden,
 	}

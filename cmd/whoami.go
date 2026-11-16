@@ -110,13 +110,12 @@ func summarizeWorkSession(ws *wsapi.WorkSession) *activeWorkSessionSummary {
 		expiresAt = ws.ExpiresAt.UTC().Format(time.RFC3339)
 	}
 	return &activeWorkSessionSummary{
-		ID:        ws.ID,
-		Status:    ws.Status,
-		Scopes:    ws.Scopes,
-		Servers:   wsapi.ServerNames(ws),
-		Clusters:  wsapi.ClusterNames(ws),
-		ExpiresAt: expiresAt,
-		// As sent: nil against a server that predates the counts.
+		ID:             ws.ID,
+		Status:         ws.Status,
+		Scopes:         ws.Scopes,
+		Servers:        wsapi.ServerNames(ws),
+		Clusters:       wsapi.ClusterNames(ws),
+		ExpiresAt:      expiresAt,
 		ServersHidden:  ws.ServersHidden,
 		ClustersHidden: ws.ClustersHidden,
 	}

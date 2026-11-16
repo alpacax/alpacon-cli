@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// HiddenCount reads a count of targets the server left unnamed. Nil, sent by
-// a server older than Alpacon Server 2.48.0, counts as none.
+// HiddenCount reads a count of targets the server left unnamed; nil (a server older than
+// Alpacon Server 2.48.0) and a negative value count as none.
 func HiddenCount(hidden *int) int {
 	if hidden == nil || *hidden < 0 {
 		return 0
@@ -14,14 +14,8 @@ func HiddenCount(hidden *int) int {
 	return *hidden
 }
 
-// JoinReached joins the names of the targets the caller reaches and says how
-// many more the server counted without naming them, so a partial list is not
-// read as the whole scope: "web-1, db-1 and 2 more", or "2 servers you cannot
-// access" when no name is left. noun is the singular of what is counted. With
-// nothing hidden it is a plain join, unchanged.
-//
-// Names are not sanitized here; a name that sanitizes to blank is dropped
-// only when a count follows, so the count never trails an empty list.
+// JoinReached joins names and says how many more are hidden ("web-1 and 2 more", or "2 servers
+// you cannot access" with no name left); noun is singular, and names are returned unsanitized.
 func JoinReached(names []string, hidden *int, noun string) string {
 	n := HiddenCount(hidden)
 	if n == 0 {

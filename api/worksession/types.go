@@ -33,27 +33,26 @@ type WorkSession struct {
 	RequesterType string                `json:"requester_type"`
 	Scopes        []string              `json:"scopes"`
 	Servers       []types.ServerSummary `json:"servers"`
-	// ServersHidden and ClustersHidden count the targets the server left out
-	// of Servers and Clusters because the caller does not reach them; a
-	// caller who manages the session or may decide its approval gets 0. Nil
-	// means a server older than Alpacon Server 2.48.0, which sends no count.
+	// ServersHidden and ClustersHidden count the targets left out of Servers and Clusters because
+	// the caller does not reach them; nil from a server older than Alpacon Server 2.48.0.
 	ServersHidden *int `json:"servers_hidden,omitempty"`
 	// Clusters is the one cluster a kube work session targets; a session
 	// targets either servers or a cluster, never both.
-	Clusters          []types.ClusterSummary `json:"clusters"`
-	ClustersHidden    *int                   `json:"clusters_hidden,omitempty"`
-	CreatedBy         *types.UserSummary     `json:"created_by"`
-	AssignedUser      *types.UserSummary     `json:"assigned_user"`
-	ApprovalRequestID string                 `json:"approval_request_id"`
-	StartsAt          *time.Time             `json:"starts_at"`
-	ExpiresAt         time.Time              `json:"expires_at"`
-	StartedAt         *time.Time             `json:"started_at"`
-	CompletedAt       *time.Time             `json:"completed_at"`
-	AddedAt           time.Time              `json:"added_at"`
-	UpdatedAt         time.Time              `json:"updated_at"`
-	SudoPolicies      []SudoPolicyInline     `json:"sudo_policies"`
-	Adjustments       *Adjustments           `json:"adjustments"`
-	Recommendations   []Recommendation       `json:"recommendations"`
+	Clusters []types.ClusterSummary `json:"clusters"`
+	// ClustersHidden counts the clusters left out of Clusters, as ServersHidden does for servers.
+	ClustersHidden    *int               `json:"clusters_hidden,omitempty"`
+	CreatedBy         *types.UserSummary `json:"created_by"`
+	AssignedUser      *types.UserSummary `json:"assigned_user"`
+	ApprovalRequestID string             `json:"approval_request_id"`
+	StartsAt          *time.Time         `json:"starts_at"`
+	ExpiresAt         time.Time          `json:"expires_at"`
+	StartedAt         *time.Time         `json:"started_at"`
+	CompletedAt       *time.Time         `json:"completed_at"`
+	AddedAt           time.Time          `json:"added_at"`
+	UpdatedAt         time.Time          `json:"updated_at"`
+	SudoPolicies      []SudoPolicyInline `json:"sudo_policies"`
+	Adjustments       *Adjustments       `json:"adjustments"`
+	Recommendations   []Recommendation   `json:"recommendations"`
 
 	// PendingExtensionRequest is the open extension request, nil when there is none. 'extend'
 	// answers 202 with it set when the workspace's approval policy holds the request, and later
@@ -68,9 +67,8 @@ type WorkSession struct {
 	AccountFlag *AccountFlag `json:"account_flag,omitempty"`
 }
 
-// PendingModificationRequest is a change to the session waiting on approval. Changes holds
-// whichever fields the change names, as the server stores them; it stays raw so every key,
-// changes.servers_hidden among them, reaches the JSON output as sent.
+// PendingModificationRequest is a change to the session waiting on approval. Changes stays raw
+// so every key the server sends, changes.servers_hidden among them, reaches the JSON output.
 type PendingModificationRequest struct {
 	ID        string          `json:"id"`
 	Changes   json.RawMessage `json:"changes"`
@@ -127,9 +125,8 @@ type Recommendation struct {
 	AutoCheckable bool   `json:"auto_checkable"`
 }
 
-// WorkSessionAttributes is a work session's list row. Servers and Clusters carry the
-// comma-joined names in JSON; the table adds how many the caller does not reach, which
-// JSON carries in ServersHidden and ClustersHidden instead.
+// WorkSessionAttributes is a work session's list row; the Servers and Clusters table text adds
+// the hidden count, which JSON carries in ServersHidden and ClustersHidden instead.
 type WorkSessionAttributes struct {
 	// Active is "*" on the workspace's active session and empty otherwise;
 	// cmd/worksession.MarkActive sets it.
