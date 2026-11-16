@@ -3,7 +3,12 @@ package cmd
 import (
 	"bytes"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/cmd/approval"
@@ -15,6 +20,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// runHint matches the "Run 'alpacon ...'" sentences that tell a user which command to type next.
+var runHint = regexp.MustCompile(`Run '(?:alpacon|ac) ([^']*)'`)
 
 func TestGroupNoSubcommandErrorPointsToHelpInsteadOfListingSubcommands(t *testing.T) {
 	errs := map[*cobra.Command]string{}
@@ -99,4 +107,45 @@ func TestEveryGroupRefusesAWordThatNamesNoSubcommand(t *testing.T) {
 	}
 	walk(RootCmd)
 	require.GreaterOrEqual(t, count, 25)
+}
+
+func TestRunHintsNameACommandThatRunsAsTyped(t *testing.T) {
+	var hints []string
+	for _, root := range []string{".", "../api", "../utils", "../pkg", "../client", "../config"} {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return err
+			}
+			src, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for _, m := range runHint.FindAllStringSubmatch(string(src), -1) {
+				hints = append(hints, m[1])
+			}
+			return nil
+		})
+		require.NoError(t, err)
+	}
+	require.NotEmpty(t, hints)
+
+	for _, hint := range hints {
+		t.Run(hint, func(t *testing.T) {
+			words := strings.Fields(hint)
+			found, _, err := RootCmd.Find(words)
+
+			require.NoError(t, err)
+			require.NotEqual(t, RootCmd, found, "hint names no command")
+			if found.HasAvailableSubCommands() && !slices.Contains(words, "--help") && found != workspace.WorkspaceCmd {
+				t.Errorf("'alpacon %s' reaches the group %q, which needs a subcommand", hint, found.CommandPath())
+			}
+			for _, word := range words {
+				name, isFlag := strings.CutPrefix(word, "--")
+				name, _, _ = strings.Cut(name, "=")
+				if isFlag && name != "" && found.Flags().Lookup(name) == nil && found.InheritedFlags().Lookup(name) == nil {
+					t.Errorf("'alpacon %s' passes --%s, which %q does not define", hint, name, found.CommandPath())
+				}
+			}
+		})
+	}
 }
