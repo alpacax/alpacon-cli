@@ -186,3 +186,29 @@ func TestRunUse_RejectsClusterSession(t *testing.T) {
 	got, _ := config.GetActiveWorkSession()
 	assert.Empty(t, got, "config must not be updated for a cluster session")
 }
+
+// The server leaves a cluster the caller does not reach out of clusters and counts it, which
+// must still keep the session out of the active slot.
+func TestRunUse_RejectsAHiddenClusterSession(t *testing.T) {
+	setupTmpConfig(t)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/api/work-sessions/sessions/550e8400-e29b-41d4-a716-446655440000/") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id": "550e8400-e29b-41d4-a716-446655440000", "status": "active", "requester_type": "user",
+			"scopes": ["kube"], "servers": [], "servers_hidden": 0, "clusters": [], "clusters_hidden": 1
+		}`))
+	}))
+	defer ts.Close()
+
+	_, err := RunUse(newTestClient(ts), "550e8400-e29b-41d4-a716-446655440000")
+
+	require.ErrorIs(t, err, ErrClusterSessionNotAttachable)
+	assert.Contains(t, err.Error(), "targets a cluster you cannot access")
+	assert.NotContains(t, err.Error(), "kube login", "a caller who cannot name the cluster has no kube login to run")
+	got, _ := config.GetActiveWorkSession()
+	assert.Empty(t, got, "config must not be updated for a cluster session")
+}

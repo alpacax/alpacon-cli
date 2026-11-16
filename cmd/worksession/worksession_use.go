@@ -113,6 +113,12 @@ func RunUseSession(ac *client.AlpaconClient, uuid string) (*wsapi.WorkSession, e
 		return nil, fmt.Errorf("%w: work-session %s targets cluster %s; run 'alpacon kube login %s --work-session %s' instead",
 			ErrClusterSessionNotAttachable, ws.ID, ws.Clusters[0].Name, ws.Clusters[0].Name, ws.ID)
 	}
+	// The server leaves out a cluster the caller does not reach, so the name a kube login
+	// would need is not there to suggest.
+	if wsapi.IsClusterSession(ws) {
+		return nil, fmt.Errorf("%w: work-session %s targets a cluster you cannot access",
+			ErrClusterSessionNotAttachable, ws.ID)
+	}
 	// Store the server's canonical ID rather than the raw argument, matching the printed JSON.
 	if err := config.SetActiveWorkSessionFor(ac.WorkspaceName, ws.ID); err != nil {
 		return nil, err
