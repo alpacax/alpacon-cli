@@ -279,6 +279,21 @@ func TestContextRows(t *testing.T) {
 			},
 		},
 		{
+			name: "names and hidden",
+			body: `{"metadata":{"changes":{"servers":[{"id":"s-1","name":"my-server"}],"servers_hidden":2}}}`,
+			want: []describeRow{{"Requested changes", ""}, {"  Servers", "my-server and 2 more"}},
+		},
+		{
+			name: "all hidden",
+			body: `{"metadata":{"changes":{"servers":[],"servers_hidden":1}}}`,
+			want: []describeRow{{"Requested changes", ""}, {"  Servers", "1 server you cannot access"}},
+		},
+		{
+			name: "zero hidden",
+			body: `{"metadata":{"changes":{"servers":[],"servers_hidden":0}}}`,
+			want: nil,
+		},
+		{
 			name: "changes with no renderable key shows no header",
 			body: `{"metadata":{"changes":{"scopes":[],"servers":null}}}`,
 			want: nil,

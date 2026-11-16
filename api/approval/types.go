@@ -79,10 +79,13 @@ type WorkSessionRef struct {
 }
 
 type RequestedChanges struct {
-	Title                 string       `json:"title"`
-	Description           string       `json:"description"`
-	Scopes                []string     `json:"scopes"`
-	Servers               []ServerRef  `json:"servers"`
+	Title       string      `json:"title"`
+	Description string      `json:"description"`
+	Scopes      []string    `json:"scopes"`
+	Servers     []ServerRef `json:"servers"`
+	// ServersHidden counts the requested servers left out of Servers because the
+	// caller does not reach them; nil from a server that predates the count.
+	ServersHidden         *int         `json:"servers_hidden,omitempty"`
 	SudoPolicies          []SudoPolicy `json:"sudo_policies"`
 	TargetAccountUsername string       `json:"target_account_username"`
 }
