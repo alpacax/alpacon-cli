@@ -30,6 +30,16 @@ func WriteToPager() (io.Writer, func()) {
 	)
 }
 
+// WouldPage reports whether WriteToPager would hand lines of output to a pager, so a caller can
+// repeat on stderr what the pager would scroll away.
+func WouldPage(lines int) bool {
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		return false
+	}
+	_, height, err := term.GetSize(int(os.Stdout.Fd()))
+	return err == nil && lines > height
+}
+
 func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.File) (io.Writer, func()) {
 	var buf bytes.Buffer
 

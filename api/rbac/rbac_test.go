@@ -247,20 +247,18 @@ func TestGetRoleHistory_StopsAtTailAndSendsNoOrdering(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query = r.URL.Query()
 
-		response := api.ListResponse[RoleAuditLogResponse]{Count: 3, Current: 1, Next: 2, Last: 2}
-		response.Results = []RoleAuditLogResponse{
-			{ID: "a1", Action: "granted", RoleName: "admin", Scope: "global"},
-			{ID: "a2", Action: "revoked", RoleName: "admin", Scope: "global"},
-			{ID: "a3", Action: "granted", RoleName: "operator", Scope: "global"},
-		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
+		_, _ = w.Write([]byte(`{"count":3,"current":1,"next":2,"last":2,"reach":"bound","results":[
+			{"id":"a1","action":"granted","role_name":"admin","scope":"global"},
+			{"id":"a2","action":"revoked","role_name":"admin","scope":"global"},
+			{"id":"a3","action":"granted","role_name":"operator","scope":"global"}]}`))
 	}))
 	defer ts.Close()
 
-	entries, err := GetRoleHistory(newTestClient(ts), userID, 2)
+	entries, reach, err := GetRoleHistory(newTestClient(ts), userID, 2)
 	require.NoError(t, err)
 	assert.Len(t, entries, 2)
+	assert.Equal(t, ReachBound, reach.Value)
 
 	assert.Equal(t, userID, query.Get("user"))
 	assert.NotContains(t, query, "ordering")

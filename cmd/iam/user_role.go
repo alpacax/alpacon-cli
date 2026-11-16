@@ -42,7 +42,8 @@ reads included, so run 'alpacon login' first.
 
 'history' is the one exception. It reads the audit log, which sits outside the
 gate that refuses tokens elsewhere and asks instead for a token carrying the
-role_audit_log:read scope, on either deployment.`,
+role_audit_log:read scope, on either deployment. How far it reaches depends on
+the reader, and it says so above its table.`,
 	Example: `  alpacon user role ls john
   alpacon user role catalog
   alpacon user role describe superuser
@@ -97,8 +98,8 @@ func resolveSubject(ac *client.AlpaconClient, args []string) (subject, error) {
 
 // canonicalUUID dashes and lowercases what IsUUID also accepts un-dashed and in either
 // case. The audit log's user filter is an exact compare against the canonical form, so a
-// non-canonical value matches nothing and 'user role history' prints an empty table and
-// exits 0. The binding list's filter coerces the value itself.
+// non-canonical value matches nothing and 'user role history' prints its reach line over an
+// empty table and exits 0. The binding list's filter coerces the value itself.
 func canonicalUUID(id string) string {
 	hex := strings.ToLower(strings.ReplaceAll(id, "-", ""))
 	if len(hex) != 32 {

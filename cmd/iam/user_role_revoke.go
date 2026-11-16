@@ -131,7 +131,7 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 
 func init() {
 	userRoleRevokeCmd.Flags().Bool("cascade", false, "For superuser: also revoke the companion admin binding, superuser first. Nothing is revoked if the user holds no superuser binding")
-	userRoleRevokeCmd.Flags().String("reason", "", "Justification recorded on the change, readable with 'alpacon user role history'")
+	userRoleRevokeCmd.Flags().String("reason", "", "Justification recorded on the change, readable with 'alpacon user role history'; a reader who does not reach the binding's target sees it withheld")
 	userRoleRevokeCmd.Flags().Bool("dry-run", false, "Print what would be deleted and exit without writing")
 	userRoleRevokeCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
 }
