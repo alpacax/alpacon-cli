@@ -106,7 +106,7 @@ since it has no account of its own for the command to default to.`,
 			}
 			// A pager fills the screen with the table and scrolls the line above it away, and
 			// on a partial list that line is the only sign the list is partial.
-			if (!reach.Stated || reach.Value != rbac.ReachOrg) && utils.WouldPage(len(rows)+1) {
+			if (!reach.Stated || reach.Value != rbac.ReachOrg) && utils.LastOutputPaged() {
 				_, _ = fmt.Fprintln(utils.TrackedStderr(), line)
 			}
 			return nil

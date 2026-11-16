@@ -77,3 +77,37 @@ func TestWriteToPager_TerminalLongOutput(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+// Serial: it sets PAGER and reads the package-level record of the last flush.
+func TestWriteToPager_RecordsWhetherAPagerRan(t *testing.T) {
+	long := strings.Repeat("line\n", 20)
+	tests := []struct {
+		name   string
+		pager  string
+		height int
+		want   bool
+	}{
+		{name: "a pager that runs", pager: "cat", height: 5, want: true},
+		{name: "a pager that fails falls back to stdout", pager: "alpacon-no-such-pager", height: 5, want: false},
+		{name: "output that fits is not paged", pager: "cat", height: 100, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("PAGER", tt.pager)
+
+			got := captureOutput(t, func(stdout *os.File) {
+				w, cleanup := writeToPager(true, func() (int, error) { return tt.height, nil }, stdout)
+				_, _ = fmt.Fprint(w, long)
+				cleanup()
+			})
+
+			if got != long {
+				t.Errorf("output = %q, want it written once", got)
+			}
+			if LastOutputPaged() != tt.want {
+				t.Errorf("LastOutputPaged() = %v, want %v", LastOutputPaged(), tt.want)
+			}
+		})
+	}
+}
