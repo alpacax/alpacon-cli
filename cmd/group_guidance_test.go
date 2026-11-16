@@ -111,22 +111,26 @@ func TestEveryGroupRefusesAWordThatNamesNoSubcommand(t *testing.T) {
 
 func TestRunHintsNameACommandThatRunsAsTyped(t *testing.T) {
 	var hints []string
-	for _, root := range []string{".", "../api", "../utils", "../pkg", "../client", "../config"} {
-		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return err
-			}
-			src, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			for _, m := range runHint.FindAllStringSubmatch(string(src), -1) {
-				hints = append(hints, m[1])
-			}
+	err := filepath.WalkDir("..", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && path != ".." && strings.HasPrefix(d.Name(), ".") {
+			return filepath.SkipDir // .git, .github and other tool directories hold no Go sources
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
-		})
-		require.NoError(t, err)
-	}
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, m := range runHint.FindAllStringSubmatch(string(src), -1) {
+			hints = append(hints, m[1])
+		}
+		return nil
+	})
+	require.NoError(t, err)
 	require.NotEmpty(t, hints)
 
 	for _, hint := range hints {
