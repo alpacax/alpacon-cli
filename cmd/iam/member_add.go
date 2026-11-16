@@ -11,39 +11,41 @@ import (
 
 var memberRequest iam.MemberAddRequest
 
-var memberAddCmd = &cobra.Command{
-	Use:   "add",
-	Short: "Add a member to a group with a specific role",
-	Long: `
+var memberAddCmd = newMemberAddCmd(client.NewAlpaconAPIClient)
+
+func newMemberAddCmd(newClient clientFactory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add",
+		Short: "Add a member to a group with a specific role",
+		Long: `
 	This command adds a new member to the specified group and assigns a role to them. 
 	It's used for managing group memberships and roles within the group.
 	`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		if memberRequest.Group == "" || memberRequest.User == "" || memberRequest.Role == "" {
-			if err := promptForMembers(); err != nil {
-				return err
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			if memberRequest.Group == "" || memberRequest.User == "" || memberRequest.Role == "" {
+				if err := promptForMembers(); err != nil {
+					return err
+				}
 			}
-		}
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		err = iam.AddMember(alpaconClient, memberRequest)
-		if err != nil {
-			return utils.NewExitError("Failed to add the member to group: %s.", err)
-		}
+			err = iam.AddMember(alpaconClient, memberRequest)
+			if err != nil {
+				return utils.NewExitError("Failed to add the member to group: %s.", err)
+			}
 
-		utils.CliSuccess("Member %s added to group %s", memberRequest.User, memberRequest.Group)
-		return nil
-	}),
-}
-
-func init() {
-	memberAddCmd.Flags().StringVarP(&memberRequest.Group, "group", "g", "", "Group")
-	memberAddCmd.Flags().StringVarP(&memberRequest.User, "user", "u", "", "User")
-	memberAddCmd.Flags().StringVarP(&memberRequest.Role, "role", "r", "", "Role of member within the group (owner, manager, member). Not an RBAC workspace role—for those see 'alpacon user role'")
+			utils.CliSuccess("Member %s added to group %s", memberRequest.User, memberRequest.Group)
+			return nil
+		}),
+	}
+	cmd.Flags().StringVarP(&memberRequest.Group, "group", "g", "", "Group")
+	cmd.Flags().StringVarP(&memberRequest.User, "user", "u", "", "User")
+	cmd.Flags().StringVarP(&memberRequest.Role, "role", "r", "", "Role of member within the group (owner, manager, member). Not an RBAC workspace role—for those see 'alpacon user role'")
+	return cmd
 }
 
 func promptForMembers() error {

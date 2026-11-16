@@ -14,7 +14,7 @@ import (
 
 var userRoleHistoryCmd = newUserRoleHistoryCmd(client.NewAlpaconAPIClient)
 
-func newUserRoleHistoryCmd(newClient func() (*client.AlpaconClient, error)) *cobra.Command {
+func newUserRoleHistoryCmd(newClient clientFactory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "history [USER]",
 		Short: "Show who changed a user's roles, and why",

@@ -11,49 +11,53 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var groupCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new group",
-	Long: `
+var groupCreateCmd = newGroupCreateCmd(client.NewAlpaconAPIClient)
+
+func newGroupCreateCmd(newClient clientFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:   "create",
+		Short: "Create a new group",
+		Long: `
 	Create a new group in the Alpacon. 
 	This command allows you to add a new group by specifying required group information such as name, servers, and other relevant details.
 	`,
-	Example: ` 
+		Example: ` 
 	alpacon group create
 	`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		if err := alpaconClient.LoadCurrentUser(); err != nil {
-			return utils.NewExitError("Failed to load current user: %s", err)
-		}
+			if err := alpaconClient.LoadCurrentUser(); err != nil {
+				return utils.NewExitError("Failed to load current user: %s", err)
+			}
 
-		if alpaconClient.Privileges == "general" {
-			return utils.NewExitError("You do not have the permission to create groups.")
-		}
+			if alpaconClient.Privileges == "general" {
+				return utils.NewExitError("You do not have the permission to create groups.")
+			}
 
-		serverList, err := server.GetServerList(alpaconClient)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve the server list: %s", err)
-		}
+			serverList, err := server.GetServerList(alpaconClient)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the server list: %s", err)
+			}
 
-		groupRequest, err := promptForGroup(alpaconClient, serverList)
-		if err != nil {
-			return err
-		}
+			groupRequest, err := promptForGroup(alpaconClient, serverList)
+			if err != nil {
+				return err
+			}
 
-		err = iam.CreateGroup(alpaconClient, groupRequest)
-		if err != nil {
-			return utils.NewExitError("Failed to create the new group: %s", err)
-		}
+			err = iam.CreateGroup(alpaconClient, groupRequest)
+			if err != nil {
+				return utils.NewExitError("Failed to create the new group: %s", err)
+			}
 
-		utils.CliSuccess("Group created: %s", groupRequest.Name)
-		return nil
-	}),
+			utils.CliSuccess("Group created: %s", groupRequest.Name)
+			return nil
+		}),
+	}
 }
 
 func promptForGroup(ac *client.AlpaconClient, serverList []server.ServerAttributes) (iam.GroupCreateRequest, error) {

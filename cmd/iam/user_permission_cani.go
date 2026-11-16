@@ -13,7 +13,7 @@ import (
 
 var userPermissionCanICmd = newUserPermissionCanICmd(client.NewAlpaconAPIClient)
 
-func newUserPermissionCanICmd(newClient func() (*client.AlpaconClient, error)) *cobra.Command {
+func newUserPermissionCanICmd(newClient clientFactory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "can-i [USER] PERMISSION",
 		Short: "Check whether a permission is allowed",
