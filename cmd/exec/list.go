@@ -2,7 +2,6 @@ package exec
 
 import (
 	"github.com/alpacax/alpacon-cli/api/event"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -23,21 +22,10 @@ and --user to filter by the requesting user.`,
 			return listFromFlags(cmd, newClient)
 		}),
 	}
-	AddListFlags(cmd)
-	return cmd
-}
-
-// AddListFlags and ListFromFlags are exported for the deprecated 'alpacon event', which
-// delegates here. Both live in this file so the flag names exist in exactly one place.
-func AddListFlags(cmd *cobra.Command) {
 	cmd.Flags().IntP("tail", "t", 25, "Number of command entries to show, newest first")
 	cmd.Flags().StringP("server", "s", "", "Filter by server name")
 	cmd.Flags().StringP("user", "u", "", "Filter by requesting user")
-}
-
-// ListFromFlags requires the flag set registered by AddListFlags.
-func ListFromFlags(cmd *cobra.Command) error {
-	return listFromFlags(cmd, client.NewAlpaconAPIClient)
+	return cmd
 }
 
 func listFromFlags(cmd *cobra.Command, newClient clientFactory) error {
