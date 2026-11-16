@@ -22,6 +22,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// clientFactory builds the API client a command talks to.
+type clientFactory = func() (*client.AlpaconClient, error)
+
 const maxEditPromptSize int64 = 10 * 1024 * 1024
 
 // guiEditors are editors that, without a wait flag, spawn a window and return
@@ -40,10 +43,13 @@ var guiEditors = map[string]bool{
 	"zed":           true,
 }
 
-var EditCmd = &cobra.Command{
-	Use:   "edit [USER@]SERVER:PATH",
-	Short: "Edit a remote file with your local editor",
-	Long: `Download a single remote file, open it in your local editor, and upload
+var EditCmd = newEditCmd(client.NewAlpaconAPIClient)
+
+func newEditCmd(newClient clientFactory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "edit [USER@]SERVER:PATH",
+		Short: "Edit a remote file with your local editor",
+		Long: `Download a single remote file, open it in your local editor, and upload
 changes back to the original path when the editor exits.
 
 The command uses the same WebFTP transport and permission behavior as 'alpacon cp'.
@@ -59,65 +65,72 @@ This edits existing remote files only—the file is downloaded first, so it
 cannot create a new one. The --editor value is tokenized without a shell (the
 file path is appended as the last argument), so shell syntax such as pipes,
 redirections, or '&&' will not work.`,
-	Example: `  alpacon edit my-server:/etc/nginx/nginx.conf
+		Example: `  alpacon edit my-server:/etc/nginx/nginx.conf
   alpacon edit my-server:/etc/nginx/nginx.conf --editor "code --wait"
   alpacon edit my-server:/var/log/large.txt --force`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		editorFlag, _ := cmd.Flags().GetString("editor")
-		usernameFlag, _ := cmd.Flags().GetString("username")
-		groupname, _ := cmd.Flags().GetString("groupname")
-		force, _ := cmd.Flags().GetBool("force")
-		flagWorkSession, _ := cmd.Flags().GetString("work-session")
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			editorFlag, _ := cmd.Flags().GetString("editor")
+			usernameFlag, _ := cmd.Flags().GetString("username")
+			groupname, _ := cmd.Flags().GetString("groupname")
+			force, _ := cmd.Flags().GetBool("force")
+			flagWorkSession, _ := cmd.Flags().GetString("work-session")
 
-		target, err := parseEditTarget(args[0], usernameFlag)
-		if err != nil {
-			return utils.NewUsageExitError("%s", err)
-		}
-
-		authMethod := config.ResolveAuthMethod()
-
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-		workSessionID, err := worksession.Resolve(alpaconClient, flagWorkSession)
-		if err != nil {
-			return utils.NewExitError("%s", err)
-		}
-
-		deps := realEditDeps(alpaconClient, groupname)
-		result, err := runEdit(editOptions{
-			Target:        target,
-			Editor:        editorFlag,
-			Force:         force,
-			WorkSessionID: workSessionID,
-		}, deps)
-		if err != nil {
-			if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
-				return exitErr
+			target, err := parseEditTarget(args[0], usernameFlag)
+			if err != nil {
+				return utils.NewUsageExitError("%s", err)
 			}
-			printPreservedTempPath(result)
-			if exitErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID); exitErr != nil {
-				return exitErr
-			}
-			var rejected *event.CommandRejectedError
-			if errors.As(err, &rejected) {
-				return utils.NewEnvelopeExitErrorWithCode(rejected.ExitCode(), "edit", err, "Failed to edit '%s:%s': %s", target.Server, target.RemotePath, rejected)
-			}
-			if refusedForWantOfForce(err, utils.IsInteractiveShell()) {
-				err = utils.MarkUsageError(err)
-			}
-			return utils.NewExitError("Failed to edit '%s:%s': %s", target.Server, target.RemotePath, err)
-		}
 
-		if !result.Changed {
-			utils.CliInfo("No changes")
+			authMethod := config.ResolveAuthMethod()
+
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
+			workSessionID, err := worksession.Resolve(alpaconClient, flagWorkSession)
+			if err != nil {
+				return utils.NewExitError("%s", err)
+			}
+
+			deps := realEditDeps(alpaconClient, groupname)
+			result, err := runEdit(editOptions{
+				Target:        target,
+				Editor:        editorFlag,
+				Force:         force,
+				WorkSessionID: workSessionID,
+			}, deps)
+			if err != nil {
+				if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+					return exitErr
+				}
+				printPreservedTempPath(result)
+				if exitErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID); exitErr != nil {
+					return exitErr
+				}
+				var rejected *event.CommandRejectedError
+				if errors.As(err, &rejected) {
+					return utils.NewEnvelopeExitErrorWithCode(rejected.ExitCode(), "edit", err, "Failed to edit '%s:%s': %s", target.Server, target.RemotePath, rejected)
+				}
+				if refusedForWantOfForce(err, utils.IsInteractiveShell()) {
+					err = utils.MarkUsageError(err)
+				}
+				return utils.NewExitError("Failed to edit '%s:%s': %s", target.Server, target.RemotePath, err)
+			}
+
+			if !result.Changed {
+				utils.CliInfo("No changes")
+				return nil
+			}
+			utils.CliSuccess("Uploaded changes to %s:%s", target.Server, target.RemotePath)
 			return nil
-		}
-		utils.CliSuccess("Uploaded changes to %s:%s", target.Server, target.RemotePath)
-		return nil
-	}),
+		}),
+	}
+	cmd.Flags().String("editor", "", "Editor command to run (default: ALPACON_EDITOR, VISUAL, EDITOR, then vi)")
+	cmd.Flags().Bool("force", false, "Edit files larger than 10 MB without prompting")
+	cmd.Flags().StringP("username", "u", "", "Specify username")
+	cmd.Flags().StringP("groupname", "g", "", "Specify groupname")
+	cmd.Flags().String("work-session", "", "Attach this edit to a work-session (overrides 'work-session use')")
+	return cmd
 }
 
 type editTarget struct {
@@ -145,14 +158,6 @@ type editDeps struct {
 	confirmLarge func(size int64) bool
 	removeAll    func(path string) error
 	tempRoot     string
-}
-
-func init() {
-	EditCmd.Flags().String("editor", "", "Editor command to run (default: ALPACON_EDITOR, VISUAL, EDITOR, then vi)")
-	EditCmd.Flags().Bool("force", false, "Edit files larger than 10 MB without prompting")
-	EditCmd.Flags().StringP("username", "u", "", "Specify username")
-	EditCmd.Flags().StringP("groupname", "g", "", "Specify groupname")
-	EditCmd.Flags().String("work-session", "", "Attach this edit to a work-session (overrides 'work-session use')")
 }
 
 func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
