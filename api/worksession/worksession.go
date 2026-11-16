@@ -46,9 +46,12 @@ func ProjectAttributes(ws *WorkSession) WorkSessionAttributes {
 		Description: utils.Truncate(ws.Description, 70),
 		Status:      ws.Status,
 		Scopes:      strings.Join(ws.Scopes, ", "),
-		Servers:     strings.Join(ServerNames(ws), ", "),
-		Clusters:    strings.Join(ClusterNames(ws), ", "),
+		Servers:     utils.Annotate(strings.Join(ServerNames(ws), ", "), ServerList(ws)),
+		Clusters:    utils.Annotate(strings.Join(ClusterNames(ws), ", "), ClusterList(ws)),
 		ExpiresAt:   utils.NewTimestamp(ws.ExpiresAt, FormatExpiresAt(ws.ExpiresAt)),
+		// Copied as sent: nil against an older server, so JSON gains no key it never had.
+		ServersHidden:  ws.ServersHidden,
+		ClustersHidden: ws.ClustersHidden,
 	}
 }
 
@@ -77,6 +80,23 @@ func ClusterNames(ws *WorkSession) []string {
 		names[i] = c.Name
 	}
 	return names
+}
+
+// ServerList is the servers ws targets as one line for a reader, saying how many more the
+// caller does not reach, such as "web-1 and 1 more".
+func ServerList(ws *WorkSession) string {
+	return utils.JoinReached(ServerNames(ws), ws.ServersHidden, "server")
+}
+
+// ClusterList is ServerList for the cluster a kube session targets.
+func ClusterList(ws *WorkSession) string {
+	return utils.JoinReached(ClusterNames(ws), ws.ClustersHidden, "cluster")
+}
+
+// IsClusterSession reports whether ws targets a cluster, counting one the caller does not
+// reach, which the server leaves out of Clusters.
+func IsClusterSession(ws *WorkSession) bool {
+	return len(ws.Clusters) > 0 || utils.HiddenCount(ws.ClustersHidden) > 0
 }
 
 // TargetsCluster reports whether ws names clusterID among its targets.

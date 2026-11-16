@@ -33,9 +33,15 @@ type WorkSession struct {
 	RequesterType string                `json:"requester_type"`
 	Scopes        []string              `json:"scopes"`
 	Servers       []types.ServerSummary `json:"servers"`
+	// ServersHidden and ClustersHidden count the targets the server left out
+	// of Servers and Clusters because the caller does not reach them; a
+	// caller who manages the session or may decide its approval gets 0. Nil
+	// means a server older than Alpacon Server 2.48.0, which sends no count.
+	ServersHidden *int `json:"servers_hidden,omitempty"`
 	// Clusters is the one cluster a kube work session targets; a session
 	// targets either servers or a cluster, never both.
 	Clusters          []types.ClusterSummary `json:"clusters"`
+	ClustersHidden    *int                   `json:"clusters_hidden,omitempty"`
 	CreatedBy         *types.UserSummary     `json:"created_by"`
 	AssignedUser      *types.UserSummary     `json:"assigned_user"`
 	ApprovalRequestID string                 `json:"approval_request_id"`
@@ -53,6 +59,31 @@ type WorkSession struct {
 	// answers 202 with it set when the workspace's approval policy holds the request, and later
 	// reads keep it set until the request is approved, rejected, cancelled, or lapses.
 	PendingExtensionRequest *PendingExtensionRequest `json:"pending_extension_request"`
+
+	// PendingModificationRequest is the open change request on the session, nil when there is none.
+	PendingModificationRequest *PendingModificationRequest `json:"pending_modification_request"`
+
+	// AccountFlag is set when a target server binds the session's account to another person.
+	// A server older than 2.44.0 sends no key, so a nil flag is left out rather than invented.
+	AccountFlag *AccountFlag `json:"account_flag,omitempty"`
+}
+
+// PendingModificationRequest is a change to the session waiting on approval. Changes holds
+// whichever fields the change names, as the server stores them; it stays raw so every key,
+// changes.servers_hidden among them, reaches the JSON output as sent.
+type PendingModificationRequest struct {
+	ID        string          `json:"id"`
+	Changes   json.RawMessage `json:"changes"`
+	AddedAt   time.Time       `json:"added_at"`
+	CanCancel bool            `json:"can_cancel"`
+}
+
+// AccountFlag says the account the session runs as belongs to another person on some servers.
+// Servers holds bare server IDs, only those the caller reaches; ServersHidden counts the rest.
+type AccountFlag struct {
+	Code          string   `json:"code"`
+	Servers       []string `json:"servers"`
+	ServersHidden *int     `json:"servers_hidden,omitempty"`
 }
 
 // PendingExtensionRequest is the open request 'extend' filed instead of applying at once.
@@ -78,10 +109,13 @@ type ScopeDiff struct {
 	New []string `json:"new"`
 }
 
-// ServerDiff holds the requested (old) and granted (new) server lists.
+// ServerDiff holds the requested (old) and granted (new) server lists. OldHidden and NewHidden
+// count the servers each side leaves out because the caller does not reach them.
 type ServerDiff struct {
-	Old []types.ServerSummary `json:"old"`
-	New []types.ServerSummary `json:"new"`
+	Old       []types.ServerSummary `json:"old"`
+	New       []types.ServerSummary `json:"new"`
+	OldHidden *int                  `json:"old_hidden,omitempty"`
+	NewHidden *int                  `json:"new_hidden,omitempty"`
 }
 
 // Recommendation is an admin-confirmed note attached at approval time.
@@ -93,17 +127,22 @@ type Recommendation struct {
 	AutoCheckable bool   `json:"auto_checkable"`
 }
 
+// WorkSessionAttributes is a work session's list row. Servers and Clusters carry the
+// comma-joined names in JSON; the table adds how many the caller does not reach, which
+// JSON carries in ServersHidden and ClustersHidden instead.
 type WorkSessionAttributes struct {
 	// Active is "*" on the workspace's active session and empty otherwise;
 	// cmd/worksession.MarkActive sets it.
-	Active      string              `json:"-"           table:"Active"`
-	ID          string              `json:"id"          table:"ID"`
-	Status      string              `json:"status"      table:"Status"`
-	Scopes      string              `json:"scopes"      table:"Scopes"`
-	Servers     string              `json:"servers"     table:"Servers"`
-	Clusters    string              `json:"clusters"    table:"Clusters"`
-	ExpiresAt   utils.Timestamp     `json:"expires_at"  table:"Expires At"`
-	Description utils.TruncatedText `json:"description" table:"Description"`
+	Active         string              `json:"-"                         table:"Active"`
+	ID             string              `json:"id"                        table:"ID"`
+	Status         string              `json:"status"                    table:"Status"`
+	Scopes         string              `json:"scopes"                    table:"Scopes"`
+	Servers        utils.AnnotatedText `json:"servers"                   table:"Servers"`
+	Clusters       utils.AnnotatedText `json:"clusters"                  table:"Clusters"`
+	ExpiresAt      utils.Timestamp     `json:"expires_at"                table:"Expires At"`
+	Description    utils.TruncatedText `json:"description"               table:"Description"`
+	ServersHidden  *int                `json:"servers_hidden,omitempty"  table:"-"`
+	ClustersHidden *int                `json:"clusters_hidden,omitempty" table:"-"`
 }
 
 // WorkSessionCreateRequest targets either Servers or Clusters, never both.
