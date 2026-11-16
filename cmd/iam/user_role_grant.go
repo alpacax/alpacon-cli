@@ -105,7 +105,7 @@ catalog' to see the names this workspace defines.`,
 }
 
 func init() {
-	userRoleGrantCmd.Flags().String("reason", "", "Justification recorded on the change, readable with 'alpacon user role history'")
+	userRoleGrantCmd.Flags().String("reason", "", "Justification recorded on the change, readable with 'alpacon user role history'; a reader who does not reach the binding's target sees it withheld")
 	userRoleGrantCmd.Flags().Bool("dry-run", false, "Print what would be sent and exit without writing")
 	userRoleGrantCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
 }

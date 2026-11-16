@@ -303,8 +303,8 @@ func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
 			wantNotSaid: []string{"superuser role", "role_audit_log:read"},
 		},
 		{
-			// The auditor limit narrows silently and never 403s, so the scope is the only
-			// cause this arm can name.
+			// A narrower reach comes back as a shorter list under a reach line and never 403s,
+			// so the scope is the only cause this arm can name.
 			name: "the audit log names the missing scope, not the auditor limit",
 			ac:   apiToken, gate: gateAuditRead,
 			wantSaid:    []string{"role_audit_log:read"},

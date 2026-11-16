@@ -3,7 +3,12 @@ package cmd
 import (
 	"bytes"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/cmd/approval"
@@ -16,6 +21,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// runHint matches the "Run 'alpacon ...'" sentences that tell a user which command to type next.
+var runHint = regexp.MustCompile(`Run '(?:alpacon|ac) ([^']*)'`)
+
 func TestGroupNoSubcommandErrorPointsToHelpInsteadOfListingSubcommands(t *testing.T) {
 	errs := map[*cobra.Command]string{}
 	var walk func(c *cobra.Command)
@@ -23,9 +31,9 @@ func TestGroupNoSubcommandErrorPointsToHelpInsteadOfListingSubcommands(t *testin
 		for _, sub := range c.Commands() {
 			walk(sub)
 		}
-		// workspace and its groups and the deprecated event list do real work in their RunE rather than
-		// printing help, and so do exec and websh, which parse their own arguments.
-		if c.RunE == nil || !c.HasSubCommands() || c == RootCmd || c == workspace.WorkspaceCmd || c.Parent() == workspace.WorkspaceCmd || c == event.EventCmd || c.DisableFlagParsing {
+		// workspace and its groups do real work in their RunE rather than printing help,
+		// and so do exec and websh, which parse their own arguments.
+		if c.RunE == nil || !c.HasSubCommands() || c == RootCmd || c == workspace.WorkspaceCmd || c.Parent() == workspace.WorkspaceCmd || c.DisableFlagParsing {
 			return
 		}
 		t.Run(c.CommandPath(), func(t *testing.T) {
@@ -60,6 +68,7 @@ func TestGroupNoSubcommandErrorPointsToHelpInsteadOfListingSubcommands(t *testin
 	require.GreaterOrEqual(t, len(errs), 25, "expected to inspect the group commands")
 	assert.Contains(t, errs[approval.ApprovalCmd], "Alpacon console")
 	assert.Contains(t, errs[worksession.WorkSessionCmd], "Alpacon console")
+	assert.Contains(t, errs[event.EventCmd], "alpacon exec ls")
 }
 
 func TestEveryGroupRefusesAWordThatNamesNoSubcommand(t *testing.T) {
@@ -98,4 +107,49 @@ func TestEveryGroupRefusesAWordThatNamesNoSubcommand(t *testing.T) {
 	}
 	walk(RootCmd)
 	require.GreaterOrEqual(t, count, 25)
+}
+
+func TestRunHintsNameACommandThatRunsAsTyped(t *testing.T) {
+	var hints []string
+	err := filepath.WalkDir("..", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && path != ".." && strings.HasPrefix(d.Name(), ".") {
+			return filepath.SkipDir // .git, .github and other tool directories hold no Go sources
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, m := range runHint.FindAllStringSubmatch(string(src), -1) {
+			hints = append(hints, m[1])
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, hints)
+
+	for _, hint := range hints {
+		t.Run(hint, func(t *testing.T) {
+			words := strings.Fields(hint)
+			found, _, err := RootCmd.Find(words)
+
+			require.NoError(t, err)
+			require.NotEqual(t, RootCmd, found, "hint names no command")
+			if found.HasAvailableSubCommands() && !slices.Contains(words, "--help") && found != workspace.WorkspaceCmd {
+				t.Errorf("'alpacon %s' reaches the group %q, which needs a subcommand", hint, found.CommandPath())
+			}
+			for _, word := range words {
+				name, isFlag := strings.CutPrefix(word, "--")
+				name, _, _ = strings.Cut(name, "=")
+				if isFlag && name != "" && found.Flags().Lookup(name) == nil && found.InheritedFlags().Lookup(name) == nil {
+					t.Errorf("'alpacon %s' passes --%s, which %q does not define", hint, name, found.CommandPath())
+				}
+			}
+		})
+	}
 }

@@ -37,8 +37,27 @@ func FetchAllPages[T any](ac *client.AlpaconClient, endpoint string, params map[
 // FetchPagesUpTo walks PageNumber pages until it has limit items, so a caller asking for
 // more than one page's worth is not silently cut off at the server's page cap.
 func FetchPagesUpTo[T any](ac *client.AlpaconClient, endpoint string, params map[string]string, limit int) ([]T, error) {
+	items, _, err := walkPageNumberPages[T](ac, endpoint, params, limit)
+	return items, err
+}
+
+// FetchPagesUpToWithReach is FetchPagesUpTo for an audit list whose envelope states the
+// reader's reach. The reach comes from the first page; Changed says a later page disagreed.
+func FetchPagesUpToWithReach[T any](ac *client.AlpaconClient, endpoint string, params map[string]string, limit int) ([]T, Reach, error) {
+	return walkPageNumberPages[T](ac, endpoint, params, limit)
+}
+
+// pageEnvelope is one PageNumber page with the envelope keys beside results that a caller reads.
+type pageEnvelope[T any] struct {
+	ListResponse[T]
+	Reach json.RawMessage `json:"reach"`
+}
+
+// walkPageNumberPages returns the items and the first page's reach, marked Changed when a later
+// page read stated another.
+func walkPageNumberPages[T any](ac *client.AlpaconClient, endpoint string, params map[string]string, limit int) ([]T, Reach, error) {
 	if limit <= 0 {
-		return nil, nil
+		return nil, Reach{}, nil
 	}
 
 	params = copyParams(params)
@@ -47,24 +66,30 @@ func FetchPagesUpTo[T any](ac *client.AlpaconClient, endpoint string, params map
 	params["page_size"] = strconv.Itoa(min(maxPageSize, limit))
 
 	result := make([]T, 0, min(limit, maxPageSize))
+	var reach Reach
 	for page := 1; len(result) < limit; page++ {
 		params["page"] = strconv.Itoa(page)
 
 		pageURL, err := utils.BuildURL(endpoint, "", params)
 		if err != nil {
-			return nil, err
+			return nil, Reach{}, err
 		}
 		responseBody, err := ac.SendGetRequest(pageURL)
 		if err != nil {
-			return nil, fmt.Errorf("fetching page %d from %s: %w", page, endpoint, err)
+			return nil, Reach{}, fmt.Errorf("fetching page %d from %s: %w", page, endpoint, err)
 		}
 
-		var response ListResponse[T]
+		var response pageEnvelope[T]
 		if err = json.Unmarshal(responseBody, &response); err != nil {
-			return nil, fmt.Errorf("decoding page %d from %s: %w", page, endpoint, err)
+			return nil, Reach{}, fmt.Errorf("decoding page %d from %s: %w", page, endpoint, err)
 		}
 
 		result = append(result, response.Results...)
+		if page == 1 {
+			reach = parseReach(response.Reach)
+		} else {
+			reach.observe(parseReach(response.Reach))
+		}
 		if response.Next == 0 || len(response.Results) == 0 {
 			break
 		}
@@ -73,7 +98,7 @@ func FetchPagesUpTo[T any](ac *client.AlpaconClient, endpoint string, params map
 	if len(result) > limit {
 		result = result[:limit]
 	}
-	return result, nil
+	return result, reach, nil
 }
 
 // FetchAllCursorPages walks every cursor page. It is FetchCursorPages with no bound.
