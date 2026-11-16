@@ -35,10 +35,13 @@ var (
 	validMethodsList     = strings.Join(validMethods, ", ")
 )
 
-var serverCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Register a new server with a registration token",
-	Long: `
+var serverCreateCmd = newServerCreateCmd(client.NewAlpaconAPIClient)
+
+func newServerCreateCmd(newClient clientFactory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Register a new server with a registration token",
+		Long: `
 	Register a new server by selecting a registration method (token-install or ansible)
 	and generating an installation guide. Use --method (-m) to choose between
 	token-install (default) and ansible.
@@ -54,7 +57,7 @@ var serverCreateCmd = &cobra.Command{
 
 	When --platform and either --token or --new-token are provided, the command runs non-interactively.
 	`,
-	Example: `
+		Example: `
 	alpacon server create
 	alpacon server create --platform debian --token prod-token
 	alpacon server create --platform rhel --token prod-token --name my-server
@@ -63,57 +66,66 @@ var serverCreateCmd = &cobra.Command{
 	alpacon server create --method ansible --platform debian --token prod-token
 	alpacon server create -m ansible -p windows -t prod-token --json
 	`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		if refusal := flagRefusal(cmd, utils.IsInteractiveShell()); refusal != "" {
-			return utils.NewUsageExitError("%s", refusal)
-		}
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			if refusal := flagRefusal(cmd, utils.IsInteractiveShell()); refusal != "" {
+				return utils.NewUsageExitError("%s", refusal)
+			}
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		method, err := resolveMethod(cmd)
-		if err != nil {
-			return err
-		}
-		platform, err := resolvePlatform(cmd, method)
-		if err != nil {
-			return err
-		}
-		serverName, err := resolveName(cmd)
-		if err != nil {
-			return err
-		}
-		tokenID, err := resolveTokenID(cmd, alpaconClient)
-		if err != nil {
-			return err
-		}
-
-		switch method {
-		case "ansible":
-			guide, err := server.GetAnsibleRegistrationGuideJSON(alpaconClient, platform, serverName, tokenID)
+			alpaconClient, err := newClient()
 			if err != nil {
-				return utils.NewExitError("Failed to retrieve the installation guide: %s.", err)
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
-			if createJSON {
-				return writeJSONGuide(guide)
-			}
-			displayAnsibleGuideFromJSON(guide)
-		case "token-install":
-			guide, err := server.GetRegistrationGuideJSON(alpaconClient, platform, serverName, tokenID)
+
+			method, err := resolveMethod(cmd)
 			if err != nil {
-				return utils.NewExitError("Failed to retrieve the installation guide: %s.", err)
+				return err
 			}
-			if createJSON {
-				return writeJSONGuide(guide)
+			platform, err := resolvePlatform(cmd, method)
+			if err != nil {
+				return err
 			}
-			displayGuideFromJSON(guide)
-		default:
-			return utils.NewExitError("Unknown registration method %q. Valid values: %s.", method, validMethodsList)
-		}
-		return nil
-	}),
+			serverName, err := resolveName(cmd)
+			if err != nil {
+				return err
+			}
+			tokenID, err := resolveTokenID(cmd, alpaconClient)
+			if err != nil {
+				return err
+			}
+
+			switch method {
+			case "ansible":
+				guide, err := server.GetAnsibleRegistrationGuideJSON(alpaconClient, platform, serverName, tokenID)
+				if err != nil {
+					return utils.NewExitError("Failed to retrieve the installation guide: %s.", err)
+				}
+				if createJSON {
+					return writeJSONGuide(guide)
+				}
+				displayAnsibleGuideFromJSON(guide)
+			case "token-install":
+				guide, err := server.GetRegistrationGuideJSON(alpaconClient, platform, serverName, tokenID)
+				if err != nil {
+					return utils.NewExitError("Failed to retrieve the installation guide: %s.", err)
+				}
+				if createJSON {
+					return writeJSONGuide(guide)
+				}
+				displayGuideFromJSON(guide)
+			default:
+				return utils.NewExitError("Unknown registration method %q. Valid values: %s.", method, validMethodsList)
+			}
+			return nil
+		}),
+	}
+	cmd.Flags().StringVarP(&createMethod, "method", "m", "token-install", fmt.Sprintf("registration method: %s", validMethodsList))
+	cmd.Flags().StringVarP(&createPlatform, "platform", "p", "", fmt.Sprintf("target OS platform: %s (suse is not supported with --method ansible)", validPlatformsList))
+	cmd.Flags().StringVarP(&createName, "name", "n", "", "server name (optional; hostname used if not set)")
+	cmd.Flags().StringVarP(&createTokenName, "token", "t", "", "existing registration token name")
+	cmd.Flags().StringVar(&createNewTokenName, "new-token", "", "create a new registration token with this name")
+	cmd.Flags().BoolVar(&createJSON, "json", false, "output the installation guide as structured JSON instead of markdown")
+	cmd.MarkFlagsMutuallyExclusive("token", "new-token")
+	return cmd
 }
 
 func writeJSONGuide(v any) error {
@@ -123,16 +135,6 @@ func writeJSONGuide(v any) error {
 		return utils.NewExitError("Failed to encode guide as JSON: %s.", err)
 	}
 	return nil
-}
-
-func init() {
-	serverCreateCmd.Flags().StringVarP(&createMethod, "method", "m", "token-install", fmt.Sprintf("registration method: %s", validMethodsList))
-	serverCreateCmd.Flags().StringVarP(&createPlatform, "platform", "p", "", fmt.Sprintf("target OS platform: %s (suse is not supported with --method ansible)", validPlatformsList))
-	serverCreateCmd.Flags().StringVarP(&createName, "name", "n", "", "server name (optional; hostname used if not set)")
-	serverCreateCmd.Flags().StringVarP(&createTokenName, "token", "t", "", "existing registration token name")
-	serverCreateCmd.Flags().StringVar(&createNewTokenName, "new-token", "", "create a new registration token with this name")
-	serverCreateCmd.Flags().BoolVar(&createJSON, "json", false, "output the installation guide as structured JSON instead of markdown")
-	serverCreateCmd.MarkFlagsMutuallyExclusive("token", "new-token")
 }
 
 // resolveMethod returns --method, token-install in a non-interactive shell, or the
