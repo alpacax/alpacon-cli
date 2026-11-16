@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"net/http"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,7 +14,9 @@ import (
 	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -427,4 +430,57 @@ func TestPrintWhoami_KeepsOneLinePerField(t *testing.T) {
 	require.NoError(t, plainErr)
 	require.NoError(t, forgedErr)
 	assert.Equal(t, strings.Count(plain, "\n"), strings.Count(forged, "\n"))
+}
+
+// whoamiLogin saves an API-token login to ts in a fresh HOME. Serial: it sets HOME.
+func whoamiLogin(t *testing.T, workspaceURL string) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ALPACON_WORK_SESSION", "")
+	require.NoError(t, config.CreateConfig(workspaceURL, "my-workspace", "api-token", "", "", "", "", 0, false))
+}
+
+// Serial: it sets HOME, captures stdout and sets utils.OutputFormat.
+func TestWhoamiReportsTheServersAnswer(t *testing.T) {
+	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+		"GET /api/iam/users/-/":            {Status: http.StatusOK, Body: `{"id": "550e8400-e29b-41d4-a716-446655440000", "username": "alice", "email": "alice@example.com", "is_staff": true}`},
+		"GET /api/iam/memberships/":        {Status: http.StatusOK, Body: `{"count": 1, "results": [{"group_name": "developers", "role": "member"}]}`},
+		"GET /api/work-sessions/sessions/": {Status: http.StatusOK, Body: `{"count": 0, "results": []}`},
+	})
+	whoamiLogin(t, ts.URL)
+
+	stdout, stderr, code := cmdtest.RunJSON(t, newWhoamiCmd(ts.Factory()))
+
+	assert.Equal(t, 0, code, stderr)
+	assert.Contains(t, stdout, `"alice"`)
+	assert.Contains(t, stdout, `"alice@example.com"`)
+	assert.Contains(t, stdout, `"my-workspace"`)
+}
+
+// Serial: it sets HOME and captures stdout and stderr.
+func TestWhoamiWithoutAServerAnswer(t *testing.T) {
+	tests := []struct {
+		name       string
+		loggedIn   bool
+		wantCode   int
+		wantStdout string
+		wantStderr string
+	}{
+		{name: "client cannot be built", loggedIn: true, wantStdout: "my-workspace", wantStderr: "Showing local config only. Server fields are unavailable."},
+		{name: "not logged in", wantCode: utils.ExitCodeGeneralError, wantStderr: "Not logged in. Run 'alpacon login' to authenticate."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			if tt.loggedIn {
+				whoamiLogin(t, "https://my-workspace.us1.alpacon.io")
+			}
+
+			stdout, stderr, code := cmdtest.RunCaptured(t, newWhoamiCmd(cmdtest.NoClient))
+
+			assert.Equal(t, tt.wantCode, code, stderr)
+			assert.Contains(t, stdout, tt.wantStdout)
+			assert.Contains(t, stderr, tt.wantStderr)
+		})
+	}
 }

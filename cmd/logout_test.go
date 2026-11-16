@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -107,7 +108,7 @@ func TestRunLogout_RemovesCredentialsWhenTheSessionIsUnusable(t *testing.T) {
 			require.NoError(t, err)
 
 			var runErr error
-			_, stderr := testutil.CaptureOutput(t, func() { runErr = runLogout(login) })
+			_, stderr := testutil.CaptureOutput(t, func() { runErr = runLogout(client.NewAlpaconAPIClient, login) })
 
 			require.NoError(t, runErr)
 			assert.NoFileExists(t, filepath.Join(home, ".alpacon", "config.json"))
@@ -177,7 +178,7 @@ func TestRunLogout_RemovesCredentialsWhenTheAuthServerRefuses(t *testing.T) {
 			require.NoError(t, err)
 
 			var runErr error
-			_, stderr := testutil.CaptureOutput(t, func() { runErr = runLogout(login) })
+			_, stderr := testutil.CaptureOutput(t, func() { runErr = runLogout(client.NewAlpaconAPIClient, login) })
 
 			require.NoError(t, runErr)
 			assert.NoFileExists(t, filepath.Join(home, ".alpacon", "config.json"))
@@ -205,7 +206,7 @@ func TestRunLogout_KeepsALoginAnotherShellMade(t *testing.T) {
 	stale := config.Config{WorkspaceURL: "https://my-workspace.invalid", Token: "fake-api-key"}
 
 	var runErr error
-	_, _ = testutil.CaptureOutput(t, func() { runErr = runLogout(stale) })
+	_, _ = testutil.CaptureOutput(t, func() { runErr = runLogout(client.NewAlpaconAPIClient, stale) })
 
 	require.ErrorIs(t, runErr, config.ErrLoginChanged)
 	kept, err := config.LoadConfig()
@@ -251,7 +252,7 @@ func TestRunLogout_DoesNotWarnWhenTheServerLogsOut(t *testing.T) {
 			require.NoError(t, err)
 
 			var runErr error
-			_, stderr := testutil.CaptureOutput(t, func() { runErr = runLogout(login) })
+			_, stderr := testutil.CaptureOutput(t, func() { runErr = runLogout(client.NewAlpaconAPIClient, login) })
 
 			require.NoError(t, runErr)
 			assert.NoFileExists(t, filepath.Join(home, ".alpacon", "config.json"))
@@ -273,7 +274,7 @@ func TestRunLogout_RemovesCredentialsWhenTheWorkspaceURLDoesNotParse(t *testing.
 	login := config.Config{WorkspaceURL: "http://[::1", Token: "fake-api-key"}
 
 	var runErr error
-	_, stderr := testutil.CaptureOutput(t, func() { runErr = runLogout(login) })
+	_, stderr := testutil.CaptureOutput(t, func() { runErr = runLogout(client.NewAlpaconAPIClient, login) })
 
 	require.NoError(t, runErr)
 	assert.NoFileExists(t, filepath.Join(home, ".alpacon", "config.json"))
