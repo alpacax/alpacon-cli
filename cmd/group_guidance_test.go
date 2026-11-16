@@ -23,9 +23,9 @@ func TestGroupNoSubcommandErrorPointsToHelpInsteadOfListingSubcommands(t *testin
 		for _, sub := range c.Commands() {
 			walk(sub)
 		}
-		// workspace and its groups and the deprecated event list do real work in their RunE rather than
-		// printing help, and so do exec and websh, which parse their own arguments.
-		if c.RunE == nil || !c.HasSubCommands() || c == RootCmd || c == workspace.WorkspaceCmd || c.Parent() == workspace.WorkspaceCmd || c == event.EventCmd || c.DisableFlagParsing {
+		// workspace and its groups do real work in their RunE rather than printing help,
+		// and so do exec and websh, which parse their own arguments.
+		if c.RunE == nil || !c.HasSubCommands() || c == RootCmd || c == workspace.WorkspaceCmd || c.Parent() == workspace.WorkspaceCmd || c.DisableFlagParsing {
 			return
 		}
 		t.Run(c.CommandPath(), func(t *testing.T) {
@@ -60,6 +60,7 @@ func TestGroupNoSubcommandErrorPointsToHelpInsteadOfListingSubcommands(t *testin
 	require.GreaterOrEqual(t, len(errs), 25, "expected to inspect the group commands")
 	assert.Contains(t, errs[approval.ApprovalCmd], "Alpacon console")
 	assert.Contains(t, errs[worksession.WorkSessionCmd], "Alpacon console")
+	assert.Contains(t, errs[event.EventCmd], "alpacon exec ls")
 }
 
 func TestEveryGroupRefusesAWordThatNamesNoSubcommand(t *testing.T) {

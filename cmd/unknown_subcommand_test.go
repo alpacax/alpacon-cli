@@ -25,6 +25,7 @@ func TestWordNamingNoSubcommandExitsTwoAsUnknownCommand(t *testing.T) {
 		{name: "token acl server", args: []string{"token", "acl", "server", "lst"}, want: []string{`unknown command "lst"`, "Did you mean this?\n\tls\n"}},
 		{name: "workspace a", args: []string{"workspace", "a"}, want: []string{`unknown command "a"`, "Did you mean this?\n\taccess-control\n\tauthentication\n\tls\n"}},
 		{name: "approval guidance", args: []string{"approval", "deny", "550e8400-e29b-41d4-a716-446655440000"}, want: []string{"Approval and rejection happen in the Alpacon console (web) or Slack."}},
+		{name: "event list moved", args: []string{"event", "ls"}, want: []string{"The command list moved to 'alpacon exec ls'."}},
 		{name: "work session guidance", args: []string{"work-session", "deny", "550e8400-e29b-41d4-a716-446655440000"}, want: []string{"Approval and rejection happen in the Alpacon console (web) or Slack."}},
 		{name: "word with no close subcommand", args: []string{"workspace", "zzzzzz"}, want: []string{`unknown command "zzzzzz" for "alpacon workspace"` + "\nRun 'alpacon workspace --help' for usage."}},
 	}
@@ -53,7 +54,6 @@ func TestRunnableParentWithoutAWordStillRuns(t *testing.T) {
 		wantStdout string
 		wantStderr string
 	}{
-		{name: "event with flags", args: []string{"event", "--tail", "10"}, wantStdout: "SERVER"},
 		{name: "workspace", args: []string{"workspace"}, wantStderr: "Current workspace: ws"},
 		{name: "workspace preferences", args: []string{"workspace", "preferences"}, wantStdout: `"count"`},
 	}
@@ -81,4 +81,29 @@ func TestHelpFlagWinsOverAWordThatNamesNoSubcommand(t *testing.T) {
 	assert.Equal(t, 0, exitCode, "stdout: %s\nstderr: %s", stdout, stderr)
 	assert.Contains(t, stdout, "Available Commands:")
 	assert.NotContains(t, stdout+stderr, "unknown command")
+}
+
+func TestBareEventNoLongerListsCommandsAndPointsToExecLs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{name: "no word", args: []string{"event"}, wantStderr: "a subcommand is required. The command list moved to 'alpacon exec ls'."},
+		{name: "plural alias", args: []string{"events"}, wantStderr: "a subcommand is required. The command list moved to 'alpacon exec ls'."},
+		{name: "old list flag", args: []string{"event", "--tail", "10"}, wantStderr: "unknown flag: --tail"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			stdout, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, tt.args,
+				exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir())
+
+			assert.Equal(t, utils.ExitCodeUsageError, exitCode, "stdout: %s\nstderr: %s", stdout, stderr)
+			assert.NotContains(t, stdout, "SERVER")
+			assert.Contains(t, stderr, tt.wantStderr)
+		})
+	}
 }
