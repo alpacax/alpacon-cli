@@ -495,7 +495,9 @@ func TestKubeCredentialsCommandChecksTheSessionThroughTheFactory(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ts := cmdtest.Server(t, map[string]cmdtest.Reply{sessionRoute: tt.reply})
-			t.Setenv("HOME", t.TempDir())
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home) // os.UserHomeDir reads it on Windows
 			t.Setenv("KUBERNETES_EXEC_INFO", "")
 			store, err := defaultKubeSessionStore()
 			require.NoError(t, err)

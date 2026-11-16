@@ -25,6 +25,7 @@ func cpScene(t *testing.T, createStatus int, createBody string) (*cmdtest.Fake, 
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir reads it on Windows
 	t.Setenv("ALPACON_WORK_SESSION", "")
 	source := filepath.Join(home, "app.conf")
 	require.NoError(t, os.WriteFile(source, []byte("listen 80"), 0o600))

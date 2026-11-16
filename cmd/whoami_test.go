@@ -432,15 +432,15 @@ func TestPrintWhoami_KeepsOneLinePerField(t *testing.T) {
 	assert.Equal(t, strings.Count(plain, "\n"), strings.Count(forged, "\n"))
 }
 
-// whoamiLogin saves an API-token login to ts in a fresh HOME. Serial: it sets HOME.
+// whoamiLogin saves an API-token login to ts in a fresh home directory. Serial: it sets it.
 func whoamiLogin(t *testing.T, workspaceURL string) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	t.Setenv("ALPACON_WORK_SESSION", "")
 	require.NoError(t, config.CreateConfig(workspaceURL, "my-workspace", "api-token", "", "", "", "", 0, false))
 }
 
-// Serial: it sets HOME, captures stdout and sets utils.OutputFormat.
+// Serial: it sets the home directory, captures stdout and sets utils.OutputFormat.
 func TestWhoamiReportsTheServersAnswer(t *testing.T) {
 	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
 		"GET /api/iam/users/-/":            {Status: http.StatusOK, Body: `{"id": "550e8400-e29b-41d4-a716-446655440000", "username": "alice", "email": "alice@example.com", "is_staff": true}`},
@@ -457,7 +457,7 @@ func TestWhoamiReportsTheServersAnswer(t *testing.T) {
 	assert.Contains(t, stdout, `"my-workspace"`)
 }
 
-// Serial: it sets HOME and captures stdout and stderr.
+// Serial: it sets the home directory and captures stdout and stderr.
 func TestWhoamiWithoutAServerAnswer(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -471,7 +471,7 @@ func TestWhoamiWithoutAServerAnswer(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
+			setTestHome(t, t.TempDir())
 			if tt.loggedIn {
 				whoamiLogin(t, "https://my-workspace.us1.alpacon.io")
 			}

@@ -49,7 +49,9 @@ func editServer(t *testing.T, createStatus int, uploads *atomic.Int32) *httptest
 
 // Serial: it sets HOME, which the auth method and WorkSession lookups read.
 func TestEditLeavesAnUnchangedFileAlone(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir reads it on Windows
 	t.Setenv("ALPACON_WORK_SESSION", "")
 	var uploads atomic.Int32
 	ts := editServer(t, http.StatusCreated, &uploads)
@@ -76,7 +78,9 @@ func TestEditFails(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
 			t.Setenv("ALPACON_WORK_SESSION", "")
 			var uploads atomic.Int32
 			newClient := cmdtest.ClientFactory(editServer(t, http.StatusForbidden, &uploads))
