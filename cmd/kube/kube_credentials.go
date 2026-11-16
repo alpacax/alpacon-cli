@@ -31,7 +31,7 @@ var (
 	errCallInterrupted = errors.New("interrupted")
 )
 
-func newKubeCredentialsCmd() *cobra.Command {
+func newKubeCredentialsCmd(newClient clientFactory) *cobra.Command {
 	var cluster string
 	cmd := &cobra.Command{
 		Use:   "credentials",
@@ -45,7 +45,7 @@ work session has expired, exits 3 and says to run 'alpacon kube login' again.`,
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runKubeCredentials(cmd.OutOrStdout(), strings.TrimSpace(cluster))
+			return runKubeCredentials(newClient, cmd.OutOrStdout(), strings.TrimSpace(cluster))
 		}),
 	}
 	cmd.Flags().StringVar(&cluster, "cluster", "", "cluster whose saved kube session to use")
@@ -113,7 +113,7 @@ func sessionGoneMessage(cluster string, err error) (string, []any) {
 	return "The server refused to check the kube session for %s, so the saved token is not used: %s. Resolve that refusal, then %s.", []any{cluster, refused.err, relogin}
 }
 
-func runKubeCredentials(stdout io.Writer, cluster string) error {
+func runKubeCredentials(newClient clientFactory, stdout io.Writer, cluster string) error {
 	relogin := fmt.Sprintf("run 'alpacon kube login %s'", shellQuote(cluster))
 
 	store, err := defaultKubeSessionStore()
@@ -142,7 +142,7 @@ func runKubeCredentials(stdout io.Writer, cluster string) error {
 	if loginErr == nil && record.WorkspaceURL == login.WorkspaceURL {
 		retrieve = func() (*kubernetes.KubeSessionDetail, error) {
 			return within(retrieveTimeout, nil, func() (*kubernetes.KubeSessionDetail, error) {
-				ac, err := recordClient(record)
+				ac, err := recordClient(newClient, record)
 				if err != nil {
 					return nil, err
 				}
@@ -278,8 +278,8 @@ func within[T any](timeout time.Duration, cancel <-chan struct{}, call func() (T
 
 // recordClient builds a client for the record's workspace, refusing one the
 // login has since moved away from: the record's session lives there.
-func recordClient(record *kubeSessionRecord) (*client.AlpaconClient, error) {
-	ac, err := client.NewAlpaconAPIClient()
+func recordClient(newClient clientFactory, record *kubeSessionRecord) (*client.AlpaconClient, error) {
+	ac, err := newClient()
 	if err != nil {
 		return nil, err
 	}

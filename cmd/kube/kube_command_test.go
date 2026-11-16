@@ -341,7 +341,7 @@ func TestCloseSavedSessionRefusesAMovedLogin(t *testing.T) {
 	record := testRecord("prod-east")
 	record.WorkspaceURL = "https://elsewhere.example.com"
 
-	err := closeSavedSession(record, nil)
+	err := closeSavedSession(client.NewAlpaconAPIClient, record, nil)
 
 	require.ErrorContains(t, err, "moved to another workspace")
 	assert.Zero(t, calls.Load())
@@ -406,6 +406,42 @@ func TestReportExit_ExitsLikeExecute(t *testing.T) {
 			code := reportExit(io.Discard, probe.Execute())
 
 			assert.Equal(t, tc.wantCode, code)
+		})
+	}
+}
+
+func TestCloseSavedSessionClosesThroughTheFactory(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		noLogin   bool
+		wantErr   string
+		wantCalls int32
+	}{
+		{name: "closes the saved session", wantCalls: 1},
+		{name: "no login", noLogin: true, wantErr: "not logged in"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var calls atomic.Int32
+			ts := closeServer(t, http.StatusOK, &calls)
+			newClient := apiClientTo(ts)
+			if tt.noLogin {
+				newClient = func() (*client.AlpaconClient, error) { return nil, errors.New("not logged in") }
+			}
+			record := testRecord("prod-east")
+			record.WorkspaceURL = ts.URL
+			record.KubeSessionID = "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47"
+
+			err := closeSavedSession(newClient, record, nil)
+
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tt.wantErr)
+			}
+			assert.Equal(t, tt.wantCalls, calls.Load())
 		})
 	}
 }

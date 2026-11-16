@@ -30,9 +30,9 @@ support is enabled for the workspace; 'alpacon login' and
 		newKubeListCmd(newClient),
 		newKubeDescribeCmd(newClient),
 		newKubeLoginCmd(newClient),
-		newKubeLogoutCmd(),
+		newKubeLogoutCmd(newClient),
 		newKubeSessionsCmd(newClient),
-		newKubeCredentialsCmd(),
+		newKubeCredentialsCmd(newClient),
 		newKubeConfigCmd(newClient),
 		newKubeProxyCmd(),
 	)

@@ -29,7 +29,7 @@ const (
 	logoutInterruptMessage = "Interrupted; finishing what was started on this machine. Press Ctrl+C again to quit now."
 )
 
-func newKubeLogoutCmd() *cobra.Command {
+func newKubeLogoutCmd(newClient clientFactory) *cobra.Command {
 	var kubeconfigFlag string
 	cmd := &cobra.Command{
 		Use:   "logout [CLUSTER]",
@@ -53,7 +53,7 @@ another with 'kubectl config use-context NAME'.`,
   alpacon kube logout prod-east --kubeconfig ~/.kube/alpacon`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runKubeLogoutCommand(cmd.OutOrStdout(), args, kubeconfigFlag)
+			return runKubeLogoutCommand(newClient, cmd.OutOrStdout(), args, kubeconfigFlag)
 		}),
 	}
 	cmd.Flags().StringVar(&kubeconfigFlag, "kubeconfig", "", "kubeconfig file to clean (default: every file kubectl reads)")
@@ -203,7 +203,7 @@ func (l *logoutLocks) release() {
 	}
 }
 
-func runKubeLogoutCommand(stdout io.Writer, args []string, kubeconfigFlag string) error {
+func runKubeLogoutCommand(newClient clientFactory, stdout io.Writer, args []string, kubeconfigFlag string) error {
 	paths, err := kubeconfig.SearchPaths(kubeconfigFlag)
 	if err != nil {
 		return utils.NewEnvelopeExitError(opKubeLogout, err, "Failed to find the kubeconfig: %s.", err)
@@ -236,7 +236,9 @@ func runKubeLogoutCommand(stdout io.Writer, args []string, kubeconfigFlag string
 		explicit:     kubeconfigFlag != "",
 		store:        store,
 		workspaceURL: workspaceURL,
-		closer:       closeSavedSession,
+		closer: func(record kubeSessionRecord, cancel <-chan struct{}) error {
+			return closeSavedSession(newClient, record, cancel)
+		},
 	})
 	for _, w := range result.warnings {
 		utils.CliWarning(w.format, w.args...)
@@ -265,9 +267,9 @@ func expectedLogoutFailure(err error) bool {
 
 // closeSavedSession closes the record's session under closeTimeout, which also
 // covers the access-token refresh building the client can run.
-func closeSavedSession(record kubeSessionRecord, cancel <-chan struct{}) error {
+func closeSavedSession(newClient clientFactory, record kubeSessionRecord, cancel <-chan struct{}) error {
 	_, err := within(closeTimeout, cancel, func() (struct{}, error) {
-		ac, err := recordClient(&record)
+		ac, err := recordClient(newClient, &record)
 		if err != nil {
 			return struct{}{}, err
 		}
