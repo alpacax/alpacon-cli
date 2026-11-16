@@ -26,7 +26,7 @@ var serverRefreshCmd = &cobra.Command{
 			return utils.NewExitError("Failed to refresh the server information: %s.", err)
 		}
 
-		utils.CliSuccess("System information refresh requested. Run 'alpacon events' to monitor progress.")
+		utils.CliSuccess("System information refresh requested. Run 'alpacon exec ls' to monitor progress.")
 		return nil
 	}),
 }
