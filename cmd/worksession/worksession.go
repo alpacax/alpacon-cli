@@ -7,6 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// clientFactory builds the API client a command talks to.
+type clientFactory = func() (*client.AlpaconClient, error)
+
 const approvalGuidance = "Approval and rejection happen in the Alpacon console (web) or Slack."
 
 // Operation identifiers carried in JSON outputs: success "operation" and error context.operation.

@@ -27,86 +27,88 @@ type recordingJSON struct {
 
 var noRecords bool
 
-var workSessionTimelineCmd = &cobra.Command{
-	Use:     "timeline SESSION_ID",
-	Aliases: []string{"tl"},
-	Short:   "Show the activity timeline for a work session",
-	Long: `Show the activity timeline for a work session.
+var workSessionTimelineCmd = newWorkSessionTimelineCmd(client.NewAlpaconAPIClient)
+
+func newWorkSessionTimelineCmd(newClient clientFactory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "timeline SESSION_ID",
+		Aliases: []string{"tl"},
+		Short:   "Show the activity timeline for a work session",
+		Long: `Show the activity timeline for a work session.
 
 Recordings are not embedded in the timeline. The recordings section lists each
 Websh terminal with the number of recording chunks it has ("unknown" when the
 server cannot count them) and the command that shows one:
 alpacon work-session recording SESSION_ID --index N. --no-records leaves the
 section out.`,
-	Args: cobra.ExactArgs(1),
-	Example: `  alpacon work-session timeline 550e8400-e29b-41d4-a716-446655440000
+		Args: cobra.ExactArgs(1),
+		Example: `  alpacon work-session timeline 550e8400-e29b-41d4-a716-446655440000
   alpacon work-session timeline 550e8400-e29b-41d4-a716-446655440000 --no-records
   alpacon work-session tl 550e8400-e29b-41d4-a716-446655440000 --output json
   alpacon work-session recording 550e8400-e29b-41d4-a716-446655440000 --index 2`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewEnvelopeExitError(opTimeline, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		id := args[0]
-
-		var (
-			items       []wsapi.TimelineItem
-			session     *wsapi.WorkSession
-			timelineErr error
-			wg          sync.WaitGroup
-		)
-		wg.Go(func() {
-			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id)
-		})
-		wg.Go(func() {
-			session, _ = wsapi.GetWorkSession(ac, id) // best-effort: server names degrade to IDs on failure
-		})
-		wg.Wait()
-
-		if timelineErr != nil {
-			return utils.NewEnvelopeExitError(opTimeline, timelineErr, "Failed to retrieve work session timeline: %s.", timelineErr)
-		}
-
-		serverMap := map[string]string{}
-		if session != nil {
-			for _, s := range session.Servers {
-				serverMap[s.ID] = s.Name
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			ac, err := newClient()
+			if err != nil {
+				return utils.NewEnvelopeExitError(opTimeline, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
-		}
 
-		rows := make([]wsapi.TimelineAttributes, 0, len(items))
-		var terminals []wsapi.TimelineItem
-		for i := range items {
-			// A server too old to know include_records sends the recordings
-			// anyway; they are not timeline rows.
-			if items[i].Type == "websh_record" {
-				continue
+			id := args[0]
+
+			var (
+				items       []wsapi.TimelineItem
+				session     *wsapi.WorkSession
+				timelineErr error
+				wg          sync.WaitGroup
+			)
+			wg.Go(func() {
+				items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id)
+			})
+			wg.Go(func() {
+				session, _ = wsapi.GetWorkSession(ac, id) // best-effort: server names degrade to IDs on failure
+			})
+			wg.Wait()
+
+			if timelineErr != nil {
+				return utils.NewEnvelopeExitError(opTimeline, timelineErr, "Failed to retrieve work session timeline: %s.", timelineErr)
 			}
-			if !noRecords && wsapi.IsTerminal(&items[i]) {
-				terminals = append(terminals, items[i])
+
+			serverMap := map[string]string{}
+			if session != nil {
+				for _, s := range session.Servers {
+					serverMap[s.ID] = s.Name
+				}
 			}
-			rows = append(rows, projectTimelineAttributes(&items[i], serverMap))
-		}
 
-		if utils.OutputFormat == utils.OutputFormatJSON {
-			return outputTimelineJSON(rows, terminals, id, serverMap)
-		}
+			rows := make([]wsapi.TimelineAttributes, 0, len(items))
+			var terminals []wsapi.TimelineItem
+			for i := range items {
+				// A server too old to know include_records sends the recordings
+				// anyway; they are not timeline rows.
+				if items[i].Type == "websh_record" {
+					continue
+				}
+				if !noRecords && wsapi.IsTerminal(&items[i]) {
+					terminals = append(terminals, items[i])
+				}
+				rows = append(rows, projectTimelineAttributes(&items[i], serverMap))
+			}
 
-		writer, cleanup := utils.WriteToPager()
-		defer cleanup()
-		printTimelineTableTo(writer, rows)
-		if len(terminals) > 0 {
-			printRecordingsSectionTo(writer, terminals, id, serverMap)
-		}
-		return nil
-	}),
-}
+			if utils.OutputFormat == utils.OutputFormatJSON {
+				return outputTimelineJSON(rows, terminals, id, serverMap)
+			}
 
-func init() {
-	workSessionTimelineCmd.Flags().BoolVar(&noRecords, "no-records", false,
+			writer, cleanup := utils.WriteToPager()
+			defer cleanup()
+			printTimelineTableTo(writer, rows)
+			if len(terminals) > 0 {
+				printRecordingsSectionTo(writer, terminals, id, serverMap)
+			}
+			return nil
+		}),
+	}
+	cmd.Flags().BoolVar(&noRecords, "no-records", false,
 		"Hide the recordings section (an empty recordings list in JSON)")
+	return cmd
 }
 
 func recordingStatus(total *int) string {

@@ -13,31 +13,35 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workSessionCurrentCmd = &cobra.Command{
-	Use:     "current",
-	Short:   "Show the active work-session in this workspace",
-	Example: `  alpacon work-session current`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		// Checked before any client exists so an unset 'current' neither logs in nor refreshes a token.
-		if uuid, err := config.GetActiveWorkSession(); err != nil {
-			return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
-		} else if uuid == "" {
-			printNoActiveSession()
-			return nil
-		}
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			err = fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
-			return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
-		}
-		if err := printCurrent(ac); err != nil {
-			if exitErr, ok := errors.AsType[*utils.ExitError](err); ok { // PrintJson's failure names no operation
-				return exitErr
+var workSessionCurrentCmd = newWorkSessionCurrentCmd(client.NewAlpaconAPIClient)
+
+func newWorkSessionCurrentCmd(newClient clientFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:     "current",
+		Short:   "Show the active work-session in this workspace",
+		Example: `  alpacon work-session current`,
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			// Checked before any client exists so an unset 'current' neither logs in nor refreshes a token.
+			if uuid, err := config.GetActiveWorkSession(); err != nil {
+				return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
+			} else if uuid == "" {
+				printNoActiveSession()
+				return nil
 			}
-			return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
-		}
-		return nil
-	}),
+			ac, err := newClient()
+			if err != nil {
+				err = fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
+				return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
+			}
+			if err := printCurrent(ac); err != nil {
+				if exitErr, ok := errors.AsType[*utils.ExitError](err); ok { // PrintJson's failure names no operation
+					return exitErr
+				}
+				return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
+			}
+			return nil
+		}),
+	}
 }
 
 // RunCurrent returns the active work-session UUID and its server-side details.
