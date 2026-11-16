@@ -236,17 +236,64 @@ func AuditAttributesFrom(entries []RoleAuditLogResponse, zone *time.Location) []
 			changedBy = entry.ChangedBy.Label
 		}
 
+		erased := entry.Context.IsErased()
 		result = append(result, RoleAuditAttributes{
-			Action:    entry.Action,
-			Role:      entry.RoleName,
-			Scope:     tierLabel(entry.Scope),
-			ChangedBy: changedBy,
-			Reason:    entry.Reason,
-			At:        timestampIn(entry.AddedAt, zone),
+			Action:        entry.Action,
+			Role:          entry.RoleName,
+			Scope:         tierLabel(entry.Scope),
+			Target:        targetCell(entry.Context.ScopeContentType, entry.Context.ScopeObjectID, entry.TargetsHidden),
+			TargetType:    entry.Context.ScopeContentType,
+			TargetID:      entry.Context.ScopeObjectID,
+			TargetsHidden: entry.TargetsHidden,
+			ChangedBy:     changedBy,
+			Reason:        entry.Reason,
+			Erased:        erased,
+			ReasonCell:    reasonCell(entry.Reason, entry.TargetsHidden, erased),
+			At:            timestampIn(entry.AddedAt, zone),
 		})
 	}
 
 	return result
+}
+
+// targetCell names a row's binding target as kind/id, or the kind alone for a binding on every
+// object of it. A withheld target shows its kind and the count in the id's place. This is not
+// ScopeLabel's "type:42/id": the audit row carries the kind's label, not its numeric id.
+func targetCell(contentType, objectID *string, hidden int) string {
+	kind := ""
+	if contentType != nil {
+		kind = *contentType
+	}
+
+	if hidden > 0 {
+		count := fmt.Sprintf("(%d hidden)", hidden)
+		if kind == "" {
+			return count
+		}
+		return kind + " " + count
+	}
+	if objectID != nil && *objectID != "" {
+		if kind == "" {
+			return *objectID
+		}
+		return kind + "/" + *objectID
+	}
+	return kind
+}
+
+// reasonCell tells an empty reason the server blanked from one never given: a withheld target
+// takes its reason with it, and an erased row's reason is gone.
+func reasonCell(reason string, hidden int, erased bool) string {
+	switch {
+	case reason != "":
+		return reason
+	case hidden > 0:
+		return "(withheld)"
+	case erased:
+		return "(erased)"
+	default:
+		return ""
+	}
 }
 
 func GrantRole(ac *client.AlpaconClient, request BindingCreateRequest) error {

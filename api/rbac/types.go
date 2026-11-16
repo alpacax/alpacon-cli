@@ -1,6 +1,8 @@
 package rbac
 
 import (
+	"bytes"
+	"encoding/json"
 	"strconv"
 	"time"
 
@@ -57,7 +59,30 @@ type RoleAuditLogResponse struct {
 	Scope       string          `json:"scope"`
 	ChangedBy   *AuditActor     `json:"changed_by"`
 	Reason      string          `json:"reason"`
-	AddedAt     time.Time       `json:"added_at"`
+	Context     AuditContext    `json:"context"`
+	// TargetsHidden counts the binding targets the row withholds from this reader: the target's
+	// id is left out of Context and Reason is sent empty. A server that predates the field
+	// sends none, which decodes as 0.
+	TargetsHidden int       `json:"targets_hidden"`
+	AddedAt       time.Time `json:"added_at"`
+}
+
+// AuditContext is the part of a row's context the CLI reads; the server may send more keys.
+type AuditContext struct {
+	// ScopeContentType names the binding target's kind as a dotted label, e.g. servers.server.
+	// It stays on a row whose target is withheld: it names a kind, not an object.
+	ScopeContentType *string `json:"scope_content_type"`
+	// ScopeObjectID is the target's id, sent verbatim.
+	ScopeObjectID *string `json:"scope_object_id"`
+	// Erased marks a row whose personal data was erased, so an empty Reason is not one never
+	// given. Kept raw so a value that is not a boolean cannot fail the whole page's decode.
+	Erased json.RawMessage `json:"erased"`
+}
+
+// IsErased reports whether the row's context marks it erased.
+func (c AuditContext) IsErased() bool {
+	value := bytes.TrimSpace(c.Erased)
+	return len(value) > 0 && !bytes.Equal(value, []byte("false")) && !bytes.Equal(value, []byte("null"))
 }
 
 type AuditPrincipal struct {
@@ -112,13 +137,22 @@ type RoleScopeAttributes struct {
 	ACL     string `json:"acl" table:"ACL"`
 }
 
+// RoleAuditAttributes keeps two cells for the table alone: Target and Reason there say "hidden"
+// and "withheld" in words, while JSON carries the fields as sent beside the counts that explain
+// them, so an empty reason stays "" and a withheld target stays null.
 type RoleAuditAttributes struct {
-	Action    string          `json:"action"`
-	Role      string          `json:"role"`
-	Scope     string          `json:"scope"`
-	ChangedBy string          `json:"changed_by" table:"Changed By"`
-	Reason    string          `json:"reason"`
-	At        utils.Timestamp `json:"at"`
+	Action        string          `json:"action"`
+	Role          string          `json:"role"`
+	Scope         string          `json:"scope"`
+	Target        string          `json:"-" table:"Target"`
+	TargetType    *string         `json:"target_type" table:"-"`
+	TargetID      *string         `json:"target_id" table:"-"`
+	TargetsHidden int             `json:"targets_hidden" table:"-"`
+	ChangedBy     string          `json:"changed_by" table:"Changed By"`
+	Reason        string          `json:"reason" table:"-"`
+	Erased        bool            `json:"erased" table:"-"`
+	ReasonCell    string          `json:"-" table:"Reason"`
+	At            utils.Timestamp `json:"at"`
 }
 
 // EffectivePermissionsResponse omits object-scoped bindings from Roles: their number grows with the
