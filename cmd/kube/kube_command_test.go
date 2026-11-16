@@ -18,6 +18,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -442,6 +443,79 @@ func TestCloseSavedSessionClosesThroughTheFactory(t *testing.T) {
 				require.ErrorContains(t, err, tt.wantErr)
 			}
 			assert.Equal(t, tt.wantCalls, calls.Load())
+		})
+	}
+}
+
+// countingFactory builds clients for ts and counts the builds, so a test sees
+// whether a command went through the factory it was given.
+func countingFactory(ts *httptest.Server, builds *atomic.Int32) clientFactory {
+	newClient := apiClientTo(ts)
+	return func() (*client.AlpaconClient, error) {
+		builds.Add(1)
+		return newClient()
+	}
+}
+
+func TestKubeLogoutCommandClosesThroughTheFactory(t *testing.T) {
+	var calls, builds atomic.Int32
+	ts := closeServer(t, http.StatusOK, &calls)
+	scene := newLogoutScene(t, ts.URL)
+	require.NoError(t, config.CreateConfig(ts.URL, "ws", "token", "", "", "", "", 0, false))
+
+	_, stderr, code := runKubeCommandWith(t, countingFactory(ts, &builds), utils.OutputFormatJSON, "logout", "prod-east")
+
+	require.Equal(t, 0, code, stderr)
+	assert.Equal(t, int32(1), builds.Load())
+	assert.Equal(t, int32(1), calls.Load())
+	assert.NoFileExists(t, scene.store.recordPath(scene.record.key()))
+}
+
+func TestKubeCredentialsCommandChecksTheSessionThroughTheFactory(t *testing.T) {
+	sessionRoute := "GET /api/kubernetes/sessions/3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47/"
+	tests := []struct {
+		name     string
+		reply    cmdtest.Reply
+		wantCode int
+		wantOut  string
+		wantErr  string
+	}{
+		{
+			name:    "open session",
+			reply:   cmdtest.Reply{Status: http.StatusOK, Body: `{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","token_expired_at":"2099-01-01T00:00:00Z","closed_at":null}`},
+			wantOut: `{"apiVersion":"client.authentication.k8s.io/v1","kind":"ExecCredential","status":{"token":"tok","expirationTimestamp":"2099-01-01T00:00:00Z"}}`,
+		},
+		{
+			name:     "ended session",
+			reply:    cmdtest.Reply{Status: http.StatusNotFound, Body: `{"detail":"Not found."}`},
+			wantCode: utils.ExitCodeWorkSessionDenied,
+			wantErr:  "alpacon kube login",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := cmdtest.Server(t, map[string]cmdtest.Reply{sessionRoute: tt.reply})
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("KUBERNETES_EXEC_INFO", "")
+			store, err := defaultKubeSessionStore()
+			require.NoError(t, err)
+			record := testRecord("prod-east")
+			record.WorkspaceURL = ts.URL
+			record.KubeSessionID = "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47"
+			record.TokenExpiredAt = time.Now().Add(time.Hour).UTC()
+			require.NoError(t, store.write(record))
+			require.NoError(t, config.CreateConfig(ts.URL, "ws", "token", "", "", "", "", 0, false))
+			var builds atomic.Int32
+
+			stdout, stderr, code := runKubeCommandWith(t, countingFactory(ts.Server, &builds), utils.OutputFormatTable, "credentials", "--cluster", "prod-east")
+
+			assert.Equal(t, tt.wantCode, code, stderr)
+			if tt.wantOut != "" {
+				assert.JSONEq(t, tt.wantOut, stdout)
+			}
+			assert.Contains(t, stderr, tt.wantErr)
+			assert.Equal(t, int32(1), builds.Load())
+			assert.Equal(t, 1, ts.Hits(sessionRoute))
 		})
 	}
 }
