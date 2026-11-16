@@ -7,32 +7,36 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var pythonPackageUploadCmd = &cobra.Command{
-	Use:   "upload FILE",
-	Short: "Upload a Python package to Alpacon",
-	Long: `
+var pythonPackageUploadCmd = newPythonPackageUploadCmd(client.NewAlpaconAPIClient)
+
+func newPythonPackageUploadCmd(newClient clientFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:   "upload FILE",
+		Short: "Upload a Python package to Alpacon",
+		Long: `
 	The 'upload' command allows users to upload a Python package to Alpacon.
 	This command is designed to facilitate the transfer of your locally developed Python packages to a remote server environment for further usage or distribution.
 	`,
-	Example: `
+		Example: `
 	alpacon package python upload alpamon-1.1.0-py3-none-any.whl
 	alpacon package python upload /home/alpacon/alpamon-1.1.0-py3-none-any.whl
 	`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		file := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			file := args[0]
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		err = packages.UploadPackage(alpaconClient, file, "python")
-		if err != nil {
-			return utils.NewExitError("Failed to upload the Python package to Alpacon: %s.", err)
-		}
+			err = packages.UploadPackage(alpaconClient, file, "python")
+			if err != nil {
+				return utils.NewExitError("Failed to upload the Python package to Alpacon: %s.", err)
+			}
 
-		utils.CliSuccess("Package uploaded: %s", file)
-		return nil
-	}),
+			utils.CliSuccess("Package uploaded: %s", file)
+			return nil
+		}),
+	}
 }

@@ -7,32 +7,36 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var pythonPackageDownloadCmd = &cobra.Command{
-	Use:   "download PACKAGE DIRECTORY",
-	Short: "Download a Python package from Alpacon",
-	Long: `
+var pythonPackageDownloadCmd = newPythonPackageDownloadCmd(client.NewAlpaconAPIClient)
+
+func newPythonPackageDownloadCmd(newClient clientFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:   "download PACKAGE DIRECTORY",
+		Short: "Download a Python package from Alpacon",
+		Long: `
 	The 'download' command allows users to download a Python package from Alpacon.
 	The package is saved into DIRECTORY on this machine.
 	`,
-	Example: `
+		Example: `
 	alpacon package python download alpamon-1.1.0-py3-none-any.whl .
 	`,
-	Args: cobra.ExactArgs(2),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		file := args[0]
-		dest := args[1]
+		Args: cobra.ExactArgs(2),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			file := args[0]
+			dest := args[1]
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		err = packages.DownloadPackage(alpaconClient, file, dest, "python")
-		if err != nil {
-			return utils.NewExitError("Failed to download the Python package from Alpacon: %s.", err)
-		}
+			err = packages.DownloadPackage(alpaconClient, file, dest, "python")
+			if err != nil {
+				return utils.NewExitError("Failed to download the Python package from Alpacon: %s.", err)
+			}
 
-		utils.CliSuccess("Package downloaded: %s", file)
-		return nil
-	}),
+			utils.CliSuccess("Package downloaded: %s", file)
+			return nil
+		}),
+	}
 }
