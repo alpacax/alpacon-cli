@@ -413,7 +413,7 @@ func TestOpenKubeSessionRestoresTheRecordWhenTheWriteFails(t *testing.T) {
 	ac := srv.start(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config")
-	editor := openEditor(t, path)
+	hold := openHold(t, path)
 	require.NoError(t, os.Chmod(dir, 0500))
 	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
 
@@ -432,7 +432,7 @@ func TestOpenKubeSessionRestoresTheRecordWhenTheWriteFails(t *testing.T) {
 		},
 	}
 
-	_, err := openKubeSession(ac, editor, kubeConfigOptions{clusterName: "prod-east", kubeconfig: path}, "c-prod", writer)
+	_, err := openKubeSession(ac, hold, kubeConfigOptions{clusterName: "prod-east", kubeconfig: path}, "c-prod", writer)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to write "+path)
@@ -449,7 +449,7 @@ func TestOpenKubeSessionClosesTheSessionWhenItCannotBeKept(t *testing.T) {
 	srv := newSessionServer()
 	ac := srv.start(t)
 	path := filepath.Join(t.TempDir(), "config")
-	editor := openEditor(t, path)
+	hold := openHold(t, path)
 	writer := kubeSessionWriter{
 		exec: credentialPlugin("prod-east"),
 		persist: func(*kubernetes.KubeSessionResponse) (func() error, error) {
@@ -457,7 +457,7 @@ func TestOpenKubeSessionClosesTheSessionWhenItCannotBeKept(t *testing.T) {
 		},
 	}
 
-	_, err := openKubeSession(ac, editor, kubeConfigOptions{clusterName: "prod-east", kubeconfig: path}, "c-prod", writer)
+	_, err := openKubeSession(ac, hold, kubeConfigOptions{clusterName: "prod-east", kubeconfig: path}, "c-prod", writer)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "disk full")
@@ -548,4 +548,38 @@ func TestWaitForWorkSessionReturnsARefusalInsteadOfExiting(t *testing.T) {
 			assert.Contains(t, stderr+failure.String(), tc.wantText) // what cmd.Execute leaves on stderr
 		})
 	}
+}
+
+// kube login on a workspace requiring MFA for kube exec prints the step-up
+// link once, then opens and saves the session.
+// Serial: it sets HOME and env and swaps stdio. On the real clock, since the
+// captured output goes through an OS pipe, so it waits one retry interval.
+func TestKubeLoginStepsUpOnceWhenTheOpenNeedsMFA(t *testing.T) {
+	t.Setenv("ALPACON_NO_BROWSER", "1")
+	srv := newSessionServer()
+	srv.mfaCreates = 1
+	ac := srv.start(t)
+	ac.WorkspaceName = "my-workspace"
+	ac.SetAccessToken("access-token")
+	setupKubeCommandConfig(t, ac.BaseURL)
+	path := filepath.Join(t.TempDir(), "config")
+
+	_, stderr, code := runKubeCommandWith(t, func() (*client.AlpaconClient, error) { return ac, nil }, utils.OutputFormatTable,
+		"login", "prod-east", "--work-session", "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47", "--kubeconfig", path)
+
+	require.Equal(t, 0, code, stderr)
+	assert.Contains(t, stderr, "MFA authentication required. Please visit:")
+	assert.Contains(t, stderr, "https://auth.example.com/mfa?ticket=t-1")
+	assert.Len(t, srv.mfaLinkQueries(), 1)
+	assert.Equal(t, 2, srv.creates())
+	assert.Equal(t, 0, srv.closes())
+
+	store, err := defaultKubeSessionStore()
+	require.NoError(t, err)
+	record, err := store.read(recordKey{workspaceURL: ac.BaseURL, cluster: "prod-east"})
+	require.NoError(t, err)
+	require.NotNil(t, record)
+	assert.Equal(t, testSessionID, record.KubeSessionID)
+	assert.Len(t, readKubeconfig(t, path).Contexts, 1)
+	assert.NoFileExists(t, path+".lock")
 }

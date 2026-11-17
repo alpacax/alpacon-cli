@@ -62,6 +62,11 @@ any that is missing in an interactive shell. A session waiting on approval is
 waited on for --wait-approval (default 5m). The active WorkSession is never
 changed, so exec, websh, cp and tunnel keep the session they use.
 
+When the workspace requires MFA for Kubernetes exec and the WorkSession has
+the kube_exec scope, the command prints an MFA link, waits up to 3 minutes for
+you to finish it in the browser, and then opens the session. The kubeconfig is
+not locked while it waits.
+
 The context runs 'alpacon kube credentials' for its token, so the token is
 never written to the kubeconfig; alpacon must be on the PATH kubectl sees. If
 your kubectl restricts credential plugins, allow alpacon. Logging in to the
@@ -293,7 +298,7 @@ func runKubeLogin(ios *utils.IOStreams, cmd *cobra.Command, args []string, flags
 			}, nil
 		},
 	}
-	result, err := openKubeSession(ac, held.editor, opts, clusterID, writer)
+	result, err := openKubeSession(ac, held.hold, opts, clusterID, writer)
 	if err != nil {
 		return kubeLoginError(err, in.cluster, choice.id)
 	}

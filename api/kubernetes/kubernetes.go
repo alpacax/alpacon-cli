@@ -149,11 +149,13 @@ func ResolveGroupNames(ac *client.AlpaconClient, groupIDs []string) []string {
 
 // CreateSession opens a proxy session to a cluster. The channel token appears
 // only in this response—the server never returns it again—so the caller must
-// persist it at once.
+// persist it at once. The POST's own error is tagged with
+// utils.MarkSubmission, so an MFA wait may send a refused create again; a
+// failure to read or use the answer is not, since the session exists by then.
 func CreateSession(ac *client.AlpaconClient, req KubeSessionCreateRequest) (*KubeSessionResponse, error) {
 	body, err := ac.SendPostRequest(sessionURL, req)
 	if err != nil {
-		return nil, err
+		return nil, utils.MarkSubmission(err)
 	}
 
 	var session KubeSessionResponse

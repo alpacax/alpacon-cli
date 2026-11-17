@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
+	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
@@ -46,6 +47,11 @@ the kube scope; create one with
 'alpacon work-session create --cluster CLUSTER --scope kube'.
 'alpacon kube login' finds or creates that session itself and keeps the token
 out of the kubeconfig.
+
+When the workspace requires MFA for Kubernetes exec and the WorkSession has
+the kube_exec scope, the command prints an MFA link, waits up to 3 minutes for
+you to finish it in the browser, and then opens the session. The kubeconfig is
+not locked while it waits.
 
 The kubeconfig file is the one 'kubectl config' itself writes: --kubeconfig,
 else the first existing file in KUBECONFIG (the last one listed when none
@@ -140,7 +146,7 @@ func runKubeConfig(ios *utils.IOStreams, cmd *cobra.Command, cluster string, fla
 	}
 	defer held.done()
 
-	result, err := openKubeConfig(ac, held.editor, kubeConfigOptions{
+	result, err := openKubeConfig(ac, held.hold, kubeConfigOptions{
 		clusterName:   clusterName,
 		workSessionID: workSessionID,
 		kubeconfig:    path,
@@ -162,32 +168,121 @@ const interruptedMessage = "Interrupted; the kubeconfig may not have been writte
 // heldKubeconfig is a kubeconfig opened and locked for one write, with the
 // Ctrl+C watch that guards it.
 type heldKubeconfig struct {
-	editor    *kubeconfig.Editor
+	hold      *kubeconfigHold
 	interrupt *interruptWatch
-	release   func()
 }
 
 // holdKubeconfig opens and locks the kubeconfig and watches for Ctrl+C. A second Ctrl+C exits from the
 // watcher, where no deferred done runs, so it releases the lock first, which kubectl's own writes wait on.
 func holdKubeconfig(ios *utils.IOStreams, path string, quit func(msg string)) (*heldKubeconfig, error) {
-	editor, err := kubeconfig.Open(path)
+	hold, err := openKubeconfigHold(path)
 	if err != nil {
 		return nil, err
 	}
-	// OnceFunc makes a release from the watcher and one from the command safe
-	// to overlap.
-	release := sync.OnceFunc(func() { _ = editor.Close() })
 	interrupt := watchInterrupt(ios, "Interrupted; stopping once the kube session is closed. Press Ctrl+C again to quit now.", func() {
-		release()
+		hold.close()
 		quit(interruptedMessage)
 	})
-	return &heldKubeconfig{editor: editor, interrupt: interrupt, release: release}, nil
+	return &heldKubeconfig{hold: hold, interrupt: interrupt}, nil
 }
 
 // done stops the watch and releases the lock; calling it again does nothing.
 func (h *heldKubeconfig) done() {
 	h.interrupt.stop()
-	h.release()
+	h.hold.close()
+}
+
+// relockTimeout bounds how long take waits for a kubeconfig lock another
+// program holds. kubectl holds it only while it writes the file. Another
+// alpacon run on the same kubeconfig can hold it longer, from its session
+// open through its write; take then fails and the opened session is closed,
+// and running it again opens without another MFA while the step-up stays
+// credited.
+const relockTimeout = 5 * time.Second
+
+const relockTick = 100 * time.Millisecond
+
+// kubeconfigHold is kubectl's write lock on one kubeconfig. The MFA wait of a
+// session open lets go of it, so kubectl is not locked out of the file while
+// the user is in the browser, and takes it again, rereading the file, once
+// the session is open. Its methods are safe to call from the Ctrl+C watcher
+// and the command at once; the command takes the editor it writes through
+// once, with take.
+type kubeconfigHold struct {
+	path string
+
+	mu     sync.Mutex
+	editor *kubeconfig.Editor // nil while let go
+	closed bool               // after close nothing takes the lock again
+}
+
+func openKubeconfigHold(path string) (*kubeconfigHold, error) {
+	editor, err := kubeconfig.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	return &kubeconfigHold{path: path, editor: editor}, nil
+}
+
+// letGo releases the lock until take.
+func (h *kubeconfigHold) letGo() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.releaseLocked()
+}
+
+// close releases the lock for good. A second Ctrl+C calls it before the
+// process exits, so a take still running on the command's goroutine must not
+// create a lock file nothing would remove.
+func (h *kubeconfigHold) close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.closed = true
+	h.releaseLocked()
+}
+
+func (h *kubeconfigHold) releaseLocked() {
+	if h.editor != nil {
+		_ = h.editor.Close()
+		h.editor = nil
+	}
+}
+
+var errHoldClosed = errors.New("the command is stopping")
+
+// take returns the editor the session's context is written through, taken
+// once: a close from the watcher after it leaves the editor closed, not nil,
+// so the write fails as a closed editor's does instead of reaching a nil
+// pointer. It returns errHoldClosed once the watcher closed the hold. When the
+// lock was let go it takes it again and rereads the file, waiting up to
+// timeout while another program holds the lock. kubeconfig.Open runs under the
+// mutex on purpose: the second Ctrl+C's close exits the process as soon as it
+// returns, so an Open it did not wait for could leave a lock file behind that
+// would lock kubectl out of the file until someone removed it.
+func (h *kubeconfigHold) take(timeout time.Duration) (*kubeconfig.Editor, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		h.mu.Lock()
+		if h.closed {
+			h.mu.Unlock()
+			return nil, errHoldClosed
+		}
+		if h.editor == nil {
+			editor, err := kubeconfig.Open(h.path)
+			if err != nil {
+				h.mu.Unlock()
+				if !errors.Is(err, kubeconfig.ErrLocked) || !time.Now().Add(relockTick).Before(deadline) {
+					return nil, err
+				}
+				time.Sleep(relockTick)
+				continue
+			}
+			h.editor = editor
+		}
+		editor := h.editor
+		h.mu.Unlock()
+		return editor, nil
+	}
 }
 
 // interruptWatch records a first Ctrl+C instead of acting on it, so the main
@@ -296,14 +391,14 @@ func (o kubeConfigOptions) isInterrupted() bool {
 }
 
 // openKubeConfig opens a kube session on the cluster and writes it into the
-// kubeconfig editor holds. A session whose token cannot be written is closed
+// kubeconfig hold locks. A session whose token cannot be written is closed
 // again, since nothing could ever use it.
-func openKubeConfig(ac *client.AlpaconClient, editor *kubeconfig.Editor, opts kubeConfigOptions) (*kubeConfigResult, error) {
+func openKubeConfig(ac *client.AlpaconClient, hold *kubeconfigHold, opts kubeConfigOptions) (*kubeConfigResult, error) {
 	clusterID, err := kubernetes.GetClusterIDByName(ac, opts.clusterName)
 	if err != nil {
 		return nil, &clusterLookupError{err: err}
 	}
-	return openKubeSession(ac, editor, opts, clusterID, kubeSessionWriter{})
+	return openKubeSession(ac, hold, opts, clusterID, kubeSessionWriter{})
 }
 
 // kubeSessionWriter is what differs between the commands that write a kube
@@ -321,17 +416,17 @@ type kubeSessionWriter struct {
 
 // openKubeSession opens a kube session under the work session and writes its
 // context. Any failure after the session exists closes it again.
-func openKubeSession(ac *client.AlpaconClient, editor *kubeconfig.Editor, opts kubeConfigOptions, clusterID string, w kubeSessionWriter) (*kubeConfigResult, error) {
+func openKubeSession(ac *client.AlpaconClient, hold *kubeconfigHold, opts kubeConfigOptions, clusterID string, w kubeSessionWriter) (*kubeConfigResult, error) {
 	if opts.isInterrupted() {
 		return nil, errInterrupted
 	}
-	session, err := kubernetes.CreateSession(ac, kubernetes.KubeSessionCreateRequest{
+	session, err := createKubeSession(ac, hold, opts, kubernetes.KubeSessionCreateRequest{
 		Cluster:     clusterID,
 		WorkSession: opts.workSessionID,
 		ClientType:  kubernetes.ClientTypeCLI,
 	})
 	if err != nil {
-		return nil, &sessionCreateError{err: err}
+		return nil, err
 	}
 
 	discard := func(reason error) error {
@@ -339,6 +434,18 @@ func openKubeSession(ac *client.AlpaconClient, editor *kubeconfig.Editor, opts k
 			return fmt.Errorf("%w; closing the kube session %s also failed: %w", reason, session.ID, closeErr)
 		}
 		return fmt.Errorf("%w; the kube session was closed, so run the command again", reason)
+	}
+
+	// Only a lock let go for the MFA step-up is opened again here, so any
+	// error but errHoldClosed comes from taking it back.
+	editor, err := hold.take(relockTimeout)
+	if err != nil {
+		if errors.Is(err, errHoldClosed) {
+			return nil, discard(errInterrupted)
+		}
+		// The MFA stays credited to this client for the workspace's window,
+		// so the run the message asks for opens without it.
+		return nil, discard(fmt.Errorf("MFA went through, but the kubeconfig could not be opened again: %w", err))
 	}
 
 	if opts.isInterrupted() {
@@ -395,6 +502,48 @@ func openKubeSession(ac *client.AlpaconClient, editor *kubeconfig.Editor, opts k
 		replacedServer:   replaced,
 		plaintext:        plaintext,
 	}, nil
+}
+
+// createKubeSession opens the session, running the MFA step-up and the wait
+// for it when the workspace asks for MFA to open a session that may exec into
+// pods. The link names no server, since a kube session has a cluster. The
+// kubeconfig lock is let go for the step-up and the wait, and the caller's
+// take opens it again. Whatever ends the wait, a refusal is returned as a
+// sessionCreateError and a first Ctrl+C as errInterrupted.
+func createKubeSession(ac *client.AlpaconClient, hold *kubeconfigHold, opts kubeConfigOptions, req kubernetes.KubeSessionCreateRequest) (*kubernetes.KubeSessionResponse, error) {
+	session, err := kubernetes.CreateSession(ac, req)
+	if err == nil {
+		return session, nil
+	}
+	callbacks := mfa.WorkspaceErrorCallbacks(ac, func() error {
+		// Untagged, so the wait ends here instead of opening a session the
+		// interrupt would only close again.
+		if opts.isInterrupted() {
+			return errInterrupted
+		}
+		created, err := kubernetes.CreateSession(ac, req)
+		if err == nil {
+			session = created
+		}
+		return err
+	})
+	// A first Ctrl+C during the refused create stops here, before a link is
+	// fetched and a browser opened for a wait that would end anyway.
+	if utils.StructuredErrorCode(err) == utils.AuthMFARequired && opts.isInterrupted() {
+		return nil, errInterrupted
+	}
+	stepUp := callbacks.OnMFARequired
+	callbacks.OnMFARequired = func(serverName string) error {
+		hold.letGo()
+		return stepUp(serverName)
+	}
+	if err = utils.HandleCommonErrors(err, "", callbacks); err != nil {
+		if errors.Is(err, errInterrupted) {
+			return nil, errInterrupted
+		}
+		return nil, &sessionCreateError{err: err}
+	}
+	return session, nil
 }
 
 // checkProxyURL reports whether proxyURL is plain http, and refuses one that
