@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,7 +14,7 @@ func TestWorkSessionConstructorsKeepFlagValuesIndependent(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name   string
-		newCmd func(clientFactory) *cobra.Command
+		newCmd func(clientFactory, *utils.IOStreams) *cobra.Command
 		flag   string
 		value  string
 		want   string
@@ -52,10 +53,10 @@ func TestWorkSessionConstructorsKeepFlagValuesIndependent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			first := tt.newCmd(cmdtest.NoClient)
+			first := tt.newCmd(cmdtest.NoClient, utils.Stdio)
 			require.NoError(t, first.ParseFlags([]string{"--" + tt.flag + "=" + tt.value}))
 
-			second := tt.newCmd(cmdtest.NoClient)
+			second := tt.newCmd(cmdtest.NoClient, utils.Stdio)
 
 			assert.Equal(t, tt.want, first.Flags().Lookup(tt.flag).Value.String())
 			assert.True(t, first.Flags().Changed(tt.flag), "first command must retain --%s", tt.flag)

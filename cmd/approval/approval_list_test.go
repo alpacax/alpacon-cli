@@ -11,6 +11,7 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -122,8 +123,8 @@ func TestListRequestsEndpoint(t *testing.T) {
 	}
 }
 
-// Serial: it captures stdout and sets utils.OutputFormat.
 func TestApprovalListCommand(t *testing.T) {
+	t.Parallel()
 	const listBody = `{"count": 1, "results": [{"id": "550e8400-e29b-41d4-a716-446655440000", "request_type": "sudo", "request_data": "systemctl restart nginx", "status": "pending", "requested_by": {"name": "alice"}, "added_at": "2026-11-01T09:00:00Z"}]}`
 	tests := []struct {
 		name      string
@@ -140,7 +141,7 @@ func TestApprovalListCommand(t *testing.T) {
 				"GET /api/approvals/approvals/-/": {Status: http.StatusOK, Body: listBody},
 			})
 
-			stdout, stderr, code := cmdtest.RunJSON(t, newApprovalListCmd(ts.Factory()), tt.args...)
+			stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newApprovalListCmd(ts.Factory(), ios) }, tt.args...)
 
 			assert.Equal(t, 0, code, stderr)
 			assert.Equal(t, 1, ts.Hits(tt.wantRoute))
@@ -170,7 +171,7 @@ func TestApprovalListCommandFails(t *testing.T) {
 				"GET /api/approvals/approvals/": {Status: tt.status, Body: `{"detail": "unavailable"}`},
 			})
 
-			failure, code := cmdtest.Run(newApprovalListCmd(ts.Factory()), tt.args...)
+			failure, code := cmdtest.Run(newApprovalListCmd(ts.Factory(), utils.Stdio), tt.args...)
 
 			assert.Equal(t, tt.wantCode, code)
 			assert.Contains(t, failure, tt.want)

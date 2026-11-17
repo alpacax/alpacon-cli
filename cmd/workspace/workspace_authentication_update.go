@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workspaceAuthenticationUpdateCmd = newWorkspaceAuthenticationUpdateCmd(client.NewAlpaconAPIClient)
+var workspaceAuthenticationUpdateCmd = newWorkspaceAuthenticationUpdateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkspaceAuthenticationUpdateCmd(newClient clientFactory) *cobra.Command {
+func newWorkspaceAuthenticationUpdateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "update",
 		Short: "Update workspace authentication settings",
@@ -42,7 +42,7 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 
 			data, err := workspace.EditAuthentication(alpaconClient)
 			if err != nil {
-				if utils.ReportNoChanges(err) {
+				if ios.ReportNoChanges(err) {
 					return nil
 				}
 				return utils.NewExitError("Failed to prepare authentication update: %s.", err)
@@ -63,8 +63,8 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 				}
 			}
 
-			utils.CliSuccess("Authentication settings updated.")
-			return utils.PrintJson(authenticationDetail)
+			ios.Success("Authentication settings updated.")
+			return ios.PrintJson(authenticationDetail)
 		}),
 	}
 }

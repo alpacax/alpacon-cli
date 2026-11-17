@@ -96,13 +96,13 @@ func init() {
 
 // endSession ends the session with end and, when it is the workspace's active one, clears it.
 // The error is the server's alone; a failed clear only warns. Reports whether it cleared.
-func endSession(ac *client.AlpaconClient, id string, end func(*client.AlpaconClient, string) error) (bool, error) {
+func endSession(ios *utils.IOStreams, ac *client.AlpaconClient, id string, end func(*client.AlpaconClient, string) error) (bool, error) {
 	if err := end(ac, id); err != nil {
 		return false, err
 	}
 	cleared, err := config.ClearActiveWorkSessionFor(ac.WorkspaceName, id)
 	if err != nil {
-		utils.CliWarning("Work session %s has ended but is still the active work-session: %s. Run 'alpacon work-session use --unset' to clear it.", id, err)
+		ios.Warning("Work session %s has ended but is still the active work-session: %s. Run 'alpacon work-session use --unset' to clear it.", id, err)
 	}
 	return cleared, nil
 }

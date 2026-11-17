@@ -12,9 +12,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclServerAddCmd = newAclServerAddCmd(client.NewAlpaconAPIClient)
+var aclServerAddCmd = newAclServerAddCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAclServerAddCmd(newClient clientFactory) *cobra.Command {
+func newAclServerAddCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add TOKEN",
 		Short: "Grant a token access to one or more servers",
@@ -26,7 +26,7 @@ Use --server for a single server or --servers for bulk operations.`,
   alpacon token acl server add my-api-token --servers web-01,web-02,web-03`,
 		Args: cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runServerAclAdd(cmd, args, newClient)
+			return runServerAclAdd(ios, cmd, args, newClient)
 		}),
 	}
 	cmd.Flags().String("server", "", "Server name (single)")
@@ -34,7 +34,7 @@ Use --server for a single server or --servers for bulk operations.`,
 	return cmd
 }
 
-func runServerAclAdd(cmd *cobra.Command, args []string, newClient clientFactory) error {
+func runServerAclAdd(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient clientFactory) error {
 	tokenArg := args[0]
 	serverName, _ := cmd.Flags().GetString("server")
 	serversCSV, _ := cmd.Flags().GetString("servers")
@@ -65,7 +65,7 @@ func runServerAclAdd(cmd *cobra.Command, args []string, newClient clientFactory)
 		}); err != nil {
 			return utils.NewExitError("Failed to add server ACL: %v.", err)
 		}
-		utils.CliSuccess("Server ACL added: token %s can access %s", tokenArg, serverName)
+		ios.Success("Server ACL added: token %s can access %s", tokenArg, serverName)
 		return nil
 	}
 
@@ -85,7 +85,7 @@ func runServerAclAdd(cmd *cobra.Command, args []string, newClient clientFactory)
 	}); err != nil {
 		return utils.NewExitError("Failed to bulk-add server ACLs: %v.", err)
 	}
-	utils.CliSuccess("Server ACLs added: token %s can access [%s]", tokenArg, strings.Join(names, ", "))
+	ios.Success("Server ACLs added: token %s can access [%s]", tokenArg, strings.Join(names, ", "))
 	return nil
 }
 

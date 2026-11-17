@@ -10,9 +10,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var webhookCreateCmd = newWebhookCreateCmd(client.NewAlpaconAPIClient)
+var webhookCreateCmd = newWebhookCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWebhookCreateCmd(newClient clientFactory) *cobra.Command {
+func newWebhookCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new webhook",
@@ -60,7 +60,7 @@ Webhook creation requires an Alpacon API that accepts requests without an owner 
 					if isValidProvider(provider) {
 						break
 					}
-					utils.CliWarning("Invalid provider. Please choose: slack, discord, teams, telegram, custom.")
+					ios.Warning("Invalid provider. Please choose: slack, discord, teams, telegram, custom.")
 				}
 			} else {
 				provider = strings.ToLower(strings.TrimSpace(provider))
@@ -84,7 +84,7 @@ Webhook creation requires an Alpacon API that accepts requests without an owner 
 						sslVerify = false
 						break
 					}
-					utils.CliWarning("Invalid input. Please enter 'y' or 'n'.")
+					ios.Warning("Invalid input. Please enter 'y' or 'n'.")
 				}
 			}
 
@@ -106,7 +106,7 @@ Webhook creation requires an Alpacon API that accepts requests without an owner 
 				return utils.NewExitError("Failed to create webhook: %s.", err)
 			}
 
-			utils.CliSuccess("Webhook created: %s", name)
+			ios.Success("Webhook created: %s", name)
 			return nil
 		}),
 	}

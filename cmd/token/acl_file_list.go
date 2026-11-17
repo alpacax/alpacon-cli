@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclFileListCmd = newAclFileListCmd(client.NewAlpaconAPIClient)
+var aclFileListCmd = newAclFileListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAclFileListCmd(newClient clientFactory) *cobra.Command {
+func newAclFileListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls TOKEN",
 		Aliases: []string{"list"},
@@ -19,12 +19,12 @@ func newAclFileListCmd(newClient clientFactory) *cobra.Command {
   alpacon token acl file list my-api-token`,
 		Args: cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runFileAclList(cmd, args, newClient)
+			return runFileAclList(ios, cmd, args, newClient)
 		}),
 	}
 }
 
-func runFileAclList(_ *cobra.Command, args []string, newClient clientFactory) error {
+func runFileAclList(ios *utils.IOStreams, _ *cobra.Command, args []string, newClient clientFactory) error {
 	tokenID := args[0]
 
 	alpaconClient, err := newClient()
@@ -42,5 +42,5 @@ func runFileAclList(_ *cobra.Command, args []string, newClient clientFactory) er
 		return utils.NewExitError("Failed to retrieve file ACLs: %v.", err)
 	}
 
-	return utils.PrintTable(acls)
+	return ios.PrintTable(acls)
 }

@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var memberDeleteCmd = newMemberDeleteCmd(client.NewAlpaconAPIClient)
+var memberDeleteCmd = newMemberDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newMemberDeleteCmd(newClient clientFactory) *cobra.Command {
+func newMemberDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var memberDeleteRequest iam.MemberDeleteRequest
 	cmd := &cobra.Command{
 		Use:     "delete",
@@ -43,7 +43,7 @@ func newMemberDeleteCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to remove the member from group: %s.", err)
 			}
 
-			utils.CliSuccess("Member %s removed from group %s", memberDeleteRequest.User, memberDeleteRequest.Group)
+			ios.Success("Member %s removed from group %s", memberDeleteRequest.User, memberDeleteRequest.Group)
 			return nil
 		}),
 	}

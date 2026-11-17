@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workspaceMFAMethodsCmd = newWorkspaceMFAMethodsCmd(client.NewAlpaconAPIClient)
+var workspaceMFAMethodsCmd = newWorkspaceMFAMethodsCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkspaceMFAMethodsCmd(newClient clientFactory) *cobra.Command {
+func newWorkspaceMFAMethodsCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "mfa-methods",
 		Aliases: []string{"mfa"},
@@ -38,7 +38,7 @@ func newWorkspaceMFAMethodsCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve MFA methods: %s.", err)
 			}
 
-			return utils.PrintJson(mfaMethodsDetail)
+			return ios.PrintJson(mfaMethodsDetail)
 		}),
 	}
 }

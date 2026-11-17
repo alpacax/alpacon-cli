@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workSessionCompleteCmd = newWorkSessionCompleteCmd(client.NewAlpaconAPIClient)
+var workSessionCompleteCmd = newWorkSessionCompleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkSessionCompleteCmd(newClient clientFactory) *cobra.Command {
+func newWorkSessionCompleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "complete SESSION_ID",
 		Short:   "Mark an active work session as completed",
@@ -21,14 +21,14 @@ func newWorkSessionCompleteCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewEnvelopeExitError(opComplete, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
 
-			cleared, err := RunComplete(ac, args[0])
+			cleared, err := RunComplete(ios, ac, args[0])
 			if err != nil {
 				return utils.NewEnvelopeExitError(opComplete, err, "Failed to complete work session: %s.", err)
 			}
 
-			utils.CliSuccess("Work session %s completed.", args[0])
+			ios.Success("Work session %s completed.", args[0])
 			if cleared {
-				utils.CliInfo("Active work-session cleared.")
+				ios.Info("Active work-session cleared.")
 			}
 			return nil
 		}),
@@ -36,6 +36,6 @@ func newWorkSessionCompleteCmd(newClient clientFactory) *cobra.Command {
 }
 
 // RunComplete completes the session; see endSession.
-func RunComplete(ac *client.AlpaconClient, id string) (bool, error) {
-	return endSession(ac, id, wsapi.CompleteWorkSession)
+func RunComplete(ios *utils.IOStreams, ac *client.AlpaconClient, id string) (bool, error) {
+	return endSession(ios, ac, id, wsapi.CompleteWorkSession)
 }

@@ -81,7 +81,7 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 	},
 	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		if showVersion {
-			return runVersion()
+			return runVersion(utils.Stdio)
 		}
 		utils.ShowLogo(buildWelcomeLines())
 		return nil

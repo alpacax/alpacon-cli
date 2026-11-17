@@ -1,7 +1,6 @@
 package iam
 
 import (
-	"os"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/iam"
@@ -11,9 +10,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userRoleDescribeCmd = newUserRoleDescribeCmd(client.NewAlpaconAPIClient)
+var userRoleDescribeCmd = newUserRoleDescribeCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUserRoleDescribeCmd(newClient clientFactory) *cobra.Command {
+func newUserRoleDescribeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "describe ROLE",
 		Aliases: []string{"desc"},
@@ -68,24 +67,24 @@ list was narrowed.`,
 			permissionRows := rbac.ScopeAttributesFrom(scopes)
 			holderRows := rbac.HolderAttributesFrom(holders, usernames, time.Local)
 
-			if utils.OutputFormat == utils.OutputFormatJSON {
+			if ios.IsJSON() {
 				combined := map[string]any{
 					"role":        role,
 					"permissions": jsonSlice(permissionRows),
 					"holders":     jsonSlice(holderRows),
 				}
-				if err = utils.PrintJSONValue(os.Stdout, combined); err != nil {
+				if err = utils.PrintJSONValue(ios.Out, combined); err != nil {
 					return utils.NewExitError("Failed to render the role: %s.", err)
 				}
 				return nil
 			}
 
-			utils.PrintHeader("Permissions")
-			if err := utils.PrintTable(permissionRows); err != nil {
+			ios.PrintHeader("Permissions")
+			if err := ios.PrintTable(permissionRows); err != nil {
 				return err
 			}
-			utils.PrintHeader("Holders")
-			return utils.PrintTable(holderRows)
+			ios.PrintHeader("Holders")
+			return ios.PrintTable(holderRows)
 		}),
 	}
 	cmd.Flags().Bool("no-resolve-names", false, "Print holder ids instead of usernames, skipping the user lookup")

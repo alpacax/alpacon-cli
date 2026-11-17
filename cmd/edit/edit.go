@@ -43,9 +43,9 @@ var guiEditors = map[string]bool{
 	"zed":           true,
 }
 
-var EditCmd = newEditCmd(client.NewAlpaconAPIClient)
+var EditCmd = newEditCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newEditCmd(newClient clientFactory) *cobra.Command {
+func newEditCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "edit [USER@]SERVER:PATH",
 		Short: "Edit a remote file with your local editor",
@@ -93,7 +93,7 @@ redirections, or '&&' will not work.`,
 			}
 
 			deps := realEditDeps(alpaconClient, groupname)
-			result, err := runEdit(editOptions{
+			result, err := runEdit(ios, editOptions{
 				Target:        target,
 				Editor:        editorFlag,
 				Force:         force,
@@ -103,7 +103,7 @@ redirections, or '&&' will not work.`,
 				if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
 					return exitErr
 				}
-				printPreservedTempPath(result)
+				printPreservedTempPath(ios, result)
 				if exitErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID); exitErr != nil {
 					return exitErr
 				}
@@ -118,10 +118,10 @@ redirections, or '&&' will not work.`,
 			}
 
 			if !result.Changed {
-				utils.CliInfo("No changes")
+				ios.Info("No changes")
 				return nil
 			}
-			utils.CliSuccess("Uploaded changes to %s:%s", target.Server, target.RemotePath)
+			ios.Success("Uploaded changes to %s:%s", target.Server, target.RemotePath)
 			return nil
 		}),
 	}
@@ -248,7 +248,7 @@ func guiEditorWaitWarning(editor string) string {
 	return fmt.Sprintf("'%s' looks like a GUI editor launched without a wait flag; it may return before you save, so changes would not be uploaded. Add a wait flag, e.g. --editor \"%s --wait\"", name, name)
 }
 
-func runEdit(opts editOptions, deps editDeps) (editResult, error) {
+func runEdit(ios *utils.IOStreams, opts editOptions, deps editDeps) (editResult, error) {
 	deps = normalizeEditDeps(deps)
 	tempPath, err := editTempPath(deps.tempRoot, opts.Target)
 	result := editResult{TempPath: tempPath}
@@ -258,7 +258,7 @@ func runEdit(opts editOptions, deps editDeps) (editResult, error) {
 
 	downloaded, err := deps.download(opts.Target, tempPath, opts.WorkSessionID)
 	if err != nil {
-		cleanupEditTemp(tempPath, deps.removeAll)
+		cleanupEditTemp(ios, tempPath, deps.removeAll)
 		return result, err
 	}
 	if downloaded.Path != "" {
@@ -268,26 +268,26 @@ func runEdit(opts editOptions, deps editDeps) (editResult, error) {
 	// Owner-only, since edit handles sensitive remote files. The 0700 parents already gate access,
 	// which also covers an editor that saves through a rename and resets the mode.
 	if err := os.Chmod(result.TempPath, 0600); err != nil {
-		cleanupEditTemp(result.TempPath, deps.removeAll)
+		cleanupEditTemp(ios, result.TempPath, deps.removeAll)
 		return result, fmt.Errorf("failed to secure temp file: %w", err)
 	}
 
 	// The size is only known once downloaded, so this guards opening an oversized file in the
 	// editor, not bandwidth.
 	if downloaded.Size > maxEditPromptSize && !opts.Force && !deps.confirmLarge(downloaded.Size) {
-		cleanupEditTemp(result.TempPath, deps.removeAll)
+		cleanupEditTemp(ios, result.TempPath, deps.removeAll)
 		return result, errLargeFile
 	}
 
 	before, err := hashFile(result.TempPath)
 	if err != nil {
-		cleanupEditTemp(result.TempPath, deps.removeAll)
+		cleanupEditTemp(ios, result.TempPath, deps.removeAll)
 		return result, err
 	}
 
 	editor := resolveEditor(opts.Editor)
 	if warning := guiEditorWaitWarning(editor); warning != "" {
-		utils.CliWarning("%s", warning)
+		ios.Warning("%s", warning)
 	}
 	editorErr := deps.runEditor(editor, result.TempPath)
 
@@ -304,13 +304,13 @@ func runEdit(opts editOptions, deps editDeps) (editResult, error) {
 		// Keep the temp only if the user changed it; otherwise it is just a copy of the remote
 		// file.
 		if !result.Changed {
-			cleanupEditTemp(result.TempPath, deps.removeAll)
+			cleanupEditTemp(ios, result.TempPath, deps.removeAll)
 		}
 		return result, fmt.Errorf("editor failed: %w", editorErr)
 	}
 
 	if !result.Changed {
-		cleanupEditTemp(result.TempPath, deps.removeAll)
+		cleanupEditTemp(ios, result.TempPath, deps.removeAll)
 		return result, nil
 	}
 
@@ -318,18 +318,18 @@ func runEdit(opts editOptions, deps editDeps) (editResult, error) {
 		return result, err
 	}
 
-	cleanupEditTemp(result.TempPath, deps.removeAll)
+	cleanupEditTemp(ios, result.TempPath, deps.removeAll)
 	return result, nil
 }
 
-func cleanupEditTemp(filePath string, removeAll func(string) error) {
+func cleanupEditTemp(ios *utils.IOStreams, filePath string, removeAll func(string) error) {
 	if filePath == "" {
 		return
 	}
 	sessionDir := filepath.Dir(filePath)
 	if err := removeAll(sessionDir); err != nil {
 		// Surface failures: the temp may hold a copy of a sensitive remote file.
-		utils.CliWarning("Failed to remove temp directory %s: %s", sessionDir, err)
+		ios.Warning("Failed to remove temp directory %s: %s", sessionDir, err)
 		return
 	}
 	// Prune the now-empty per-file (<hash>) and per-server parents.
@@ -496,13 +496,13 @@ func formatBytes(size int64) string {
 	return fmt.Sprintf("%.1f MB", float64(size)/float64(mb))
 }
 
-func printPreservedTempPath(result editResult) {
+func printPreservedTempPath(ios *utils.IOStreams, result editResult) {
 	// Only claim preservation when the user actually changed the file; an
 	// unchanged temp is either already cleaned up or just a copy of the remote.
 	if !result.Changed || result.TempPath == "" {
 		return
 	}
 	if _, err := os.Stat(result.TempPath); err == nil {
-		utils.CliWarning("Edited file preserved at %s", result.TempPath)
+		ios.Warning("Edited file preserved at %s", result.TempPath)
 	}
 }

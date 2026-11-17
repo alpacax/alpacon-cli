@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var serverDeleteCmd = newServerDeleteCmd(client.NewAlpaconAPIClient)
+var serverDeleteCmd = newServerDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newServerDeleteCmd(newClient clientFactory) *cobra.Command {
+func newServerDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete SERVER",
 		Aliases: []string{"rm"},
@@ -45,7 +45,7 @@ func newServerDeleteCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to delete the server: %s.", err)
 			}
 
-			utils.CliSuccess("Server deleted: %s", serverName)
+			ios.Success("Server deleted: %s", serverName)
 			return nil
 		}),
 	}

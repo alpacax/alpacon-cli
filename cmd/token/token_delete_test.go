@@ -28,7 +28,7 @@ func TestTokenDeleteDeletesTheNamedToken(t *testing.T) {
 				deleteRoute:             {Status: http.StatusNoContent},
 			})
 
-			failure, code := cmdtest.Run(newTokenDeleteCmd(ts.Factory()), tt.arg, "-y")
+			failure, code := cmdtest.Run(newTokenDeleteCmd(ts.Factory(), utils.Stdio), tt.arg, "-y")
 
 			assert.Equal(t, 0, code, failure)
 			assert.Equal(t, 1, ts.Hits(deleteRoute))
@@ -56,7 +56,7 @@ func TestTokenDeleteFailsWithExit1(t *testing.T) {
 				"DELETE /api/auth/tokens/550e8400-e29b-41d4-a716-446655440000/": {Status: tt.status, Body: `{"code": "permission_denied", "detail": "denied"}`},
 			})
 
-			failure, code := cmdtest.Run(newTokenDeleteCmd(ts.Factory()), "my-api-token", "-y")
+			failure, code := cmdtest.Run(newTokenDeleteCmd(ts.Factory(), utils.Stdio), "my-api-token", "-y")
 
 			assert.Equal(t, utils.ExitCodeGeneralError, code)
 			assert.Contains(t, failure, tt.want)

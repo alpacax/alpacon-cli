@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var serverDetailCmd = newServerDetailCmd(client.NewAlpaconAPIClient)
+var serverDetailCmd = newServerDetailCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newServerDetailCmd(newClient clientFactory) *cobra.Command {
+func newServerDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "describe SERVER",
 		Aliases: []string{"desc"},
@@ -37,7 +37,7 @@ func newServerDetailCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the server details: %s.", err)
 			}
 
-			return utils.PrintJson(serverDetail)
+			return ios.PrintJson(serverDetail)
 		}),
 	}
 }

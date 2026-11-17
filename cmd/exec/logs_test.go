@@ -174,7 +174,7 @@ func TestLogsCommandOutcome(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			stdoutLine, stderrLine, exitCode := logsCommandOutcome(tt.details)
+			stdoutLine, stderrLine, exitCode := logsCommandOutcome(utils.Stdio, tt.details)
 
 			assert.Equal(t, tt.wantStdoutLine, stdoutLine, "stdout line")
 			assert.Equal(t, tt.wantExitCode, exitCode, "exit code")
@@ -233,7 +233,7 @@ func TestLogsCommandOutcomeSanitizesServerText(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, stderrLine, _ := logsCommandOutcome(tt.details)
+			_, stderrLine, _ := logsCommandOutcome(utils.Stdio, tt.details)
 
 			assert.Equal(t, tt.wantStderr, stderrLine)
 		})

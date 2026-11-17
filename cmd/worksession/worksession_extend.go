@@ -3,7 +3,6 @@ package worksession
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
@@ -13,9 +12,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workSessionExtendCmd = newWorkSessionExtendCmd(client.NewAlpaconAPIClient)
+var workSessionExtendCmd = newWorkSessionExtendCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkSessionExtendCmd(newClient clientFactory) *cobra.Command {
+func newWorkSessionExtendCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var (
 		extendExpiresIn string
 		extendExpiresAt string
@@ -71,11 +70,11 @@ reason once the request settles.`,
 			// Branch on the status, not PendingExtensionRequest: a 200 body can still carry a stale
 			// request.
 			if status == http.StatusAccepted {
-				printExtendPending(id, session.PendingExtensionRequest, session.ConsoleURL, ac)
+				printExtendPending(ios, id, session.PendingExtensionRequest, session.ConsoleURL, ac)
 				return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 			}
 
-			return printExtendSuccess(id, formatMutationExpiresAt(session.ExpiresAt))
+			return printExtendSuccess(ios, id, formatMutationExpiresAt(session.ExpiresAt))
 		}),
 	}
 	cmd.Flags().StringVar(&extendExpiresIn, "expires-in", "", "New expiry set to now + duration (e.g. 2h)")
@@ -85,19 +84,19 @@ reason once the request settles.`,
 	return cmd
 }
 
-func printExtendSuccess(id, expiresAt string) error {
+func printExtendSuccess(ios *utils.IOStreams, id, expiresAt string) error {
 	output := newWorkSessionExtendOutput(id, expiresAt)
-	if utils.OutputFormat == utils.OutputFormatJSON {
-		return printWorkSessionMutationJSON(output)
+	if ios.IsJSON() {
+		return printWorkSessionMutationJSON(ios, output)
 	}
-	utils.CliSuccess("%s", output.Message)
+	ios.Success("%s", output.Message)
 	return nil
 }
 
 // printExtendPending reports a 202, which queued the extension instead of applying it; req may be
 // nil on a body that omits it. The next steps point at 'describe' and a retry with a new reason,
 // not at 'work-session complete', which has nothing to do with an extension.
-func printExtendPending(id string, req *wsapi.PendingExtensionRequest, consoleURL string, sources ...utils.SignalOriginSource) {
+func printExtendPending(ios *utils.IOStreams, id string, req *wsapi.PendingExtensionRequest, consoleURL string, sources ...utils.SignalOriginSource) {
 	utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: id, ConsoleURL: consoleURL}, sources...)
 	message, requestID, requestedExpiresAt, deadline := extendPendingMessage(id, req)
 	describeCmd := fmt.Sprintf("alpacon work-session describe %s", id)
@@ -105,7 +104,7 @@ func printExtendPending(id string, req *wsapi.PendingExtensionRequest, consoleUR
 		{Command: describeCmd, Description: "check status; --output json shows pending_extension_request"},
 		{Description: "retry 'work-session extend' with a new reason after the request settles"},
 	}
-	if utils.OutputFormat == utils.OutputFormatJSON {
+	if ios.IsJSON() {
 		envelope := extendPendingJSON{
 			OK:       false,
 			Status:   utils.PendingApprovalStatus,
@@ -120,15 +119,15 @@ func printExtendPending(id string, req *wsapi.PendingExtensionRequest, consoleUR
 			},
 			NextActions: next,
 		}
-		if err := utils.PrintJSONValue(os.Stdout, envelope); err != nil {
-			_, _ = fmt.Fprintf(os.Stdout, `{"ok":false,"status":%q}`+"\n", utils.PendingApprovalStatus)
+		if err := utils.PrintJSONValue(ios.Out, envelope); err != nil {
+			_, _ = fmt.Fprintf(ios.Out, `{"ok":false,"status":%q}`+"\n", utils.PendingApprovalStatus)
 		}
 		return
 	}
 
-	utils.CliWarning("%s", message)
+	ios.Warning("%s", message)
 	for _, action := range next {
-		fmt.Fprintf(os.Stderr, "  %s\n", action.PlainText())
+		fmt.Fprintf(ios.ErrOut, "  %s\n", action.PlainText())
 	}
 }
 

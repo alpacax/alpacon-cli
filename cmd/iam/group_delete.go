@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var groupDeleteCmd = newGroupDeleteCmd(client.NewAlpaconAPIClient)
+var groupDeleteCmd = newGroupDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newGroupDeleteCmd(newClient clientFactory) *cobra.Command {
+func newGroupDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete GROUP",
 		Aliases: []string{"rm"},
@@ -53,7 +53,7 @@ func newGroupDeleteCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to delete the group: %s", err)
 			}
 
-			utils.CliSuccess("Group deleted: %s", groupName)
+			ios.Success("Group deleted: %s", groupName)
 			return nil
 		}),
 	}

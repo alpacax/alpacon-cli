@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workSessionCancelCmd = newWorkSessionCancelCmd(client.NewAlpaconAPIClient)
+var workSessionCancelCmd = newWorkSessionCancelCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkSessionCancelCmd(newClient clientFactory) *cobra.Command {
+func newWorkSessionCancelCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "cancel SESSION_ID",
 		Short:   "Withdraw your own pending work session request",
@@ -27,10 +27,10 @@ func newWorkSessionCancelCmd(newClient clientFactory) *cobra.Command {
 			}
 
 			output := newWorkSessionCancelOutput(args[0])
-			if utils.OutputFormat == utils.OutputFormatJSON {
-				return printWorkSessionMutationJSON(output)
+			if ios.IsJSON() {
+				return printWorkSessionMutationJSON(ios, output)
 			}
-			utils.CliSuccess("%s", output.Message)
+			ios.Success("%s", output.Message)
 			return nil
 		}),
 	}

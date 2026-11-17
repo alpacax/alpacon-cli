@@ -116,7 +116,7 @@ func TestExtendCommand_SendsReason(t *testing.T) {
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
 
-	cmd := newWorkSessionExtendCmd(client.NewAlpaconAPIClient)
+	cmd := newWorkSessionExtendCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	require.NoError(t, cmd.ParseFlags([]string{"--expires-at", "2026-06-01T12:00:00Z", "--reason", "customer escalation"}))
 
 	var runErr error
@@ -232,7 +232,7 @@ func TestExtendCommand_StalePendingOn200_IsSuccess(t *testing.T) {
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
 
-	cmd := newWorkSessionExtendCmd(client.NewAlpaconAPIClient)
+	cmd := newWorkSessionExtendCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	require.NoError(t, cmd.ParseFlags([]string{"--expires-at", "2026-06-01T12:00:00Z"}))
 
 	var runErr error

@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var tokenCreateCmd = newTokenCreateCmd(client.NewAlpaconAPIClient)
+var tokenCreateCmd = newTokenCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newTokenCreateCmd(newClient clientFactory) *cobra.Command {
+func newTokenCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new API token",
@@ -33,7 +33,7 @@ func newTokenCreateCmd(newClient clientFactory) *cobra.Command {
 			var err error
 
 			if name == "" {
-				if tokenRequest, err = promptForToken(); err != nil {
+				if tokenRequest, err = promptForToken(ios); err != nil {
 					return err
 				}
 			} else {
@@ -56,8 +56,8 @@ func newTokenCreateCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to create API token %s.", err)
 			}
 
-			utils.CliSuccess("API token created: %s", token)
-			utils.CliWarning("This token cannot be retrieved again after you exit.")
+			ios.Success("API token created: %s", token)
+			ios.Warning("This token cannot be retrieved again after you exit.")
 			return nil
 		}),
 	}
@@ -71,14 +71,14 @@ func newTokenCreateCmd(newClient clientFactory) *cobra.Command {
 	return cmd
 }
 
-func promptForToken() (auth.APITokenRequest, error) {
+func promptForToken(ios *utils.IOStreams) (auth.APITokenRequest, error) {
 	var tokenRequest auth.APITokenRequest
 	var err error
 	if tokenRequest.Name, err = utils.ReadRequiredInput("Token name: "); err != nil {
 		return tokenRequest, err
 	}
 	if utils.PromptForBool("Set a shorter expiration than the workspace's maximum token lifetime?") {
-		days, err := promptForExpiryDays()
+		days, err := promptForExpiryDays(ios)
 		if err != nil {
 			return tokenRequest, err
 		}
@@ -94,7 +94,7 @@ func promptForToken() (auth.APITokenRequest, error) {
 	return tokenRequest, nil
 }
 
-func promptForExpiryDays() (int, error) {
+func promptForExpiryDays(ios *utils.IOStreams) (int, error) {
 	for {
 		days, err := utils.ReadRequiredIntInput("Valid days for the token: ")
 		if err != nil {
@@ -103,6 +103,6 @@ func promptForExpiryDays() (int, error) {
 		if days > 0 {
 			return days, nil
 		}
-		utils.CliWarning("Enter a number of days greater than 0.")
+		ios.Warning("Enter a number of days greater than 0.")
 	}
 }

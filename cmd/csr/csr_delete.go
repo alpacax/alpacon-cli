@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var csrDeleteCmd = newCsrDeleteCmd(client.NewAlpaconAPIClient)
+var csrDeleteCmd = newCsrDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newCsrDeleteCmd(newClient clientFactory) *cobra.Command {
+func newCsrDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete CSR_ID",
 		Aliases: []string{"rm"},
@@ -44,7 +44,7 @@ func newCsrDeleteCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to delete the CSR: %s.", err)
 			}
 
-			utils.CliSuccess("CSR deleted: %s", csrId)
+			ios.Success("CSR deleted: %s", csrId)
 			return nil
 		}),
 	}

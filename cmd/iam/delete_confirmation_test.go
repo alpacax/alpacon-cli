@@ -26,7 +26,7 @@ func TestDeleteCommands_StopForConfirmationBeforeAnyRequest(t *testing.T) {
 	}{
 		{name: "group delete", cmd: groupDeleteCmd, args: []string{"my-group"}},
 		{name: "user delete", cmd: userDeleteCmd, args: []string{"alice"}},
-		{name: "member delete", cmd: newMemberDeleteCmd(cmdtest.NoClient), flags: []string{"--group", "my-group", "--user", "alice"}},
+		{name: "member delete", cmd: newMemberDeleteCmd(cmdtest.NoClient, utils.Stdio), flags: []string{"--group", "my-group", "--user", "alice"}},
 	}
 
 	for _, tt := range tests {

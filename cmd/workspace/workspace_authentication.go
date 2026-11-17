@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workspaceAuthenticationCmd = newWorkspaceAuthenticationCmd(client.NewAlpaconAPIClient)
+var workspaceAuthenticationCmd = newWorkspaceAuthenticationCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkspaceAuthenticationCmd(newClient clientFactory) *cobra.Command {
+func newWorkspaceAuthenticationCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "authentication",
 		Aliases: []string{"auth"},
@@ -38,7 +38,7 @@ func newWorkspaceAuthenticationCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve authentication settings: %s.", err)
 			}
 
-			return utils.PrintJson(authenticationDetail)
+			return ios.PrintJson(authenticationDetail)
 		}),
 	}
 }

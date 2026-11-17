@@ -2,7 +2,6 @@ package utils
 
 import (
 	"fmt"
-	"os"
 )
 
 // pendingApprovalCtx is the machine-readable context for a pending-approval signal. RequestID is
@@ -43,7 +42,12 @@ func pendingApprovalNextActions(retry NextAction, extra ...NextAction) []NextAct
 // Command a pure executable string, any hint in Description; extra follows the console pointer.
 // It never exits, so the exit-code contract stays with the caller.
 func PrintPendingApproval(message, requestID string, retry NextAction, extra ...NextAction) {
-	if OutputFormat == OutputFormatJSON {
+	Stdio.PrintPendingApproval(message, requestID, retry, extra...)
+}
+
+// PrintPendingApproval is the package-level PrintPendingApproval on s.
+func (s *IOStreams) PrintPendingApproval(message, requestID string, retry NextAction, extra ...NextAction) {
+	if s.IsJSON() {
 		envelope := pendingApprovalJSON{
 			OK:          false,
 			Status:      PendingApprovalStatus,
@@ -53,16 +57,16 @@ func PrintPendingApproval(message, requestID string, retry NextAction, extra ...
 			Context:     pendingApprovalCtx{RequestID: requestID},
 			NextActions: pendingApprovalNextActions(retry, extra...),
 		}
-		if err := PrintJSONValue(os.Stdout, envelope); err != nil {
+		if err := PrintJSONValue(s.Out, envelope); err != nil {
 			// Fall back to a minimal, still-parseable object so a machine consumer
 			// always sees the status field.
-			_, _ = fmt.Fprintf(os.Stdout, `{"ok":false,"status":%q}`+"\n", PendingApprovalStatus)
+			_, _ = fmt.Fprintf(s.Out, `{"ok":false,"status":%q}`+"\n", PendingApprovalStatus)
 		}
 		return
 	}
 
-	CliWarning("%s", message)
+	s.Warning("%s", message)
 	for _, action := range pendingApprovalNextActions(retry, extra...) {
-		fmt.Fprintf(os.Stderr, "  %s\n", action.PlainText())
+		fmt.Fprintf(s.ErrOut, "  %s\n", action.PlainText())
 	}
 }

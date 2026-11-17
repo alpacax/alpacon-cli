@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var usernameSetCmd = newUsernameSetCmd(client.NewAlpaconAPIClient)
+var usernameSetCmd = newUsernameSetCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUsernameSetCmd(newClient clientFactory) *cobra.Command {
+func newUsernameSetCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "set NAME",
 		Short: "Set the username for your account",
@@ -36,7 +36,7 @@ func newUsernameSetCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("%s", utils.Reword(err, setUsernameErrorText(err)))
 			}
 
-			utils.CliSuccess(iam.UsernameSetSuccessFmt, response.Username)
+			ios.Success(iam.UsernameSetSuccessFmt, response.Username)
 			return nil
 		}),
 	}

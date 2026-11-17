@@ -148,7 +148,7 @@ func TestParseRemoteExecArgs_File(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.expected.Env = map[string]string{}
-			assert.Equal(t, tt.expected, ParseRemoteExecArgs(tt.args))
+			assert.Equal(t, tt.expected, ParseRemoteExecArgs(utils.Stdio, tt.args))
 		})
 	}
 }
@@ -297,7 +297,7 @@ func TestParseRemoteExecArgs_FileErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ParseRemoteExecArgs(tt.args)
+			result := ParseRemoteExecArgs(utils.Stdio, tt.args)
 			assert.Equal(t, tt.expectedErr, result.Err)
 			assert.Empty(t, result.Server)
 			assert.Nil(t, result.File)
@@ -309,7 +309,7 @@ func TestParseRemoteExecArgs_FileErrors(t *testing.T) {
 // still joins Command.
 func TestParseRemoteExecArgs_GenericLaneHasNoFile(t *testing.T) {
 	t.Parallel()
-	result := ParseRemoteExecArgs([]string{"prod-web", "--", "bash", "/opt/deploy.sh"})
+	result := ParseRemoteExecArgs(utils.Stdio, []string{"prod-web", "--", "bash", "/opt/deploy.sh"})
 	assert.Nil(t, result.File)
 	assert.Equal(t, "bash /opt/deploy.sh", result.Command)
 }
@@ -537,7 +537,7 @@ func TestFileExecRefusal(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			message, hint, ok := fileExecRefusal(tt.err, "prod-web")
+			message, hint, ok := fileExecRefusal(utils.Stdio, tt.err, "prod-web")
 			assert.Equal(t, tt.wantOK, ok, "message %q", message)
 			if tt.wantMessage != "" {
 				assert.Equal(t, tt.wantMessage, message)
@@ -564,7 +564,7 @@ func TestFileExecRefusal(t *testing.T) {
 
 func TestFileExecRefusalStripsControlBytesFromServerName(t *testing.T) {
 	t.Parallel()
-	message, hint, ok := fileExecRefusal(coded("file_exec_unsupported_agent"), "prod\n\x1b[2Kforged")
+	message, hint, ok := fileExecRefusal(utils.Stdio, coded("file_exec_unsupported_agent"), "prod\n\x1b[2Kforged")
 
 	require.True(t, ok)
 	assert.Contains(t, message, "the agent on 'prodforged' ")
@@ -782,7 +782,7 @@ func TestFileExecInlineCredentialRefusal(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			message, hint, ok := fileExecInlineCredentialRefusal(tt.err)
+			message, hint, ok := fileExecInlineCredentialRefusal(utils.Stdio, tt.err)
 			assert.Equal(t, tt.wantOK, ok)
 			if !tt.wantOK {
 				assert.Empty(t, message)

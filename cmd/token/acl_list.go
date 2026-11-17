@@ -6,9 +6,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclListCmd = newAclListCmd(client.NewAlpaconAPIClient)
+var aclListCmd = newAclListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAclListCmd(newClient clientFactory) *cobra.Command {
+func newAclListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:        "ls TOKEN",
 		Aliases:    []string{"list"},
@@ -17,7 +17,7 @@ func newAclListCmd(newClient clientFactory) *cobra.Command {
 		Hidden:     true,
 		Args:       cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runCommandAclList(cmd, args, newClient)
+			return runCommandAclList(ios, cmd, args, newClient)
 		}),
 	}
 }

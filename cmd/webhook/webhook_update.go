@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var webhookUpdateCmd = newWebhookUpdateCmd(client.NewAlpaconAPIClient)
+var webhookUpdateCmd = newWebhookUpdateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWebhookUpdateCmd(newClient clientFactory) *cobra.Command {
+func newWebhookUpdateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "update WEBHOOK",
 		Short: "Update a webhook configuration",
@@ -33,14 +33,14 @@ func newWebhookUpdateCmd(newClient clientFactory) *cobra.Command {
 
 			webhookDetail, err := webhook.UpdateWebhook(alpaconClient, webhookName)
 			if err != nil {
-				if utils.ReportNoChanges(err) {
+				if ios.ReportNoChanges(err) {
 					return nil
 				}
 				return utils.NewExitError("Failed to update the webhook: %s.", err)
 			}
 
-			utils.CliSuccess("Webhook updated: %s", webhookName)
-			return utils.PrintJson(webhookDetail)
+			ios.Success("Webhook updated: %s", webhookName)
+			return ios.PrintJson(webhookDetail)
 		}),
 	}
 }

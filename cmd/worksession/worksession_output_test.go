@@ -124,7 +124,7 @@ func TestWorkSessionCreateCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
 	clearWorkSessionAgentEnvironment(t)
-	cmd := newWorkSessionCreateCmd(client.NewAlpaconAPIClient)
+	cmd := newWorkSessionCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	require.NoError(t, cmd.ParseFlags([]string{"--purpose", "incident", "--scope", "command", "--server", "prod", "--expires-at", "2026-06-01T12:00:00Z"}))
 
 	var runErr error
@@ -172,7 +172,7 @@ func TestWorkSessionUseCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
-	cmd := newWorkSessionUseCmd(client.NewAlpaconAPIClient)
+	cmd := newWorkSessionUseCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
@@ -209,7 +209,7 @@ func TestWorkSessionUnsetCommandJSONOutput_OperationIsUnset(t *testing.T) {
 	setupWorkSessionCommandConfig(t, "http://example.invalid")
 	withWorkSessionCommandJSONMode(t)
 	require.NoError(t, config.SetActiveWorkSession("ses-active"))
-	cmd := newWorkSessionUseCmd(client.NewAlpaconAPIClient)
+	cmd := newWorkSessionUseCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	require.NoError(t, cmd.ParseFlags([]string{"--unset"}))
 
 	var runErr error
@@ -246,7 +246,7 @@ func TestWorkSessionExtendCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
-	cmd := newWorkSessionExtendCmd(client.NewAlpaconAPIClient)
+	cmd := newWorkSessionExtendCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	require.NoError(t, cmd.ParseFlags([]string{"--expires-at", "2026-06-01T12:00:00Z"}))
 
 	var runErr error

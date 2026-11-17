@@ -18,9 +18,9 @@ func TestKubePromptsReturnClosedInput(t *testing.T) {
 			os.Stdin = f
 			t.Cleanup(func() { os.Stdin = saved; _ = f.Close() })
 			if name == "scopes" {
-				_, err = promptKubeScopes()
+				_, err = promptKubeScopes(utils.Stdio)
 			} else {
-				_, err = promptDuration()
+				_, err = promptDuration(utils.Stdio)
 			}
 			var exitErr *utils.ExitError
 			require.ErrorAs(t, err, &exitErr)

@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var authorityDownloadCmd = newAuthorityDownloadCmd(client.NewAlpaconAPIClient)
+var authorityDownloadCmd = newAuthorityDownloadCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAuthorityDownloadCmd(newClient clientFactory) *cobra.Command {
+func newAuthorityDownloadCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "download-crt AUTHORITY",
 		Aliases: []string{"download-cert"},
@@ -47,7 +47,7 @@ func newAuthorityDownloadCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to download the root certificate from authority: %s.", err)
 			}
 
-			utils.CliSuccess("Root certificate downloaded: %s", filePath)
+			ios.Success("Root certificate downloaded: %s", filePath)
 			return nil
 		}),
 	}

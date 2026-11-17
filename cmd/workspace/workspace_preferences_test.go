@@ -6,16 +6,17 @@ import (
 
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
 
-// Serial: it captures stdout and sets utils.OutputFormat.
 func TestWorkspacePreferencesPrintsTheServerAnswer(t *testing.T) {
+	t.Parallel()
 	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
 		"GET /api/workspaces/preferences/-/": {Status: http.StatusOK, Body: `{"timezone": "Asia/Seoul", "language": "en"}`},
 	})
 
-	stdout, stderr, code := cmdtest.RunJSON(t, newWorkspacePreferencesCmd(ts.Factory()))
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newWorkspacePreferencesCmd(ts.Factory(), ios) })
 
 	assert.Equal(t, 0, code, stderr)
 	assert.JSONEq(t, `{"timezone": "Asia/Seoul", "language": "en"}`, stdout)
@@ -43,7 +44,7 @@ func TestWorkspacePreferencesFailsWithExit1(t *testing.T) {
 				}).Factory()
 			}
 
-			failure, code := cmdtest.Run(newWorkspacePreferencesCmd(newClient))
+			failure, code := cmdtest.Run(newWorkspacePreferencesCmd(newClient, utils.Stdio))
 
 			assert.Equal(t, utils.ExitCodeGeneralError, code)
 			assert.Contains(t, failure, tt.want)

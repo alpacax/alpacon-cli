@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var installPAMCmd = newInstallPAMCmd(client.NewAlpaconAPIClient)
+var installPAMCmd = newInstallPAMCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newInstallPAMCmd(newClient clientFactory) *cobra.Command {
+func newInstallPAMCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "install-pam SERVER",
 		Short: "Install alpamon-pam on the server",
@@ -30,7 +30,7 @@ func newInstallPAMCmd(newClient clientFactory) *cobra.Command {
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 			yes, _ := cmd.Flags().GetBool("yes")
 			return servercmd.RunServerAction(
-				newClient,
+				ios, newClient,
 				args[0],
 				server.ActionInstallPAM,
 				"Install alpamon-pam on server '%s'?",

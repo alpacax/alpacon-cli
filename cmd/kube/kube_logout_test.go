@@ -108,7 +108,7 @@ func TestKubeLogoutRemovesOnlyTheNamedCluster(t *testing.T) {
 	devRecord := testRecord("dev")
 	require.NoError(t, f.in.store.write(devRecord))
 
-	result, err := kubeLogout(f.in)
+	result, err := kubeLogout(utils.Stdio, f.in)
 	require.NoError(t, err)
 
 	assert.True(t, result.Found, "%+v", result)
@@ -131,7 +131,7 @@ func TestKubeLogoutKeepsACurrentContextItDoesNotRemove(t *testing.T) {
 	path := kubeconfigWith(t, "other", [2]string{"prod-east", prodServer})
 	f := newLogoutFixture(t, nil, path)
 
-	result, err := kubeLogout(f.in)
+	result, err := kubeLogout(utils.Stdio, f.in)
 	require.NoError(t, err)
 
 	assert.False(t, result.CurrentContextCleared, "%+v", result)
@@ -176,7 +176,7 @@ func TestKubeLogoutCloseOutcomes(t *testing.T) {
 				return inner(r, cancel)
 			}
 
-			result, err := kubeLogout(f.in)
+			result, err := kubeLogout(utils.Stdio, f.in)
 			require.NoError(t, err, "a failed close is only a warning")
 
 			require.Len(t, result.Sessions, 1)
@@ -209,7 +209,7 @@ func TestKubeLogoutWithoutTheSessionsWorkspaceSkipsTheClose(t *testing.T) {
 			f := newLogoutFixture(t, nil, path)
 			f.in.workspaceURL = tt.workspaceURL
 
-			result, err := kubeLogout(f.in)
+			result, err := kubeLogout(utils.Stdio, f.in)
 			require.NoError(t, err)
 
 			assert.Empty(t, f.closed)
@@ -226,7 +226,7 @@ func TestKubeLogoutCleansEveryFileKubectlReads(t *testing.T) {
 	second := kubeconfigWith(t, "other", [2]string{"prod-east", prodServer})
 	f := newLogoutFixture(t, nil, first, second)
 
-	result, err := kubeLogout(f.in)
+	result, err := kubeLogout(utils.Stdio, f.in)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{first, second}, result.Kubeconfigs)
@@ -249,7 +249,7 @@ func TestKubeLogoutCoversTheRecordBehindEachFile(t *testing.T) {
 	elsewhere.KubeSessionID = "k-9"
 	require.NoError(t, f.in.store.write(elsewhere))
 
-	result, err := kubeLogout(f.in)
+	result, err := kubeLogout(utils.Stdio, f.in)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"k-1"}, f.closed, "only the logged-in workspace's session can be closed")
@@ -280,7 +280,7 @@ func TestKubeLogoutCoversEveryClusterItDeletes(t *testing.T) {
 	elsewhere.KubeSessionID = "k-9"
 	require.NoError(t, f.in.store.write(elsewhere))
 
-	_, err := kubeLogout(f.in)
+	_, err := kubeLogout(utils.Stdio, f.in)
 	require.NoError(t, err)
 
 	assertGone(t, first, "alpacon-prod-east")
@@ -298,7 +298,7 @@ func TestKubeLogoutLeavesARecordOfAnotherWorkspaceTheKubeconfigDoesNotUse(t *tes
 	elsewhere.ProxyURL = "https://other-ws.example.com/kube/c-9"
 	require.NoError(t, f.in.store.write(elsewhere))
 
-	result, err := kubeLogout(f.in)
+	result, err := kubeLogout(utils.Stdio, f.in)
 	require.NoError(t, err)
 
 	assert.FileExists(t, f.in.store.recordPath(elsewhere.key()))
@@ -312,7 +312,7 @@ func TestKubeLogoutFindingNothingIsNotAnError(t *testing.T) {
 	before, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	result, err := kubeLogout(kubeLogoutInput{
+	result, err := kubeLogout(utils.Stdio, kubeLogoutInput{
 		cluster: "prod-east", paths: []string{path, filepath.Join(t.TempDir(), "missing")}, store: store, workspaceURL: logoutWorkspace,
 		closer: func(kubeSessionRecord, <-chan struct{}) error { t.Error("nothing to close"); return nil },
 	})
@@ -333,7 +333,7 @@ func TestKubeLogoutOfAStaticTokenContextWarnsItsSessionStaysOpen(t *testing.T) {
 	body := "clusters:\n- cluster:\n    server: https://ws.example.com/kube/c-1\n  name: alpacon-prod-east\ncontexts:\n- context:\n    cluster: alpacon-prod-east\n    user: alpacon-prod-east\n  name: alpacon-prod-east\nusers:\n- name: alpacon-prod-east\n  user:\n    token: static\n"
 	require.NoError(t, os.WriteFile(path, []byte(body), 0600))
 
-	result, err := kubeLogout(kubeLogoutInput{cluster: "prod-east", paths: []string{path}, store: kubeSessionStore{dir: t.TempDir()}, workspaceURL: logoutWorkspace})
+	result, err := kubeLogout(utils.Stdio, kubeLogoutInput{cluster: "prod-east", paths: []string{path}, store: kubeSessionStore{dir: t.TempDir()}, workspaceURL: logoutWorkspace})
 	require.NoError(t, err)
 
 	assert.True(t, result.Found, "%+v", result)
@@ -348,7 +348,7 @@ func TestKubeLogoutOfARecordWithNoContextNamesKubeconfig(t *testing.T) {
 	path := kubeconfigWith(t, "other")
 	f := newLogoutFixture(t, nil, path)
 
-	result, err := kubeLogout(f.in)
+	result, err := kubeLogout(utils.Stdio, f.in)
 	require.NoError(t, err)
 
 	assert.True(t, result.Found, "%+v", result)
@@ -365,7 +365,7 @@ func TestKubeLogoutChangesNothingWhileALoginRuns(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = held.Release() }()
 
-	_, err = kubeLogout(f.in)
+	_, err = kubeLogout(utils.Stdio, f.in)
 
 	require.ErrorIs(t, err, errStoreLocked)
 	assertHolds(t, path, "alpacon-prod-east")
@@ -403,7 +403,7 @@ func TestKubeLogoutChangesNothingWhileAFirstLoginRuns(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = held.Release() }()
 
-	_, err = kubeLogout(kubeLogoutInput{cluster: "prod-east", paths: []string{path}, store: store, workspaceURL: logoutWorkspace})
+	_, err = kubeLogout(utils.Stdio, kubeLogoutInput{cluster: "prod-east", paths: []string{path}, store: store, workspaceURL: logoutWorkspace})
 
 	require.ErrorIs(t, err, errStoreLocked)
 	assertHolds(t, path, "alpacon-prod-east")
@@ -416,7 +416,7 @@ func TestKubeLogoutRemovesAStagingFileWithoutARecord(t *testing.T) {
 	staging := filepath.Join(store.dir, recordBase(testKey("prod-east"))+".123.tmp")
 	require.NoError(t, os.WriteFile(staging, []byte("token"), storeFilePerm))
 
-	_, err := kubeLogout(kubeLogoutInput{cluster: "prod-east", paths: []string{kubeconfigWith(t, "other")}, store: store, workspaceURL: logoutWorkspace})
+	_, err := kubeLogout(utils.Stdio, kubeLogoutInput{cluster: "prod-east", paths: []string{kubeconfigWith(t, "other")}, store: store, workspaceURL: logoutWorkspace})
 
 	require.NoError(t, err)
 	assert.NoFileExists(t, staging)
@@ -430,7 +430,7 @@ func TestKubeLogoutFirstInterrupt(t *testing.T) {
 		f := newLogoutFixture(t, nil, path)
 		f.in.interrupted = func() bool { return true }
 
-		_, err := kubeLogout(f.in)
+		_, err := kubeLogout(utils.Stdio, f.in)
 
 		require.ErrorIs(t, err, errLogoutInterrupted)
 		assertHolds(t, path, "alpacon-prod-east")
@@ -449,7 +449,7 @@ func TestKubeLogoutFirstInterrupt(t *testing.T) {
 			return ed.Save()
 		}
 
-		result, err := kubeLogout(f.in)
+		result, err := kubeLogout(utils.Stdio, f.in)
 
 		require.NoError(t, err)
 		assertGone(t, path, "alpacon-prod-east")
@@ -467,7 +467,7 @@ func TestKubeLogoutSaysNothingWhenTheEffectiveContextStays(t *testing.T) {
 	second := kubeconfigWith(t, "alpacon-prod-east", [2]string{"prod-east", prodServer})
 	f := newLogoutFixture(t, nil, first, second)
 
-	result, err := kubeLogout(f.in)
+	result, err := kubeLogout(utils.Stdio, f.in)
 
 	require.NoError(t, err)
 	assert.True(t, result.CurrentContextCleared, "%+v", result)
@@ -485,7 +485,7 @@ func TestKubeLogoutChangesNothingWhenAFileCannotBeLocked(t *testing.T) {
 	defer func() { _ = held.Close() }()
 	f := newLogoutFixture(t, nil, free, locked)
 
-	_, err = kubeLogout(f.in)
+	_, err = kubeLogout(utils.Stdio, f.in)
 
 	require.ErrorIs(t, err, kubeconfig.ErrLocked)
 	assertHolds(t, free, "alpacon-prod-east")
@@ -512,7 +512,7 @@ func TestKubeLogoutHandlesAFileItCannotParse(t *testing.T) {
 			require.NoError(t, os.WriteFile(bad, []byte(tt.body), 0600))
 			f := newLogoutFixture(t, nil, bad, good)
 
-			result, err := kubeLogout(f.in)
+			result, err := kubeLogout(utils.Stdio, f.in)
 
 			if tt.wantFail {
 				require.ErrorContains(t, err, bad)
@@ -542,7 +542,7 @@ func TestKubeLogoutFinishesAfterASaveFails(t *testing.T) {
 		return ed.Save()
 	}
 
-	result, err := kubeLogout(f.in)
+	result, err := kubeLogout(utils.Stdio, f.in)
 
 	require.ErrorContains(t, err, bad)
 	require.ErrorContains(t, err, "disk full")
@@ -667,7 +667,7 @@ func TestKubeLogoutFollowsTheContextToAClusterInAnotherFile(t *testing.T) {
 	elsewhere.KubeSessionID = "k-9"
 	require.NoError(t, f.in.store.write(elsewhere))
 
-	_, err := kubeLogout(f.in)
+	_, err := kubeLogout(utils.Stdio, f.in)
 	require.NoError(t, err)
 
 	assert.NoFileExists(t, f.in.store.recordPath(elsewhere.key()))
@@ -699,7 +699,7 @@ func TestKubeLogoutFallsBackToTheLoginsRecordForAMovedServer(t *testing.T) {
 	path := kubeconfigWith(t, "other", [2]string{"prod-east", "https://moved.example.com/kube/c-1"})
 	f := newLogoutFixture(t, nil, path)
 
-	result, err := kubeLogout(f.in)
+	result, err := kubeLogout(utils.Stdio, f.in)
 	require.NoError(t, err)
 
 	assert.NoFileExists(t, f.in.store.recordPath(f.record.key()))
@@ -714,7 +714,7 @@ func TestKubeLogoutKeepsTheTokenWhenTheNamedFileLacksTheContext(t *testing.T) {
 	f := newLogoutFixture(t, nil, kubeconfigWith(t, "other"))
 	f.in.explicit = true
 
-	result, err := kubeLogout(f.in)
+	result, err := kubeLogout(utils.Stdio, f.in)
 	require.NoError(t, err)
 
 	assert.False(t, result.Found, "%+v", result)
@@ -733,7 +733,7 @@ func TestKubeLogoutDeletesARecordItCannotRead(t *testing.T) {
 	broken := store.recordPath(testKey("prod-east"))
 	require.NoError(t, os.WriteFile(broken, []byte(`{"cluster":"prod-east","channel_token":"secret","token_expired_at":"soon"}`), storeFilePerm))
 
-	result, err := kubeLogout(kubeLogoutInput{cluster: "prod-east", paths: []string{path}, store: store, workspaceURL: logoutWorkspace})
+	result, err := kubeLogout(utils.Stdio, kubeLogoutInput{cluster: "prod-east", paths: []string{path}, store: store, workspaceURL: logoutWorkspace})
 	require.NoError(t, err)
 
 	assert.True(t, result.Found, "%+v", result)
@@ -770,7 +770,7 @@ func TestKubeLogoutWarnsOfWhatItLeaves(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config")
 			require.NoError(t, os.WriteFile(path, []byte(tt.body), 0600))
 
-			result, err := kubeLogout(kubeLogoutInput{cluster: "prod-east", paths: []string{path}, store: kubeSessionStore{dir: t.TempDir()}})
+			result, err := kubeLogout(utils.Stdio, kubeLogoutInput{cluster: "prod-east", paths: []string{path}, store: kubeSessionStore{dir: t.TempDir()}})
 			require.NoError(t, err)
 
 			assert.Contains(t, warningsOf(result), tt.wantWarning)
@@ -793,7 +793,7 @@ func TestKubeLogoutDoesNotReportTheRemovedContextAsTheNewOne(t *testing.T) {
 		return ed.Save()
 	}
 
-	result, err := kubeLogout(f.in)
+	result, err := kubeLogout(utils.Stdio, f.in)
 
 	require.ErrorContains(t, err, "disk full")
 	assert.Equal(t, "alpacon-prod-east", result.EffectiveContext)
@@ -817,7 +817,7 @@ func TestKubeLogoutReportsATokenItCouldNotDelete(t *testing.T) {
 	require.NoError(t, os.Chmod(f.in.store.dir, 0500))
 	t.Cleanup(func() { _ = os.Chmod(f.in.store.dir, storeDirPerm) })
 
-	result, err := kubeLogout(f.in)
+	result, err := kubeLogout(utils.Stdio, f.in)
 
 	require.ErrorContains(t, err, "the saved token for prod-east was not deleted")
 	assert.True(t, result.Found, "%+v", result)

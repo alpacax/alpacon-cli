@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclCommandListCmd = newAclCommandListCmd(client.NewAlpaconAPIClient)
+var aclCommandListCmd = newAclCommandListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAclCommandListCmd(newClient clientFactory) *cobra.Command {
+func newAclCommandListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls TOKEN",
 		Aliases: []string{"list"},
@@ -19,12 +19,12 @@ func newAclCommandListCmd(newClient clientFactory) *cobra.Command {
   alpacon token acl command list my-api-token`,
 		Args: cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runCommandAclList(cmd, args, newClient)
+			return runCommandAclList(ios, cmd, args, newClient)
 		}),
 	}
 }
 
-func runCommandAclList(_ *cobra.Command, args []string, newClient clientFactory) error {
+func runCommandAclList(ios *utils.IOStreams, _ *cobra.Command, args []string, newClient clientFactory) error {
 	tokenID := args[0]
 
 	alpaconClient, err := newClient()
@@ -42,5 +42,5 @@ func runCommandAclList(_ *cobra.Command, args []string, newClient clientFactory)
 		return utils.NewExitError("Failed to retrieve command ACLs: %v.", err)
 	}
 
-	return utils.PrintTable(acls)
+	return ios.PrintTable(acls)
 }

@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workSessionUseCmd = newWorkSessionUseCmd(client.NewAlpaconAPIClient)
+var workSessionUseCmd = newWorkSessionUseCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkSessionUseCmd(newClient clientFactory) *cobra.Command {
+func newWorkSessionUseCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var unsetActiveWorkSession bool
 
 	cmd := &cobra.Command{
@@ -32,29 +32,29 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 				// A missing config, workspace, or entry counts as already unset, so --unset never fails
 				// on it.
 				if cur, err := config.GetActiveWorkSession(); err != nil || cur == "" {
-					if utils.OutputFormat == utils.OutputFormatJSON {
-						return printWorkSessionMutationJSON(workSessionMutationOutput{
+					if ios.IsJSON() {
+						return printWorkSessionMutationJSON(ios, workSessionMutationOutput{
 							OK:                true,
 							Operation:         opUnset,
 							Message:           "No active work-session to unset.",
 							ActiveWorksession: nil,
 						})
 					}
-					utils.CliInfo("No active work-session to unset.")
+					ios.Info("No active work-session to unset.")
 					return nil
 				}
 				if err := RunUnset(); err != nil {
 					return utils.NewEnvelopeExitError(opUnset, err, "%s", err)
 				}
-				if utils.OutputFormat == utils.OutputFormatJSON {
-					return printWorkSessionMutationJSON(workSessionMutationOutput{
+				if ios.IsJSON() {
+					return printWorkSessionMutationJSON(ios, workSessionMutationOutput{
 						OK:                true,
 						Operation:         opUnset,
 						Message:           "Active work-session cleared.",
 						ActiveWorksession: nil,
 					})
 				}
-				utils.CliSuccess("Active work-session cleared.")
+				ios.Success("Active work-session cleared.")
 				return nil
 			}
 
@@ -73,11 +73,11 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 				return utils.NewEnvelopeExitError(opUse, err, "%s", err)
 			}
 			message := activeWorkSessionSetMessage("", ws.ID, ws.Description)
-			if utils.OutputFormat == utils.OutputFormatJSON {
+			if ios.IsJSON() {
 				active := ws.ID
-				return printWorkSessionMutationJSON(newWorkSessionMutationOutput(opUse, message, ws, &active))
+				return printWorkSessionMutationJSON(ios, newWorkSessionMutationOutput(opUse, message, ws, &active))
 			}
-			utils.CliSuccess("%s", message)
+			ios.Success("%s", message)
 			return nil
 		}),
 	}

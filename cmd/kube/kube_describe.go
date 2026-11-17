@@ -15,7 +15,7 @@ type describeRow struct {
 	Value string `table:"Value"`
 }
 
-func newKubeDescribeCmd(newClient clientFactory) *cobra.Command {
+func newKubeDescribeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "describe CLUSTER",
 		Aliases: []string{"desc"},
@@ -44,12 +44,12 @@ names and status and tags as the server stores them.`,
 				return utils.NewExitError("Failed to retrieve the cluster: %s.", err)
 			}
 
-			if utils.OutputFormat == utils.OutputFormatJSON {
+			if ios.IsJSON() {
 				body, err := kubernetes.GetClusterDetailRaw(ac, clusterID)
 				if err != nil {
 					return utils.NewExitError("Failed to retrieve the cluster: %s.", err)
 				}
-				return utils.PrintJson(body)
+				return ios.PrintJson(body)
 			}
 
 			cluster, err := kubernetes.GetClusterDetail(ac, clusterID)
@@ -57,7 +57,7 @@ names and status and tags as the server stores them.`,
 				return utils.NewExitError("Failed to retrieve the cluster: %s.", err)
 			}
 
-			return utils.PrintTable(describeRows(cluster, kubernetes.ResolveGroupNames(ac, cluster.Groups), time.Local))
+			return ios.PrintTable(describeRows(cluster, kubernetes.ResolveGroupNames(ac, cluster.Groups), time.Local))
 		}),
 	}
 }

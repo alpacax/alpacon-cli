@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var revokeDetailCmd = newRevokeDetailCmd(client.NewAlpaconAPIClient)
+var revokeDetailCmd = newRevokeDetailCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newRevokeDetailCmd(newClient clientFactory) *cobra.Command {
+func newRevokeDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "describe REQUEST_ID",
 		Aliases: []string{"desc"},
@@ -36,7 +36,7 @@ func newRevokeDetailCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the revoke request details: %s.", err)
 			}
 
-			return utils.PrintJson(requestDetail)
+			return ios.PrintJson(requestDetail)
 		}),
 	}
 }

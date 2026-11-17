@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var restartAgentCmd = newRestartAgentCmd(client.NewAlpaconAPIClient)
+var restartAgentCmd = newRestartAgentCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newRestartAgentCmd(newClient clientFactory) *cobra.Command {
+func newRestartAgentCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "restart SERVER",
 		Short: "Restart the Alpamon agent on a server",
@@ -29,7 +29,7 @@ func newRestartAgentCmd(newClient clientFactory) *cobra.Command {
 			yes, _ := cmd.Flags().GetBool("yes")
 			force, _ := cmd.Flags().GetBool("force")
 			return servercmd.RunDisruptiveServerAction(
-				newClient,
+				ios, newClient,
 				args[0],
 				server.ActionRestartAgent,
 				"Restart the agent on server '%s'?",

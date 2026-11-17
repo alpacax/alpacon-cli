@@ -7,6 +7,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -75,7 +76,7 @@ func TestNoteLsParsesFlags(t *testing.T) {
 func TestNoteLsTailZeroExitsWithUsageErrorCode(t *testing.T) {
 	t.Parallel()
 
-	err := runNoteList(cmdtest.NoClient, 0, "", false)
+	err := runNoteList(utils.Stdio, cmdtest.NoClient, 0, "", false)
 
 	var exitErr *utils.ExitError
 	require.ErrorAs(t, err, &exitErr)
@@ -85,13 +86,13 @@ func TestNoteLsTailZeroExitsWithUsageErrorCode(t *testing.T) {
 	assert.Contains(t, stderr.String(), "--tail must be a positive integer.")
 }
 
-// Serial: it captures stdout and sets utils.OutputFormat.
 func TestNoteLsPrintsTheNotes(t *testing.T) {
+	t.Parallel()
 	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
 		"GET /api/servers/notes/": {Status: http.StatusOK, Body: `{"count": 1, "results": [{"id": "550e8400-e29b-41d4-a716-446655440000", "server": {"name": "my-server"}, "author": {"name": "alice"}, "content": "rotate the disk", "pinned": true, "added_at": "2026-11-01T09:00:00Z"}]}`},
 	})
 
-	stdout, stderr, code := cmdtest.RunJSON(t, newNoteListCmd(ts.Factory()))
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newNoteListCmd(ts.Factory(), ios) })
 
 	assert.Equal(t, 0, code, stderr)
 	assert.Contains(t, stdout, `"rotate the disk"`)
@@ -118,7 +119,7 @@ func TestNoteLsFailsWithExit1(t *testing.T) {
 				}).Factory()
 			}
 
-			failure, code := cmdtest.Run(newNoteListCmd(newClient))
+			failure, code := cmdtest.Run(newNoteListCmd(newClient, utils.Stdio))
 
 			assert.Equal(t, utils.ExitCodeGeneralError, code)
 			assert.Contains(t, failure, tt.want)

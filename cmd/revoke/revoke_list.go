@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var revokeListCmd = newRevokeListCmd(client.NewAlpaconAPIClient)
+var revokeListCmd = newRevokeListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newRevokeListCmd(newClient clientFactory) *cobra.Command {
+func newRevokeListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -36,7 +36,7 @@ func newRevokeListCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to get revoke requests: %s.", err)
 			}
 
-			return utils.PrintTable(requestList)
+			return ios.PrintTable(requestList)
 		}),
 	}
 	cmd.Flags().String("status", "", "Filter by status (requested, revoking, revoked, failed, denied, canceled)")

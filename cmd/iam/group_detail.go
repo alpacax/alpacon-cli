@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var groupDetailCmd = newGroupDetailCmd(client.NewAlpaconAPIClient)
+var groupDetailCmd = newGroupDetailCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newGroupDetailCmd(newClient clientFactory) *cobra.Command {
+func newGroupDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "describe GROUP",
 		Aliases: []string{"desc"},
@@ -40,7 +40,7 @@ func newGroupDetailCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the group details: %s.", err)
 			}
 
-			return utils.PrintJson(groupDetail)
+			return ios.PrintJson(groupDetail)
 		}),
 	}
 }

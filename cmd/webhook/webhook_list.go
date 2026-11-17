@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var webhookListCmd = newWebhookListCmd(client.NewAlpaconAPIClient)
+var webhookListCmd = newWebhookListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWebhookListCmd(newClient clientFactory) *cobra.Command {
+func newWebhookListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -32,7 +32,7 @@ func newWebhookListCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to get webhooks: %s.", err)
 			}
 
-			return utils.PrintTable(webhookList)
+			return ios.PrintTable(webhookList)
 		}),
 	}
 }

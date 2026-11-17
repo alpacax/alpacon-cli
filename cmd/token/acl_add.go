@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclAddCmd = newAclAddCmd(client.NewAlpaconAPIClient)
+var aclAddCmd = newAclAddCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAclAddCmd(newClient clientFactory) *cobra.Command {
+func newAclAddCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "add [TOKEN]",
 		Short:      "Add a command ACL rule to a token",
@@ -18,7 +18,7 @@ func newAclAddCmd(newClient clientFactory) *cobra.Command {
 		Hidden:     true,
 		Args:       cobra.RangeArgs(0, 1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runLegacyAclAdd(cmd, args, newClient)
+			return runLegacyAclAdd(ios, cmd, args, newClient)
 		}),
 	}
 	cmd.Flags().StringP("token", "t", "", "Token name or ID")
@@ -28,7 +28,7 @@ func newAclAddCmd(newClient clientFactory) *cobra.Command {
 	return cmd
 }
 
-func runLegacyAclAdd(cmd *cobra.Command, args []string, newClient clientFactory) error {
+func runLegacyAclAdd(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient clientFactory) error {
 	tokenFlag, _ := cmd.Flags().GetString("token")
 	var tokenArg string
 	switch {
@@ -66,6 +66,6 @@ func runLegacyAclAdd(cmd *cobra.Command, args []string, newClient clientFactory)
 		return utils.NewExitError("Failed to add the command ACL: %v.", err)
 	}
 
-	utils.CliSuccess("Command ACL added to token %s: %s", tokenArg, command)
+	ios.Success("Command ACL added to token %s: %s", tokenArg, command)
 	return nil
 }

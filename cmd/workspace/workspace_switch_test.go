@@ -15,6 +15,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,10 +47,9 @@ func TestFetchKubernetesSurface(t *testing.T) {
 			}))
 			defer ts.Close()
 
-			var got bool
-			_, stderr := testutil.CaptureOutput(t, func() {
-				got = fetchKubernetesSurface(ts.URL, "next", false)
-			})
+			ios, _, errOut := utils.TestIOStreams()
+			got := fetchKubernetesSurface(ios, ts.URL, "next", false)
+			stderr := errOut.String()
 
 			assert.Equal(t, tt.expected, got)
 			if tt.expectWarning != "" {

@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var tokenScopesCmd = newTokenScopesCmd(client.NewAlpaconAPIClient)
+var tokenScopesCmd = newTokenScopesCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newTokenScopesCmd(newClient clientFactory) *cobra.Command {
+func newTokenScopesCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "scopes",
 		Short: "List available scopes for API tokens",
@@ -29,7 +29,7 @@ func newTokenScopesCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve available scopes: %s.", err)
 			}
 
-			if utils.OutputFormat != utils.OutputFormatJSON {
+			if !ios.IsJSON() {
 				for i := range scopes {
 					if scopes[i].Actions == "" {
 						scopes[i].Actions = "(matches all scopes)"
@@ -37,7 +37,7 @@ func newTokenScopesCmd(newClient clientFactory) *cobra.Command {
 				}
 			}
 
-			return utils.PrintTable(scopes)
+			return ios.PrintTable(scopes)
 		}),
 	}
 }

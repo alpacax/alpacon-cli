@@ -18,7 +18,6 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/alpacax/alpacon-cli/pkg/kubeconfig"
-	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -537,7 +536,9 @@ func TestWaitForWorkSessionReturnsARefusalInsteadOfExiting(t *testing.T) {
 			in := kubeLoginInput{cluster: "prod-east", waitTimeout: time.Minute}
 
 			var err error
-			_, stderr := testutil.CaptureOutput(t, func() { _, err = waitForWorkSession(ac, in, ws, true) })
+			ios, _, errOut := utils.TestIOStreams()
+			_, err = waitForWorkSession(ios, ac, in, ws, true)
+			stderr := errOut.String()
 
 			var exitErr *utils.ExitError
 			require.ErrorAs(t, err, &exitErr)

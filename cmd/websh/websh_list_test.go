@@ -3,6 +3,7 @@ package websh
 import (
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -42,7 +43,7 @@ func TestWebshLsRoutesAndParsesFlags(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			cmd, flags, err := newCommand(noClient).Find(tt.args)
+			cmd, flags, err := newCommand(noClient, utils.Stdio).Find(tt.args)
 			require.NoError(t, err)
 			require.Equal(t, "ls", cmd.Name())
 

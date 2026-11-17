@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workspaceAccessControlUpdateCmd = newWorkspaceAccessControlUpdateCmd(client.NewAlpaconAPIClient)
+var workspaceAccessControlUpdateCmd = newWorkspaceAccessControlUpdateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkspaceAccessControlUpdateCmd(newClient clientFactory) *cobra.Command {
+func newWorkspaceAccessControlUpdateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "update",
 		Short: "Update workspace access control settings",
@@ -46,7 +46,7 @@ from the CLI; edits that tighten these settings or leave them unchanged are save
 
 			data, err := workspace.EditAccessControl(alpaconClient)
 			if err != nil {
-				if utils.ReportNoChanges(err) {
+				if ios.ReportNoChanges(err) {
 					return nil
 				}
 				return utils.NewExitError("Failed to prepare access control update: %s.", err)
@@ -67,8 +67,8 @@ from the CLI; edits that tighten these settings or leave them unchanged are save
 				}
 			}
 
-			utils.CliSuccess("Access control settings updated.")
-			return utils.PrintJson(accessControlDetail)
+			ios.Success("Access control settings updated.")
+			return ios.PrintJson(accessControlDetail)
 		}),
 	}
 }

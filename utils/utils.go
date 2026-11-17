@@ -60,7 +60,7 @@ type editFile interface {
 // plain mode (no TTY or NO_COLOR) they are █ glyphs. The ▄ and ▀ edge half-blocks stay in both
 // modes because they define the shape. Brand colors: primary #27AAE1, secondary #58595B.
 func ShowLogo(rightLines []string) {
-	useColor := os.Getenv("NO_COLOR") == "" && term.IsTerminal(int(os.Stderr.Fd()))
+	useColor := Stdio.ColorEnabled
 
 	var p, pb, s, a, b, r string
 	if useColor {
@@ -641,11 +641,14 @@ func SanitizeTerminalBlockKeepingTabs(s string) string {
 
 // ReportNoChanges prints the no-change notice and returns true when err is ErrNoChanges; the caller
 // then ends on exit 0.
-func ReportNoChanges(err error) bool {
+func ReportNoChanges(err error) bool { return Stdio.ReportNoChanges(err) }
+
+// ReportNoChanges is the package-level ReportNoChanges on s.
+func (s *IOStreams) ReportNoChanges(err error) bool {
 	if !errors.Is(err, ErrNoChanges) {
 		return false
 	}
-	CliInfo("No changes made. Aborting update.")
+	s.Info("No changes made. Aborting update.")
 	return true
 }
 

@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclFileDeleteCmd = newAclFileDeleteCmd(client.NewAlpaconAPIClient)
+var aclFileDeleteCmd = newAclFileDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAclFileDeleteCmd(newClient clientFactory) *cobra.Command {
+func newAclFileDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete ACL_ID",
 		Aliases: []string{"rm"},
@@ -18,14 +18,14 @@ func newAclFileDeleteCmd(newClient clientFactory) *cobra.Command {
   alpacon token acl file rm 550e8400-e29b-41d4-a716-446655440000`,
 		Args: cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runFileAclDelete(cmd, args, newClient)
+			return runFileAclDelete(ios, cmd, args, newClient)
 		}),
 	}
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 	return cmd
 }
 
-func runFileAclDelete(cmd *cobra.Command, args []string, newClient clientFactory) error {
+func runFileAclDelete(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient clientFactory) error {
 	aclID := args[0]
 	yes, _ := cmd.Flags().GetBool("yes")
 
@@ -44,6 +44,6 @@ func runFileAclDelete(cmd *cobra.Command, args []string, newClient clientFactory
 		return utils.NewExitError("Failed to delete file ACL: %v.", err)
 	}
 
-	utils.CliSuccess("File ACL deleted: %s", aclID)
+	ios.Success("File ACL deleted: %s", aclID)
 	return nil
 }

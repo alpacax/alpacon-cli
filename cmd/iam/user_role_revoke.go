@@ -12,9 +12,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userRoleRevokeCmd = newUserRoleRevokeCmd(client.NewAlpaconAPIClient)
+var userRoleRevokeCmd = newUserRoleRevokeCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUserRoleRevokeCmd(newClient clientFactory) *cobra.Command {
+func newUserRoleRevokeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "revoke USER ROLE",
 		Short: "Revoke a workspace role from a user",
@@ -69,7 +69,7 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 			// Nothing-to-do is checked before the invariant guard: revoking an unheld role must succeed.
 			targets := plannedRevocations(bindings, role.Name, cascade)
 			if len(targets) == 0 {
-				utils.CliInfo("%s does not hold %s workspace-wide. Nothing to do.", subj.Label, role.Name)
+				ios.Info("%s does not hold %s workspace-wide. Nothing to do.", subj.Label, role.Name)
 				return nil
 			}
 
@@ -82,14 +82,14 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 			// Same ordering as grant: --dry-run exists to show these before the write.
 			if rbac.IsPlatformTier(role.Name) {
 				if role.Name == rbac.RoleSuperuser && !cascade && rbac.HoldsWorkspaceRole(bindings, rbac.RoleAdmin) {
-					utils.CliInfo("The companion admin binding stays, so %s remains a workspace administrator; --cascade removes both.", subj.Label)
+					ios.Info("The companion admin binding stays, so %s remains a workspace administrator; --cascade removes both.", subj.Label)
 				}
-				warnMissingReason(reason)
+				warnMissingReason(ios, reason)
 			}
 
 			if dryRun {
 				for _, target := range targets {
-					utils.CliInfo("Would revoke %s from %s (binding %s).", target.Role.Name, subj.Label, target.ID)
+					ios.Info("Would revoke %s from %s (binding %s).", target.Role.Name, subj.Label, target.ID)
 				}
 				return nil
 			}
@@ -115,19 +115,19 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 					}
 					if index > 0 {
 						resume := utils.NextAction{Command: fmt.Sprintf("alpacon user role revoke %s %s", args[0], target.Role.Name)}
-						utils.CliWarning("Revoked %s, but %s was left in place.", targets[index-1].Role.Name, target.Role.Name)
-						utils.CliInfo("To finish: %s", resume.PlainText())
+						ios.Warning("Revoked %s, but %s was left in place.", targets[index-1].Role.Name, target.Role.Name)
+						ios.Info("To finish: %s", resume.PlainText())
 					}
 					return utils.NewExitError("Failed to revoke %s from %s: %s.", target.Role.Name, subj.Label, describeRBACError(alpaconClient, gateRoleWrite, err))
 				}
 			}
 
-			utils.CliSuccess("Revoked %s from %s.", describeTargets(targets), subj.Label)
+			ios.Success("Revoked %s from %s.", describeTargets(targets), subj.Label)
 			if role.Name == rbac.RoleSuperuser && !cascade && rbac.HoldsWorkspaceRole(bindings, rbac.RoleAdmin) {
 				next := utils.NextAction{Command: fmt.Sprintf("alpacon user role revoke %s admin", args[0])}
-				utils.CliInfo("The companion admin binding remains, so %s is still a workspace administrator. To remove it too: %s", subj.Label, next.PlainText())
+				ios.Info("The companion admin binding remains, so %s is still a workspace administrator. To remove it too: %s", subj.Label, next.PlainText())
 			}
-			reportWorkspaceRoles(alpaconClient, subj.ID, subj.Label)
+			reportWorkspaceRoles(ios, alpaconClient, subj.ID, subj.Label)
 			return nil
 		}),
 	}

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/client"
@@ -13,9 +12,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userCreateCmd = newUserCreateCmd(client.NewAlpaconAPIClient)
+var userCreateCmd = newUserCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUserCreateCmd(newClient clientFactory) *cobra.Command {
+func newUserCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "create",
 		Short: "Create a new user",
@@ -60,8 +59,8 @@ func newUserCreateCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to create the new user: %s", err)
 			}
 
-			utils.CliSuccess("User created: %s", userRequest.Username)
-			if err := printGeneratedPassword(os.Stdout, utils.CliInfo, password); err != nil {
+			ios.Success("User created: %s", userRequest.Username)
+			if err := printGeneratedPassword(ios.Out, ios.Info, password); err != nil {
 				return utils.NewExitError("The user was created, but %s. Set a new password for the user before they can log in.", err)
 			}
 			return nil

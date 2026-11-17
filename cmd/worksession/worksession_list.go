@@ -55,9 +55,9 @@ func markActiveFor(ac *client.AlpaconClient, sessions []wsapi.WorkSessionAttribu
 	MarkActive(sessions, activeUUID)
 }
 
-var workSessionListCmd = newWorkSessionListCmd(client.NewAlpaconAPIClient)
+var workSessionListCmd = newWorkSessionListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkSessionListCmd(newClient clientFactory) *cobra.Command {
+func newWorkSessionListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var (
 		statusFilter    string
 		requesterFilter string
@@ -104,7 +104,7 @@ func newWorkSessionListCmd(newClient clientFactory) *cobra.Command {
 
 			markActiveFor(ac, sessions)
 
-			return utils.PrintTable(sessions)
+			return ios.PrintTable(sessions)
 		}),
 	}
 	cmd.Flags().StringVar(&statusFilter, "status", "active", "Filter by status (pending, approved, active, completed, rejected, expired, revoked, cancelled); use \"all\" for any status")

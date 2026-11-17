@@ -22,14 +22,14 @@ func TestPromptPaths_ReturnTheNoInputFailureOnClosedStdin(t *testing.T) {
 		run  func() error
 	}{
 		{name: "member add", run: func() error {
-			cmd := newMemberAddCmd(cmdtest.NoClient)
+			cmd := newMemberAddCmd(cmdtest.NoClient, utils.Stdio)
 			return cmd.RunE(cmd, nil)
 		}},
 		{name: "member delete", run: func() error {
-			cmd := newMemberDeleteCmd(cmdtest.NoClient)
+			cmd := newMemberDeleteCmd(cmdtest.NoClient, utils.Stdio)
 			return cmd.RunE(cmd, nil)
 		}},
-		{name: "group create", run: func() error { _, err := promptForGroup(nil, nil); return err }},
+		{name: "group create", run: func() error { _, err := promptForGroup(utils.Stdio, nil, nil); return err }},
 		{name: "user create", run: func() error { _, err := promptForUser(nil); return err }},
 	}
 

@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var noteCreateCmd = newNoteCreateCmd(client.NewAlpaconAPIClient)
+var noteCreateCmd = newNoteCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newNoteCreateCmd(newClient clientFactory) *cobra.Command {
+func newNoteCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var noteRequest note.NoteCreateRequest
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -53,7 +53,7 @@ func newNoteCreateCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to create the new note: %s.", err)
 			}
 
-			utils.CliSuccess("Note created on server %s", noteRequest.Server)
+			ios.Success("Note created on server %s", noteRequest.Server)
 			return nil
 		}),
 	}

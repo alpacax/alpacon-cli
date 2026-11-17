@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var authorityDetailCmd = newAuthorityDetailCmd(client.NewAlpaconAPIClient)
+var authorityDetailCmd = newAuthorityDetailCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAuthorityDetailCmd(newClient clientFactory) *cobra.Command {
+func newAuthorityDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "describe AUTHORITY",
 		Aliases: []string{"desc"},
@@ -41,7 +41,7 @@ func newAuthorityDetailCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the authority details: %s.", err)
 			}
 
-			return utils.PrintJson(authorityDetail)
+			return ios.PrintJson(authorityDetail)
 		}),
 	}
 }

@@ -15,7 +15,6 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -49,12 +48,6 @@ func TestPrintGuideFields_StripsControlSequences(t *testing.T) {
 	assert.Equal(t, 3, strings.Count(got, "\n"), "one line per field")
 	assert.Contains(t, got, "  Platform : Debian\n")
 	assert.Contains(t, got, "  Server   : web-01URL      : https://evil.example.com\n")
-}
-
-func captureGuideStderr(t *testing.T, fn func()) string {
-	t.Helper()
-	_, stderr := testutil.CaptureOutput(t, fn)
-	return stderr
 }
 
 // The guide strings are what the operator pastes into a root shell, so the
@@ -93,7 +86,7 @@ func TestPrintGuideCommand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			printGuideCommand(&buf, tt.input)
+			printGuideCommand(utils.Stdio, &buf, tt.input)
 
 			got := buf.String()
 			assert.True(t, strings.HasSuffix(got, tt.wantLine), "the command must be the last thing printed: %q", got)
@@ -109,6 +102,7 @@ func TestPrintGuideCommand(t *testing.T) {
 // Every command the guide echoes must be sanitized; one added to the response and
 // printed directly would slip past unnoticed.
 func TestDisplayAnsibleGuideFromJSON_WarnsOnEveryAlteredField(t *testing.T) {
+	t.Parallel()
 	fields := []struct {
 		name  string
 		build func(string) server.AnsibleGuideJsonResponse
@@ -131,9 +125,10 @@ func TestDisplayAnsibleGuideFromJSON_WarnsOnEveryAlteredField(t *testing.T) {
 	}
 	for _, f := range fields {
 		t.Run(f.name, func(t *testing.T) {
-			got := captureGuideStderr(t, func() {
-				displayAnsibleGuideFromJSON(f.build("ansible-galaxy install\x1b[2Kevil"))
-			})
+			t.Parallel()
+			ios, _, errOut := utils.TestIOStreams()
+			displayAnsibleGuideFromJSON(ios, f.build("ansible-galaxy install\x1b[2Kevil"))
+			got := errOut.String()
 
 			assert.NotContains(t, got, "\x1b[2K")
 			assert.Contains(t, got, "Warning")
@@ -142,6 +137,7 @@ func TestDisplayAnsibleGuideFromJSON_WarnsOnEveryAlteredField(t *testing.T) {
 }
 
 func TestDisplayGuideFromJSON_WarnsOnEveryAlteredField(t *testing.T) {
+	t.Parallel()
 	fields := []struct {
 		name  string
 		build func(string) server.RegistrationMethodGuideJsonResponse
@@ -155,9 +151,10 @@ func TestDisplayGuideFromJSON_WarnsOnEveryAlteredField(t *testing.T) {
 	}
 	for _, f := range fields {
 		t.Run(f.name, func(t *testing.T) {
-			got := captureGuideStderr(t, func() {
-				displayGuideFromJSON(f.build("curl real.example.com\x1b[2Kevil"))
-			})
+			t.Parallel()
+			ios, _, errOut := utils.TestIOStreams()
+			displayGuideFromJSON(ios, f.build("curl real.example.com\x1b[2Kevil"))
+			got := errOut.String()
 
 			assert.NotContains(t, got, "\x1b[2K")
 			assert.Contains(t, got, "Warning")
@@ -166,12 +163,13 @@ func TestDisplayGuideFromJSON_WarnsOnEveryAlteredField(t *testing.T) {
 }
 
 func TestDisplayGuideFromJSON_StaysQuietOnACleanGuide(t *testing.T) {
-	got := captureGuideStderr(t, func() {
-		displayGuideFromJSON(server.RegistrationMethodGuideJsonResponse{
-			InstallCommands: []string{"curl -fsSL https://demo.alpacon.io/i.sh | sudo bash"},
-			RegisterCommand: "alpamon register --token abc",
-		})
+	t.Parallel()
+	ios, _, errOut := utils.TestIOStreams()
+	displayGuideFromJSON(ios, server.RegistrationMethodGuideJsonResponse{
+		InstallCommands: []string{"curl -fsSL https://demo.alpacon.io/i.sh | sudo bash"},
+		RegisterCommand: "alpamon register --token abc",
 	})
+	got := errOut.String()
 
 	assert.NotContains(t, got, "Warning")
 	assert.Contains(t, got, "curl -fsSL https://demo.alpacon.io/i.sh | sudo bash\n")
@@ -184,7 +182,7 @@ func TestResolvePlatform_AcceptsSuseFromFlag(t *testing.T) {
 	cmd.Flags().StringP("platform", "p", "", "")
 	require.NoError(t, cmd.Flags().Parse([]string{"--platform", "suse"}))
 
-	got, err := resolvePlatform(cmd, "token-install")
+	got, err := resolvePlatform(utils.Stdio, cmd, "token-install")
 
 	require.NoError(t, err)
 	assert.Equal(t, "suse", got)
@@ -260,7 +258,7 @@ func TestPromptPlatform(t *testing.T) {
 			t.Parallel()
 			var prompts []string
 			i := 0
-			got, err := promptPlatform(tt.allowed, strings.Join(tt.allowed, ", "), func(p string) (string, error) {
+			got, err := promptPlatform(utils.Stdio, tt.allowed, strings.Join(tt.allowed, ", "), func(p string) (string, error) {
 				prompts = append(prompts, p)
 				in := tt.inputs[i]
 				i++
@@ -279,7 +277,7 @@ func TestPromptPlatform_ReturnsPromptFailureInsteadOfAskingAgain(t *testing.T) {
 	noInput := errors.New("no input received")
 	calls := 0
 
-	got, err := promptPlatform(validPlatforms, strings.Join(validPlatforms, ", "), func(string) (string, error) {
+	got, err := promptPlatform(utils.Stdio, validPlatforms, strings.Join(validPlatforms, ", "), func(string) (string, error) {
 		calls++
 		return "", noInput
 	})
@@ -314,7 +312,7 @@ func TestServerCreate_RejectsAnsibleSuseBeforeAnyRequest(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config.json"), cfg, 0600))
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	cmd := newServerCreateCmd(client.NewAlpaconAPIClient) // reads the expired login above
+	cmd := newServerCreateCmd(client.NewAlpaconAPIClient, utils.Stdio) // reads the expired login above
 	require.NoError(t, cmd.ParseFlags([]string{"-m", "ansible", "-p", "suse", "-t", "prod-token"}))
 
 	err = cmd.RunE(cmd, nil)

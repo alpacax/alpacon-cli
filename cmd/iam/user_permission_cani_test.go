@@ -42,7 +42,7 @@ func TestCanIQuiet_TheExitCodeIsTheAnswer(t *testing.T) {
 			defer ts.Close()
 			cmd := newUserPermissionCanICmd(func() (*client.AlpaconClient, error) {
 				return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, nil
-			})
+			}, utils.Stdio)
 			cmd.SetArgs([]string{"server:update", "-q"})
 
 			err := cmd.Execute()

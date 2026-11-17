@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var csrApproveCmd = newCsrApproveCmd(client.NewAlpaconAPIClient)
+var csrApproveCmd = newCsrApproveCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newCsrApproveCmd(newClient clientFactory) *cobra.Command {
+func newCsrApproveCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "approve CSR_ID",
 		Short: "Approve a CSR",
@@ -32,7 +32,7 @@ func newCsrApproveCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to approve the csr: %s.", err)
 			}
 
-			utils.CliSuccess("CSR approved. Run 'alpacon csr ls' to verify status.")
+			ios.Success("CSR approved. Run 'alpacon csr ls' to verify status.")
 			return nil
 		}),
 	}

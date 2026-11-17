@@ -570,7 +570,7 @@ func TestCliErrorEnvelopeWithExitNilErrorHelperProcess(t *testing.T) {
 		return
 	}
 	OutputFormat = format
-	colorEnabled = false
+	Stdio.ColorEnabled = false
 	useErr := &hintedError{code: "permission_denied", hint: sampleHint}
 	CliErrorEnvelopeWithExit("create", nil, "Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", "ws-1", useErr, "ws-1")
 }

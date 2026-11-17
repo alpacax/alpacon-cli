@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workSessionActivateCmd = newWorkSessionActivateCmd(client.NewAlpaconAPIClient)
+var workSessionActivateCmd = newWorkSessionActivateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkSessionActivateCmd(newClient clientFactory) *cobra.Command {
+func newWorkSessionActivateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "activate SESSION_ID",
 		Short:   "Activate an approved work session",
@@ -25,7 +25,7 @@ func newWorkSessionActivateCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewEnvelopeExitError(opActivate, err, "Failed to activate work session: %s.", err)
 			}
 
-			utils.CliSuccess("Work session %s activated.", args[0])
+			ios.Success("Work session %s activated.", args[0])
 			return nil
 		}),
 	}

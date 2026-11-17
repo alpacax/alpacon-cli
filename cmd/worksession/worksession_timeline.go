@@ -3,7 +3,6 @@ package worksession
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -25,9 +24,9 @@ type recordingJSON struct {
 	Status            string          `json:"status"`
 }
 
-var workSessionTimelineCmd = newWorkSessionTimelineCmd(client.NewAlpaconAPIClient)
+var workSessionTimelineCmd = newWorkSessionTimelineCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkSessionTimelineCmd(newClient clientFactory) *cobra.Command {
+func newWorkSessionTimelineCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var noRecords bool
 
 	cmd := &cobra.Command{
@@ -93,11 +92,11 @@ section out.`,
 				rows = append(rows, projectTimelineAttributes(&items[i], serverMap))
 			}
 
-			if utils.OutputFormat == utils.OutputFormatJSON {
-				return outputTimelineJSON(rows, terminals, id, serverMap)
+			if ios.IsJSON() {
+				return outputTimelineJSON(ios, rows, terminals, id, serverMap)
 			}
 
-			writer, cleanup := utils.WriteToPager()
+			writer, cleanup := ios.Pager()
 			defer cleanup()
 			printTimelineTableTo(writer, rows)
 			if len(terminals) > 0 {
@@ -182,7 +181,7 @@ func printRecordingsSectionTo(w io.Writer, terminals []wsapi.TimelineItem, sessi
 	}
 }
 
-func outputTimelineJSON(rows []wsapi.TimelineAttributes, terminals []wsapi.TimelineItem, sessionID string, serverMap map[string]string) error {
+func outputTimelineJSON(ios *utils.IOStreams, rows []wsapi.TimelineAttributes, terminals []wsapi.TimelineItem, sessionID string, serverMap map[string]string) error {
 	recEntries := make([]recordingJSON, len(terminals))
 	for i := range terminals {
 		term := &terminals[i]
@@ -201,7 +200,7 @@ func outputTimelineJSON(rows []wsapi.TimelineAttributes, terminals []wsapi.Timel
 	}
 	// Not a plain Marshal: the shared writer escapes the format and C1 runes that
 	// encoding/json leaves alone, and this output is read in a terminal too.
-	if err := utils.PrintJSONValue(os.Stdout, out); err != nil {
+	if err := utils.PrintJSONValue(ios.Out, out); err != nil {
 		return utils.NewEnvelopeExitError(opTimeline, err, "Failed to serialize timeline: %s.", err)
 	}
 	return nil

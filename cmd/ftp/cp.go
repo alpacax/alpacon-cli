@@ -21,9 +21,9 @@ import (
 // clientFactory builds the API client a command talks to.
 type clientFactory = func() (*client.AlpaconClient, error)
 
-var CpCmd = newCpCmd(client.NewAlpaconAPIClient)
+var CpCmd = newCpCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newCpCmd(newClient clientFactory) *cobra.Command {
+func newCpCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cp SOURCE... DESTINATION",
 		Short: "Copy files between local and remote locations",
@@ -136,7 +136,7 @@ This is client guidance; personal-token enforcement depends on the server versio
 					}
 				}
 				wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
-				utils.CliSuccess("Uploaded %s to %s", wrappedSrc, dest)
+				ios.Success("Uploaded %s to %s", wrappedSrc, dest)
 			} else if plan.isDownload() {
 				serverName, err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
 				if err != nil {
@@ -165,7 +165,7 @@ This is client guidance; personal-token enforcement depends on the server versio
 					}
 				}
 				wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
-				utils.CliSuccess("Downloaded %s to %s", wrappedSrc, dest)
+				ios.Success("Downloaded %s to %s", wrappedSrc, dest)
 			} else {
 				return utils.NewUsageExitError("Invalid combination of source and destination paths.\n\n" +
 					"Valid operations:\n" +

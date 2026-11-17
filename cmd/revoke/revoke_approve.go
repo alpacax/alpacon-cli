@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var revokeApproveCmd = newRevokeApproveCmd(client.NewAlpaconAPIClient)
+var revokeApproveCmd = newRevokeApproveCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newRevokeApproveCmd(newClient clientFactory) *cobra.Command {
+func newRevokeApproveCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "approve REQUEST_ID",
 		Short: "Approve a revoke request",
@@ -32,7 +32,7 @@ func newRevokeApproveCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to approve the revoke request: %s.", err)
 			}
 
-			utils.CliSuccess("Revoke request approved. Run 'alpacon revoke ls' to verify status.")
+			ios.Success("Revoke request approved. Run 'alpacon revoke ls' to verify status.")
 			return nil
 		}),
 	}

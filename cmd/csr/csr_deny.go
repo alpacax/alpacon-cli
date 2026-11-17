@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var csrDenyCmd = newCsrDenyCmd(client.NewAlpaconAPIClient)
+var csrDenyCmd = newCsrDenyCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newCsrDenyCmd(newClient clientFactory) *cobra.Command {
+func newCsrDenyCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "deny CSR_ID",
 		Short: "Deny a CSR",
@@ -32,7 +32,7 @@ func newCsrDenyCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to deny the csr: %s.", err)
 			}
 
-			utils.CliSuccess("CSR denied. Run 'alpacon csr ls' to verify status.")
+			ios.Success("CSR denied. Run 'alpacon csr ls' to verify status.")
 			return nil
 		}),
 	}

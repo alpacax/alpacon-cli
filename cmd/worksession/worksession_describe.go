@@ -15,9 +15,9 @@ type describeRow struct {
 	Value string `table:"Value"`
 }
 
-var workSessionDescribeCmd = newWorkSessionDescribeCmd(client.NewAlpaconAPIClient)
+var workSessionDescribeCmd = newWorkSessionDescribeCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkSessionDescribeCmd(newClient clientFactory) *cobra.Command {
+func newWorkSessionDescribeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "describe SESSION_ID",
 		Aliases: []string{"desc"},
@@ -31,12 +31,12 @@ func newWorkSessionDescribeCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewEnvelopeExitError(opDescribe, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
 
-			if utils.OutputFormat == utils.OutputFormatJSON {
+			if ios.IsJSON() {
 				body, err := wsapi.GetWorkSessionRaw(ac, args[0])
 				if err != nil {
 					return utils.NewEnvelopeExitError(opDescribe, err, "Failed to retrieve work session: %s.", err)
 				}
-				return utils.PrintJson(body)
+				return ios.PrintJson(body)
 			}
 
 			session, err := wsapi.GetWorkSession(ac, args[0])
@@ -77,15 +77,15 @@ func newWorkSessionDescribeCmd(newClient clientFactory) *cobra.Command {
 				{"Added at", session.AddedAt.Local().Format("2006-01-02 15:04")},
 			}
 
-			if err := utils.PrintTable(rows); err != nil {
+			if err := ios.PrintTable(rows); err != nil {
 				return err
 			}
 
 			if block := formatAdjustments(session.Adjustments); block != "" {
-				fmt.Printf("\nAdjustments:\n%s\n", block)
+				fmt.Fprintf(ios.Out, "\nAdjustments:\n%s\n", block)
 			}
 			if block := formatRecommendations(session.Recommendations); block != "" {
-				fmt.Printf("\nRecommendations:\n%s\n", block)
+				fmt.Fprintf(ios.Out, "\nRecommendations:\n%s\n", block)
 			}
 			return nil
 		}),

@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var noteUpdateCmd = newNoteUpdateCmd(client.NewAlpaconAPIClient)
+var noteUpdateCmd = newNoteUpdateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newNoteUpdateCmd(newClient clientFactory) *cobra.Command {
+func newNoteUpdateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "update NOTE_ID",
 		Short: "Update a note",
@@ -32,14 +32,14 @@ func newNoteUpdateCmd(newClient clientFactory) *cobra.Command {
 
 			noteDetail, err := note.UpdateNote(alpaconClient, noteID)
 			if err != nil {
-				if utils.ReportNoChanges(err) {
+				if ios.ReportNoChanges(err) {
 					return nil
 				}
 				return utils.NewExitError("Failed to update the note: %s.", err)
 			}
 
-			utils.CliSuccess("Note updated: %s", noteID)
-			return utils.PrintJson(noteDetail)
+			ios.Success("Note updated: %s", noteID)
+			return ios.PrintJson(noteDetail)
 		}),
 	}
 }

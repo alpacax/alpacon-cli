@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var pythonPackageUploadCmd = newPythonPackageUploadCmd(client.NewAlpaconAPIClient)
+var pythonPackageUploadCmd = newPythonPackageUploadCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newPythonPackageUploadCmd(newClient clientFactory) *cobra.Command {
+func newPythonPackageUploadCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "upload FILE",
 		Short: "Upload a Python package to Alpacon",
@@ -35,7 +35,7 @@ func newPythonPackageUploadCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to upload the Python package to Alpacon: %s.", err)
 			}
 
-			utils.CliSuccess("Package uploaded: %s", file)
+			ios.Success("Package uploaded: %s", file)
 			return nil
 		}),
 	}

@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userDeleteCmd = newUserDeleteCmd(client.NewAlpaconAPIClient)
+var userDeleteCmd = newUserDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUserDeleteCmd(newClient clientFactory) *cobra.Command {
+func newUserDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete USER",
 		Aliases: []string{"rm"},
@@ -52,7 +52,7 @@ func newUserDeleteCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to delete the user: %s", err)
 			}
 
-			utils.CliSuccess("User deleted: %s", userName)
+			ios.Success("User deleted: %s", userName)
 			return nil
 		}),
 	}

@@ -6,16 +6,17 @@ import (
 
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
 
-// Serial: it captures stdout and sets utils.OutputFormat.
 func TestTokenListPrintsWhatTheServerReturned(t *testing.T) {
+	t.Parallel()
 	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
 		"GET /api/auth/tokens/": {Status: http.StatusOK, Body: `{"count": 1, "results": [{"id": "550e8400-e29b-41d4-a716-446655440000", "name": "my-api-token", "enabled": true, "updated_at": "2026-11-01T09:00:00Z", "expires_at": "2026-11-01T09:00:00Z", "scopes": ["server:read"]}]}`},
 	})
 
-	stdout, stderr, code := cmdtest.RunJSON(t, newTokenListCmd(ts.Factory()))
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newTokenListCmd(ts.Factory(), ios) })
 
 	assert.Equal(t, 0, code, stderr)
 	assert.Contains(t, stdout, `"550e8400-e29b-41d4-a716-446655440000"`)
@@ -45,7 +46,7 @@ func TestTokenListFailsWithExit1(t *testing.T) {
 				}).Factory()
 			}
 
-			failure, code := cmdtest.Run(newTokenListCmd(newClient))
+			failure, code := cmdtest.Run(newTokenListCmd(newClient, utils.Stdio))
 
 			assert.Equal(t, utils.ExitCodeGeneralError, code)
 			assert.Contains(t, failure, tt.want)

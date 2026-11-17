@@ -12,6 +12,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -59,7 +60,7 @@ func TestPollForApproval_SurvivesATokenExpiryMidWait(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	ac.SetAccessToken("stale")
 
-	session, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, 5*time.Second)
+	session, err := WaitForApproval(utils.Stdio, ac, "ws-uuid", false, time.Millisecond, 5*time.Second)
 
 	require.NoError(t, err)
 	require.NotNil(t, session)

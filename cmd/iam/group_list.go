@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var groupListCmd = newGroupListCmd(client.NewAlpaconAPIClient)
+var groupListCmd = newGroupListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newGroupListCmd(newClient clientFactory) *cobra.Command {
+func newGroupListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -33,7 +33,7 @@ func newGroupListCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the group list: %s.", err)
 			}
 
-			return utils.PrintTable(groupList)
+			return ios.PrintTable(groupList)
 		}),
 	}
 }

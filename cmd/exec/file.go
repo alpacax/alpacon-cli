@@ -165,7 +165,7 @@ func newFileExecution(spec FileExecArgs, content string) event.FileExecution {
 // uploadFile writes file.Content to its --file path on the server as the run-as account and group,
 // so what lands there is what the reviewer sees. It returns the failure's exit, since a script that
 // was not written must not be submitted.
-func uploadFile(stderr io.Writer, ac *client.AlpaconClient, parsed RemoteExecArgs, file event.FileExecution, workSessionID, authMethod string) error {
+func uploadFile(ios *utils.IOStreams, stderr io.Writer, ac *client.AlpaconClient, parsed RemoteExecArgs, file event.FileExecution, workSessionID, authMethod string) error {
 	upload := func() error {
 		return ftpapi.UploadContentAs(ac, parsed.Server, file.Path, []byte(file.Content),
 			parsed.Username, parsed.Groupname, workSessionID, parsed.File.Overwrite)
@@ -190,18 +190,18 @@ func uploadFile(stderr io.Writer, ac *client.AlpaconClient, parsed RemoteExecArg
 	var hint string
 	// The agent answers "PATH already exists." for an existing file.
 	if !parsed.File.Overwrite && strings.Contains(err.Error(), "already exists") {
-		hint = denialHintLine("pass --overwrite to replace the file on the server, or use --from-server instead of --upload (and drop --file-from) to submit the copy already there.\n")
+		hint = denialHintLine(ios, "pass --overwrite to replace the file on the server, or use --from-server instead of --upload (and drop --file-from) to submit the copy already there.\n")
 	}
 	// codedRefusal writes raw and appends its own period; drop the one the
 	// agent's message ends with.
 	msg := strings.TrimSuffix(utils.SanitizeTerminalText(fmt.Sprintf("failed to upload the script to '%s:%s': %s", parsed.Server, file.Path, err)), ".")
-	return codedRefusal(stderr, utils.OperationWebFTP, err, msg, hint)
+	return codedRefusal(ios, stderr, utils.OperationWebFTP, err, msg, hint)
 }
 
 // downloadFile reads the script from its --file path on the server as the run-as account and
 // group, and builds the submission from those bytes. It returns the failure's exit, since a script
 // that could not be read must not be submitted.
-func downloadFile(stderr io.Writer, ac *client.AlpaconClient, parsed RemoteExecArgs, workSessionID, authMethod string) (event.FileExecution, error) {
+func downloadFile(ios *utils.IOStreams, stderr io.Writer, ac *client.AlpaconClient, parsed RemoteExecArgs, workSessionID, authMethod string) (event.FileExecution, error) {
 	label := parsed.Server + ":" + parsed.File.Path
 	content, msg, err := fetchServerScript(ac, parsed, label, workSessionID)
 	if err != nil {
@@ -217,12 +217,12 @@ func downloadFile(stderr io.Writer, ac *client.AlpaconClient, parsed RemoteExecA
 		}
 		var rejected *event.CommandRejectedError
 		if errors.As(err, &rejected) {
-			return event.FileExecution{}, commandRejectionFailure(stderr, err, rejected)
+			return event.FileExecution{}, commandRejectionFailure(ios, stderr, err, rejected)
 		}
 		// codedRefusal writes raw and appends its own period; drop one the
 		// agent's message ends with.
 		msg = strings.TrimSuffix(utils.SanitizeTerminalText(fmt.Sprintf("cannot read the script from '%s' on the server: %s", label, err)), ".")
-		return event.FileExecution{}, codedRefusal(stderr, utils.OperationWebFTP, err, msg, "")
+		return event.FileExecution{}, codedRefusal(ios, stderr, utils.OperationWebFTP, err, msg, "")
 	}
 	if msg != "" {
 		return event.FileExecution{}, utils.NewExitError("%s", msg)
@@ -323,7 +323,7 @@ func describeOpenError(err error) string {
 // fileExecRefusal renders a file-lane refusal as a message without a trailing newline and an
 // optional hint with one, as the credential and sudo hints are. serverName fills the placeholders.
 // It answers false for any other error.
-func fileExecRefusal(err error, serverName string) (message, hint string, ok bool) {
+func fileExecRefusal(ios *utils.IOStreams, err error, serverName string) (message, hint string, ok bool) {
 	if err == nil {
 		return "", "", false
 	}
@@ -345,10 +345,10 @@ func fileExecRefusal(err error, serverName string) (message, hint string, ok boo
 		}
 		switch {
 		case r.clientBug:
-			hint = denialHintLine(fmt.Sprintf(
+			hint = denialHintLine(ios, fmt.Sprintf(
 				"this is a bug in alpacon-cli, not in your request (%s). Please report it at https://github.com/alpacax/alpacon-cli/issues\n", code))
 		case hint != "":
-			hint = denialHintLine(hint)
+			hint = denialHintLine(ios, hint)
 		}
 		return message, hint, true
 	}
@@ -362,35 +362,35 @@ const fileExecInlineCredentialMessage = "server rejected this script—it carrie
 // script unreviewed, so it names neither.
 const fileExecInlineCredentialHint = "take the secret out of the script and have the script read it from a file or the environment on the host at run time, so it is not stored with the reviewed script.\n"
 
-func fileExecInlineCredentialRefusal(err error) (message, hint string, ok bool) {
+func fileExecInlineCredentialRefusal(ios *utils.IOStreams, err error) (message, hint string, ok bool) {
 	if !isCommandInlineCredentialError(err) {
 		return "", "", false
 	}
-	return fileExecInlineCredentialMessage, denialHintLine(fileExecInlineCredentialHint), true
+	return fileExecInlineCredentialMessage, denialHintLine(ios, fileExecInlineCredentialHint), true
 }
 
 // fileExecFailure reports a file-lane refusal and returns exit 1, or nil
 // when err is something else. Under --output json the envelope carries the
 // server's code; table mode prints the message and the hint. It runs before
 // commandResultFailure, which knows no server name and would print the raw code.
-func fileExecFailure(stderr io.Writer, err error, serverName string) error {
-	message, hint, ok := fileExecRefusal(err, serverName)
+func fileExecFailure(ios *utils.IOStreams, stderr io.Writer, err error, serverName string) error {
+	message, hint, ok := fileExecRefusal(ios, err, serverName)
 	if !ok {
 		return nil
 	}
-	return codedRefusal(stderr, "command", err, message, hint)
+	return codedRefusal(ios, stderr, "command", err, message, hint)
 }
 
 // fileExecInlineCredentialFailure reports command_inline_credential with the
 // file lane's hint and returns exit 1, or nil when err is something else.
 // Call it only on the file lane: the shell lane shares the code and answers it
 // in commandResultFailure with --env.
-func fileExecInlineCredentialFailure(stderr io.Writer, err error) error {
-	message, hint, ok := fileExecInlineCredentialRefusal(err)
+func fileExecInlineCredentialFailure(ios *utils.IOStreams, stderr io.Writer, err error) error {
+	message, hint, ok := fileExecInlineCredentialRefusal(ios, err)
 	if !ok {
 		return nil
 	}
-	return codedRefusal(stderr, "command", err, message, hint)
+	return codedRefusal(ios, stderr, "command", err, message, hint)
 }
 
 // useFileExecutionRefusal renders a use_file_execution rejection as a message and the file-lane
@@ -463,30 +463,30 @@ func runAsFlags(parsed RemoteExecArgs) []string {
 // file lane guidance and returns exit 6, or nil when err is something else.
 // It runs ahead of commandResultFailure, which knows neither the server nor the
 // account flags the guidance repeats.
-func useFileExecutionFailure(stderr io.Writer, err error, parsed RemoteExecArgs) error {
+func useFileExecutionFailure(ios *utils.IOStreams, stderr io.Writer, err error, parsed RemoteExecArgs) error {
 	var rejected *event.CommandRejectedError
 	if !errors.As(err, &rejected) || !rejected.WantsFileExecution() {
 		return nil
 	}
-	return reportUseFileExecution(stderr, rejected, parsed.Server, runAsFlags(parsed), len(parsed.Env) > 0, "")
+	return reportUseFileExecution(ios, stderr, rejected, parsed.Server, runAsFlags(parsed), len(parsed.Env) > 0, "")
 }
 
 // reportUseFileExecution prints the use_file_execution refusal and returns exit 6, the
 // code every settled-without-a-grant command exits with: running the same line
 // again is refused the same way. Under --output json the envelope carries the
 // code as error_code and the replacement commands as next_actions.
-func reportUseFileExecution(stderr io.Writer, rejected *event.CommandRejectedError, server string, accountFlags []string, withEnv bool, accountNote string) error {
+func reportUseFileExecution(ios *utils.IOStreams, stderr io.Writer, rejected *event.CommandRejectedError, server string, accountFlags []string, withEnv bool, accountNote string) error {
 	message, actions := useFileExecutionRefusal(rejected.CommandID, server, accountFlags, withEnv, accountNote)
 	var hint strings.Builder
 	for i, action := range actions {
 		line := action.Description + ":\n  " + action.Command + "\n"
 		switch i {
 		case 0:
-			line = denialHintLine(line)
+			line = denialHintLine(ios, line)
 		case 1:
 			line = "or, " + line
 		}
 		hint.WriteString(line)
 	}
-	return codedRefusalWithExit(stderr, utils.ExitCodeNotApproved, "command", rejected, message, hint.String(), actions)
+	return codedRefusalWithExit(ios, stderr, utils.ExitCodeNotApproved, "command", rejected, message, hint.String(), actions)
 }

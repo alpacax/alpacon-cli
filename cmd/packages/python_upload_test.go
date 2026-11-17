@@ -46,7 +46,7 @@ func TestPythonPackageUploadSendsTheFile(t *testing.T) {
 	wheel := filepath.Join(t.TempDir(), "alpamon-1.1.0-py3-none-any.whl")
 	require.NoError(t, os.WriteFile(wheel, []byte("wheel-content"), 0o600))
 
-	failure, code := cmdtest.Run(newPythonPackageUploadCmd(cmdtest.ClientFactory(ts)), wheel)
+	failure, code := cmdtest.Run(newPythonPackageUploadCmd(cmdtest.ClientFactory(ts), utils.Stdio), wheel)
 
 	assert.Equal(t, 0, code, failure)
 	mu.Lock()
@@ -75,7 +75,7 @@ func TestPythonPackageUploadFails(t *testing.T) {
 				require.NoError(t, os.WriteFile(wheel, []byte("x"), 0o600))
 			}
 
-			failure, code := cmdtest.Run(newPythonPackageUploadCmd(ts.Factory()), wheel)
+			failure, code := cmdtest.Run(newPythonPackageUploadCmd(ts.Factory(), utils.Stdio), wheel)
 
 			assert.Equal(t, utils.ExitCodeGeneralError, code)
 			assert.Contains(t, failure, "Failed to upload the Python package to Alpacon")
@@ -87,7 +87,7 @@ func TestPythonPackageUploadFails(t *testing.T) {
 func TestPythonPackageUploadRefusesAMissingArgumentWithExit2(t *testing.T) {
 	t.Parallel()
 
-	failure, code := cmdtest.Run(newPythonPackageUploadCmd(cmdtest.NoClient))
+	failure, code := cmdtest.Run(newPythonPackageUploadCmd(cmdtest.NoClient, utils.Stdio))
 
 	assert.Equal(t, utils.ExitCodeUsageError, code)
 	assert.Contains(t, failure, "accepts 1 arg(s), received 0")

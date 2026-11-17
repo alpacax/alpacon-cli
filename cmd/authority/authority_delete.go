@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var authorityDeleteCmd = newAuthorityDeleteCmd(client.NewAlpaconAPIClient)
+var authorityDeleteCmd = newAuthorityDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAuthorityDeleteCmd(newClient clientFactory) *cobra.Command {
+func newAuthorityDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete AUTHORITY",
 		Aliases: []string{"rm"},
@@ -57,7 +57,7 @@ func newAuthorityDeleteCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("%s", utils.Reword(err, deleteCAErrorText(authorityName, err)))
 			}
 
-			utils.CliSuccess("CA deleted: %s", authorityName)
+			ios.Success("CA deleted: %s", authorityName)
 			return nil
 		}),
 	}

@@ -60,3 +60,26 @@ func TestRunLeavesTheCommandsHooksAsTheyWere(t *testing.T) {
 
 	assert.False(t, utils.IsHookError(err), "Run must restore the original RunE")
 }
+
+func TestRunCapturedCapturesCobrasOwnOutput(t *testing.T) {
+	t.Parallel()
+	build := func(*utils.IOStreams) *cobra.Command {
+		return &cobra.Command{Use: "probe", Short: "Probe the streams", RunE: func(*cobra.Command, []string) error { return nil }}
+	}
+
+	stdout, _, code := RunCaptured(build, "--help")
+
+	assert.Equal(t, 0, code)
+	assert.Contains(t, stdout, "Probe the streams")
+}
+
+func TestRunPrintsAParseErrorInTheOutputItsArgumentsName(t *testing.T) {
+	t.Parallel()
+	cmd := &cobra.Command{Use: "probe", RunE: func(*cobra.Command, []string) error { return nil }}
+	cmd.Flags().String("output", "", "")
+
+	failure, code := Run(cmd, "--bogus", "--output", "json")
+
+	assert.Equal(t, utils.ExitCodeUsageError, code)
+	assert.Contains(t, failure, `"error_code":"usage_error"`)
+}

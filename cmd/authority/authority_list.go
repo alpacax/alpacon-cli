@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var authorityListCmd = newAuthorityListCmd(client.NewAlpaconAPIClient)
+var authorityListCmd = newAuthorityListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAuthorityListCmd(newClient clientFactory) *cobra.Command {
+func newAuthorityListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -34,7 +34,7 @@ func newAuthorityListCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the authority list: %s.", err)
 			}
 
-			return utils.PrintTable(authorityList)
+			return ios.PrintTable(authorityList)
 		}),
 	}
 }

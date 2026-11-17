@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var pythonPackageDownloadCmd = newPythonPackageDownloadCmd(client.NewAlpaconAPIClient)
+var pythonPackageDownloadCmd = newPythonPackageDownloadCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newPythonPackageDownloadCmd(newClient clientFactory) *cobra.Command {
+func newPythonPackageDownloadCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "download PACKAGE DIRECTORY",
 		Short: "Download a Python package from Alpacon",
@@ -35,7 +35,7 @@ func newPythonPackageDownloadCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to download the Python package from Alpacon: %s.", err)
 			}
 
-			utils.CliSuccess("Package downloaded: %s", file)
+			ios.Success("Package downloaded: %s", file)
 			return nil
 		}),
 	}

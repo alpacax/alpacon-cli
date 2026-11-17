@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclCommandAddCmd = newAclCommandAddCmd(client.NewAlpaconAPIClient)
+var aclCommandAddCmd = newAclCommandAddCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAclCommandAddCmd(newClient clientFactory) *cobra.Command {
+func newAclCommandAddCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add TOKEN",
 		Short: "Add a command ACL rule to a token",
@@ -32,7 +32,7 @@ personal API token has no command list on the ledger.`,
   alpacon token acl command add my-api-token --command="systemctl status *" --username="*" --groupname="*"`,
 		Args: cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runCommandAclAdd(cmd, args, newClient)
+			return runCommandAclAdd(ios, cmd, args, newClient)
 		}),
 	}
 	cmd.Flags().StringP("command", "c", "", "Server-side shell command (supports * wildcard)")
@@ -42,7 +42,7 @@ personal API token has no command list on the ledger.`,
 	return cmd
 }
 
-func runCommandAclAdd(cmd *cobra.Command, args []string, newClient clientFactory) error {
+func runCommandAclAdd(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient clientFactory) error {
 	tokenArg := args[0]
 	command, _ := cmd.Flags().GetString("command")
 	username, _ := cmd.Flags().GetString("username")
@@ -68,6 +68,6 @@ func runCommandAclAdd(cmd *cobra.Command, args []string, newClient clientFactory
 		return utils.NewExitError("Failed to add the command ACL: %v.", err)
 	}
 
-	utils.CliSuccess("Command ACL added to token %s: %s", tokenArg, command)
+	ios.Success("Command ACL added to token %s: %s", tokenArg, command)
 	return nil
 }

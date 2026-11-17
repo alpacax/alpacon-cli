@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var authorityDownloadCrlCmd = newAuthorityDownloadCrlCmd(client.NewAlpaconAPIClient)
+var authorityDownloadCrlCmd = newAuthorityDownloadCrlCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAuthorityDownloadCrlCmd(newClient clientFactory) *cobra.Command {
+func newAuthorityDownloadCrlCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "download-crl AUTHORITY",
 		Short: "Download a certificate revocation list (CRL)",
@@ -46,7 +46,7 @@ func newAuthorityDownloadCrlCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to download the CRL from authority: %s.", err)
 			}
 
-			utils.CliSuccess("CRL downloaded: %s", filePath)
+			ios.Success("CRL downloaded: %s", filePath)
 			return nil
 		}),
 	}

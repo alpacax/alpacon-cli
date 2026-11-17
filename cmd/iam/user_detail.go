@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userDetailCmd = newUserDetailCmd(client.NewAlpaconAPIClient)
+var userDetailCmd = newUserDetailCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUserDetailCmd(newClient clientFactory) *cobra.Command {
+func newUserDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "describe USER",
 		Aliases: []string{"desc"},
@@ -41,7 +41,7 @@ func newUserDetailCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the user details: %s.", err)
 			}
 
-			return utils.PrintJson(userDetail)
+			return ios.PrintJson(userDetail)
 		}),
 	}
 }

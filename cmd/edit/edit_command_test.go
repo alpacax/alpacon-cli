@@ -8,6 +8,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -56,7 +57,9 @@ func TestEditLeavesAnUnchangedFileAlone(t *testing.T) {
 	var uploads atomic.Int32
 	ts := editServer(t, http.StatusCreated, &uploads)
 
-	_, stderr, code := cmdtest.RunCaptured(t, newEditCmd(cmdtest.ClientFactory(ts)), "my-server:/etc/app.conf", "--editor", "true")
+	_, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
+		return newEditCmd(cmdtest.ClientFactory(ts), ios)
+	}, "my-server:/etc/app.conf", "--editor", "true")
 
 	assert.Equal(t, 0, code, stderr)
 	assert.Contains(t, stderr, "No changes")
@@ -88,7 +91,7 @@ func TestEditFails(t *testing.T) {
 				newClient = cmdtest.NoClient
 			}
 
-			_, stderr, code := cmdtest.RunCaptured(t, newEditCmd(newClient), tt.target, "--editor", "true")
+			_, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return newEditCmd(newClient, ios) }, tt.target, "--editor", "true")
 
 			assert.Equal(t, tt.wantCode, code, stderr)
 			assert.Contains(t, stderr, tt.want)

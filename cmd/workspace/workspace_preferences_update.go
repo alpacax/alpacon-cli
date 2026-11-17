@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workspacePreferencesUpdateCmd = newWorkspacePreferencesUpdateCmd(client.NewAlpaconAPIClient)
+var workspacePreferencesUpdateCmd = newWorkspacePreferencesUpdateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkspacePreferencesUpdateCmd(newClient clientFactory) *cobra.Command {
+func newWorkspacePreferencesUpdateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "update",
 		Short: "Update workspace preferences",
@@ -30,14 +30,14 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 
 			preferencesDetail, err := workspace.UpdatePreferences(alpaconClient)
 			if err != nil {
-				if utils.ReportNoChanges(err) {
+				if ios.ReportNoChanges(err) {
 					return nil
 				}
 				return utils.NewExitError("Failed to update workspace preferences: %s.", err)
 			}
 
-			utils.CliSuccess("Workspace preferences updated.")
-			return utils.PrintJson(preferencesDetail)
+			ios.Success("Workspace preferences updated.")
+			return ios.PrintJson(preferencesDetail)
 		}),
 	}
 }

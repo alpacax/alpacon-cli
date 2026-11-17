@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userRoleListCmd = newUserRoleListCmd(client.NewAlpaconAPIClient)
+var userRoleListCmd = newUserRoleListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUserRoleListCmd(newClient clientFactory) *cobra.Command {
+func newUserRoleListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls [USER]",
 		Aliases: []string{"list"},
@@ -45,7 +45,7 @@ narrows the answer to your own rather than refusing, so an empty table can mean
 				return utils.NewExitError("Failed to retrieve the role bindings: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 			}
 
-			return utils.PrintTable(rbac.BindingAttributesFrom(bindings, time.Local))
+			return ios.PrintTable(rbac.BindingAttributesFrom(bindings, time.Local))
 		}),
 	}
 }

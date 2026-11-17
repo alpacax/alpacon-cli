@@ -160,7 +160,7 @@ func TestWorkSessionCreateClusterSendsOnlyTheCluster(t *testing.T) {
 	ts := srv.start(t)
 	setupWorkSessionCommandConfig(t, ts.URL)
 	clearWorkSessionAgentEnvironment(t)
-	cmd := newWorkSessionCreateCmd(client.NewAlpaconAPIClient)
+	cmd := newWorkSessionCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	require.NoError(t, cmd.ParseFlags([]string{"--purpose", "debug api pods", "--scope", "kube,kube_exec", "--cluster", "prod-east", "--expires-in", "1h"}))
 
 	var runErr error

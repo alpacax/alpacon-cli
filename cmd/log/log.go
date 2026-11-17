@@ -10,9 +10,9 @@ import (
 // clientFactory builds the API client a command talks to.
 type clientFactory = func() (*client.AlpaconClient, error)
 
-var LogCmd = newLogCmd(client.NewAlpaconAPIClient)
+var LogCmd = newLogCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newLogCmd(newClient clientFactory) *cobra.Command {
+func newLogCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "log SERVER",
 		Aliases: []string{"logs"},
@@ -41,7 +41,7 @@ func newLogCmd(newClient clientFactory) *cobra.Command {
 			}
 
 			logList, err := log.GetSystemLogList(alpaconClient, serverName, tail)
-			return utils.PrintList(logList, err, "Failed to get logs")
+			return utils.PrintListTo(ios, logList, err, "Failed to get logs")
 		}),
 	}
 	var tail int

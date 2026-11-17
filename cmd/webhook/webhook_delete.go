@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var webhookDeleteCmd = newWebhookDeleteCmd(client.NewAlpaconAPIClient)
+var webhookDeleteCmd = newWebhookDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWebhookDeleteCmd(newClient clientFactory) *cobra.Command {
+func newWebhookDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete WEBHOOK",
 		Aliases: []string{"rm"},
@@ -44,7 +44,7 @@ func newWebhookDeleteCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to delete the webhook: %s.", err)
 			}
 
-			utils.CliSuccess("Webhook deleted: %s", webhookName)
+			ios.Success("Webhook deleted: %s", webhookName)
 			return nil
 		}),
 	}

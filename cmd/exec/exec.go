@@ -21,13 +21,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var ExecCmd = newCommand(client.NewAlpaconAPIClient)
+var ExecCmd = newCommand(client.NewAlpaconAPIClient, utils.Stdio)
 
 // clientFactory builds the client a command sends its requests with; a test hands in one for its
 // own server.
 type clientFactory = func() (*client.AlpaconClient, error)
 
-func newCommand(newClient clientFactory) *cobra.Command {
+func newCommand(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "exec [flags] [USER@]SERVER [--] [COMMAND...]", // [flags] stays first: words after SERVER go to the remote command
 		Short: "Execute a command on a remote server",
@@ -251,17 +251,17 @@ This is client guidance; personal-token enforcement depends on the server versio
 		// Cobra would otherwise consume remote command flags (e.g. -U, -d); Run parses flags itself.
 		DisableFlagParsing: true,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			parsed := ParseRemoteExecArgs(args)
+			parsed := ParseRemoteExecArgs(ios, args)
 
 			if parsed.ShowHelp {
 				_ = cmd.Help()
 				return nil
 			}
 			if parsed.Err != "" {
-				return utils.NewParseExitError(cmd, parsed.OutputFormat, parsed.Err)
+				return ios.NewParseExitError(cmd, parsed.OutputFormat, parsed.Err)
 			}
 			if parsed.OutputFormat != "" {
-				if err := utils.SetOutputFormat(parsed.OutputFormat); err != nil {
+				if err := ios.SetOutputFormat(parsed.OutputFormat); err != nil {
 					return utils.NewUsageExitError("%s", err)
 				}
 			}
@@ -275,16 +275,16 @@ This is client guidance; personal-token enforcement depends on the server versio
 				return utils.NewUsageExitError("You must specify a command to execute, or a script with --file.")
 			}
 
-			return RemoteExec(newClient, cmd.OutOrStdout(), cmd.ErrOrStderr(), parsed)
+			return RemoteExec(ios, newClient, ios.Out, ios.ErrOut, parsed)
 		}),
 	}
-	cmd.AddCommand(newListCommand(newClient), newLogsCommand(newClient), newPurposeCommand(newClient))
+	cmd.AddCommand(newListCommand(newClient, ios), newLogsCommand(newClient, ios), newPurposeCommand(newClient, ios))
 	return cmd
 }
 
 // RemoteExec is the shared post-parse execution path for exec and websh command mode, returning
 // the failure as a utils.ExitError. Requires Server, Command or File, and the parsed --output applied.
-func RemoteExec(newClient clientFactory, stdout, stderr io.Writer, parsed RemoteExecArgs) error {
+func RemoteExec(ios *utils.IOStreams, newClient clientFactory, stdout, stderr io.Writer, parsed RemoteExecArgs) error {
 	// A local script is read before any network call, so a missing or oversized file fails here;
 	// a --from-server script is read once the client exists.
 	var file *event.FileExecution
@@ -309,12 +309,12 @@ func RemoteExec(newClient clientFactory, stdout, stderr io.Writer, parsed Remote
 	}
 
 	if file != nil && parsed.File.Upload {
-		if err := uploadFile(stderr, alpaconClient, parsed, *file, workSessionID, authMethod); err != nil {
+		if err := uploadFile(ios, stderr, alpaconClient, parsed, *file, workSessionID, authMethod); err != nil {
 			return err
 		}
 	}
 	if parsed.File != nil && parsed.File.FromServer {
-		loaded, err := downloadFile(stderr, alpaconClient, parsed, workSessionID, authMethod)
+		loaded, err := downloadFile(ios, stderr, alpaconClient, parsed, workSessionID, authMethod)
 		if err != nil {
 			return err
 		}
@@ -346,22 +346,22 @@ func RemoteExec(newClient clientFactory, stdout, stderr io.Writer, parsed Remote
 			err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), alpaconClient)
 			utils.SignalRefusal(err)
 			if file == nil && isLineTooLong(err) {
-				return lineTooLongFailure(stderr, err, parsed)
+				return lineTooLongFailure(ios, stderr, err, parsed)
 			}
 			if failure := utils.WorkSessionExitError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID); failure != nil {
 				return failure
 			}
-			if failure := submitFailure(stderr, err, parsed, file != nil); failure != nil {
+			if failure := submitFailure(ios, stderr, err, parsed, file != nil); failure != nil {
 				return failure
 			}
 			return utils.NewExitError("failed to submit command on '%s': %s", parsed.Server, err)
 		}
-		if utils.OutputFormat == utils.OutputFormatJSON {
+		if ios.IsJSON() {
 			data, err := json.Marshal(map[string]string{"job_id": resp.ID})
 			if err != nil {
 				return utils.NewExitError("failed to marshal JSON: %s", err)
 			}
-			return utils.PrintJson(data)
+			return ios.PrintJson(data)
 		}
 		line1, line2 := detachResultLines(resp.ID)
 		_, _ = fmt.Fprintln(stdout, line1)
@@ -373,37 +373,37 @@ func RemoteExec(newClient clientFactory, stdout, stderr io.Writer, parsed Remote
 	// streams live.
 	out := stdout
 	var buf *bytes.Buffer
-	if utils.OutputFormat == utils.OutputFormatJSON {
+	if ios.IsJSON() {
 		buf = &bytes.Buffer{}
 		out = buf
 	}
 
 	if file != nil {
-		err = RunFileExecWithApprovalWait(alpaconClient, parsed.Server, *file, parsed.Username, parsed.Groupname, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
+		err = RunFileExecWithApprovalWait(ios, alpaconClient, parsed.Server, *file, parsed.Username, parsed.Groupname, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
 	} else {
-		err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
+		err = RunExecWithApprovalWait(ios, alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
 	}
 	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
 		return exitErr // the MFA failure carries the lookup's error, which the classifiers below would read as a refusal
 	}
 	if file == nil && isLineTooLong(err) {
-		return lineTooLongFailure(stderr, err, parsed)
+		return lineTooLongFailure(ios, stderr, err, parsed)
 	}
 	if failure := utils.WorkSessionExitError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID); failure != nil {
 		return failure
 	}
 	// A purpose demand has no approval request yet, so it is reported before the pending-approval
 	// path, which would name a queue the command is not in.
-	if failure := purposeDemandFailure(err); failure != nil {
+	if failure := purposeDemandFailure(ios, err); failure != nil {
 		return failure
 	}
 	// Before commandResultFailure, which would treat the pending denial as a plain failure.
-	if failure := pendingApprovalFailure(stderr, err, parsed); failure != nil {
+	if failure := pendingApprovalFailure(ios, stderr, err, parsed); failure != nil {
 		return failure
 	}
 	// The command never ran, so under --output json nothing reaches stdout: the
 	// buffer holds only the server's own wording of the refusal.
-	if failure := useFileExecutionFailure(stderr, err, parsed); failure != nil {
+	if failure := useFileExecutionFailure(ios, stderr, err, parsed); failure != nil {
 		return failure
 	}
 	if buf != nil {
@@ -411,23 +411,23 @@ func RemoteExec(newClient clientFactory, stdout, stderr io.Writer, parsed Remote
 	}
 	// A file-lane refusal names the server in its guidance, which
 	// commandResultFailure does not know; it answers only its own codes.
-	if failure := submitFailure(stderr, err, parsed, file != nil); failure != nil {
+	if failure := submitFailure(ios, stderr, err, parsed, file != nil); failure != nil {
 		return failure
 	}
-	return commandResultFailure(stderr, err, parsed.InvokedAs)
+	return commandResultFailure(ios, stderr, err, parsed.InvokedAs)
 }
 
 // submitFailure reports the refusals of a submission whose guidance needs the parsed command line,
 // and returns nil for any other error.
-func submitFailure(stderr io.Writer, err error, parsed RemoteExecArgs, fileLane bool) error {
-	if failure := fileExecFailure(stderr, err, parsed.Server); failure != nil {
+func submitFailure(ios *utils.IOStreams, stderr io.Writer, err error, parsed RemoteExecArgs, fileLane bool) error {
+	if failure := fileExecFailure(ios, stderr, err, parsed.Server); failure != nil {
 		return failure
 	}
-	if failure := execUserFailure(stderr, err, parsed); failure != nil {
+	if failure := execUserFailure(ios, stderr, err, parsed); failure != nil {
 		return failure
 	}
 	if fileLane {
-		return fileExecInlineCredentialFailure(stderr, err)
+		return fileExecInlineCredentialFailure(ios, stderr, err)
 	}
 	return nil
 }

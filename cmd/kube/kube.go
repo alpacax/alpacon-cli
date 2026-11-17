@@ -6,11 +6,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var KubeCmd = newKubeCmd(client.NewAlpaconAPIClient)
+var KubeCmd = newKubeCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 type clientFactory func() (*client.AlpaconClient, error)
 
-func newKubeCmd(newClient clientFactory) *cobra.Command {
+func newKubeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "kube",
 		Aliases: []string{"k8s", "clusters"},
@@ -27,14 +27,14 @@ support is enabled for the workspace; 'alpacon login' and
 		},
 	}
 	cmd.AddCommand(
-		newKubeListCmd(newClient),
-		newKubeDescribeCmd(newClient),
-		newKubeLoginCmd(newClient),
-		newKubeLogoutCmd(newClient),
-		newKubeSessionsCmd(newClient),
-		newKubeCredentialsCmd(newClient),
-		newKubeConfigCmd(newClient),
-		newKubeProxyCmd(),
+		newKubeListCmd(newClient, ios),
+		newKubeDescribeCmd(newClient, ios),
+		newKubeLoginCmd(newClient, ios),
+		newKubeLogoutCmd(newClient, ios),
+		newKubeSessionsCmd(newClient, ios),
+		newKubeCredentialsCmd(newClient, ios),
+		newKubeConfigCmd(newClient, ios),
+		newKubeProxyCmd(ios),
 	)
 	return cmd
 }
