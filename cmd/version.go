@@ -8,13 +8,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var versionCmd = &cobra.Command{
-	Use:   "version",
-	Short: "Display the current CLI version",
-	Long:  "Displays the current version of the CLI and checks if there is an available update.",
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		return runVersion(utils.Stdio)
-	}),
+func newVersionCmd(ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Display the current CLI version",
+		Long:  "Displays the current version of the CLI and checks if there is an available update.",
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return runVersion(ios)
+		}),
+	}
 }
 
 func runVersion(ios *utils.IOStreams) error {

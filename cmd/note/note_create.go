@@ -2,12 +2,9 @@ package note
 
 import (
 	"github.com/alpacax/alpacon-cli/api/note"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var noteCreateCmd = newNoteCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newNoteCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var noteRequest note.NoteCreateRequest

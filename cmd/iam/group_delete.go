@@ -2,12 +2,9 @@ package iam
 
 import (
 	"github.com/alpacax/alpacon-cli/api/iam"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var groupDeleteCmd = newGroupDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newGroupDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{

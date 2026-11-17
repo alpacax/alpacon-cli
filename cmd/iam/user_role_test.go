@@ -12,6 +12,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/rbac"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -172,6 +173,8 @@ func TestSplitCanIArgs_RejectsWhatIsNotAPermission(t *testing.T) {
 }
 
 func TestUserSubcommandsAreRegistered(t *testing.T) {
+	t.Parallel()
+	userCmd := NewUserCmd(cmdtest.NoClient, utils.Stdio)
 	for _, path := range [][]string{
 		{"role", "ls"},
 		{"role", "catalog"},
@@ -182,15 +185,18 @@ func TestUserSubcommandsAreRegistered(t *testing.T) {
 		{"permission", "ls"},
 		{"permission", "can-i"},
 	} {
-		cmd, _, err := UserCmd.Find(path)
+		cmd, _, err := userCmd.Find(path)
 		require.NoError(t, err)
 		assert.Equal(t, path[len(path)-1], cmd.Name())
 	}
 }
 
-// The walk cannot start at RootCmd (cmd imports cmd/iam, not the reverse), so GroupCmd's
+// The walk cannot start at the root (cmd imports cmd/iam, not the reverse), so the group command's
 // --role is asserted here as the one intended holder.
 func TestRoleFlagKeepsOneMeaning(t *testing.T) {
+	t.Parallel()
+	groupCmd := NewGroupCmd(cmdtest.NoClient, utils.Stdio)
+	userCmd := NewUserCmd(cmdtest.NoClient, utils.Stdio)
 	var walk func(cmd *cobra.Command)
 	walk = func(cmd *cobra.Command) {
 		assert.Nil(t, cmd.Flags().Lookup("role"),
@@ -199,9 +205,9 @@ func TestRoleFlagKeepsOneMeaning(t *testing.T) {
 			walk(child)
 		}
 	}
-	walk(UserCmd)
+	walk(userCmd)
 
-	memberAdd, _, err := GroupCmd.Find([]string{"member", "add"})
+	memberAdd, _, err := groupCmd.Find([]string{"member", "add"})
 	require.NoError(t, err)
 	assert.NotNil(t, memberAdd.Flags().Lookup("role"), "group membership is where --role belongs")
 }

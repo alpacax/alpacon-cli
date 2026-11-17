@@ -6,11 +6,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var KubeCmd = newKubeCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 type clientFactory func() (*client.AlpaconClient, error)
 
-func newKubeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+func NewKubeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "kube",
 		Aliases: []string{"k8s", "clusters"},

@@ -289,7 +289,7 @@ func TestPromptPlatform_ReturnsPromptFailureInsteadOfAskingAgain(t *testing.T) {
 
 // An expired access token makes NewAlpaconAPIClient refresh over the network,
 // so a pair the CLI can reject on its own must be rejected before that.
-// Serial: it points HOME at a temp config and sets the package-level flag variables.
+// Serial: it points HOME at a temp config.
 func TestServerCreate_RejectsAnsibleSuseBeforeAnyRequest(t *testing.T) {
 	var requests atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

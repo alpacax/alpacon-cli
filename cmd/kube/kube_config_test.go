@@ -597,7 +597,7 @@ func TestKubeConfigReleasesTheLockBeforePrintingTheResult(t *testing.T) {
 	ios, _, _ := utils.TestIOStreams()
 	ios.Out = probe
 	require.NoError(t, ios.SetOutputFormat(utils.OutputFormatJSON))
-	cmd := newKubeCmd(func() (*client.AlpaconClient, error) { return ac, nil }, ios)
+	cmd := NewKubeCmd(func() (*client.AlpaconClient, error) { return ac, nil }, ios)
 	cmd.SetArgs([]string{"config", "prod-east", "--kubeconfig", path})
 
 	var err error

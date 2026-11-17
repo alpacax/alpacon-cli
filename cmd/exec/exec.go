@@ -21,13 +21,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var ExecCmd = newCommand(client.NewAlpaconAPIClient, utils.Stdio)
-
 // clientFactory builds the client a command sends its requests with; a test hands in one for its
 // own server.
 type clientFactory = func() (*client.AlpaconClient, error)
 
-func newCommand(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+func NewExecCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "exec [flags] [USER@]SERVER [--] [COMMAND...]", // [flags] stays first: words after SERVER go to the remote command
 		Short: "Execute a command on a remote server",

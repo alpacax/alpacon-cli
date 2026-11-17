@@ -13,8 +13,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userRoleGrantCmd = newUserRoleGrantCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newUserRoleGrantCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "grant USER ROLE",

@@ -2,12 +2,9 @@ package iam
 
 import (
 	"github.com/alpacax/alpacon-cli/api/iam"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var groupListCmd = newGroupListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newGroupListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

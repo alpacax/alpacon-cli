@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -14,8 +13,6 @@ type describeRow struct {
 	Field string `table:"Field"`
 	Value string `table:"Value"`
 }
-
-var workSessionDescribeCmd = newWorkSessionDescribeCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newWorkSessionDescribeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

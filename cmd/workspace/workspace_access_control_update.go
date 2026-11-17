@@ -5,13 +5,10 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/workspace"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var workspaceAccessControlUpdateCmd = newWorkspaceAccessControlUpdateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newWorkspaceAccessControlUpdateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

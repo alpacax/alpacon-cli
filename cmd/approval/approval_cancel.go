@@ -2,12 +2,9 @@ package approval
 
 import (
 	approvalapi "github.com/alpacax/alpacon-cli/api/approval"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var approvalCancelCmd = newApprovalCancelCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newApprovalCancelCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

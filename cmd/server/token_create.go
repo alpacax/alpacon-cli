@@ -12,8 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var tokenCreateCmd = newTokenCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newTokenCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",

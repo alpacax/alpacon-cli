@@ -2,15 +2,12 @@ package workspace
 
 import (
 	"github.com/alpacax/alpacon-cli/api/workspace"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var workspacePreferencesCmd = newWorkspacePreferencesCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newWorkspacePreferencesCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:     "preferences",
 		Aliases: []string{"prefs"},
 		Short:   "Retrieve workspace preferences",
@@ -32,8 +29,6 @@ func newWorkspacePreferencesCmd(newClient clientFactory, ios *utils.IOStreams) *
 			return ios.PrintJson(preferencesDetail)
 		}),
 	}
-}
-
-func init() {
-	workspacePreferencesCmd.AddCommand(workspacePreferencesUpdateCmd)
+	cmd.AddCommand(newWorkspacePreferencesUpdateCmd(newClient, ios))
+	return cmd
 }

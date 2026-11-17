@@ -10,8 +10,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var groupCreateCmd = newGroupCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newGroupCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "create",

@@ -15,7 +15,6 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/alpacax/alpacon-cli/utils"
-	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -125,7 +124,7 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 			newWorkspaceClient = func() (*client.AlpaconClient, error) {
 				return &client.AlpaconClient{HTTPClient: httpclient.New(false), BaseURL: workspace.URL}, nil
 			}
-			resetEntryAddFlags(t)
+			entryAddCmd := newEntryAddCmd(utils.Stdio)
 			require.NoError(t, entryAddCmd.Flags().Parse(flags))
 			oldFormat := utils.OutputFormat
 			utils.OutputFormat = utils.OutputFormatJSON
@@ -202,27 +201,13 @@ func TestBindApplicationAccounts_ReturnsAccountRefusal(t *testing.T) {
 }
 
 func TestEntryAdd_AccountHelp(t *testing.T) {
+	t.Parallel()
+	entryAddCmd, entryListCmd := newEntryAddCmd(utils.Stdio), newEntryListCmd(utils.Stdio)
 	assert.Contains(t, strings.Join(strings.Fields(entryAddCmd.Long), " "), "any account bound to the application on that server")
 	assert.Contains(t, entryAddCmd.Flags().Lookup("username").Usage, "Omit to pin the entry to the application's own account")
 	assert.Contains(t, entryAddCmd.Flags().Lookup("groupname").Usage, "'' or * sets no group restriction")
 	assert.NotContains(t, entryAddCmd.Long, "same account")
 	assert.Contains(t, strings.Join(strings.Fields(entryListCmd.Long), " "), "blank when the application account cannot be resolved")
-}
-
-func resetEntryAddFlags(t *testing.T) {
-	t.Helper()
-	reset := func() {
-		entryAddCmd.Flags().VisitAll(func(flag *pflag.Flag) {
-			value := flag.DefValue
-			if flag.Name == "server" {
-				value = ""
-			}
-			require.NoError(t, flag.Value.Set(value))
-			flag.Changed = false
-		})
-	}
-	reset()
-	t.Cleanup(reset)
 }
 
 func TestLedgerEntryAttributes_ApplicationAccount(t *testing.T) {

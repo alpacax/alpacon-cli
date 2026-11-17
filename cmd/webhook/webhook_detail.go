@@ -2,12 +2,9 @@ package webhook
 
 import (
 	"github.com/alpacax/alpacon-cli/api/webhook"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var webhookDetailCmd = newWebhookDetailCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newWebhookDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

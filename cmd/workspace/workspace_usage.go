@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 
 	"github.com/alpacax/alpacon-cli/api/workspace"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -60,8 +59,6 @@ func renderUsageEstimate(estimate *workspace.UsageEstimate) renderedUsageEstimat
 		Metadata:      estimate.Metadata,
 	}
 }
-
-var workspaceUsageCmd = newWorkspaceUsageCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newWorkspaceUsageCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

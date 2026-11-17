@@ -9,6 +9,8 @@ import (
 	"github.com/alpacax/alpacon-cli/cmd/websh"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -43,17 +45,19 @@ func TestWhoamiSessionGuidanceForCommandAndTransferAccess(t *testing.T) {
 }
 
 func TestSessionGuidanceInCommandHelp(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		help string
 	}{
-		{name: "exec", help: exec.ExecCmd.Long},
-		{name: "cp", help: ftp.CpCmd.Long},
-		{name: "Websh", help: websh.WebshCmd.Long},
-		{name: "work-session", help: worksession.WorkSessionCmd.Long},
+		{name: "exec", help: exec.NewExecCmd(cmdtest.NoClient, utils.Stdio).Long},
+		{name: "cp", help: ftp.NewCpCmd(cmdtest.NoClient, utils.Stdio).Long},
+		{name: "Websh", help: websh.NewWebshCmd(cmdtest.NoClient, utils.Stdio).Long},
+		{name: "work-session", help: worksession.NewWorkSessionCmd(cmdtest.NoClient, utils.Stdio).Long},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			assert.Contains(t, tt.help, "personal API tokens")
 			assert.Contains(t, tt.help, "active, approved WorkSession")
 			assert.Contains(t, tt.help, "endpoint-specific authorization")

@@ -7,8 +7,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workSessionRevokeCmd = newWorkSessionRevokeCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newWorkSessionRevokeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "revoke SESSION_ID",

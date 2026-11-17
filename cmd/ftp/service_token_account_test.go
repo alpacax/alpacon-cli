@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -18,6 +19,7 @@ import (
 )
 
 func TestCp_ApplicationAccountRefusal(t *testing.T) {
+	cpCmd := NewCpCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 		t.Run(format, func(t *testing.T) {
 			var submitted atomic.Bool
@@ -49,7 +51,7 @@ func TestCp_ApplicationAccountRefusal(t *testing.T) {
 			t.Cleanup(func() { utils.OutputFormat = previous })
 
 			stdout, _ := testutil.CaptureOutput(t, func() {
-				err = CpCmd.RunE(CpCmd, []string{source, "root@my-server:/tmp/"})
+				err = cpCmd.RunE(cpCmd, []string{source, "root@my-server:/tmp/"})
 			})
 
 			var exitErr *utils.ExitError

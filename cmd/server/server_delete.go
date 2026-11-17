@@ -2,12 +2,9 @@ package server
 
 import (
 	"github.com/alpacax/alpacon-cli/api/server"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var serverDeleteCmd = newServerDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newServerDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{

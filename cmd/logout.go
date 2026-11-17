@@ -7,7 +7,6 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/auth0"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -17,8 +16,6 @@ import (
 const (
 	blacklistURL = "/api/auth0/token/blacklist/"
 )
-
-var logoutCmd = newLogoutCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newLogoutCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

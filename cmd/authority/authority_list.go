@@ -2,12 +2,9 @@ package authority
 
 import (
 	"github.com/alpacax/alpacon-cli/api/cert"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var authorityListCmd = newAuthorityListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newAuthorityListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

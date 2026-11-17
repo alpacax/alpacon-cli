@@ -59,8 +59,9 @@ func TestCheckOutcome(t *testing.T) {
 }
 
 func TestUpdateCommandIsRegistered(t *testing.T) {
+	t.Parallel()
 	var names []string
-	for _, command := range RootCmd.Commands() {
+	for _, command := range newTestRoot().Commands() {
 		names = append(names, command.Name())
 	}
 
@@ -178,6 +179,8 @@ func TestCheckActionNeverSendsAPackageManagerInstallToTheUpdateCommand(t *testin
 }
 
 func TestUpdateCommandRefusesAPositionalArgument(t *testing.T) {
+	t.Parallel()
+	updateCmd := newUpdateCmd(utils.Stdio)
 	require.NotNil(t, updateCmd.Args, "an unvalidated argument makes 'alpacon update check' replace the binary")
 
 	require.Error(t, updateCmd.Args(updateCmd, []string{"check"}))

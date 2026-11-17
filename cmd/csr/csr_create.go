@@ -24,8 +24,6 @@ const (
 		"Note: Root permission may be required for certain paths."
 )
 
-var csrCreateCmd = newCsrCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newCsrCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var csrFlags struct {
 		domains   string

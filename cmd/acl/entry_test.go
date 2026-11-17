@@ -14,7 +14,6 @@ import (
 	"github.com/alpacax/alpacon-cli/api/acl"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -111,7 +110,7 @@ func TestParseEntryFile_NonStringAccountFields(t *testing.T) {
 
 			file := t.TempDir() + "/entries.json"
 			require.NoError(t, os.WriteFile(file, data, 0600))
-			resetEntryAddFlags(t)
+			entryAddCmd := newEntryAddCmd(utils.Stdio)
 			require.NoError(t, entryAddCmd.Flags().Parse([]string{"--file", file}))
 			oldFormat := utils.OutputFormat
 			utils.OutputFormat = utils.OutputFormatJSON
@@ -203,10 +202,7 @@ func TestValidateServerRefs_RefusesAnEmptyValue(t *testing.T) {
 func TestEntryAdd_ServerFlagEmptyShapesAreRefused(t *testing.T) {
 	t.Parallel()
 	for _, args := range [][]string{{"--server", ""}, {"--server", "web-01,"}, {"--server=,"}} {
-		// A fresh command with the same flag type, so no parse leaks into
-		// entryAddCmd.
-		cmd := &cobra.Command{}
-		cmd.Flags().StringSlice("server", nil, "")
+		cmd := newEntryAddCmd(utils.Stdio)
 
 		require.NoError(t, cmd.Flags().Parse(args))
 		refs, err := cmd.Flags().GetStringSlice("server")
@@ -282,6 +278,7 @@ func TestEntryRemove_RequiresConfirmationInProcess(t *testing.T) {
 			utils.OutputFormat = utils.OutputFormatJSON
 			t.Cleanup(func() { utils.OutputFormat = previous })
 
+			entryRemoveCmd := newEntryRemoveCmd(utils.Stdio)
 			err := entryRemoveCmd.RunE(entryRemoveCmd, args)
 
 			var exitErr *utils.ExitError
@@ -319,6 +316,7 @@ func TestAdminRevoke_RequiresConfirmationBeforeDeleting(t *testing.T) {
 	os.Stdin, utils.OutputFormat = stdin, utils.OutputFormatJSON
 	t.Cleanup(func() { os.Stdin, utils.OutputFormat = previousStdin, previousFormat; _ = stdin.Close() })
 
+	adminRevokeCmd := newAdminRevokeCmd(utils.Stdio)
 	err = adminRevokeCmd.RunE(adminRevokeCmd, []string{"alice"})
 
 	var exitErr *utils.ExitError

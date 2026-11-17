@@ -2,12 +2,9 @@ package iam
 
 import (
 	"github.com/alpacax/alpacon-cli/api/iam"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var userDetailCmd = newUserDetailCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newUserDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

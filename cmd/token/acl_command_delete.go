@@ -2,12 +2,9 @@ package token
 
 import (
 	"github.com/alpacax/alpacon-cli/api/security"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var aclCommandDeleteCmd = newAclCommandDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newAclCommandDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{

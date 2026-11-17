@@ -3,12 +3,9 @@ package token
 import (
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/security"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var aclCommandListCmd = newAclCommandListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newAclCommandListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

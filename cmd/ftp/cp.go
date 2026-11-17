@@ -21,9 +21,7 @@ import (
 // clientFactory builds the API client a command talks to.
 type clientFactory = func() (*client.AlpaconClient, error)
 
-var CpCmd = newCpCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
-func newCpCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+func NewCpCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cp SOURCE... DESTINATION",
 		Short: "Copy files between local and remote locations",

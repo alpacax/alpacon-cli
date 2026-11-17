@@ -24,7 +24,6 @@ import (
 )
 
 var (
-	ApiCmd           = newCommand(client.NewAlpaconAPIClient)
 	isStdoutTerminal = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
 )
 
@@ -88,7 +87,7 @@ func (f *fieldFlag) Set(value string) error {
 	return nil
 }
 
-func newCommand(newAPIClient func() (*client.AlpaconClient, error)) *cobra.Command {
+func NewApiCmd(newAPIClient func() (*client.AlpaconClient, error)) *cobra.Command {
 	var opts options
 	cmd := &cobra.Command{
 		Use:   "api ENDPOINT",

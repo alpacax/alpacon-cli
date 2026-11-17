@@ -3,12 +3,16 @@ package exec
 import (
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // DisableFlagParsing only covers the parent; this pins that a child still routes and parses flags normally.
 func TestExecLsRoutesAndParsesFlags(t *testing.T) {
+	t.Parallel()
+	execCmd := NewExecCmd(cmdtest.NoClient, utils.Stdio)
 	tests := []struct {
 		name           string
 		args           []string
@@ -44,7 +48,7 @@ func TestExecLsRoutesAndParsesFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd, flags, err := ExecCmd.Find(tt.args)
+			cmd, flags, err := execCmd.Find(tt.args)
 			require.NoError(t, err)
 			require.Equal(t, "ls", cmd.Name())
 

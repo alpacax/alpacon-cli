@@ -9,17 +9,18 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/server"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// The command-tree tests share the package-global AgentCmd, which Cobra
-// mutates lazily (sorting children, building flag sets), so they stay serial.
 func TestAgentSubcommands(t *testing.T) {
+	t.Parallel()
 	var names []string
-	for _, c := range AgentCmd.Commands() {
+	for _, c := range NewAgentCmd(cmdtest.NoClient, utils.Stdio).Commands() {
 		if c.Hidden {
 			continue
 		}
@@ -29,9 +30,11 @@ func TestAgentSubcommands(t *testing.T) {
 }
 
 func TestAgentDisruptiveFlags(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"restart", "upgrade"} {
 		t.Run(name, func(t *testing.T) {
-			cmd, _, err := AgentCmd.Find([]string{name})
+			t.Parallel()
+			cmd, _, err := NewAgentCmd(cmdtest.NoClient, utils.Stdio).Find([]string{name})
 			require.NoError(t, err)
 			yes := cmd.Flags().Lookup("yes")
 			require.NotNil(t, yes)
@@ -44,7 +47,8 @@ func TestAgentDisruptiveFlags(t *testing.T) {
 // install-pam is not disruptive: the server applies no busy guard to it, so
 // the command offers no --force to override one.
 func TestAgentInstallPAMFlags(t *testing.T) {
-	cmd, _, err := AgentCmd.Find([]string{"install-pam"})
+	t.Parallel()
+	cmd, _, err := NewAgentCmd(cmdtest.NoClient, utils.Stdio).Find([]string{"install-pam"})
 	require.NoError(t, err)
 	yes := cmd.Flags().Lookup("yes")
 	require.NotNil(t, yes)
@@ -82,10 +86,9 @@ func TestAgentInstallPAMSendsTheAction(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	require.NoError(t, config.CreateConfig(ts.URL, "test", "", "", "access-token", "refresh-token", "", 3600, false))
 
-	cmd, _, err := AgentCmd.Find([]string{"install-pam"})
+	cmd, _, err := NewAgentCmd(client.NewAlpaconAPIClient, utils.Stdio).Find([]string{"install-pam"})
 	require.NoError(t, err)
 	require.NoError(t, cmd.Flags().Set("yes", "true"))
-	t.Cleanup(func() { _ = cmd.Flags().Set("yes", "false") })
 
 	require.NoError(t, cmd.RunE(cmd, []string{"my-server"}))
 
@@ -119,10 +122,9 @@ func TestAgentRestartOnABusyServerExitsWithServerBusy(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	require.NoError(t, config.CreateConfig(ts.URL, "test", "", "", "access-token", "refresh-token", "", 3600, false))
 
-	cmd, _, err := AgentCmd.Find([]string{"restart"})
+	cmd, _, err := NewAgentCmd(client.NewAlpaconAPIClient, utils.Stdio).Find([]string{"restart"})
 	require.NoError(t, err)
 	require.NoError(t, cmd.Flags().Set("yes", "true"))
-	t.Cleanup(func() { _ = cmd.Flags().Set("yes", "false") })
 
 	err = cmd.RunE(cmd, []string{"my-server"})
 

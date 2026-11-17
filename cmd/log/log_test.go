@@ -17,7 +17,7 @@ func TestLogPrintsTheServersLogs(t *testing.T) {
 		"GET /api/history/logs/":    {Status: http.StatusOK, Body: `{"results": [{"id": 7, "program": "alpamon", "level": 20, "msg": "connected", "date": "2026-11-01T09:00:00Z"}]}`},
 	})
 
-	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newLogCmd(ts.Factory(), ios) }, "my-server", "--tail", "1")
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return NewLogCmd(ts.Factory(), ios) }, "my-server", "--tail", "1")
 
 	assert.Equal(t, 0, code, stderr)
 	assert.Contains(t, stdout, `"alpamon"`)
@@ -44,7 +44,7 @@ func TestLogFails(t *testing.T) {
 				"GET /api/servers/servers/": {Status: http.StatusOK, Body: tt.servers},
 			})
 
-			failure, code := cmdtest.Run(newLogCmd(ts.Factory(), utils.Stdio), tt.args...)
+			failure, code := cmdtest.Run(NewLogCmd(ts.Factory(), utils.Stdio), tt.args...)
 
 			assert.Equal(t, tt.wantCode, code)
 			assert.Contains(t, failure, tt.want)

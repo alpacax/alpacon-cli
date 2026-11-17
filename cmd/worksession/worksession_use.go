@@ -11,8 +11,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workSessionUseCmd = newWorkSessionUseCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newWorkSessionUseCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var unsetActiveWorkSession bool
 

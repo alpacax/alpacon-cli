@@ -2,13 +2,10 @@ package workspace
 
 import (
 	"github.com/alpacax/alpacon-cli/api/workspace"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var workspaceMFAMethodsCmd = newWorkspaceMFAMethodsCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newWorkspaceMFAMethodsCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

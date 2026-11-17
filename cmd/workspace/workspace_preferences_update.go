@@ -2,12 +2,9 @@ package workspace
 
 import (
 	"github.com/alpacax/alpacon-cli/api/workspace"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var workspacePreferencesUpdateCmd = newWorkspacePreferencesUpdateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newWorkspacePreferencesUpdateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

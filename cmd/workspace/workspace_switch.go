@@ -7,7 +7,6 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/api/workspace"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -15,8 +14,6 @@ import (
 )
 
 var errRefreshRejected = errors.New("refresh token refused")
-
-var workspaceSwitchCmd = newWorkspaceSwitchCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newWorkspaceSwitchCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

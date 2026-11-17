@@ -10,9 +10,7 @@ import (
 // clientFactory builds the API client a command talks to.
 type clientFactory = func() (*client.AlpaconClient, error)
 
-var WebFTPCmd = newWebFTPCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
-func newWebFTPCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+func NewWebFTPCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "webftp-log",
 		Aliases: []string{"webftp-logs"},

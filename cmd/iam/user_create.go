@@ -12,8 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userCreateCmd = newUserCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newUserCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "create",

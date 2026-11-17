@@ -15,8 +15,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var waitCmd = newWaitCommand(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newWaitCommand(newClient func() (*client.AlpaconClient, error), ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "wait",
@@ -60,10 +58,6 @@ Run 'alpacon work-session ls' or the Alpacon console to find a target ID.`,
 	cmd.Flags().StringSlice("until", nil, "Sub types that end the wait (comma-separated). Overrides the built-in condition, and is required for a type this CLI has none for")
 	cmd.Flags().Duration("timeout", utils.DefaultApprovalWaitTimeout, "How long to wait before giving up")
 	return cmd
-}
-
-func init() {
-	EventCmd.AddCommand(waitCmd)
 }
 
 func validateEventTarget(target string) (string, error) {

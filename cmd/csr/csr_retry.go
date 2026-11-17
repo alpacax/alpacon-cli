@@ -2,12 +2,9 @@ package csr
 
 import (
 	"github.com/alpacax/alpacon-cli/api/cert"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var csrRetryCmd = newCsrRetryCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newCsrRetryCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

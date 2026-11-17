@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	approvalapi "github.com/alpacax/alpacon-cli/api/approval"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -373,6 +374,7 @@ func TestDescribeRowsShowFileExecutionRunAsOnce(t *testing.T) {
 }
 
 func TestApprovalDescribeJSONPreservesSudoRunAs(t *testing.T) {
+	approvalDescribeCmd := newApprovalDescribeCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	const response = `{"id":"apr-abc","metadata":{"sudo":{"command":"apt update","runas":"root"}}}`
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/approvals/approvals/apr-abc/", r.URL.Path)
