@@ -203,7 +203,7 @@ const relockTick = 100 * time.Millisecond
 // the user is in the browser, and takes it again, rereading the file, once
 // the session is open. Its methods are safe to call from the Ctrl+C watcher
 // and the command at once; the command takes the editor it writes through
-// once, with writer.
+// once, with take.
 type kubeconfigHold struct {
 	path string
 
@@ -220,27 +220,7 @@ func openKubeconfigHold(path string) (*kubeconfigHold, error) {
 	return &kubeconfigHold{path: path, editor: editor}, nil
 }
 
-// Editor is the open editor, or nil while the lock is let go or after close.
-func (h *kubeconfigHold) Editor() *kubeconfig.Editor {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.editor
-}
-
-// writer is the editor the session's context is written through, taken once:
-// a close from the watcher after it leaves the editor closed, not nil, so the
-// write fails as a closed editor's does instead of reaching a nil pointer. It
-// returns errHoldClosed when the watcher closed the hold first.
-func (h *kubeconfigHold) writer() (*kubeconfig.Editor, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.closed || h.editor == nil {
-		return nil, errHoldClosed
-	}
-	return h.editor, nil
-}
-
-// letGo releases the lock until retake.
+// letGo releases the lock until take.
 func (h *kubeconfigHold) letGo() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -266,29 +246,38 @@ func (h *kubeconfigHold) releaseLocked() {
 
 var errHoldClosed = errors.New("the command is stopping")
 
-// retake takes the lock again and rereads the file, waiting up to timeout
-// while another program holds the lock.
-func (h *kubeconfigHold) retake(timeout time.Duration) error {
+// take returns the editor the session's context is written through, taken
+// once: a close from the watcher after it leaves the editor closed, not nil,
+// so the write fails as a closed editor's does instead of reaching a nil
+// pointer. It returns errHoldClosed once the watcher closed the hold. When the
+// lock was let go it takes it again and rereads the file, waiting up to
+// timeout while another program holds the lock. kubeconfig.Open runs under the
+// mutex on purpose: the second Ctrl+C's close exits the process as soon as it
+// returns, so an Open it did not wait for could leave a lock file behind that
+// would lock kubectl out of the file until someone removed it.
+func (h *kubeconfigHold) take(timeout time.Duration) (*kubeconfig.Editor, error) {
 	deadline := time.Now().Add(timeout)
 	for {
 		h.mu.Lock()
 		if h.closed {
 			h.mu.Unlock()
-			return errHoldClosed
+			return nil, errHoldClosed
 		}
-		if h.editor != nil {
-			h.mu.Unlock()
-			return nil
-		}
-		editor, err := kubeconfig.Open(h.path)
-		if err == nil {
+		if h.editor == nil {
+			editor, err := kubeconfig.Open(h.path)
+			if err != nil {
+				h.mu.Unlock()
+				if !errors.Is(err, kubeconfig.ErrLocked) || !time.Now().Add(relockTick).Before(deadline) {
+					return nil, err
+				}
+				time.Sleep(relockTick)
+				continue
+			}
 			h.editor = editor
 		}
+		editor := h.editor
 		h.mu.Unlock()
-		if err == nil || !errors.Is(err, kubeconfig.ErrLocked) || !time.Now().Add(relockTick).Before(deadline) {
-			return err
-		}
-		time.Sleep(relockTick)
+		return editor, nil
 	}
 }
 
@@ -435,7 +424,7 @@ func openKubeSession(ac *client.AlpaconClient, hold *kubeconfigHold, opts kubeCo
 	if opts.isInterrupted() {
 		return nil, errInterrupted
 	}
-	session, letGo, err := createKubeSession(ac, hold, opts, kubernetes.KubeSessionCreateRequest{
+	session, err := createKubeSession(ac, hold, opts, kubernetes.KubeSessionCreateRequest{
 		Cluster:     clusterID,
 		WorkSession: opts.workSessionID,
 		ClientType:  kubernetes.ClientTypeCLI,
@@ -451,19 +440,16 @@ func openKubeSession(ac *client.AlpaconClient, hold *kubeconfigHold, opts kubeCo
 		return fmt.Errorf("%w; the kube session was closed, so run the command again", reason)
 	}
 
-	if letGo {
-		if err := hold.retake(opts.relockWait()); err != nil {
-			if errors.Is(err, errHoldClosed) {
-				return nil, discard(errInterrupted)
-			}
-			// The MFA stays credited to this client for the workspace's
-			// window, so the run the message asks for opens without it.
-			return nil, discard(fmt.Errorf("MFA went through, but the kubeconfig could not be opened again: %w", err))
-		}
-	}
-	editor, err := hold.writer()
+	// Only a lock let go for the MFA step-up is opened again here, so any
+	// error but errHoldClosed comes from taking it back.
+	editor, err := hold.take(opts.relockWait())
 	if err != nil {
-		return nil, discard(errInterrupted)
+		if errors.Is(err, errHoldClosed) {
+			return nil, discard(errInterrupted)
+		}
+		// The MFA stays credited to this client for the workspace's window,
+		// so the run the message asks for opens without it.
+		return nil, discard(fmt.Errorf("MFA went through, but the kubeconfig could not be opened again: %w", err))
 	}
 
 	if opts.isInterrupted() {
@@ -525,13 +511,13 @@ func openKubeSession(ac *client.AlpaconClient, hold *kubeconfigHold, opts kubeCo
 // createKubeSession opens the session, running the MFA step-up and the wait
 // for it when the workspace asks for MFA to open a session that may exec into
 // pods. The link names no server, since a kube session has a cluster. The
-// kubeconfig lock is let go for the step-up and the wait; letGo reports that
-// the caller must take it again. Whatever ends the wait, a refusal is
-// returned as a sessionCreateError and a first Ctrl+C as errInterrupted.
-func createKubeSession(ac *client.AlpaconClient, hold *kubeconfigHold, opts kubeConfigOptions, req kubernetes.KubeSessionCreateRequest) (session *kubernetes.KubeSessionResponse, letGo bool, err error) {
-	session, err = kubernetes.CreateSession(ac, req)
+// kubeconfig lock is let go for the step-up and the wait, and the caller's
+// take opens it again. Whatever ends the wait, a refusal is returned as a
+// sessionCreateError and a first Ctrl+C as errInterrupted.
+func createKubeSession(ac *client.AlpaconClient, hold *kubeconfigHold, opts kubeConfigOptions, req kubernetes.KubeSessionCreateRequest) (*kubernetes.KubeSessionResponse, error) {
+	session, err := kubernetes.CreateSession(ac, req)
 	if err == nil {
-		return session, false, nil
+		return session, nil
 	}
 	callbacks := mfa.WorkspaceErrorCallbacks(ac, func() error {
 		// Untagged, so the wait ends here instead of opening a session the
@@ -546,18 +532,26 @@ func createKubeSession(ac *client.AlpaconClient, hold *kubeconfigHold, opts kube
 		return err
 	})
 	stepUp := callbacks.OnMFARequired
+	// HandleCommonErrors words a step-up failure with %s, so errors.Is cannot
+	// find errInterrupted in it; the flag carries it instead.
+	var interruptedBeforeStepUp bool
 	callbacks.OnMFARequired = func(serverName string) error {
 		hold.letGo()
-		letGo = true
+		// A first Ctrl+C during the refused create stops here, before a link
+		// is fetched and a browser opened for a wait that would end anyway.
+		if opts.isInterrupted() {
+			interruptedBeforeStepUp = true
+			return errInterrupted
+		}
 		return stepUp(serverName)
 	}
 	if err = utils.HandleCommonErrors(err, "", callbacks); err != nil {
-		if errors.Is(err, errInterrupted) {
-			return nil, letGo, errInterrupted
+		if interruptedBeforeStepUp || errors.Is(err, errInterrupted) {
+			return nil, errInterrupted
 		}
-		return nil, letGo, &sessionCreateError{err: err}
+		return nil, &sessionCreateError{err: err}
 	}
-	return session, letGo, nil
+	return session, nil
 }
 
 // checkProxyURL reports whether proxyURL is plain http, and refuses one that

@@ -18,6 +18,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/kubeconfig"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -695,4 +696,55 @@ func TestKubeConfigRefusalKeepsTheServerCode(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, envelope.HTTPStatus)
 		})
 	}
+}
+
+func TestKubeconfigHoldLetsGoAndTakesAgain(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config")
+	hold := openHold(t, path)
+	held, err := hold.take(0)
+	require.NoError(t, err)
+
+	hold.letGo()
+	assert.NoFileExists(t, path+".lock")
+
+	editor, err := hold.take(0)
+	require.NoError(t, err)
+	assert.FileExists(t, path+".lock")
+	assert.NotSame(t, held, editor, "the file is reread after the lock is let go")
+	// A second take keeps the editor it holds.
+	again, err := hold.take(0)
+	require.NoError(t, err)
+	assert.Same(t, editor, again)
+
+	hold.close()
+	hold.close()
+	assert.NoFileExists(t, path+".lock")
+}
+
+// A second Ctrl+C closes the hold from the signal goroutine and exits. A take
+// after it must not create a lock file the exiting process leaves behind.
+func TestKubeconfigHoldRefusesToTakeAfterClose(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config")
+	hold := openHold(t, path)
+	hold.letGo()
+	hold.close()
+
+	_, err := hold.take(0)
+	require.ErrorIs(t, err, errHoldClosed)
+	assert.NoFileExists(t, path+".lock")
+}
+
+func TestKubeconfigHoldTakeFailsOnAForeignLock(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config")
+	hold := openHold(t, path)
+	hold.letGo()
+	require.NoError(t, os.WriteFile(path+".lock", nil, 0o600))
+
+	_, err := hold.take(0)
+	require.ErrorIs(t, err, kubeconfig.ErrLocked)
+	hold.close()
+	assert.FileExists(t, path+".lock")
 }

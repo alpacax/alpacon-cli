@@ -548,3 +548,37 @@ func TestWaitForWorkSessionReturnsARefusalInsteadOfExiting(t *testing.T) {
 		})
 	}
 }
+
+// The issue's acceptance case: kube login on a workspace requiring MFA for
+// kube exec prints the step-up link once, then opens and saves the session.
+// Serial: it sets HOME and env and swaps stdio. On the real clock, since the
+// captured output goes through an OS pipe, so it waits one retry interval.
+func TestKubeLoginStepsUpOnceWhenTheOpenNeedsMFA(t *testing.T) {
+	t.Setenv("ALPACON_NO_BROWSER", "1")
+	srv := newSessionServer()
+	srv.mfaCreates = 1
+	ac := srv.start(t)
+	ac.WorkspaceName = "my-workspace"
+	ac.SetAccessToken("access-token")
+	setupKubeCommandConfig(t, ac.BaseURL)
+	path := filepath.Join(t.TempDir(), "config")
+
+	_, stderr, code := runKubeCommandWith(t, func() (*client.AlpaconClient, error) { return ac, nil }, utils.OutputFormatTable,
+		"login", "prod-east", "--work-session", "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47", "--kubeconfig", path)
+
+	require.Equal(t, 0, code, stderr)
+	assert.Contains(t, stderr, "MFA authentication required. Please visit:")
+	assert.Contains(t, stderr, "https://auth.example.com/mfa?ticket=t-1")
+	assert.Len(t, srv.mfaLinkQueries(), 1)
+	assert.Equal(t, 2, srv.creates())
+	assert.Equal(t, 0, srv.closes())
+
+	store, err := defaultKubeSessionStore()
+	require.NoError(t, err)
+	record, err := store.read(recordKey{workspaceURL: ac.BaseURL, cluster: "prod-east"})
+	require.NoError(t, err)
+	require.NotNil(t, record)
+	assert.Equal(t, testSessionID, record.KubeSessionID)
+	assert.Len(t, readKubeconfig(t, path).Contexts, 1)
+	assert.NoFileExists(t, path+".lock")
+}

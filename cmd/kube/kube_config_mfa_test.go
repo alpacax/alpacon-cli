@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/kubeconfig"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -114,6 +113,9 @@ func TestOpenKubeConfigStopsTheMFAWaitAtAnInterrupt(t *testing.T) {
 	require.ErrorIs(t, err, errInterrupted)
 	assert.Equal(t, 1, srv.creates())
 	assert.Equal(t, 0, srv.closes())
+	// Interrupted during the refused create: no link is fetched and no
+	// browser opened for a wait that would end at once.
+	assert.Empty(t, srv.mfaLinkQueries())
 	assert.NoFileExists(t, path)
 	assert.NoFileExists(t, path+".lock")
 	exitErr := kubeConfigError(err, "prod-east", "")
@@ -306,84 +308,31 @@ func TestOpenKubeConfigClosesTheSessionWhenTheHoldClosesUnderIt(t *testing.T) {
 	assert.NoFileExists(t, path+".lock")
 }
 
-func TestKubeconfigHoldLetsGoAndRetakes(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "config")
-	hold := openHold(t, path)
-
-	hold.letGo()
-	assert.NoFileExists(t, path+".lock")
-	assert.Nil(t, hold.Editor())
-
-	require.NoError(t, hold.retake(0))
-	assert.FileExists(t, path+".lock")
-	assert.NotNil(t, hold.Editor())
-	// A second retake keeps the editor it holds.
-	editor := hold.Editor()
-	require.NoError(t, hold.retake(0))
-	assert.Same(t, editor, hold.Editor())
-
-	hold.close()
-	hold.close()
-	assert.NoFileExists(t, path+".lock")
-}
-
-// A second Ctrl+C closes the hold from the signal goroutine and exits. A retake
-// after it must not create a lock file the exiting process leaves behind.
-func TestKubeconfigHoldRefusesToRetakeAfterClose(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "config")
-	hold := openHold(t, path)
-	hold.letGo()
-	hold.close()
-
-	require.ErrorIs(t, hold.retake(0), errHoldClosed)
-	assert.NoFileExists(t, path+".lock")
-}
-
-func TestKubeconfigHoldRetakeFailsOnAForeignLock(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "config")
-	hold := openHold(t, path)
-	hold.letGo()
-	require.NoError(t, os.WriteFile(path+".lock", nil, 0o600))
-
-	require.ErrorIs(t, hold.retake(0), kubeconfig.ErrLocked)
-	assert.Nil(t, hold.Editor())
-	hold.close()
-	assert.FileExists(t, path+".lock")
-}
-
-// The issue's acceptance case: kube login on a workspace requiring MFA for
-// kube exec prints the step-up link once, then opens and saves the session.
-// Serial: it sets HOME and env and swaps stdio. On the real clock, since the
-// captured output goes through an OS pipe, so it waits one retry interval.
-func TestKubeLoginStepsUpOnceWhenTheOpenNeedsMFA(t *testing.T) {
+// A second Ctrl+C during the MFA wait closes the hold from the watcher. When
+// the retry has already opened the session, the command closes it instead of
+// taking the lock again or writing.
+// Serial: t.Setenv.
+func TestOpenKubeConfigClosesTheSessionWhenTheHoldClosesDuringTheMFAWait(t *testing.T) {
 	t.Setenv("ALPACON_NO_BROWSER", "1")
+	path := filepath.Join(t.TempDir(), "config")
 	srv := newSessionServer()
 	srv.mfaCreates = 1
-	ac := srv.start(t)
-	ac.WorkspaceName = "my-workspace"
-	ac.SetAccessToken("access-token")
-	setupKubeCommandConfig(t, ac.BaseURL)
-	path := filepath.Join(t.TempDir(), "config")
+	ac := srv.startInMemory(t)
 
-	_, stderr, code := runKubeCommandWith(t, func() (*client.AlpaconClient, error) { return ac, nil }, utils.OutputFormatTable,
-		"login", "prod-east", "--work-session", "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47", "--kubeconfig", path)
+	var err error
+	synctest.Test(t, func(t *testing.T) {
+		hold := openHold(t, path)
+		srv.onCreate = func(call int) {
+			if call == 2 {
+				hold.close()
+			}
+		}
+		_, err = openKubeConfig(ac, hold, kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
+	})
 
-	require.Equal(t, 0, code, stderr)
-	assert.Contains(t, stderr, "MFA authentication required. Please visit:")
-	assert.Contains(t, stderr, "https://auth.example.com/mfa?ticket=t-1")
-	assert.Len(t, srv.mfaLinkQueries(), 1)
+	require.ErrorIs(t, err, errInterrupted)
 	assert.Equal(t, 2, srv.creates())
-	assert.Equal(t, 0, srv.closes())
-
-	store, err := defaultKubeSessionStore()
-	require.NoError(t, err)
-	record, err := store.read(recordKey{workspaceURL: ac.BaseURL, cluster: "prod-east"})
-	require.NoError(t, err)
-	require.NotNil(t, record)
-	assert.Equal(t, testSessionID, record.KubeSessionID)
-	assert.Len(t, readKubeconfig(t, path).Contexts, 1)
+	assert.Equal(t, 1, srv.closes())
+	assert.NoFileExists(t, path)
 	assert.NoFileExists(t, path+".lock")
 }
