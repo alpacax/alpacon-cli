@@ -301,7 +301,7 @@ func runKubeLogin(ios *utils.IOStreams, cmd *cobra.Command, args []string, flags
 	// should not spend locked out of the file.
 	held.done()
 
-	if err := printKubeLoginResult(ios, cmd.OutOrStdout(), kubeLoginResult{
+	if err := printKubeLoginResult(ios, ios.Out, kubeLoginResult{
 		kubeConfigResult:   *result,
 		WorkSessionCreated: choice.created,
 		Scopes:             choice.scopes,

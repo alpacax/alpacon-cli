@@ -45,7 +45,7 @@ work session has expired, exits 3 and says to run 'alpacon kube login' again.`,
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runKubeCredentials(ios, newClient, cmd.OutOrStdout(), strings.TrimSpace(cluster))
+			return runKubeCredentials(ios, newClient, ios.Out, strings.TrimSpace(cluster))
 		}),
 	}
 	cmd.Flags().StringVar(&cluster, "cluster", "", "cluster whose saved kube session to use")

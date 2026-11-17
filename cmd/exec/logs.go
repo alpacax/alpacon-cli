@@ -23,7 +23,7 @@ Run the command again later to check for completion.`,
 		Args:    cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 			jobID := args[0]
-			stdout, stderr := cmd.OutOrStdout(), cmd.ErrOrStderr()
+			stdout, stderr := ios.Out, ios.ErrOut
 
 			if !utils.IsUUID(jobID) {
 				return utils.NewUsageExitError("invalid JOB_ID %q: must be a UUID (e.g. 550e8400-e29b-41d4-a716-446655440000)", jobID)

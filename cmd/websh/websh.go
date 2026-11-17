@@ -287,7 +287,7 @@ func runWebsh(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient
 	// pending-approval exit code, sudo-denial hints, and JSON buffering match
 	// exec. Wait is left false—websh has no --wait, so the blocking wait never runs.
 	if len(commandArgs) > 0 {
-		return execCmd.RemoteExec(ios, newClient, cmd.OutOrStdout(), cmd.ErrOrStderr(), buildRemoteExecArgs(parsed, username, serverName))
+		return execCmd.RemoteExec(ios, newClient, ios.Out, ios.ErrOut, buildRemoteExecArgs(parsed, username, serverName))
 	}
 
 	// Interactive websh has no channel for env: CreateWebshSession takes none.

@@ -53,7 +53,7 @@ another with 'kubectl config use-context NAME'.`,
   alpacon kube logout prod-east --kubeconfig ~/.kube/alpacon`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runKubeLogoutCommand(ios, newClient, cmd.OutOrStdout(), args, kubeconfigFlag)
+			return runKubeLogoutCommand(ios, newClient, ios.Out, args, kubeconfigFlag)
 		}),
 	}
 	cmd.Flags().StringVar(&kubeconfigFlag, "kubeconfig", "", "kubeconfig file to clean (default: every file kubectl reads)")

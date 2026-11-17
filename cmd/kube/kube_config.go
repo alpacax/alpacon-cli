@@ -153,7 +153,7 @@ func runKubeConfig(ios *utils.IOStreams, cmd *cobra.Command, cluster string, fla
 	// A write to a closed pipe ends the process with SIGPIPE, skipping the defer and leaving the lock file.
 	held.done()
 
-	return printKubeConfigResult(ios, cmd.OutOrStdout(), result, ac.Insecure)
+	return printKubeConfigResult(ios, ios.Out, result, ac.Insecure)
 }
 
 // interruptedMessage is how a command ends on a second Ctrl+C.

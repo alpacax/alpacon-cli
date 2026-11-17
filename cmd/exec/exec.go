@@ -275,7 +275,7 @@ This is client guidance; personal-token enforcement depends on the server versio
 				return utils.NewUsageExitError("You must specify a command to execute, or a script with --file.")
 			}
 
-			return RemoteExec(ios, newClient, cmd.OutOrStdout(), cmd.ErrOrStderr(), parsed)
+			return RemoteExec(ios, newClient, ios.Out, ios.ErrOut, parsed)
 		}),
 	}
 	cmd.AddCommand(newListCommand(newClient, ios), newLogsCommand(newClient, ios), newPurposeCommand(newClient, ios))
