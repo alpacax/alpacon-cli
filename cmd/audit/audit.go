@@ -10,9 +10,9 @@ import (
 // clientFactory builds the API client a command talks to.
 type clientFactory = func() (*client.AlpaconClient, error)
 
-var AuditCmd = newAuditCmd(client.NewAlpaconAPIClient)
+var AuditCmd = newAuditCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAuditCmd(newClient clientFactory) *cobra.Command {
+func newAuditCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "audit",
 		Aliases: []string{"audit-log"},
@@ -28,7 +28,7 @@ func newAuditCmd(newClient clientFactory) *cobra.Command {
 	alpacon audit --tail=50 --app=cert --model=authority
 	`,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runAudit(cmd, args, newClient)
+			return runAudit(ios, cmd, args, newClient)
 		}),
 	}
 	var model string
@@ -42,7 +42,7 @@ func newAuditCmd(newClient clientFactory) *cobra.Command {
 	return cmd
 }
 
-func runAudit(cmd *cobra.Command, args []string, newClient clientFactory) error {
+func runAudit(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient clientFactory) error {
 	tail, _ := cmd.Flags().GetInt("tail")
 	if err := utils.CheckPositiveInt("tail", tail); err != nil {
 		return err
@@ -57,5 +57,5 @@ func runAudit(cmd *cobra.Command, args []string, newClient clientFactory) error 
 	}
 
 	auditList, err := audit.GetAuditLogList(alpaconClient, tail, userName, app, model)
-	return utils.PrintList(auditList, err, "Failed to get audit logs")
+	return utils.PrintListTo(ios, auditList, err, "Failed to get audit logs")
 }

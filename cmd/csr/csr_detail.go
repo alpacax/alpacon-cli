@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var csrDetailCmd = newCsrDetailCmd(client.NewAlpaconAPIClient)
+var csrDetailCmd = newCsrDetailCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newCsrDetailCmd(newClient clientFactory) *cobra.Command {
+func newCsrDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "describe CSR_ID",
 		Aliases: []string{"desc"},
@@ -36,7 +36,7 @@ func newCsrDetailCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the csr details: %s.", err)
 			}
 
-			return utils.PrintJson(csrDetail)
+			return ios.PrintJson(csrDetail)
 		}),
 	}
 }

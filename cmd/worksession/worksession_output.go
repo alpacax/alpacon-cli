@@ -2,7 +2,6 @@ package worksession
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -113,8 +112,8 @@ func activeWorkSessionSetMessage(successPrefix, id, desc string) string {
 		utils.SanitizeTerminalText(successPrefix), utils.SanitizeTerminalText(id), suffix)
 }
 
-func printWorkSessionMutationJSON(output workSessionMutationOutput) error {
-	if err := utils.PrintJSONValue(os.Stdout, output); err != nil {
+func printWorkSessionMutationJSON(ios *utils.IOStreams, output workSessionMutationOutput) error {
+	if err := utils.PrintJSONValue(ios.Out, output); err != nil {
 		// Keeps stderr structured even though marshalling failed.
 		return utils.NewEnvelopeExitError(output.Operation, err, "Failed to marshal work-session result: %s", err)
 	}
@@ -158,12 +157,12 @@ func formatRecommendations(recs []wsapi.Recommendation) string {
 
 // PrintSessionAdvisories shows what the approver changed or recommended, such as a scope dropped from
 // the request. Text mode only—JSON callers return before reaching this.
-func PrintSessionAdvisories(session *wsapi.WorkSession) {
+func PrintSessionAdvisories(ios *utils.IOStreams, session *wsapi.WorkSession) {
 	if block := formatAdjustments(session.Adjustments); block != "" {
-		utils.CliWarning("Approver adjusted your request:\n%s", block)
+		ios.Warning("Approver adjusted your request:\n%s", block)
 	}
 	if block := formatRecommendations(session.Recommendations); block != "" {
-		utils.CliInfo("Recommendations from approver:\n%s", block)
+		ios.Info("Recommendations from approver:\n%s", block)
 	}
 }
 

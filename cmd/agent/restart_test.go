@@ -33,7 +33,7 @@ func TestAgentRestart(t *testing.T) {
 				actionRoute:                 {Status: tt.status, Body: tt.body},
 			})
 
-			failure, code := cmdtest.Run(newRestartAgentCmd(ts.Factory()), tt.args...)
+			failure, code := cmdtest.Run(newRestartAgentCmd(ts.Factory(), utils.Stdio), tt.args...)
 
 			assert.Equal(t, tt.wantCode, code, failure)
 			assert.Contains(t, failure, tt.want)
@@ -45,7 +45,7 @@ func TestAgentRestart(t *testing.T) {
 func TestAgentRestartFailsWithoutALogin(t *testing.T) {
 	t.Parallel()
 
-	failure, code := cmdtest.Run(newRestartAgentCmd(cmdtest.NoClient), "my-server", "-y")
+	failure, code := cmdtest.Run(newRestartAgentCmd(cmdtest.NoClient, utils.Stdio), "my-server", "-y")
 
 	assert.Equal(t, utils.ExitCodeGeneralError, code)
 	assert.Contains(t, failure, "Connection to Alpacon API failed: not logged in")

@@ -3,7 +3,6 @@ package worksession
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
@@ -12,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workSessionRecordingCmd = newWorkSessionRecordingCmd(client.NewAlpaconAPIClient)
+var workSessionRecordingCmd = newWorkSessionRecordingCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkSessionRecordingCmd(newClient clientFactory) *cobra.Command {
+func newWorkSessionRecordingCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var terminalIndex int
 
 	cmd := &cobra.Command{
@@ -62,8 +61,8 @@ The [N] beside each terminal in 'alpacon work-session timeline' is its --index.`
 				return utils.NewEnvelopeExitError(opRecording, nil, "Terminal %d of %d in session %s has no recording; try another --index.", terminalIndex, len(terminals), sessionID)
 			}
 
-			printRecordingHeader(os.Stdout, addedAt, terminalIndex, len(terminals))
-			printRecordingContent(os.Stdout, record)
+			printRecordingHeader(ios.Out, addedAt, terminalIndex, len(terminals))
+			printRecordingContent(ios.Out, record)
 			return nil
 		}),
 	}

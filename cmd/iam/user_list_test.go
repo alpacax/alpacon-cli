@@ -6,16 +6,17 @@ import (
 
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
 
-// Serial: it captures stdout and sets utils.OutputFormat.
 func TestUserListPrintsWhatTheServerReturned(t *testing.T) {
+	t.Parallel()
 	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
 		"GET /api/iam/users/": {Status: http.StatusOK, Body: `{"count": 1, "results": [{"username": "alice", "first_name": "Alice", "last_name": "Kim", "email": "alice@example.com", "uid": 2001, "is_active": true}]}`},
 	})
 
-	stdout, stderr, code := cmdtest.RunJSON(t, newUserListCmd(ts.Factory()))
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newUserListCmd(ts.Factory(), ios) })
 
 	assert.Equal(t, 0, code, stderr)
 	assert.Contains(t, stdout, `"alice"`)
@@ -45,7 +46,7 @@ func TestUserListFailsWithExit1(t *testing.T) {
 				}).Factory()
 			}
 
-			failure, code := cmdtest.Run(newUserListCmd(newClient))
+			failure, code := cmdtest.Run(newUserListCmd(newClient, utils.Stdio))
 
 			assert.Equal(t, utils.ExitCodeGeneralError, code)
 			assert.Contains(t, failure, tt.want)

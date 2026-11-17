@@ -13,9 +13,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userRoleGrantCmd = newUserRoleGrantCmd(client.NewAlpaconAPIClient)
+var userRoleGrantCmd = newUserRoleGrantCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUserRoleGrantCmd(newClient clientFactory) *cobra.Command {
+func newUserRoleGrantCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "grant USER ROLE",
 		Short: "Grant a workspace role to a user",
@@ -61,7 +61,7 @@ catalog' to see the names this workspace defines.`,
 			}
 
 			if rbac.FindWorkspaceBinding(bindings, role.ID) != nil {
-				utils.CliInfo("%s already holds %s workspace-wide. Nothing to do.", subj.Label, role.Name)
+				ios.Info("%s already holds %s workspace-wide. Nothing to do.", subj.Label, role.Name)
 				return nil
 			}
 
@@ -70,13 +70,13 @@ catalog' to see the names this workspace defines.`,
 			// Disclose before the dry-run returns, not after: this is what --dry-run is for.
 			if rbac.IsPlatformTier(role.Name) {
 				if role.Name == rbac.RoleSuperuser {
-					utils.CliInfo("The server also creates a companion workspace-wide admin binding for a superuser grant.")
+					ios.Info("The server also creates a companion workspace-wide admin binding for a superuser grant.")
 				}
-				warnMissingReason(reason)
+				warnMissingReason(ios, reason)
 			}
 
 			if dryRun {
-				utils.CliInfo("Would grant %s to %s (user %s, role %s), workspace-wide.", role.Name, subj.Label, subj.ID, role.ID)
+				ios.Info("Would grant %s to %s (user %s, role %s), workspace-wide.", role.Name, subj.Label, subj.ID, role.ID)
 				return nil
 			}
 
@@ -101,8 +101,8 @@ catalog' to see the names this workspace defines.`,
 				return utils.NewExitError("Failed to grant %s to %s: %s.", role.Name, subj.Label, describeRBACError(alpaconClient, gateRoleWrite, err))
 			}
 
-			utils.CliSuccess("Granted %s to %s.", role.Name, subj.Label)
-			reportWorkspaceRoles(alpaconClient, subj.ID, subj.Label)
+			ios.Success("Granted %s to %s.", role.Name, subj.Label)
+			reportWorkspaceRoles(ios, alpaconClient, subj.ID, subj.Label)
 			return nil
 		}),
 	}
@@ -150,26 +150,26 @@ func reasonFlag(cmd *cobra.Command) string {
 
 // warnMissingReason warns, never refuses: the server accepts a blank justification and records
 // the omission.
-func warnMissingReason(reason string) {
+func warnMissingReason(ios *utils.IOStreams, reason string) {
 	if reason == "" {
-		utils.CliWarning("No --reason given, so the audit entry for this change will carry no justification.")
+		ios.Warning("No --reason given, so the audit entry for this change will carry no justification.")
 	}
 }
 
 // reportWorkspaceRoles re-reads rather than trust the 2xx: a superuser grant creates a second
 // binding the client never asked for, and revoke can leave one behind.
-func reportWorkspaceRoles(ac *client.AlpaconClient, userID, userLabel string) {
+func reportWorkspaceRoles(ios *utils.IOStreams, ac *client.AlpaconClient, userID, userLabel string) {
 	bindings, err := rbac.GetUserBindings(ac, userID)
 	if err != nil {
-		utils.CliWarning("The change was accepted, but re-reading %s's roles failed: %s.", userLabel, describeRBACError(ac, gateRoleRead, err))
+		ios.Warning("The change was accepted, but re-reading %s's roles failed: %s.", userLabel, describeRBACError(ac, gateRoleRead, err))
 		return
 	}
 
 	names := rbac.WorkspaceRoleNames(bindings)
 	if len(names) == 0 {
-		utils.CliInfo("%s now holds no workspace-wide roles.", userLabel)
+		ios.Info("%s now holds no workspace-wide roles.", userLabel)
 		return
 	}
 
-	utils.CliInfo("%s now holds workspace-wide: %s", userLabel, strings.Join(names, ", "))
+	ios.Info("%s now holds workspace-wide: %s", userLabel, strings.Join(names, ", "))
 }

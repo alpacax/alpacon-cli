@@ -6,16 +6,17 @@ import (
 
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
 
-// Serial: it captures stdout and sets utils.OutputFormat.
 func TestServerListPrintsWhatTheServerReturned(t *testing.T) {
+	t.Parallel()
 	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
 		"GET /api/servers/servers/": {Status: http.StatusOK, Body: `{"count": 1, "results": [{"id": "550e8400-e29b-41d4-a716-446655440000", "name": "my-server", "remote_ip": "10.0.0.5", "is_connected": true, "os_name": "Ubuntu", "os_version": "24.04"}]}`},
 	})
 
-	stdout, stderr, code := cmdtest.RunJSON(t, newServerListCmd(ts.Factory()))
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newServerListCmd(ts.Factory(), ios) })
 
 	assert.Equal(t, 0, code, stderr)
 	assert.Contains(t, stdout, `"my-server"`)
@@ -45,7 +46,7 @@ func TestServerListFailsWithExit1(t *testing.T) {
 				}).Factory()
 			}
 
-			failure, code := cmdtest.Run(newServerListCmd(newClient))
+			failure, code := cmdtest.Run(newServerListCmd(newClient, utils.Stdio))
 
 			assert.Equal(t, utils.ExitCodeGeneralError, code)
 			assert.Contains(t, failure, tt.want)

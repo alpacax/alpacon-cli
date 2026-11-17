@@ -13,7 +13,7 @@ import (
 
 const opKubeSessions = "kube_sessions"
 
-func newKubeSessionsCmd(newClient clientFactory) *cobra.Command {
+func newKubeSessionsCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var (
 		clusterFlag string
 		all         bool
@@ -53,7 +53,7 @@ counts cannot be read.`,
 				return utils.NewEnvelopeExitError(opKubeSessions, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
 
-			rows, err := listKubeSessions(ac, cluster, all)
+			rows, err := listKubeSessions(ios, ac, cluster, all)
 			if err != nil {
 				// Both lists answer 404 only when the surface is off. A named exit code keeps that
 				// expected refusal free of the "report an issue" footer.
@@ -66,7 +66,7 @@ counts cannot be read.`,
 				return utils.NewEnvelopeExitError(opKubeSessions, err, "Failed to retrieve the kube sessions: %s.", err)
 			}
 
-			return utils.PrintTable(rows)
+			return ios.PrintTable(rows)
 		}),
 	}
 	cmd.Flags().StringVar(&clusterFlag, "cluster", "", "only sessions on this cluster")
@@ -78,7 +78,7 @@ counts cannot be read.`,
 // so the filtering stays on the server. The session list names clusters by ID
 // alone, so without --cluster the names come from one read of the cluster list;
 // if that fails the rows show the IDs.
-func listKubeSessions(ac *client.AlpaconClient, cluster string, all bool) ([]kubernetes.KubeSessionAttributes, error) {
+func listKubeSessions(ios *utils.IOStreams, ac *client.AlpaconClient, cluster string, all bool) ([]kubernetes.KubeSessionAttributes, error) {
 	status := kubernetes.SessionStatusOpen
 	if all {
 		status = ""
@@ -103,7 +103,7 @@ func listKubeSessions(ac *client.AlpaconClient, cluster string, all bool) ([]kub
 	if cluster == "" && len(sessions) > 0 {
 		found, err := kubernetes.GetClusterNames(ac)
 		if err != nil {
-			utils.CliWarning("Could not resolve cluster names; showing IDs instead: %s", err)
+			ios.Warning("Could not resolve cluster names; showing IDs instead: %s", err)
 		}
 		names = found
 	}

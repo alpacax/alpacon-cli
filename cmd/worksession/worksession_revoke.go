@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workSessionRevokeCmd = newWorkSessionRevokeCmd(client.NewAlpaconAPIClient)
+var workSessionRevokeCmd = newWorkSessionRevokeCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkSessionRevokeCmd(newClient clientFactory) *cobra.Command {
+func newWorkSessionRevokeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "revoke SESSION_ID",
 		Short:   "Force-terminate a work session",
@@ -22,14 +22,14 @@ func newWorkSessionRevokeCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewEnvelopeExitError(opRevoke, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
 
-			cleared, err := RunRevoke(ac, args[0])
+			cleared, err := RunRevoke(ios, ac, args[0])
 			if err != nil {
 				return utils.NewEnvelopeExitError(opRevoke, err, "Failed to revoke work session: %s.", err)
 			}
 
-			utils.CliSuccess("Work session %s revoked.", args[0])
+			ios.Success("Work session %s revoked.", args[0])
 			if cleared {
-				utils.CliInfo("Active work-session cleared.")
+				ios.Info("Active work-session cleared.")
 			}
 			return nil
 		}),
@@ -37,6 +37,6 @@ func newWorkSessionRevokeCmd(newClient clientFactory) *cobra.Command {
 }
 
 // RunRevoke revokes the session; see endSession.
-func RunRevoke(ac *client.AlpaconClient, id string) (bool, error) {
-	return endSession(ac, id, wsapi.RevokeWorkSession)
+func RunRevoke(ios *utils.IOStreams, ac *client.AlpaconClient, id string) (bool, error) {
+	return endSession(ios, ac, id, wsapi.RevokeWorkSession)
 }

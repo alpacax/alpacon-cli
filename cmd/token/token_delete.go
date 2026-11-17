@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var tokenDeleteCmd = newTokenDeleteCmd(client.NewAlpaconAPIClient)
+var tokenDeleteCmd = newTokenDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newTokenDeleteCmd(newClient clientFactory) *cobra.Command {
+func newTokenDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete TOKEN",
 		Aliases: []string{"rm"},
@@ -51,7 +51,7 @@ func newTokenDeleteCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to delete the api token: %s.", err)
 			}
 
-			utils.CliSuccess("API token deleted: %s", tokenId)
+			ios.Success("API token deleted: %s", tokenId)
 			return nil
 		}),
 	}

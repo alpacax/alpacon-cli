@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var tokenDuplicateCmd = newTokenDuplicateCmd(client.NewAlpaconAPIClient)
+var tokenDuplicateCmd = newTokenDuplicateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newTokenDuplicateCmd(newClient clientFactory) *cobra.Command {
+func newTokenDuplicateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "duplicate TOKEN",
 		Short: "Duplicate an API token and its rules",
@@ -44,8 +44,8 @@ func newTokenDuplicateCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to duplicate the API token: %s.", err)
 			}
 
-			utils.CliSuccess("API token duplicated: %s", key)
-			utils.CliWarning("This token cannot be retrieved again after you exit.")
+			ios.Success("API token duplicated: %s", key)
+			ios.Warning("This token cannot be retrieved again after you exit.")
 			return nil
 		}),
 	}

@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var approvalCancelCmd = newApprovalCancelCmd(client.NewAlpaconAPIClient)
+var approvalCancelCmd = newApprovalCancelCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newApprovalCancelCmd(newClient clientFactory) *cobra.Command {
+func newApprovalCancelCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "cancel REQUEST_ID",
 		Short: "Cancel a pending approval request you submitted",
@@ -31,7 +31,7 @@ session.`,
 				return utils.NewExitError("Failed to cancel request: %s.", err)
 			}
 
-			utils.CliSuccess("Approval request %s cancelled.", args[0])
+			ios.Success("Approval request %s cancelled.", args[0])
 			return nil
 		}),
 	}

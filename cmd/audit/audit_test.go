@@ -6,16 +6,17 @@ import (
 
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
 
-// Serial: it captures stdout and sets utils.OutputFormat.
 func TestAuditPrintsTheActivity(t *testing.T) {
+	t.Parallel()
 	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
 		"GET /api/audit/activity/": {Status: http.StatusOK, Body: `{"results": [{"id": "550e8400-e29b-41d4-a716-446655440000", "username": "alice", "ip": "10.0.0.7", "app": "servers", "action": "update", "status_code": 200, "model": "server", "added_at": "2026-11-01T09:00:00Z"}]}`},
 	})
 
-	stdout, stderr, code := cmdtest.RunJSON(t, newAuditCmd(ts.Factory()), "--tail", "1")
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newAuditCmd(ts.Factory(), ios) }, "--tail", "1")
 
 	assert.Equal(t, 0, code, stderr)
 	assert.Contains(t, stdout, `"alice"`)
@@ -41,7 +42,7 @@ func TestAuditFails(t *testing.T) {
 				"GET /api/audit/activity/": {Status: http.StatusInternalServerError, Body: `{"detail": "unavailable"}`},
 			})
 
-			failure, code := cmdtest.Run(newAuditCmd(ts.Factory()), tt.args...)
+			failure, code := cmdtest.Run(newAuditCmd(ts.Factory(), utils.Stdio), tt.args...)
 
 			assert.Equal(t, tt.wantCode, code)
 			assert.Contains(t, failure, tt.want)

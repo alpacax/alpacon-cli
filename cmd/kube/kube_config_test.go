@@ -594,7 +594,7 @@ func TestKubeConfigReleasesTheLockBeforePrintingTheResult(t *testing.T) {
 	ac := newSessionServer().start(t)
 	path := filepath.Join(t.TempDir(), "config")
 	probe := &lockProbe{lockPath: path + ".lock"}
-	cmd := newKubeCmd(func() (*client.AlpaconClient, error) { return ac, nil })
+	cmd := newKubeCmd(func() (*client.AlpaconClient, error) { return ac, nil }, utils.Stdio)
 	cmd.SetArgs([]string{"config", "prod-east", "--kubeconfig", path})
 	cmd.SetOut(probe)
 

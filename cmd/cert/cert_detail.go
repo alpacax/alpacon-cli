@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var certDetailCmd = newCertDetailCmd(client.NewAlpaconAPIClient)
+var certDetailCmd = newCertDetailCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newCertDetailCmd(newClient clientFactory) *cobra.Command {
+func newCertDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "describe CERT_ID",
 		Aliases: []string{"desc"},
@@ -36,7 +36,7 @@ func newCertDetailCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the certificate details: %s.", err)
 			}
 
-			return utils.PrintJson(certDetail)
+			return ios.PrintJson(certDetail)
 		}),
 	}
 }

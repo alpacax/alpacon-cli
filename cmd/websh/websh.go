@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -38,7 +37,7 @@ type WebshArgs struct {
 // errHelpRequested when -h/--help is seen.
 //
 // NOTE: every named flag must be matched before the unknown-flag case.
-func ParseWebshArgs(args []string) (WebshArgs, error) {
+func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 	res := WebshArgs{Env: map[string]string{}}
 	for i := 0; i < len(args); i++ {
 		switch {
@@ -51,7 +50,7 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 		case isFlag(args[i], "-g", "--groupname"):
 			res.Groupname, i = extractValue(args, i)
 		case args[i] == "--env" || strings.HasPrefix(args[i], "--env="):
-			if errMsg := execCmd.ParseEnvArg(args[i], res.Env); errMsg != "" {
+			if errMsg := execCmd.ParseEnvArg(ios, args[i], res.Env); errMsg != "" {
 				return res, errors.New(errMsg)
 			}
 		case isFlag(args[i], "--read-only"):
@@ -128,9 +127,9 @@ func buildRemoteExecArgs(parsed WebshArgs, username, serverName string) execCmd.
 // clientFactory builds the API client a command talks to.
 type clientFactory = func() (*client.AlpaconClient, error)
 
-var WebshCmd = newCommand(client.NewAlpaconAPIClient)
+var WebshCmd = newCommand(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newCommand(newClient clientFactory) *cobra.Command {
+func newCommand(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "websh [flags] [USER@]SERVER [COMMAND...]", // [flags] stays first: words after SERVER go to the remote command
 		Short: "Open a Websh terminal or run a command",
@@ -229,33 +228,33 @@ Note: All flags must be placed before the server name.
 		// are parsed by hand in runWebsh.
 		DisableFlagParsing: true,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runWebsh(cmd, args, newClient)
+			return runWebsh(ios, cmd, args, newClient)
 		}),
 	}
 	cmd.AddCommand(
 		newJoinCommand(newClient),
-		newListCommand(newClient),
-		newDescribeCommand(newClient),
-		newCloseCommand(newClient),
-		newForceCloseCommand(newClient),
-		newInviteCommand(newClient),
+		newListCommand(newClient, ios),
+		newDescribeCommand(newClient, ios),
+		newCloseCommand(newClient, ios),
+		newForceCloseCommand(newClient, ios),
+		newInviteCommand(newClient, ios),
 		newWatchCommand(newClient),
-		newRecordsCommand(newClient),
+		newRecordsCommand(newClient, ios),
 	)
 	return cmd
 }
 
-func runWebsh(cmd *cobra.Command, args []string, newClient clientFactory) error {
-	parsed, err := ParseWebshArgs(args)
+func runWebsh(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient clientFactory) error {
+	parsed, err := ParseWebshArgs(ios, args)
 	if errors.Is(err, errHelpRequested) {
 		_ = cmd.Help()
 		return nil
 	}
 	if err != nil {
-		return utils.NewParseExitError(cmd, parsed.OutputFormat, err.Error())
+		return ios.NewParseExitError(cmd, parsed.OutputFormat, err.Error())
 	}
 	if parsed.OutputFormat != "" {
-		if err := utils.SetOutputFormat(parsed.OutputFormat); err != nil {
+		if err := ios.SetOutputFormat(parsed.OutputFormat); err != nil {
 			return utils.NewUsageExitError("%s", err)
 		}
 	}
@@ -288,13 +287,13 @@ func runWebsh(cmd *cobra.Command, args []string, newClient clientFactory) error 
 	// pending-approval exit code, sudo-denial hints, and JSON buffering match
 	// exec. Wait is left false—websh has no --wait, so the blocking wait never runs.
 	if len(commandArgs) > 0 {
-		return execCmd.RemoteExec(newClient, cmd.OutOrStdout(), cmd.ErrOrStderr(), buildRemoteExecArgs(parsed, username, serverName))
+		return execCmd.RemoteExec(ios, newClient, cmd.OutOrStdout(), cmd.ErrOrStderr(), buildRemoteExecArgs(parsed, username, serverName))
 	}
 
 	// Interactive websh has no channel for env: CreateWebshSession takes none.
 	// Warn rather than silently drop, since the help frames --env as the secrets channel.
 	if len(env) > 0 {
-		utils.CliWarning("--env has no effect on an interactive websh session; it applies only when running a command")
+		ios.Warning("--env has no effect on an interactive websh session; it applies only when running a command")
 	}
 
 	authMethod := config.ResolveAuthMethod()
@@ -330,7 +329,7 @@ func runWebsh(cmd *cobra.Command, args []string, newClient clientFactory) error 
 	// Start the sudo MFA listener in the background so it does not delay the terminal; a sudo
 	// typed before it is ready lets the approval request expire, and the user can retry.
 	defer runInBackground(func() func() {
-		if sl := setupSudoListener(alpaconClient, serverName, session.ID); sl != nil {
+		if sl := setupSudoListener(ios, alpaconClient, serverName, session.ID); sl != nil {
 			return sl.Stop
 		}
 		return nil
@@ -400,7 +399,7 @@ func runInBackground(start func() (stop func()), grace time.Duration) func() {
 
 // setupSudoListener starts the sudo MFA listener for the given websh session.
 // Returns nil when it cannot connect.
-func setupSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *event.SudoListener {
+func setupSudoListener(ios *utils.IOStreams, ac *client.AlpaconClient, serverName, sessionID string) *event.SudoListener {
 	listener := event.NewSudoListener(ac, serverName, sessionID)
 	listener.Start()
 
@@ -410,7 +409,7 @@ func setupSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *
 			// Not utils.CliWarning: this runs in a goroutine racing
 			// OpenNewTerminal, so the terminal may already be in raw mode,
 			// where a bare newline leaves the cursor where it stood.
-			_, _ = fmt.Fprintf(os.Stderr, "\r\n%s: %s\r\n%s", utils.Yellow("Warning"), warning, utils.RawTerminalHintLines(listener.Err()))
+			_, _ = fmt.Fprintf(ios.ErrOut, "\r\n%s: %s\r\n%s", ios.Yellow("Warning"), warning, ios.RawTerminalHintLines(listener.Err()))
 		}
 		return nil
 	}

@@ -16,9 +16,9 @@ import (
 
 const noSessionToUpdate = "No SESSION_ID given and no active work session. Pass an ID, set ALPACON_WORK_SESSION, or run 'alpacon work-session use <id>' first."
 
-var workSessionUpdateCmd = newWorkSessionUpdateCmd(client.NewAlpaconAPIClient)
+var workSessionUpdateCmd = newWorkSessionUpdateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkSessionUpdateCmd(newClient clientFactory) *cobra.Command {
+func newWorkSessionUpdateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var (
 		updateTitle       string
 		updateDescription string
@@ -161,12 +161,12 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 			}
 
 			message := updateSuccessMessage(updated)
-			if utils.OutputFormat == utils.OutputFormatJSON {
-				return printWorkSessionMutationJSON(newWorkSessionMutationOutput(opUpdate, message, updated, nil))
+			if ios.IsJSON() {
+				return printWorkSessionMutationJSON(ios, newWorkSessionMutationOutput(opUpdate, message, updated, nil))
 			}
-			utils.CliSuccess("%s", message)
+			ios.Success("%s", message)
 			if len(newSudo) > 0 {
-				utils.CliInfo("Added sudo policies may require approval before they take effect. Re-run your command once the session reflects the change.")
+				ios.Info("Added sudo policies may require approval before they take effect. Re-run your command once the session reflects the change.")
 			}
 			return nil
 		}),

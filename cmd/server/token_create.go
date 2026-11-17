@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	iamAPI "github.com/alpacax/alpacon-cli/api/iam"
@@ -13,9 +12,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var tokenCreateCmd = newTokenCreateCmd(client.NewAlpaconAPIClient)
+var tokenCreateCmd = newTokenCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newTokenCreateCmd(newClient clientFactory) *cobra.Command {
+func newTokenCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new server registration token",
@@ -72,18 +71,18 @@ The token key is displayed once at creation time and cannot be retrieved again.`
 				return utils.NewExitError("Failed to create registration token: %s.", err)
 			}
 
-			if utils.OutputFormat == utils.OutputFormatJSON {
+			if ios.IsJSON() {
 				data, err := json.Marshal(resp)
 				if err != nil {
 					return utils.NewExitError("Failed to marshal response: %s.", err)
 				}
-				return utils.PrintJson(data)
+				return ios.PrintJson(data)
 			}
 
-			utils.CliSuccess("Registration token created: %s", resp.Name)
-			warnTokenKey("Save this key now—it will not be shown again", resp.Key)
+			ios.Success("Registration token created: %s", resp.Name)
+			warnTokenKey(ios, "Save this key now—it will not be shown again", resp.Key)
 			if resp.ExpiresAt != nil {
-				utils.CliInfo("Token expires at: %s", *resp.ExpiresAt)
+				ios.Info("Token expires at: %s", *resp.ExpiresAt)
 			}
 			return nil
 		}),
@@ -118,7 +117,7 @@ func resolveGroupIDs(ac *client.AlpaconClient, entries []string) ([]string, erro
 
 // warnTokenKey prints the one-time key like CliWarning, except it colors the
 // key after sanitizing—CliWarning would strip the highlight with the escapes.
-func warnTokenKey(prefix, key string) {
-	fmt.Fprintf(os.Stderr, "%s: %s: %s\n",
-		utils.Yellow("Warning"), prefix, utils.Green(utils.SanitizeTerminalText(key)))
+func warnTokenKey(ios *utils.IOStreams, prefix, key string) {
+	fmt.Fprintf(ios.ErrOut, "%s: %s: %s\n",
+		ios.Yellow("Warning"), prefix, ios.Green(utils.SanitizeTerminalText(key)))
 }

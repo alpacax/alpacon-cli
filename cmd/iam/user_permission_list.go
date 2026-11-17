@@ -1,17 +1,15 @@
 package iam
 
 import (
-	"os"
-
 	"github.com/alpacax/alpacon-cli/api/rbac"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var userPermissionListCmd = newUserPermissionListCmd(client.NewAlpaconAPIClient)
+var userPermissionListCmd = newUserPermissionListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUserPermissionListCmd(newClient clientFactory) *cobra.Command {
+func newUserPermissionListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls [USER]",
 		Aliases: []string{"list"},
@@ -52,7 +50,7 @@ second group says the user holds the permission somewhere without saying on what
 					return utils.NewExitError("Failed to retrieve %s's permissions: %s.", subj.Label, describeRBACError(alpaconClient, gatePermissionIntrospect, err))
 				}
 
-				return utils.PrintTable(rbac.PermissionPatternAttributesFrom(patterns))
+				return ios.PrintTable(rbac.PermissionPatternAttributesFrom(patterns))
 			}
 
 			effective, err := rbac.GetEffectivePermissions(alpaconClient, subj.PK)
@@ -63,7 +61,7 @@ second group says the user holds the permission somewhere without saying on what
 			roleRows := rbac.EffectiveRoleAttributesFrom(effective.Roles)
 			capabilityRows := rbac.ScopeAttributesFrom(&effective.Permissions)
 
-			if utils.OutputFormat == utils.OutputFormatJSON {
+			if ios.IsJSON() {
 				// The same projections the table prints, so both output modes answer the same question.
 				combined := map[string]any{
 					"user":        effective.User,
@@ -71,18 +69,18 @@ second group says the user holds the permission somewhere without saying on what
 					"roles":       jsonSlice(roleRows),
 					"permissions": jsonSlice(capabilityRows),
 				}
-				if err = utils.PrintJSONValue(os.Stdout, combined); err != nil {
+				if err = utils.PrintJSONValue(ios.Out, combined); err != nil {
 					return utils.NewExitError("Failed to render the permissions: %s.", err)
 				}
 				return nil
 			}
 
-			utils.PrintHeader("Roles in effect")
-			if err := utils.PrintTable(roleRows); err != nil {
+			ios.PrintHeader("Roles in effect")
+			if err := ios.PrintTable(roleRows); err != nil {
 				return err
 			}
-			utils.PrintHeader("Permissions")
-			return utils.PrintTable(capabilityRows)
+			ios.PrintHeader("Permissions")
+			return ios.PrintTable(capabilityRows)
 		}),
 	}
 	cmd.Flags().Bool("patterns", false, "List the raw permission patterns instead of the roles conferring them")

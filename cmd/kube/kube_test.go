@@ -210,7 +210,7 @@ func TestKubeConfigNextStepNamesAFileKubectlDoesNotRead(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, stderr := testutil.CaptureOutput(t, func() {
-				_ = printKubeConfigResult(os.Stdout, &kubeConfigResult{Context: "alpacon-prod-east", Kubeconfig: tt.written}, false)
+				_ = printKubeConfigResult(utils.Stdio, os.Stdout, &kubeConfigResult{Context: "alpacon-prod-east", Kubeconfig: tt.written}, false)
 			})
 
 			assert.Contains(t, stderr, tt.want)
@@ -263,7 +263,7 @@ func TestKubeConfigWarnsOnlyWhenAnEarlierFileCanOverride(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, stderr := testutil.CaptureOutput(t, func() {
-				_ = printKubeConfigResult(os.Stdout, &kubeConfigResult{Context: "alpacon-prod-east", Kubeconfig: tt.written}, false)
+				_ = printKubeConfigResult(utils.Stdio, os.Stdout, &kubeConfigResult{Context: "alpacon-prod-east", Kubeconfig: tt.written}, false)
 			})
 
 			if tt.warned {
@@ -319,8 +319,8 @@ func TestKubeConfigWarnsWhenTheSessionOpenedOnADriftedCluster(t *testing.T) {
 				name string
 				run  func()
 			}{
-				{name: "kube config", run: func() { _ = printKubeConfigResult(os.Stdout, &result.kubeConfigResult, false) }},
-				{name: "kube login", run: func() { _ = printKubeLoginResult(os.Stdout, result, false, time.Now()) }},
+				{name: "kube config", run: func() { _ = printKubeConfigResult(utils.Stdio, os.Stdout, &result.kubeConfigResult, false) }},
+				{name: "kube login", run: func() { _ = printKubeLoginResult(utils.Stdio, os.Stdout, result, false, time.Now()) }},
 			} {
 				stdout, stderr := testutil.CaptureOutput(t, p.run)
 				if tt.want == "" {

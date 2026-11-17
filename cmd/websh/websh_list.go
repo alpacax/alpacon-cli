@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newListCommand(newClient clientFactory) *cobra.Command {
+func newListCommand(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -29,7 +29,7 @@ func newListCommand(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve websh sessions: %s.", err)
 			}
 
-			return utils.PrintTable(sessionList)
+			return ios.PrintTable(sessionList)
 		}),
 	}
 	cmd.Flags().IntP("tail", "t", 25, "Number of sessions to show, newest first")

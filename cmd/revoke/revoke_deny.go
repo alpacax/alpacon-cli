@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var revokeDenyCmd = newRevokeDenyCmd(client.NewAlpaconAPIClient)
+var revokeDenyCmd = newRevokeDenyCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newRevokeDenyCmd(newClient clientFactory) *cobra.Command {
+func newRevokeDenyCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "deny REQUEST_ID",
 		Short: "Deny a revoke request",
@@ -31,7 +31,7 @@ func newRevokeDenyCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to deny the revoke request: %s.", err)
 			}
 
-			utils.CliSuccess("Revoke request denied. Run 'alpacon revoke ls' to verify status.")
+			ios.Success("Revoke request denied. Run 'alpacon revoke ls' to verify status.")
 			return nil
 		}),
 	}

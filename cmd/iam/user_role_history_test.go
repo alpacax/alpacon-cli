@@ -11,7 +11,6 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/rbac"
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -50,21 +49,17 @@ func historyServer(t *testing.T, pages ...string) *httptest.Server {
 }
 
 // runHistory runs the command in process under format and returns its streams and error.
-// Serial callers only: it sets utils.OutputFormat and swaps os.Stdout and os.Stderr.
 func runHistory(t *testing.T, ts *httptest.Server, format string, args ...string) (string, string, error) {
 	t.Helper()
-	saved := utils.OutputFormat
-	t.Cleanup(func() { utils.OutputFormat = saved })
-	utils.OutputFormat = format
-
+	ios, out, errOut := utils.TestIOStreams()
+	require.NoError(t, ios.SetOutputFormat(format))
 	cmd := newUserRoleHistoryCmd(func() (*client.AlpaconClient, error) {
 		return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, nil
-	})
+	}, ios)
 	cmd.SetArgs(append([]string{historySubjectID}, args...))
 
-	var err error
-	stdout, stderr := testutil.CaptureOutput(t, func() { err = cmd.Execute() })
-	return stdout, stderr, err
+	err := cmd.Execute()
+	return out.String(), errOut.String(), err
 }
 
 func historyPage(reach, rows string) string {
@@ -74,8 +69,8 @@ func historyPage(reach, rows string) string {
 	return `{"count":1,"current":1,"next":null,"last":1,"reach":` + reach + `,"results":[` + rows + `]}`
 }
 
-// Serial: runHistory sets utils.OutputFormat and captures the process's stdout and stderr.
 func TestUserRoleHistory_TableSaysHowFarTheListReaches(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		body       string
@@ -94,6 +89,7 @@ func TestUserRoleHistory_TableSaysHowFarTheListReaches(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ts := historyServer(t, tt.body)
 			defer ts.Close()
 
@@ -111,8 +107,8 @@ func TestUserRoleHistory_TableSaysHowFarTheListReaches(t *testing.T) {
 	}
 }
 
-// Serial: runHistory sets utils.OutputFormat and captures the process's stdout and stderr.
 func TestUserRoleHistory_JSONCarriesTheReach(t *testing.T) {
+	t.Parallel()
 	hiddenEntry := `{"action":"granted","role":"server:viewer","scope":"object",
 		"target_type":"servers.server","target_id":null,"targets_hidden":1,
 		"changed_by":"bob","reason":"","erased":false,"at":"2026-11-10T09:00:00Z"}`
@@ -129,6 +125,7 @@ func TestUserRoleHistory_JSONCarriesTheReach(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ts := historyServer(t, tt.body)
 			defer ts.Close()
 
@@ -141,8 +138,8 @@ func TestUserRoleHistory_JSONCarriesTheReach(t *testing.T) {
 	}
 }
 
-// Serial: runHistory sets utils.OutputFormat and captures the process's stdout and stderr.
 func TestUserRoleHistory_ReachThatChangedBetweenPages(t *testing.T) {
+	t.Parallel()
 	rows := func(from, n int) string {
 		var buf bytes.Buffer
 		for i := range n {
@@ -170,8 +167,8 @@ func TestUserRoleHistory_ReachThatChangedBetweenPages(t *testing.T) {
 	assert.Contains(t, stderr, "The pages of the role history did not state the same reach")
 }
 
-// Serial: runHistory sets utils.OutputFormat and captures the process's stdout and stderr.
 func TestUserRoleHistory_NoneExitsOne(t *testing.T) {
+	t.Parallel()
 	for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 		t.Run(format, func(t *testing.T) {
 			ts := historyServer(t, historyPage(`"none"`, ""))
@@ -185,7 +182,9 @@ func TestUserRoleHistory_NoneExitsOne(t *testing.T) {
 			assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
 			assert.Empty(t, stdout, "an empty list must not be printed as if it were the answer")
 			var printed bytes.Buffer
-			utils.FprintExitError(&printed, exitErr)
+			ios, _, _ := utils.TestIOStreams()
+			require.NoError(t, ios.SetOutputFormat(format))
+			ios.FprintExitError(&printed, exitErr)
 			if format == utils.OutputFormatJSON {
 				var envelope struct {
 					ErrorCode string `json:"error_code"`
@@ -201,8 +200,8 @@ func TestUserRoleHistory_NoneExitsOne(t *testing.T) {
 	}
 }
 
-// Serial: runHistory sets utils.OutputFormat and captures the process's stdout and stderr.
 func TestUserRoleHistory_ARefusalKeepsItsMessage(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)

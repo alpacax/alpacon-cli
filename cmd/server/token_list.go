@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var tokenListCmd = newTokenListCmd(client.NewAlpaconAPIClient)
+var tokenListCmd = newTokenListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newTokenListCmd(newClient clientFactory) *cobra.Command {
+func newTokenListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -31,7 +31,7 @@ Tokens are used by Alpamon to self-register servers without manual intervention.
 				return utils.NewExitError("Failed to retrieve the registration tokens: %s.", err)
 			}
 
-			return utils.PrintTable(tokens)
+			return ios.PrintTable(tokens)
 		}),
 	}
 }

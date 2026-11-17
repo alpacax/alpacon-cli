@@ -31,7 +31,7 @@ var (
 	errCallInterrupted = errors.New("interrupted")
 )
 
-func newKubeCredentialsCmd(newClient clientFactory) *cobra.Command {
+func newKubeCredentialsCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var cluster string
 	cmd := &cobra.Command{
 		Use:   "credentials",
@@ -45,7 +45,7 @@ work session has expired, exits 3 and says to run 'alpacon kube login' again.`,
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runKubeCredentials(newClient, cmd.OutOrStdout(), strings.TrimSpace(cluster))
+			return runKubeCredentials(ios, newClient, cmd.OutOrStdout(), strings.TrimSpace(cluster))
 		}),
 	}
 	cmd.Flags().StringVar(&cluster, "cluster", "", "cluster whose saved kube session to use")
@@ -113,7 +113,7 @@ func sessionGoneMessage(cluster string, err error) (string, []any) {
 	return "The server refused to check the kube session for %s, so the saved token is not used: %s. Resolve that refusal, then %s.", []any{cluster, refused.err, relogin}
 }
 
-func runKubeCredentials(newClient clientFactory, stdout io.Writer, cluster string) error {
+func runKubeCredentials(ios *utils.IOStreams, newClient clientFactory, stdout io.Writer, cluster string) error {
 	relogin := fmt.Sprintf("run 'alpacon kube login %s'", shellQuote(cluster))
 
 	store, err := defaultKubeSessionStore()
@@ -156,7 +156,7 @@ func runKubeCredentials(newClient clientFactory, stdout io.Writer, cluster strin
 		return utils.NewExitErrorWithCode(utils.ExitCodeWorkSessionDenied, msg, msgArgs...)
 	}
 	if checkErr != nil {
-		utils.CliWarning("Could not check the kube session for %s (%s); using the saved token until it expires.", cluster, checkErr)
+		ios.Warning("Could not check the kube session for %s (%s); using the saved token until it expires.", cluster, checkErr)
 	}
 
 	if loginErr == nil {

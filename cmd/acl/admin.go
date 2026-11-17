@@ -33,7 +33,7 @@ var adminListCmd = &cobra.Command{
 	Example: `  alpacon acl admin ls`,
 	Args:    cobra.NoArgs,
 	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		session, err := openLedger()
+		session, err := openLedger(utils.Stdio)
 		if err != nil {
 			return err
 		}
@@ -59,7 +59,7 @@ machine identity cannot hold it.`,
 	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		email, _ := cmd.Flags().GetString("email")
 
-		session, err := openLedger()
+		session, err := openLedger(utils.Stdio)
 		if err != nil {
 			return err
 		}
@@ -86,7 +86,7 @@ leave nobody able to manage the workspace's pre-approved commands.`,
 	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		yes, _ := cmd.Flags().GetBool("yes")
 
-		session, err := openLedger()
+		session, err := openLedger(utils.Stdio)
 		if err != nil {
 			return err
 		}

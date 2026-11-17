@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var noteListCmd = newNoteListCmd(client.NewAlpaconAPIClient)
+var noteListCmd = newNoteListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newNoteListCmd(newClient clientFactory) *cobra.Command {
+func newNoteListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -27,7 +27,7 @@ and --pinned to show only pinned notes.`,
 			serverName, _ := cmd.Flags().GetString("server")
 			pinnedOnly, _ := cmd.Flags().GetBool("pinned")
 
-			return runNoteList(newClient, tail, serverName, pinnedOnly)
+			return runNoteList(ios, newClient, tail, serverName, pinnedOnly)
 		}),
 	}
 	cmd.Flags().IntP("tail", "t", 25, "Number of notes to show, newest first")
@@ -36,7 +36,7 @@ and --pinned to show only pinned notes.`,
 	return cmd
 }
 
-func runNoteList(newClient clientFactory, tail int, serverName string, pinnedOnly bool) error {
+func runNoteList(ios *utils.IOStreams, newClient clientFactory, tail int, serverName string, pinnedOnly bool) error {
 	if err := utils.CheckPositiveInt("tail", tail); err != nil {
 		return err
 	}
@@ -51,5 +51,5 @@ func runNoteList(newClient clientFactory, tail int, serverName string, pinnedOnl
 		return utils.NewExitError("Failed to retrieve the notes: %s.", err)
 	}
 
-	return utils.PrintTable(noteList)
+	return ios.PrintTable(noteList)
 }

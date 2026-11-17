@@ -50,7 +50,7 @@ func TestGroupDeleteDeletesOnlyWhenAllowed(t *testing.T) {
 				deleteRoute:             {Status: http.StatusNoContent},
 			})
 
-			failure, code := cmdtest.Run(newGroupDeleteCmd(ts.Factory()), "developers", "-y")
+			failure, code := cmdtest.Run(newGroupDeleteCmd(ts.Factory(), utils.Stdio), "developers", "-y")
 
 			assert.Equal(t, tt.wantCode, code, failure)
 			if tt.wantFailure != "" {
@@ -64,7 +64,7 @@ func TestGroupDeleteDeletesOnlyWhenAllowed(t *testing.T) {
 func TestGroupDeleteFailsWithoutALogin(t *testing.T) {
 	t.Parallel()
 
-	failure, code := cmdtest.Run(newGroupDeleteCmd(cmdtest.NoClient), "developers", "-y")
+	failure, code := cmdtest.Run(newGroupDeleteCmd(cmdtest.NoClient, utils.Stdio), "developers", "-y")
 
 	assert.Equal(t, utils.ExitCodeGeneralError, code)
 	assert.Contains(t, failure, "Connection to Alpacon API failed: not logged in")

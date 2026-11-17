@@ -16,9 +16,9 @@ import (
 
 var errRefreshRejected = errors.New("refresh token refused")
 
-var workspaceSwitchCmd = newWorkspaceSwitchCmd(client.NewAlpaconAPIClient)
+var workspaceSwitchCmd = newWorkspaceSwitchCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkspaceSwitchCmd(newClient clientFactory) *cobra.Command {
+func newWorkspaceSwitchCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "switch WORKSPACE",
 		Short: "Switch to a different workspace",
@@ -41,7 +41,7 @@ func newWorkspaceSwitchCmd(newClient clientFactory) *cobra.Command {
 			}
 
 			if cfg.WorkspaceIdentity() == targetName {
-				utils.CliInfo("Already on workspace %q.", targetName)
+				ios.Info("Already on workspace %q.", targetName)
 				return nil
 			}
 
@@ -54,7 +54,7 @@ func newWorkspaceSwitchCmd(newClient clientFactory) *cobra.Command {
 
 			// The env endpoint needs no credential, so the answer is in hand before
 			// the switch and lands in the same save as the workspace it describes.
-			kubernetesSurface := fetchKubernetesSurface(newURL, newName, cfg.Insecure)
+			kubernetesSurface := fetchKubernetesSurface(ios, newURL, newName, cfg.Insecure)
 
 			if err := commitSwitch(cfg, newURL, newName, kubernetesSurface, renewed, func() error {
 				_, err := newClient()
@@ -63,7 +63,7 @@ func newWorkspaceSwitchCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("%s", err)
 			}
 
-			utils.CliSuccess("Switched to workspace %q (%s)", newName, newURL)
+			ios.Success("Switched to workspace %q (%s)", newName, newURL)
 			return nil
 		}),
 	}
@@ -139,10 +139,10 @@ func commitSwitch(orig config.Config, newURL, newName string, kubernetesSurface 
 
 // fetchKubernetesSurface asks the target workspace, since a switch can cross regions
 // and the login's answer does not carry over; an unreachable endpoint reads as no.
-func fetchKubernetesSurface(workspaceURL, workspaceName string, insecure bool) bool {
+func fetchKubernetesSurface(ios *utils.IOStreams, workspaceURL, workspaceName string, insecure bool) bool {
 	envInfo, err := auth0.FetchAuthEnv(workspaceURL, httpclient.New(insecure))
 	if err != nil {
-		utils.CliWarning("Could not check Kubernetes support on workspace %q: %s. 'alpacon kube' stays hidden until you run 'alpacon login'.", workspaceName, err)
+		ios.Warning("Could not check Kubernetes support on workspace %q: %s. 'alpacon kube' stays hidden until you run 'alpacon login'.", workspaceName, err)
 		return false
 	}
 	return envInfo.Surfaces.Kubernetes

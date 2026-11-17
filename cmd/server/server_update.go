@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var serverUpdateCmd = newServerUpdateCmd(client.NewAlpaconAPIClient)
+var serverUpdateCmd = newServerUpdateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newServerUpdateCmd(newClient clientFactory) *cobra.Command {
+func newServerUpdateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "update SERVER",
 		Short: "Update the server information",
@@ -33,14 +33,14 @@ func newServerUpdateCmd(newClient clientFactory) *cobra.Command {
 
 			serverDetail, err := server.UpdateServer(alpaconClient, serverName)
 			if err != nil {
-				if utils.ReportNoChanges(err) {
+				if ios.ReportNoChanges(err) {
 					return nil
 				}
 				return utils.NewExitError("Failed to update the server info: %s.", err)
 			}
 
-			utils.CliSuccess("Server updated: %s", serverName)
-			return utils.PrintJson(serverDetail)
+			ios.Success("Server updated: %s", serverName)
+			return ios.PrintJson(serverDetail)
 		}),
 	}
 }

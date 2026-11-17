@@ -10,9 +10,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userInviteCmd = newUserInviteCmd(client.NewAlpaconAPIClient)
+var userInviteCmd = newUserInviteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUserInviteCmd(newClient clientFactory) *cobra.Command {
+func newUserInviteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "invite [EMAIL]",
 		Short: "Invite a user to the workspace",
@@ -72,7 +72,7 @@ This command requires staff or superuser privileges.`,
 				return utils.NewExitError("Failed to invite user: %s", err)
 			}
 
-			utils.CliSuccess("Invitation sent to %s", email)
+			ios.Success("Invitation sent to %s", email)
 			return nil
 		}),
 	}

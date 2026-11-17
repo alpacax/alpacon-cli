@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userRoleCatalogCmd = newUserRoleCatalogCmd(client.NewAlpaconAPIClient)
+var userRoleCatalogCmd = newUserRoleCatalogCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUserRoleCatalogCmd(newClient clientFactory) *cobra.Command {
+func newUserRoleCatalogCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "catalog",
 		Aliases: []string{"roles"},
@@ -53,7 +53,7 @@ the flag and read the whole catalog.`,
 				return utils.NewExitError("Failed to retrieve the role catalog: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 			}
 
-			return utils.PrintTable(rbac.RoleAttributesFrom(roles))
+			return ios.PrintTable(rbac.RoleAttributesFrom(roles))
 		}),
 	}
 	// The name predates hiding by the server's auto_assigned answer; scripts already pass it.

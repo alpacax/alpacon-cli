@@ -24,9 +24,9 @@ const (
 		"Note: Root permission may be required for certain paths."
 )
 
-var csrCreateCmd = newCsrCreateCmd(client.NewAlpaconAPIClient)
+var csrCreateCmd = newCsrCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newCsrCreateCmd(newClient clientFactory) *cobra.Command {
+func newCsrCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var csrFlags struct {
 		domains   string
 		ips       string
@@ -86,13 +86,13 @@ func newCsrCreateCmd(newClient clientFactory) *cobra.Command {
 					certPath.CSRPath = filepath.Join(defaultCSRDir, commonName+".csr")
 				}
 			} else {
-				signRequest, certPath, err = promptForCert(defaultPrivateKeyDir, defaultCSRDir)
+				signRequest, certPath, err = promptForCert(ios, defaultPrivateKeyDir, defaultCSRDir)
 				if err != nil {
 					return err
 				}
 			}
 
-			if err := EnsureSecureConnection(alpaconClient); err != nil {
+			if err := EnsureSecureConnection(ios, alpaconClient); err != nil {
 				return err
 			}
 
@@ -111,7 +111,7 @@ func newCsrCreateCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to submit CSR file to server: %s.", err)
 			}
 
-			utils.CliSuccess("CSR created (ID: %s). After approval, run: alpacon csr download-crt %s", response.ID, response.ID)
+			ios.Success("CSR created (ID: %s). After approval, run: alpacon csr download-crt %s", response.ID, response.ID)
 			return nil
 		}),
 	}
@@ -123,7 +123,7 @@ func newCsrCreateCmd(newClient clientFactory) *cobra.Command {
 	return cmd
 }
 
-func promptForCert(defaultPrivateKeyDir, defaultCSRDir string) (certApi.SignRequest, cert.CertificatePath, error) {
+func promptForCert(ios *utils.IOStreams, defaultPrivateKeyDir, defaultCSRDir string) (certApi.SignRequest, cert.CertificatePath, error) {
 	var signRequest certApi.SignRequest
 	var certPath cert.CertificatePath
 
@@ -152,7 +152,7 @@ func promptForCert(defaultPrivateKeyDir, defaultCSRDir string) (certApi.SignRequ
 			signRequest.ValidDays = validDays
 			break
 		}
-		utils.CliWarning("%s. Please try again.", err)
+		ios.Warning("%s. Please try again.", err)
 	}
 
 	var commonName string
@@ -165,7 +165,7 @@ func promptForCert(defaultPrivateKeyDir, defaultCSRDir string) (certApi.SignRequ
 	defaultKeyPath := fmt.Sprintf("%s/%s.key", defaultPrivateKeyDir, commonName)
 	defaultCSRPath := fmt.Sprintf("%s/%s.csr", defaultCSRDir, commonName)
 
-	utils.CliInfo(infoMessage)
+	ios.Info(infoMessage)
 
 	if certPath.PrivateKeyPath, err = utils.ReadInput(fmt.Sprintf("Path for the Private Key file (default: %s): ", defaultKeyPath)); err != nil {
 		return signRequest, certPath, err
@@ -226,13 +226,13 @@ func createSignRequestErrorText(err error, validDays int) string {
 
 // EnsureSecureConnection checks if the server uses HTTPS and prompts the user
 // to confirm proceeding with an insecure connection if necessary.
-func EnsureSecureConnection(client *client.AlpaconClient) error {
+func EnsureSecureConnection(ios *utils.IOStreams, client *client.AlpaconClient) error {
 	isTLS, err := client.IsUsingHTTPS()
 	if err != nil {
 		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 	if !isTLS {
-		utils.CliWarning("The connection to %s might not be secure.", client.BaseURL)
+		ios.Warning("The connection to %s might not be secure.", client.BaseURL)
 
 		if !utils.IsInteractiveShell() {
 			return utils.NewExitError("Cannot confirm insecure connection in a non-interactive environment. Configure the Alpacon API endpoint to use HTTPS.")

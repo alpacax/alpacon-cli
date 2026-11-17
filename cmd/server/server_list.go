@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var serverListCmd = newServerListCmd(client.NewAlpaconAPIClient)
+var serverListCmd = newServerListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newServerListCmd(newClient clientFactory) *cobra.Command {
+func newServerListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -33,7 +33,7 @@ func newServerListCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the servers: %s.", err)
 			}
 
-			return utils.PrintTable(serverList)
+			return ios.PrintTable(serverList)
 		}),
 	}
 }

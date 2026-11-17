@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclServerDeleteCmd = newAclServerDeleteCmd(client.NewAlpaconAPIClient)
+var aclServerDeleteCmd = newAclServerDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAclServerDeleteCmd(newClient clientFactory) *cobra.Command {
+func newAclServerDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete ACL_ID_OR_TOKEN",
 		Aliases: []string{"rm"},
@@ -24,7 +24,7 @@ to multiple servers at once using --servers (bulk delete).`,
   alpacon token acl server delete my-api-token --servers web-01,web-02`,
 		Args: cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runServerAclDelete(cmd, args, newClient)
+			return runServerAclDelete(ios, cmd, args, newClient)
 		}),
 	}
 	cmd.Flags().String("servers", "", "Comma-separated server names (bulk delete)")
@@ -32,7 +32,7 @@ to multiple servers at once using --servers (bulk delete).`,
 	return cmd
 }
 
-func runServerAclDelete(cmd *cobra.Command, args []string, newClient clientFactory) error {
+func runServerAclDelete(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient clientFactory) error {
 	arg := args[0]
 	serversCSV, _ := cmd.Flags().GetString("servers")
 	yes, _ := cmd.Flags().GetBool("yes")
@@ -69,7 +69,7 @@ func runServerAclDelete(cmd *cobra.Command, args []string, newClient clientFacto
 		}); err != nil {
 			return utils.NewExitError("Failed to bulk-delete server ACLs: %v.", err)
 		}
-		utils.CliSuccess("Server ACLs revoked: token %s no longer has access to [%s]", arg, serversCSV)
+		ios.Success("Server ACLs revoked: token %s no longer has access to [%s]", arg, serversCSV)
 		return nil
 	}
 
@@ -81,6 +81,6 @@ func runServerAclDelete(cmd *cobra.Command, args []string, newClient clientFacto
 	if err = security.DeleteServerAcl(alpaconClient, arg); err != nil {
 		return utils.NewExitError("Failed to delete server ACL: %v.", err)
 	}
-	utils.CliSuccess("Server ACL deleted: %s", arg)
+	ios.Success("Server ACL deleted: %s", arg)
 	return nil
 }

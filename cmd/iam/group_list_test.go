@@ -6,16 +6,17 @@ import (
 
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
 
-// Serial: it captures stdout and sets utils.OutputFormat.
 func TestGroupListPrintsWhatTheServerReturned(t *testing.T) {
+	t.Parallel()
 	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
 		"GET /api/iam/groups/": {Status: http.StatusOK, Body: `{"count": 1, "results": [{"name": "my-group", "display_name": "My group", "gid": 3001, "num_members": 2}]}`},
 	})
 
-	stdout, stderr, code := cmdtest.RunJSON(t, newGroupListCmd(ts.Factory()))
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newGroupListCmd(ts.Factory(), ios) })
 
 	assert.Equal(t, 0, code, stderr)
 	assert.Contains(t, stdout, `"my-group"`)
@@ -45,7 +46,7 @@ func TestGroupListFailsWithExit1(t *testing.T) {
 				}).Factory()
 			}
 
-			failure, code := cmdtest.Run(newGroupListCmd(newClient))
+			failure, code := cmdtest.Run(newGroupListCmd(newClient, utils.Stdio))
 
 			assert.Equal(t, utils.ExitCodeGeneralError, code)
 			assert.Contains(t, failure, tt.want)

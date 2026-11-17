@@ -3,7 +3,6 @@ package iam
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/rbac"
@@ -12,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userRoleHistoryCmd = newUserRoleHistoryCmd(client.NewAlpaconAPIClient)
+var userRoleHistoryCmd = newUserRoleHistoryCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUserRoleHistoryCmd(newClient clientFactory) *cobra.Command {
+func newUserRoleHistoryCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "history [USER]",
 		Short: "Show who changed a user's roles, and why",
@@ -91,25 +90,25 @@ without USER, since the token has no account of its own to default to.`,
 				return utils.NewExitErrorWithErrorCode(utils.ExitCodeGeneralError, errorCodeReachNone, "This credential may not read the role-change log (reach: none), so it says nothing about %s's roles. A service token gets this; run 'alpacon login' to read it as your account.", subj.Label)
 			}
 			if reach.Changed {
-				utils.CliWarning(reachChangedWarning)
+				ios.Warning(reachChangedWarning)
 			}
 
 			rows := rbac.AuditAttributesFrom(entries, time.Local)
-			if utils.OutputFormat == utils.OutputFormatJSON {
-				return printRoleHistoryJSON(reach, rows)
+			if ios.IsJSON() {
+				return printRoleHistoryJSON(ios, reach, rows)
 			}
 
 			line := reachLine(reach)
-			_, _ = fmt.Fprintln(utils.TrackedStderr(), line)
-			if err := utils.PrintTable(rows); err != nil {
+			_, _ = fmt.Fprintln(ios.ErrOut, line)
+			if err := ios.PrintTable(rows); err != nil {
 				return err
 			}
 			repeatLine, repeatWarning := noticesToRepeat(reach, utils.LastOutputPaged())
 			if repeatLine {
-				_, _ = fmt.Fprintln(utils.TrackedStderr(), line)
+				_, _ = fmt.Fprintln(ios.ErrOut, line)
 			}
 			if repeatWarning {
-				utils.CliWarning(reachChangedWarning)
+				ios.Warning(reachChangedWarning)
 			}
 			return nil
 		}),
@@ -143,9 +142,9 @@ type roleHistoryOutput struct {
 	Entries      []rbac.RoleAuditAttributes `json:"entries"`
 }
 
-func printRoleHistoryJSON(reach rbac.Reach, rows []rbac.RoleAuditAttributes) error {
+func printRoleHistoryJSON(ios *utils.IOStreams, reach rbac.Reach, rows []rbac.RoleAuditAttributes) error {
 	output := roleHistoryOutput{Reach: reach.Raw, ReachChanged: reach.Changed, Entries: jsonSlice(rows)}
-	if err := utils.PrintJSONValue(os.Stdout, output); err != nil {
+	if err := utils.PrintJSONValue(ios.Out, output); err != nil {
 		return utils.NewExitError("Failed to marshal data to JSON: %s", err)
 	}
 

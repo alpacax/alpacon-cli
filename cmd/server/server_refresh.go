@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var serverRefreshCmd = newServerRefreshCmd(client.NewAlpaconAPIClient)
+var serverRefreshCmd = newServerRefreshCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newServerRefreshCmd(newClient clientFactory) *cobra.Command {
+func newServerRefreshCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "refresh SERVER",
 		Short: "Refresh a server's system information",
@@ -29,7 +29,7 @@ func newServerRefreshCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to refresh the server information: %s.", err)
 			}
 
-			utils.CliSuccess("System information refresh requested. Run 'alpacon exec ls' to monitor progress.")
+			ios.Success("System information refresh requested. Run 'alpacon exec ls' to monitor progress.")
 			return nil
 		}),
 	}

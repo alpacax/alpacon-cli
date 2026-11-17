@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var webhookDetailCmd = newWebhookDetailCmd(client.NewAlpaconAPIClient)
+var webhookDetailCmd = newWebhookDetailCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWebhookDetailCmd(newClient clientFactory) *cobra.Command {
+func newWebhookDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "describe WEBHOOK",
 		Aliases: []string{"desc"},
@@ -41,7 +41,7 @@ func newWebhookDetailCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the webhook details: %s.", err)
 			}
 
-			return utils.PrintJson(webhookDetail)
+			return ios.PrintJson(webhookDetail)
 		}),
 	}
 }

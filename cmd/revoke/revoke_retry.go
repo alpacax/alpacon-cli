@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var revokeRetryCmd = newRevokeRetryCmd(client.NewAlpaconAPIClient)
+var revokeRetryCmd = newRevokeRetryCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newRevokeRetryCmd(newClient clientFactory) *cobra.Command {
+func newRevokeRetryCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "retry REQUEST_ID",
 		Short: "Retry a failed revoke request",
@@ -32,7 +32,7 @@ func newRevokeRetryCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retry the revoke request: %s.", err)
 			}
 
-			utils.CliSuccess("Revoke request retried. Run 'alpacon revoke ls' to verify status.")
+			ios.Success("Revoke request retried. Run 'alpacon revoke ls' to verify status.")
 			return nil
 		}),
 	}

@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var csrDownloadCrtCmd = newCsrDownloadCrtCmd(client.NewAlpaconAPIClient)
+var csrDownloadCrtCmd = newCsrDownloadCrtCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newCsrDownloadCrtCmd(newClient clientFactory) *cobra.Command {
+func newCsrDownloadCrtCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "download-crt CSR_ID",
 		Short: "Download the certificate for a CSR",
@@ -40,7 +40,7 @@ func newCsrDownloadCrtCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to download the certificate: %s.", err)
 			}
 
-			utils.CliSuccess("Certificate downloaded: %s", filePath)
+			ios.Success("Certificate downloaded: %s", filePath)
 			return nil
 		}),
 	}

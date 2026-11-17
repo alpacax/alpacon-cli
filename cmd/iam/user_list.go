@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userListCmd = newUserListCmd(client.NewAlpaconAPIClient)
+var userListCmd = newUserListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUserListCmd(newClient clientFactory) *cobra.Command {
+func newUserListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -33,7 +33,7 @@ func newUserListCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the user list: %s.", err)
 			}
 
-			return utils.PrintTable(userList)
+			return ios.PrintTable(userList)
 		}),
 	}
 }

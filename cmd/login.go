@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
@@ -31,9 +30,9 @@ const (
 // default. Add a region here when it launches.
 var knownCloudRegions = []string{"us1", "ap1"}
 
-var loginCmd = newLoginCmd(client.NewAlpaconAPIClient)
+var loginCmd = newLoginCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newLoginCmd(newClient clientFactory) *cobra.Command {
+func newLoginCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var (
 		insecure, noBrowser       bool
 		workspaceFlag, regionFlag string
@@ -117,7 +116,7 @@ with the saved target as the default. Non-interactive login requires a HOST or
 			password, _ := cmd.Flags().GetString("password")
 			token, _ := cmd.Flags().GetString("token")
 
-			utils.CliInfo("Logging in to %s", workspaceURL)
+			ios.Info("Logging in to %s", workspaceURL)
 
 			if envInfo.Auth0.Method == "auth0" && token == "" {
 				deviceCode, err := auth0.RequestDeviceCode(workspaceName, httpClient, envInfo)
@@ -125,7 +124,7 @@ with the saved target as the default. Non-interactive login requires a HOST or
 					return utils.NewExitError("Device code request failed. %v", err)
 				}
 
-				promptURI := printDeviceCodePrompt(os.Stderr, deviceCode.VerificationURIComplete, deviceCode.UserCode)
+				promptURI := printDeviceCodePrompt(ios.ErrOut, deviceCode.VerificationURIComplete, deviceCode.UserCode)
 				if !noBrowser {
 					utils.OpenBrowser(promptURI)
 				}
@@ -165,7 +164,7 @@ with the saved target as the default. Non-interactive login requires a HOST or
 
 			}
 
-			persistWorkspaceEnv(workspaceURL, envInfo)
+			persistWorkspaceEnv(ios, workspaceURL, envInfo)
 
 			ac, err := newClient()
 			if err != nil {
@@ -175,18 +174,18 @@ with the saved target as the default. Non-interactive login requires a HOST or
 			switch classifyWhoamiVerification(whoErr) {
 			case whoamiVerified:
 				if who.PrincipalType == auth.PrincipalTypeApplication && who.Application != nil {
-					utils.CliInfo("Authenticated as application '%s'.", who.Application.Name)
+					ios.Info("Authenticated as application '%s'.", who.Application.Name)
 				}
 			case whoamiFallback:
 				// Old server without whoami: fall back to legacy prefix-based verification.
-				if err := verifyLoginLegacy(ac, token); err != nil {
+				if err := verifyLoginLegacy(ios, ac, token); err != nil {
 					return err
 				}
 			default:
 				return utils.NewExitError("%s", utils.Reword(whoErr, whoamiFailureMessage(whoErr)))
 			}
 
-			utils.CliSuccess("Login succeeded!")
+			ios.Success("Login succeeded!")
 			return nil
 		}),
 	}
@@ -203,13 +202,13 @@ with the saved target as the default. Non-interactive login requires a HOST or
 
 // persistWorkspaceEnv records the schema name, which stays fixed when the URL slug is renamed, and
 // surfaces.kubernetes after every branch's CreateConfig reset both; a failed write warns, not fails.
-func persistWorkspaceEnv(workspaceURL string, envInfo *auth0.AuthEnvResponse) {
+func persistWorkspaceEnv(ios *utils.IOStreams, workspaceURL string, envInfo *auth0.AuthEnvResponse) {
 	err := config.SetWorkspaceEnv(workspaceURL, envInfo.Auth0.SchemaName, envInfo.Surfaces.Kubernetes)
 	switch {
 	case errors.Is(err, config.ErrWorkspaceChanged):
-		utils.CliWarning("Did not save the workspace identity and Kubernetes support for %s: %s since this login started.", workspaceURL, err)
+		ios.Warning("Did not save the workspace identity and Kubernetes support for %s: %s since this login started.", workspaceURL, err)
 	case err != nil:
-		utils.CliWarning("Could not save the workspace identity and Kubernetes support: %s. Run 'alpacon login' again if workspace or kube commands fail.", err)
+		ios.Warning("Could not save the workspace identity and Kubernetes support: %s. Run 'alpacon login' again if workspace or kube commands fail.", err)
 	}
 }
 
@@ -566,16 +565,16 @@ func classifyWhoamiVerification(whoErr error) string {
 }
 
 // verifyLoginLegacy is the pre-whoami verification used against servers without the whoami endpoint.
-func verifyLoginLegacy(ac *client.AlpaconClient, token string) error {
+func verifyLoginLegacy(ios *utils.IOStreams, ac *client.AlpaconClient, token string) error {
 	if config.IsServiceToken(token) {
-		utils.CliInfo("Authenticated with a service token. Service tokens are application principals and have no user profile, so user details are unavailable.")
+		ios.Info("Authenticated with a service token. Service tokens are application principals and have no user profile, so user details are unavailable.")
 		return nil
 	}
 	if err := ac.LoadCurrentUser(); err != nil {
 		if shouldFailOnProfileError(token) {
 			return utils.NewExitError("%s", utils.Reword(err, profileFailureMessage(err)))
 		}
-		utils.CliInfo("Could not preload your user profile; continuing since the credential was verified.")
+		ios.Info("Could not preload your user profile; continuing since the credential was verified.")
 	}
 	return nil
 }

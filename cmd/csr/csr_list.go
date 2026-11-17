@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var csrListCmd = newCsrListCmd(client.NewAlpaconAPIClient)
+var csrListCmd = newCsrListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newCsrListCmd(newClient clientFactory) *cobra.Command {
+func newCsrListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -35,7 +35,7 @@ func newCsrListCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the csr list: %s.", err)
 			}
 
-			return utils.PrintTable(csrList)
+			return ios.PrintTable(csrList)
 		}),
 	}
 	cmd.Flags().StringP("status", "s", "", "Specify the status of the CSR (e.g., 'denied', 'signed')")

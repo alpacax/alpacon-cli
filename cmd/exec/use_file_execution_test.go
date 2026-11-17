@@ -571,7 +571,7 @@ func TestCodedRefusalOfAnInvalidIDExitsTwoInEitherFormat(t *testing.T) {
 			_, idErr := api.RequireID("../x", "work session")
 
 			exitCode, stderr := reportRefusal(t, format, func(w io.Writer) error {
-				return codedRefusal(w, "command", idErr, "work session ID is unusable", "")
+				return codedRefusal(utils.Stdio, w, "command", idErr, "work session ID is unusable", "")
 			})
 
 			assert.Equal(t, utils.ExitCodeUsageError, exitCode)
@@ -606,7 +606,7 @@ func TestCodedRefusalOfAUsageErrorExitsTwoOnlyInPlaceOfOne(t *testing.T) {
 			flagErr := utils.MarkUsageError(errors.New("bad flag"))
 
 			exitCode, stderr := reportRefusal(t, utils.OutputFormatTable, func(w io.Writer) error {
-				return codedRefusalWithExit(w, tc.code, "command", flagErr, "the flag is unusable", "", nil)
+				return codedRefusalWithExit(utils.Stdio, w, tc.code, "command", flagErr, "the flag is unusable", "", nil)
 			})
 
 			assert.Equal(t, tc.wantExit, exitCode)

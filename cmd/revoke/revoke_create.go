@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var revokeCreateCmd = newRevokeCreateCmd(client.NewAlpaconAPIClient)
+var revokeCreateCmd = newRevokeCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newRevokeCreateCmd(newClient clientFactory) *cobra.Command {
+func newRevokeCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new certificate revoke request",
@@ -66,7 +66,7 @@ func newRevokeCreateCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to create revoke request: %s.", err)
 			}
 
-			utils.CliSuccess("Revoke request created: %s", response.ID)
+			ios.Success("Revoke request created: %s", response.ID)
 			return nil
 		}),
 	}

@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workspacePreferencesCmd = newWorkspacePreferencesCmd(client.NewAlpaconAPIClient)
+var workspacePreferencesCmd = newWorkspacePreferencesCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkspacePreferencesCmd(newClient clientFactory) *cobra.Command {
+func newWorkspacePreferencesCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "preferences",
 		Aliases: []string{"prefs"},
@@ -29,7 +29,7 @@ func newWorkspacePreferencesCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve workspace preferences: %s.", err)
 			}
 
-			return utils.PrintJson(preferencesDetail)
+			return ios.PrintJson(preferencesDetail)
 		}),
 	}
 }

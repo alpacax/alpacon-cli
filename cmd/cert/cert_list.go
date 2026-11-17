@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var certListCmd = newCertListCmd(client.NewAlpaconAPIClient)
+var certListCmd = newCertListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newCertListCmd(newClient clientFactory) *cobra.Command {
+func newCertListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -33,7 +33,7 @@ func newCertListCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the certificate list: %s.", err)
 			}
 
-			return utils.PrintTable(certList)
+			return ios.PrintTable(certList)
 		}),
 	}
 }

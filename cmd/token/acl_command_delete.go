@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclCommandDeleteCmd = newAclCommandDeleteCmd(client.NewAlpaconAPIClient)
+var aclCommandDeleteCmd = newAclCommandDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAclCommandDeleteCmd(newClient clientFactory) *cobra.Command {
+func newAclCommandDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete ACL_ID",
 		Aliases: []string{"rm"},
@@ -24,14 +24,14 @@ personal API token has no command list on the ledger.`,
   alpacon token acl command rm 550e8400-e29b-41d4-a716-446655440000`,
 		Args: cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runCommandAclDelete(cmd, args, newClient)
+			return runCommandAclDelete(ios, cmd, args, newClient)
 		}),
 	}
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 	return cmd
 }
 
-func runCommandAclDelete(cmd *cobra.Command, args []string, newClient clientFactory) error {
+func runCommandAclDelete(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient clientFactory) error {
 	aclID := args[0]
 	yes, _ := cmd.Flags().GetBool("yes")
 
@@ -50,6 +50,6 @@ func runCommandAclDelete(cmd *cobra.Command, args []string, newClient clientFact
 		return utils.NewExitError("Failed to delete command ACL: %v.", err)
 	}
 
-	utils.CliSuccess("Command ACL deleted: %s", aclID)
+	ios.Success("Command ACL deleted: %s", aclID)
 	return nil
 }

@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var memberAddCmd = newMemberAddCmd(client.NewAlpaconAPIClient)
+var memberAddCmd = newMemberAddCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newMemberAddCmd(newClient clientFactory) *cobra.Command {
+func newMemberAddCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var memberRequest iam.MemberAddRequest
 	cmd := &cobra.Command{
 		Use:   "add",
@@ -22,7 +22,7 @@ func newMemberAddCmd(newClient clientFactory) *cobra.Command {
 	`,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 			if memberRequest.Group == "" || memberRequest.User == "" || memberRequest.Role == "" {
-				if err := promptForMembers(&memberRequest); err != nil {
+				if err := promptForMembers(ios, &memberRequest); err != nil {
 					return err
 				}
 			}
@@ -37,7 +37,7 @@ func newMemberAddCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to add the member to group: %s.", err)
 			}
 
-			utils.CliSuccess("Member %s added to group %s", memberRequest.User, memberRequest.Group)
+			ios.Success("Member %s added to group %s", memberRequest.User, memberRequest.Group)
 			return nil
 		}),
 	}
@@ -47,7 +47,7 @@ func newMemberAddCmd(newClient clientFactory) *cobra.Command {
 	return cmd
 }
 
-func promptForMembers(memberRequest *iam.MemberAddRequest) error {
+func promptForMembers(ios *utils.IOStreams, memberRequest *iam.MemberAddRequest) error {
 	var err error
 	if memberRequest.Group == "" {
 		if memberRequest.Group, err = utils.ReadRequiredInput("Group: "); err != nil {
@@ -60,14 +60,14 @@ func promptForMembers(memberRequest *iam.MemberAddRequest) error {
 		}
 	}
 	if memberRequest.Role == "" {
-		if memberRequest.Role, err = promptForRole(); err != nil {
+		if memberRequest.Role, err = promptForRole(ios); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func promptForRole() (string, error) {
+func promptForRole(ios *utils.IOStreams) (string, error) {
 	for {
 		role, err := utils.ReadRequiredInput("Role(owner, manager, member): ")
 		if err != nil {
@@ -76,6 +76,6 @@ func promptForRole() (string, error) {
 		if strings.ToLower(role) == "owner" || strings.ToLower(role) == "manager" || strings.ToLower(role) == "member" {
 			return role, nil
 		}
-		utils.CliWarning("Invalid role. Please choose 'owner', 'manager', or 'member'.")
+		ios.Warning("Invalid role. Please choose 'owner', 'manager', or 'member'.")
 	}
 }

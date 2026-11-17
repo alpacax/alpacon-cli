@@ -19,7 +19,7 @@ const issueFooter = "For issues, check the latest version or report on"
 // runTunnelCommand runs a fresh tunnel command and returns its exit code and what cmd.Execute would print.
 func runTunnelCommand(t *testing.T, newClient func() (*client.AlpaconClient, error), args ...string) (int, string) {
 	t.Helper()
-	cmd := newCommand(newClient)
+	cmd := newCommand(newClient, utils.Stdio)
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)

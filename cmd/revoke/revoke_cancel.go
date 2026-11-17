@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var revokeCancelCmd = newRevokeCancelCmd(client.NewAlpaconAPIClient)
+var revokeCancelCmd = newRevokeCancelCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newRevokeCancelCmd(newClient clientFactory) *cobra.Command {
+func newRevokeCancelCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cancel REQUEST_ID",
 		Short: "Cancel a revoke request",
@@ -42,7 +42,7 @@ func newRevokeCancelCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to cancel the revoke request: %s.", err)
 			}
 
-			utils.CliSuccess("Revoke request cancelled: %s", requestId)
+			ios.Success("Revoke request cancelled: %s", requestId)
 			return nil
 		}),
 	}

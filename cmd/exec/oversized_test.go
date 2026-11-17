@@ -49,7 +49,7 @@ func refusalsFrom(t *testing.T, status int, body string) (detach, stream error) 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	_, detach = event.SubmitCommand(ac, "prod", "echo hi", "", "", nil, "", "")
-	stream = RunExecWithApprovalWait(ac, "prod", "echo hi", "", "", nil, "", "", 0, io.Discard)
+	stream = RunExecWithApprovalWait(utils.Stdio, ac, "prod", "echo hi", "", "", nil, "", "", 0, io.Discard)
 	return detach, stream
 }
 
@@ -215,7 +215,7 @@ func TestLineTooLongGuidance(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			message, hint, action := lineTooLongGuidance(tc.parsed)
+			message, hint, action := lineTooLongGuidance(utils.Stdio, tc.parsed)
 			assert.Equal(t, tc.wantMessage, message)
 			assert.Equal(t, tc.wantCommand, action.Command)
 			assert.Contains(t, hint, "\n  "+tc.wantCommand+"\n")
@@ -244,13 +244,13 @@ func TestLineTooLongGuidanceKeepsTheApprovalWait(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			parsed := ParseRemoteExecArgs(append(tc.args, "prod", "--", "echo", "hi"))
+			parsed := ParseRemoteExecArgs(utils.Stdio, append(tc.args, "prod", "--", "echo", "hi"))
 			require.Empty(t, parsed.Err)
 
-			_, _, action := lineTooLongGuidance(parsed)
+			_, _, action := lineTooLongGuidance(utils.Stdio, parsed)
 
 			assert.Equal(t, "alpacon exec "+tc.wantFlags+"--interpreter /bin/sh "+uploadCommandTail, action.Command)
-			replayed := ParseRemoteExecArgs(strings.Fields(strings.TrimPrefix(action.Command, "alpacon exec ")))
+			replayed := ParseRemoteExecArgs(utils.Stdio, strings.Fields(strings.TrimPrefix(action.Command, "alpacon exec ")))
 			require.Empty(t, replayed.Err)
 			require.NotNil(t, replayed.File)
 			assert.Equal(t, tc.wantWait, replayed.Wait)

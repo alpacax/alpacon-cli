@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var upgradeAgentCmd = newUpgradeAgentCmd(client.NewAlpaconAPIClient)
+var upgradeAgentCmd = newUpgradeAgentCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUpgradeAgentCmd(newClient clientFactory) *cobra.Command {
+func newUpgradeAgentCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "upgrade SERVER",
 		Short: "Upgrade the Alpamon agent on a server",
@@ -29,7 +29,7 @@ func newUpgradeAgentCmd(newClient clientFactory) *cobra.Command {
 			yes, _ := cmd.Flags().GetBool("yes")
 			force, _ := cmd.Flags().GetBool("force")
 			return servercmd.RunDisruptiveServerAction(
-				newClient,
+				ios, newClient,
 				args[0],
 				server.ActionUpgradeAgent,
 				"Upgrade the agent on server '%s'?",

@@ -28,7 +28,7 @@ func TestUsernameSet(t *testing.T) {
 				"POST /api/iam/username/": {Status: tt.status, Body: tt.body},
 			})
 
-			failure, code := cmdtest.Run(newUsernameSetCmd(ts.Factory()), "alice")
+			failure, code := cmdtest.Run(newUsernameSetCmd(ts.Factory(), utils.Stdio), "alice")
 
 			assert.Equal(t, tt.wantCode, code, failure)
 			assert.Contains(t, failure, tt.want)

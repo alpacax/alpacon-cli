@@ -10,9 +10,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userUpdateCmd = newUserUpdateCmd(client.NewAlpaconAPIClient)
+var userUpdateCmd = newUserUpdateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUserUpdateCmd(newClient clientFactory) *cobra.Command {
+func newUserUpdateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "update USER",
 		Short: "Update the user information",
@@ -38,7 +38,7 @@ one of them never exits 0, whether or not the rest of the edit was applied.`,
 
 			userID, edit, err := iam.PrepareUserUpdate(alpaconClient, userName)
 			if err != nil {
-				if utils.ReportNoChanges(err) {
+				if ios.ReportNoChanges(err) {
 					return nil
 				}
 				return utils.NewExitError("Failed to update the user info: %s.", err)
@@ -46,9 +46,9 @@ one of them never exits 0, whether or not the rest of the edit was applied.`,
 
 			// Report the privilege edits first, so the guidance survives a failed patch.
 			for _, privilege := range edit.Privileges {
-				utils.CliWarning("%s is a read-only projection of %s's RBAC roles and was not sent.",
+				ios.Warning("%s is a read-only projection of %s's RBAC roles and was not sent.",
 					privilege.Field, userName)
-				utils.CliInfo("To make that change: %s", roleCommandFor(userName, privilege).PlainText())
+				ios.Info("To make that change: %s", roleCommandFor(userName, privilege).PlainText())
 			}
 
 			if len(edit.Changes) == 0 {
@@ -60,7 +60,7 @@ one of them never exits 0, whether or not the rest of the edit was applied.`,
 				return utils.NewExitError("Failed to update the user info: %s.", err)
 			}
 
-			if err := utils.PrintJson(userDetail); err != nil {
+			if err := ios.PrintJson(userDetail); err != nil {
 				return err
 			}
 
@@ -69,7 +69,7 @@ one of them never exits 0, whether or not the rest of the edit was applied.`,
 				return utils.NewExitError("The other edits were applied, but the privilege flags were not sent. Run the 'alpacon user role' command above to change them.")
 			}
 
-			utils.CliSuccess("User updated: %s", userName)
+			ios.Success("User updated: %s", userName)
 			return nil
 		}),
 	}

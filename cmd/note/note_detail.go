@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var noteDetailCmd = newNoteDetailCmd(client.NewAlpaconAPIClient)
+var noteDetailCmd = newNoteDetailCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newNoteDetailCmd(newClient clientFactory) *cobra.Command {
+func newNoteDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "describe NOTE_ID",
 		Aliases: []string{"desc"},
@@ -36,7 +36,7 @@ func newNoteDetailCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the note details: %s.", err)
 			}
 
-			return utils.PrintJson(noteDetail)
+			return ios.PrintJson(noteDetail)
 		}),
 	}
 }

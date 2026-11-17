@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var noteDeleteCmd = newNoteDeleteCmd(client.NewAlpaconAPIClient)
+var noteDeleteCmd = newNoteDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newNoteDeleteCmd(newClient clientFactory) *cobra.Command {
+func newNoteDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete NOTE_ID",
 		Aliases: []string{"rm"},
@@ -45,7 +45,7 @@ func newNoteDeleteCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to delete the note: %s.", err)
 			}
 
-			utils.CliSuccess("Note deleted: %s", noteID)
+			ios.Success("Note deleted: %s", noteID)
 			return nil
 		}),
 	}

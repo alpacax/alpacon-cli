@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var authorityUpdateCmd = newAuthorityUpdateCmd(client.NewAlpaconAPIClient)
+var authorityUpdateCmd = newAuthorityUpdateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAuthorityUpdateCmd(newClient clientFactory) *cobra.Command {
+func newAuthorityUpdateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "update AUTHORITY",
 		Short: "Update the authority information",
@@ -38,14 +38,14 @@ func newAuthorityUpdateCmd(newClient clientFactory) *cobra.Command {
 
 			authorityDetail, err := cert.UpdateAuthority(alpaconClient, authorityID)
 			if err != nil {
-				if utils.ReportNoChanges(err) {
+				if ios.ReportNoChanges(err) {
 					return nil
 				}
 				return utils.NewExitError("Failed to update the authority info: %s.", err)
 			}
 
-			utils.CliSuccess("Authority updated: %s", authorityName)
-			return utils.PrintJson(authorityDetail)
+			ios.Success("Authority updated: %s", authorityName)
+			return ios.PrintJson(authorityDetail)
 		}),
 	}
 }

@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newPurposeCommand(newClient clientFactory) *cobra.Command {
+func newPurposeCommand(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "purpose JOB_ID PURPOSE",
 		Short: "State what a held command is for",
@@ -79,13 +79,13 @@ re-submitting it.`,
 				// The server answers a settled command and a bystander's answer with
 				// one code, so this cannot say which happened—which is exactly the
 				// branch a machine consumer needs a field rather than prose for.
-				utils.PrintPurposeRefused(jobID, err)
+				ios.PrintPurposeRefused(jobID, err)
 				return utils.NewSilentExitError(utils.ExitCodeGeneralError)
 			}
 
 			// The command re-enters judgment on the worker, so there is no verdict to
 			// report here; naming where to read it keeps the caller off a resubmit.
-			utils.PrintPurposeAccepted(jobID)
+			ios.PrintPurposeAccepted(jobID)
 			return nil
 		}),
 	}

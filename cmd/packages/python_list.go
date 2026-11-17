@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var pythonPackageListCmd = newPythonPackageListCmd(client.NewAlpaconAPIClient)
+var pythonPackageListCmd = newPythonPackageListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newPythonPackageListCmd(newClient clientFactory) *cobra.Command {
+func newPythonPackageListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -33,7 +33,7 @@ func newPythonPackageListCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the Python packages: %s.", err)
 			}
 
-			return utils.PrintTable(packageList)
+			return ios.PrintTable(packageList)
 		}),
 	}
 }

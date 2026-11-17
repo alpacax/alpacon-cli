@@ -19,9 +19,9 @@ var validTypes = []string{
 	"discovered_account_accept", "api_token_scope_expand",
 }
 
-var approvalListCmd = newApprovalListCmd(client.NewAlpaconAPIClient)
+var approvalListCmd = newApprovalListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newApprovalListCmd(newClient clientFactory) *cobra.Command {
+func newApprovalListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var (
 		statusFilter, typeFilter string
 		myRequests               bool
@@ -59,7 +59,7 @@ requests you submitted.`,
 				return utils.NewExitError("Failed to list approval requests: %s.", err)
 			}
 
-			return utils.PrintTable(requests)
+			return ios.PrintTable(requests)
 		}),
 	}
 	cmd.Flags().StringVar(&statusFilter, "status", "pending", "Filter by status: "+strings.Join(validStatuses, "|"))

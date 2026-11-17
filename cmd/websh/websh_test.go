@@ -12,12 +12,10 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/api/websh"
 	"github.com/alpacax/alpacon-cli/client"
 	execCmd "github.com/alpacax/alpacon-cli/cmd/exec"
-	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -305,7 +303,7 @@ func TestSudoListenerWarning(t *testing.T) {
 
 func executeTestCommand(t *testing.T, args []string) (string, string, string, []string, bool, bool, map[string]string) {
 	t.Helper()
-	parsed, err := ParseWebshArgs(args)
+	parsed, err := ParseWebshArgs(utils.Stdio, args)
 	if errors.Is(err, errHelpRequested) {
 		return parsed.Username, parsed.Groupname, parsed.ServerName, parsed.CommandArgs,
 			parsed.Share, parsed.ReadOnly, parsed.Env
@@ -329,7 +327,7 @@ func executeTestCommand(t *testing.T, args []string) (string, string, string, []
 
 func TestParseWebshArgs_WorkSessionFlag(t *testing.T) {
 	t.Parallel()
-	got, err := ParseWebshArgs([]string{"--work-session", "ses-abc", "my-server"})
+	got, err := ParseWebshArgs(utils.Stdio, []string{"--work-session", "ses-abc", "my-server"})
 	require.NoError(t, err)
 	assert.Equal(t, "ses-abc", got.WorkSessionID)
 	assert.Equal(t, "my-server", got.ServerName)
@@ -337,7 +335,7 @@ func TestParseWebshArgs_WorkSessionFlag(t *testing.T) {
 
 func TestParseWebshArgs_WorkSessionEqualForm(t *testing.T) {
 	t.Parallel()
-	got, err := ParseWebshArgs([]string{"--work-session=ses-abc", "my-server"})
+	got, err := ParseWebshArgs(utils.Stdio, []string{"--work-session=ses-abc", "my-server"})
 	require.NoError(t, err)
 	assert.Equal(t, "ses-abc", got.WorkSessionID)
 	assert.Equal(t, "my-server", got.ServerName)
@@ -345,7 +343,7 @@ func TestParseWebshArgs_WorkSessionEqualForm(t *testing.T) {
 
 func TestParseWebshArgs_EnvErrorHidesSecret(t *testing.T) {
 	t.Parallel()
-	_, err := ParseWebshArgs([]string{"--env=\"=hunter2\"", "my-server", "ls"})
+	_, err := ParseWebshArgs(utils.Stdio, []string{"--env=\"=hunter2\"", "my-server", "ls"})
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "hunter2", "malformed --env error must not echo the value")
 }
@@ -371,7 +369,7 @@ func TestParseWebshArgsRejectsAnUnknownFlagBeforeTheServer(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := ParseWebshArgs(tt.args)
+			_, err := ParseWebshArgs(utils.Stdio, tt.args)
 
 			require.EqualError(t, err, "unknown flag: "+tt.flag)
 		})
@@ -380,7 +378,7 @@ func TestParseWebshArgsRejectsAnUnknownFlagBeforeTheServer(t *testing.T) {
 
 func TestParseWebshArgs_CommandAfterServerNotConsumed(t *testing.T) {
 	t.Parallel()
-	got, err := ParseWebshArgs([]string{"my-server", "ls", "--work-session", "fake"})
+	got, err := ParseWebshArgs(utils.Stdio, []string{"my-server", "ls", "--work-session", "fake"})
 	require.NoError(t, err)
 	assert.Equal(t, "my-server", got.ServerName)
 	assert.Empty(t, got.WorkSessionID)
@@ -474,26 +472,26 @@ func newSudoListenerTestServer(t *testing.T, status int, body string) *httptest.
 }
 
 func TestSetupSudoListener_StaysSilentOnNotFound(t *testing.T) {
+	t.Parallel()
 	ts := newSudoListenerTestServer(t, http.StatusNotFound, `{"detail":"Not found."}`)
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	var listener *event.SudoListener
-	_, stderr := testutil.CaptureOutput(t, func() {
-		listener = setupSudoListener(ac, "my-server", "session-1")
-	})
+	ios, _, errOut := utils.TestIOStreams()
+	listener := setupSudoListener(ios, ac, "my-server", "session-1")
+	stderr := errOut.String()
 
 	assert.Nil(t, listener)
 	assert.Empty(t, stderr, "an older server without the events API must not warn")
 }
 
 func TestSetupSudoListener_WarnsOnOtherFailures(t *testing.T) {
+	t.Parallel()
 	ts := newSudoListenerTestServer(t, http.StatusBadRequest, `{"detail":"Invalid input."}`)
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	var listener *event.SudoListener
-	_, stderr := testutil.CaptureOutput(t, func() {
-		listener = setupSudoListener(ac, "my-server", "session-1")
-	})
+	ios, _, errOut := utils.TestIOStreams()
+	listener := setupSudoListener(ios, ac, "my-server", "session-1")
+	stderr := errOut.String()
 
 	assert.Nil(t, listener)
 	assert.Contains(t, stderr, "Sudo MFA listener unavailable")
@@ -508,12 +506,13 @@ func TestSudoListenerWarning_SanitizesTheServersText(t *testing.T) {
 }
 
 func TestSetupSudoListener_WarningReturnsTheCursor(t *testing.T) {
+	t.Parallel()
 	ts := newSudoListenerTestServer(t, http.StatusBadRequest, `{"detail":"Invalid input."}`)
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, stderr := testutil.CaptureOutput(t, func() {
-		_ = setupSudoListener(ac, "my-server", "session-1")
-	})
+	ios, _, errOut := utils.TestIOStreams()
+	_ = setupSudoListener(ios, ac, "my-server", "session-1")
+	stderr := errOut.String()
 
 	require.NotEmpty(t, stderr, "a rejected request must warn, or there is nothing to check")
 	for line := range strings.SplitSeq(strings.TrimSuffix(stderr, "\n"), "\n") {
@@ -525,13 +524,14 @@ func TestSetupSudoListener_WarningReturnsTheCursor(t *testing.T) {
 // A refused event session carries the server's hint under the warning, on a
 // line that still returns the cursor in raw mode.
 func TestSetupSudoListener_WarningCarriesTheServerHint(t *testing.T) {
+	t.Parallel()
 	const hint = "This credential cannot stand for a person at the keyboard; sign in to the CLI instead."
 	ts := newSudoListenerTestServer(t, http.StatusForbidden, `{"code": "auth_interactive_channel_requires_presence", "hint": "`+hint+`"}`)
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, stderr := testutil.CaptureOutput(t, func() {
-		_ = setupSudoListener(ac, "my-server", "session-1")
-	})
+	ios, _, errOut := utils.TestIOStreams()
+	_ = setupSudoListener(ios, ac, "my-server", "session-1")
+	stderr := errOut.String()
 
 	assert.Contains(t, stderr, "Sudo MFA listener unavailable")
 	assert.Equal(t, 1, strings.Count(stderr, hint), "stderr: %q", stderr)
@@ -556,7 +556,7 @@ func TestParseWebshArgsRefusalCarriesTheOutputReadBeforeIt(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			parsed, err := ParseWebshArgs(tt.args)
+			parsed, err := ParseWebshArgs(utils.Stdio, tt.args)
 
 			require.Error(t, err)
 			assert.Equal(t, tt.want, parsed.OutputFormat)

@@ -16,9 +16,9 @@ type describeRow struct {
 	Value string `table:"Value"`
 }
 
-var approvalDescribeCmd = newApprovalDescribeCmd(client.NewAlpaconAPIClient)
+var approvalDescribeCmd = newApprovalDescribeCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newApprovalDescribeCmd(newClient clientFactory) *cobra.Command {
+func newApprovalDescribeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "describe REQUEST_ID",
 		Aliases: []string{"desc"},
@@ -37,12 +37,12 @@ requested changes. Use --output json to print the full raw response.`,
 				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
 
-			if utils.OutputFormat == utils.OutputFormatJSON {
+			if ios.IsJSON() {
 				body, err := approvalapi.GetApprovalRequestRaw(ac, args[0])
 				if err != nil {
 					return utils.NewExitError("Failed to retrieve approval request: %s.", err)
 				}
-				return utils.PrintJson(body)
+				return ios.PrintJson(body)
 			}
 
 			req, err := approvalapi.GetApprovalRequest(ac, args[0])
@@ -57,12 +57,12 @@ requested changes. Use --output json to print the full raw response.`,
 			if fe != nil {
 				script, hasScript = fileExecutionScript(fe)
 			}
-			if err := utils.PrintTable(rows); err != nil {
+			if err := ios.PrintTable(rows); err != nil {
 				return err
 			}
 			if hasScript {
-				fmt.Println()
-				fmt.Println(script)
+				_, _ = fmt.Fprintln(ios.Out)
+				_, _ = fmt.Fprintln(ios.Out, script)
 			}
 			return nil
 		}),

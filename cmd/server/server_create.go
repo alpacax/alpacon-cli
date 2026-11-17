@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -26,9 +25,9 @@ var (
 	validMethodsList     = strings.Join(validMethods, ", ")
 )
 
-var serverCreateCmd = newServerCreateCmd(client.NewAlpaconAPIClient)
+var serverCreateCmd = newServerCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newServerCreateCmd(newClient clientFactory) *cobra.Command {
+func newServerCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var createJSON bool
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -68,19 +67,19 @@ func newServerCreateCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
 
-			method, err := resolveMethod(cmd)
+			method, err := resolveMethod(ios, cmd)
 			if err != nil {
 				return err
 			}
-			platform, err := resolvePlatform(cmd, method)
+			platform, err := resolvePlatform(ios, cmd, method)
 			if err != nil {
 				return err
 			}
-			serverName, err := resolveName(cmd)
+			serverName, err := resolveName(ios, cmd)
 			if err != nil {
 				return err
 			}
-			tokenID, err := resolveTokenID(cmd, alpaconClient)
+			tokenID, err := resolveTokenID(ios, cmd, alpaconClient)
 			if err != nil {
 				return err
 			}
@@ -92,18 +91,18 @@ func newServerCreateCmd(newClient clientFactory) *cobra.Command {
 					return utils.NewExitError("Failed to retrieve the installation guide: %s.", err)
 				}
 				if createJSON {
-					return writeJSONGuide(guide)
+					return writeJSONGuide(ios, guide)
 				}
-				displayAnsibleGuideFromJSON(guide)
+				displayAnsibleGuideFromJSON(ios, guide)
 			case "token-install":
 				guide, err := server.GetRegistrationGuideJSON(alpaconClient, platform, serverName, tokenID)
 				if err != nil {
 					return utils.NewExitError("Failed to retrieve the installation guide: %s.", err)
 				}
 				if createJSON {
-					return writeJSONGuide(guide)
+					return writeJSONGuide(ios, guide)
 				}
-				displayGuideFromJSON(guide)
+				displayGuideFromJSON(ios, guide)
 			default:
 				return utils.NewExitError("Unknown registration method %q. Valid values: %s.", method, validMethodsList)
 			}
@@ -120,8 +119,8 @@ func newServerCreateCmd(newClient clientFactory) *cobra.Command {
 	return cmd
 }
 
-func writeJSONGuide(v any) error {
-	enc := json.NewEncoder(os.Stdout)
+func writeJSONGuide(ios *utils.IOStreams, v any) error {
+	enc := json.NewEncoder(ios.Out)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(v); err != nil {
 		return utils.NewExitError("Failed to encode guide as JSON: %s.", err)
@@ -131,7 +130,7 @@ func writeJSONGuide(v any) error {
 
 // resolveMethod returns --method, token-install in a non-interactive shell, or the
 // user's choice.
-func resolveMethod(cmd *cobra.Command) (string, error) {
+func resolveMethod(ios *utils.IOStreams, cmd *cobra.Command) (string, error) {
 	if cmd.Flags().Changed("method") {
 		method, _ := cmd.Flags().GetString("method")
 		if refusal := methodRefusal(method); refusal != "" {
@@ -142,10 +141,10 @@ func resolveMethod(cmd *cobra.Command) (string, error) {
 	if !utils.IsInteractiveShell() {
 		return "token-install", nil
 	}
-	return selectMethod()
+	return selectMethod(ios)
 }
 
-func resolvePlatform(cmd *cobra.Command, method string) (string, error) {
+func resolvePlatform(ios *utils.IOStreams, cmd *cobra.Command, method string) (string, error) {
 	if cmd.Flags().Changed("platform") {
 		platform, _ := cmd.Flags().GetString("platform")
 		if refusal := platformRefusal(method, platform); refusal != "" {
@@ -153,7 +152,7 @@ func resolvePlatform(cmd *cobra.Command, method string) (string, error) {
 		}
 		return platform, nil
 	}
-	return selectPlatform(method)
+	return selectPlatform(ios, method)
 }
 
 // flagRefusal checks --method and --platform without prompting, so a bad value is refused
@@ -203,7 +202,7 @@ func platformsForMethod(method string) ([]string, string) {
 
 // resolveName returns --name or prompts for one. With --token or --new-token the
 // caller is scripting, so it returns empty and the server falls back to the hostname.
-func resolveName(cmd *cobra.Command) (string, error) {
+func resolveName(ios *utils.IOStreams, cmd *cobra.Command) (string, error) {
 	if cmd.Flags().Changed("name") {
 		name, _ := cmd.Flags().GetString("name")
 		return name, nil
@@ -211,12 +210,12 @@ func resolveName(cmd *cobra.Command) (string, error) {
 	if cmd.Flags().Changed("token") || cmd.Flags().Changed("new-token") {
 		return "", nil
 	}
-	return promptForServerName()
+	return promptForServerName(ios)
 }
 
 // resolveTokenID returns the UUID of the --token token, of one created for
 // --new-token, or of the user's interactive choice.
-func resolveTokenID(cmd *cobra.Command, ac *client.AlpaconClient) (string, error) {
+func resolveTokenID(ios *utils.IOStreams, cmd *cobra.Command, ac *client.AlpaconClient) (string, error) {
 	if cmd.Flags().Changed("token") {
 		createTokenName, _ := cmd.Flags().GetString("token")
 		token, err := server.GetRegistrationTokenByName(ac, createTokenName)
@@ -230,17 +229,17 @@ func resolveTokenID(cmd *cobra.Command, ac *client.AlpaconClient) (string, error
 	}
 	if cmd.Flags().Changed("new-token") {
 		newTokenName, _ := cmd.Flags().GetString("new-token")
-		return createTokenAndWarn(ac, newTokenName)
+		return createTokenAndWarn(ios, ac, newTokenName)
 	}
-	return selectOrCreateToken(ac)
+	return selectOrCreateToken(ios, ac)
 }
 
 // selectMethod prompts the user to choose a registration method.
 // Empty input defaults to token-install to preserve existing muscle memory.
-func selectMethod() (string, error) {
-	fmt.Fprintln(os.Stderr, "Registration method:")
-	fmt.Fprintln(os.Stderr, "  [1] Token install")
-	fmt.Fprintln(os.Stderr, "  [2] Ansible")
+func selectMethod(ios *utils.IOStreams) (string, error) {
+	_, _ = fmt.Fprintln(ios.ErrOut, "Registration method:")
+	_, _ = fmt.Fprintln(ios.ErrOut, "  [1] Token install")
+	_, _ = fmt.Fprintln(ios.ErrOut, "  [2] Ansible")
 	for {
 		input, err := utils.ReadInput("Method [1]: ")
 		if err != nil {
@@ -252,19 +251,19 @@ func selectMethod() (string, error) {
 		case "2", "ansible":
 			return "ansible", nil
 		}
-		utils.CliWarning("Invalid selection. Enter 1 or 2.")
+		ios.Warning("Invalid selection. Enter 1 or 2.")
 	}
 }
 
-func selectPlatform(method string) (string, error) {
+func selectPlatform(ios *utils.IOStreams, method string) (string, error) {
 	allowed, list := platformsForMethod(method)
 	if !utils.IsInteractiveShell() {
 		return "", utils.NewUsageExitError("Non-interactive mode requires --platform. Valid values: %s.", list)
 	}
-	return promptPlatform(allowed, list, utils.ReadInput)
+	return promptPlatform(ios, allowed, list, utils.ReadInput)
 }
 
-func promptPlatform(allowed []string, list string, prompt func(string) (string, error)) (string, error) {
+func promptPlatform(ios *utils.IOStreams, allowed []string, list string, prompt func(string) (string, error)) (string, error) {
 	for {
 		input, err := prompt(fmt.Sprintf("Platform (%s): ", list))
 		if err != nil {
@@ -274,21 +273,21 @@ func promptPlatform(allowed []string, list string, prompt func(string) (string, 
 		if slices.Contains(allowed, platform) {
 			return platform, nil
 		}
-		utils.CliWarning("Invalid platform. Valid values: %s.", list)
+		ios.Warning("Invalid platform. Valid values: %s.", list)
 	}
 }
 
-func promptForServerName() (string, error) {
+func promptForServerName(ios *utils.IOStreams) (string, error) {
 	if !utils.IsInteractiveShell() {
 		return "", nil
 	}
-	fmt.Fprintln(os.Stderr, "Server name (optional—hostname will be used if not specified):")
+	_, _ = fmt.Fprintln(ios.ErrOut, "Server name (optional—hostname will be used if not specified):")
 	return utils.ReadInput("Server Name: ")
 }
 
 // selectOrCreateToken lists existing registration tokens and lets the user pick one
 // or create a new one. Returns the selected or newly created token UUID.
-func selectOrCreateToken(ac *client.AlpaconClient) (string, error) {
+func selectOrCreateToken(ios *utils.IOStreams, ac *client.AlpaconClient) (string, error) {
 	if !utils.IsInteractiveShell() {
 		return "", utils.NewUsageExitError("Non-interactive mode requires --token or --new-token.")
 	}
@@ -298,11 +297,11 @@ func selectOrCreateToken(ac *client.AlpaconClient) (string, error) {
 	}
 
 	if len(tokens) == 0 {
-		utils.CliInfo("No existing tokens. Creating a new one.")
-		return createNewToken(ac)
+		ios.Info("No existing tokens. Creating a new one.")
+		return createNewToken(ios, ac)
 	}
 
-	printTokenChoices(os.Stderr, tokens)
+	printTokenChoices(ios.ErrOut, tokens)
 
 	for {
 		input, err := utils.ReadRequiredInput("Token: ")
@@ -311,14 +310,14 @@ func selectOrCreateToken(ac *client.AlpaconClient) (string, error) {
 		}
 
 		if input == "+" {
-			return createNewToken(ac)
+			return createNewToken(ios, ac)
 		}
 
 		idx, err := strconv.Atoi(input)
 		if err == nil && idx >= 1 && idx <= len(tokens) {
 			return tokens[idx-1].ID, nil
 		}
-		utils.CliWarning("Invalid selection. Enter a number from the list or '+' to create a new token.")
+		ios.Warning("Invalid selection. Enter a number from the list or '+' to create a new token.")
 	}
 }
 
@@ -332,29 +331,29 @@ func printTokenChoices(w io.Writer, tokens []server.RegistrationTokenDetails) {
 	_, _ = fmt.Fprintln(w, "  [+] Create new token")
 }
 
-func createNewToken(ac *client.AlpaconClient) (string, error) {
+func createNewToken(ios *utils.IOStreams, ac *client.AlpaconClient) (string, error) {
 	name, err := utils.ReadRequiredInput("Token name: ")
 	if err != nil {
 		return "", err
 	}
-	return createTokenAndWarn(ac, name)
+	return createTokenAndWarn(ios, ac, name)
 }
 
-func createTokenAndWarn(ac *client.AlpaconClient, name string) (string, error) {
+func createTokenAndWarn(ios *utils.IOStreams, ac *client.AlpaconClient, name string) (string, error) {
 	response, err := server.CreateRegistrationToken(ac, server.RegistrationTokenRequest{Name: name})
 	if err != nil {
 		return "", utils.NewExitError("Failed to create the registration token: %s.", err)
 	}
-	warnTokenKey("New token created. Save the key now—it will not be shown again", response.Key)
+	warnTokenKey(ios, "New token created. Save the key now—it will not be shown again", response.Key)
 	return response.ID, nil
 }
 
-func printGuideHeader(platformLabel, serverName, alpaconURL string) {
-	fmt.Fprintln(os.Stderr)
-	utils.PrintHeader("Installation guide")
-	fmt.Fprintln(os.Stderr)
-	printGuideFields(os.Stderr, platformLabel, serverName, alpaconURL)
-	fmt.Fprintln(os.Stderr)
+func printGuideHeader(ios *utils.IOStreams, platformLabel, serverName, alpaconURL string) {
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	ios.PrintHeader("Installation guide")
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	printGuideFields(ios.ErrOut, platformLabel, serverName, alpaconURL)
+	_, _ = fmt.Fprintln(ios.ErrOut)
 }
 
 // Every value here is echoed from the guide response; a newline in one forges a field line.
@@ -366,72 +365,72 @@ func printGuideFields(w io.Writer, platformLabel, serverName, alpaconURL string)
 	_, _ = fmt.Fprintf(w, "  URL      : %s\n", utils.SanitizeTerminalText(alpaconURL))
 }
 
-func printGuideVerifyFooter(stepNum int) {
-	fmt.Fprintln(os.Stderr, utils.Bold(fmt.Sprintf("Step %d — Verify", stepNum)))
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "  Your server will appear in the Servers list within moments.")
+func printGuideVerifyFooter(ios *utils.IOStreams, stepNum int) {
+	_, _ = fmt.Fprintln(ios.ErrOut, ios.Bold(fmt.Sprintf("Step %d — Verify", stepNum)))
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	_, _ = fmt.Fprintln(ios.ErrOut, "  Your server will appear in the Servers list within moments.")
 }
 
 // printGuideCommand warns rather than withholds: the operator decides, and an
 // automation reading this guide keeps working. The warning goes above the
 // value, so a guide with several altered fields says which ones.
-func printGuideCommand(w io.Writer, s string) {
+func printGuideCommand(ios *utils.IOStreams, w io.Writer, s string) {
 	clean, altered := utils.SanitizeTerminalBlock(s)
 	if altered {
-		utils.WarnTerminalTextAltered(w, "  ")
+		ios.WarnTerminalTextAltered(w, "  ")
 	}
 	_, _ = fmt.Fprintln(w, clean)
 }
 
-func displayGuideFromJSON(guide server.RegistrationMethodGuideJsonResponse) {
-	printGuideHeader(guide.PlatformLabel, guide.ServerName, guide.AlpaconURL)
+func displayGuideFromJSON(ios *utils.IOStreams, guide server.RegistrationMethodGuideJsonResponse) {
+	printGuideHeader(ios, guide.PlatformLabel, guide.ServerName, guide.AlpaconURL)
 
-	fmt.Fprintln(os.Stderr, utils.Bold("Step 1 — Install Alpamon"))
-	fmt.Fprintln(os.Stderr)
+	_, _ = fmt.Fprintln(ios.ErrOut, ios.Bold("Step 1 — Install Alpamon"))
+	_, _ = fmt.Fprintln(ios.ErrOut)
 	for _, installCmd := range guide.InstallCommands {
-		printGuideCommand(os.Stderr, installCmd)
+		printGuideCommand(ios, ios.ErrOut, installCmd)
 	}
-	fmt.Fprintln(os.Stderr)
+	_, _ = fmt.Fprintln(ios.ErrOut)
 
-	fmt.Fprintln(os.Stderr, utils.Bold("Step 2 — Register"))
-	fmt.Fprintln(os.Stderr)
-	printGuideCommand(os.Stderr, guide.RegisterCommand)
-	fmt.Fprintln(os.Stderr)
+	_, _ = fmt.Fprintln(ios.ErrOut, ios.Bold("Step 2 — Register"))
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	printGuideCommand(ios, ios.ErrOut, guide.RegisterCommand)
+	_, _ = fmt.Fprintln(ios.ErrOut)
 
-	printGuideVerifyFooter(3)
+	printGuideVerifyFooter(ios, 3)
 }
 
-func displayAnsibleGuideFromJSON(guide server.AnsibleGuideJsonResponse) {
-	printGuideHeader(guide.PlatformLabel, guide.ServerName, guide.AlpaconURL)
+func displayAnsibleGuideFromJSON(ios *utils.IOStreams, guide server.AnsibleGuideJsonResponse) {
+	printGuideHeader(ios, guide.PlatformLabel, guide.ServerName, guide.AlpaconURL)
 
-	fmt.Fprintln(os.Stderr, utils.Bold("Step 1 — Install Ansible collection"))
-	fmt.Fprintln(os.Stderr)
-	printGuideCommand(os.Stderr, guide.CollectionInstall)
-	fmt.Fprintln(os.Stderr)
+	_, _ = fmt.Fprintln(ios.ErrOut, ios.Bold("Step 1 — Install Ansible collection"))
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	printGuideCommand(ios, ios.ErrOut, guide.CollectionInstall)
+	_, _ = fmt.Fprintln(ios.ErrOut)
 
-	fmt.Fprintln(os.Stderr, utils.Bold("Step 2 — Configure inventory"))
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "Save as inventory.ini:")
-	fmt.Fprintln(os.Stderr)
-	printGuideCommand(os.Stderr, guide.InventorySnippet)
-	fmt.Fprintln(os.Stderr)
+	_, _ = fmt.Fprintln(ios.ErrOut, ios.Bold("Step 2 — Configure inventory"))
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	_, _ = fmt.Fprintln(ios.ErrOut, "Save as inventory.ini:")
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	printGuideCommand(ios, ios.ErrOut, guide.InventorySnippet)
+	_, _ = fmt.Fprintln(ios.ErrOut)
 
-	fmt.Fprintln(os.Stderr, utils.Bold("Step 3 — Register"))
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, utils.Bold("Option A — Bundled playbook (recommended):"))
-	fmt.Fprintln(os.Stderr)
-	printGuideCommand(os.Stderr, guide.RunCommandQuick)
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, utils.Bold("Option B — Custom playbook:"))
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "Save as playbook.yml:")
-	fmt.Fprintln(os.Stderr)
-	printGuideCommand(os.Stderr, guide.PlaybookSnippet)
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "Then run:")
-	fmt.Fprintln(os.Stderr)
-	printGuideCommand(os.Stderr, guide.RunCommandCustom)
-	fmt.Fprintln(os.Stderr)
+	_, _ = fmt.Fprintln(ios.ErrOut, ios.Bold("Step 3 — Register"))
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	_, _ = fmt.Fprintln(ios.ErrOut, ios.Bold("Option A — Bundled playbook (recommended):"))
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	printGuideCommand(ios, ios.ErrOut, guide.RunCommandQuick)
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	_, _ = fmt.Fprintln(ios.ErrOut, ios.Bold("Option B — Custom playbook:"))
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	_, _ = fmt.Fprintln(ios.ErrOut, "Save as playbook.yml:")
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	printGuideCommand(ios, ios.ErrOut, guide.PlaybookSnippet)
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	_, _ = fmt.Fprintln(ios.ErrOut, "Then run:")
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	printGuideCommand(ios, ios.ErrOut, guide.RunCommandCustom)
+	_, _ = fmt.Fprintln(ios.ErrOut)
 
-	printGuideVerifyFooter(4)
+	printGuideVerifyFooter(ios, 4)
 }

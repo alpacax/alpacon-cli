@@ -17,6 +17,7 @@ import (
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -993,7 +994,7 @@ func TestPersistWorkspaceEnv(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	require.NoError(t, config.CreateConfig("https://ws.example.com", "ws", "token", "", "", "", "", 0, false))
 
-	persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
+	persistWorkspaceEnv(utils.Stdio, "https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "frozen", cfg.SchemaName)
@@ -1001,7 +1002,7 @@ func TestPersistWorkspaceEnv(t *testing.T) {
 	assert.Equal(t, "token", cfg.Token)
 
 	// A server that stops reporting either keeps the schema name and turns the surface back off.
-	persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{})
+	persistWorkspaceEnv(utils.Stdio, "https://ws.example.com", &auth0.AuthEnvResponse{})
 	cfg, err = config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "frozen", cfg.SchemaName)
@@ -1011,9 +1012,9 @@ func TestPersistWorkspaceEnv(t *testing.T) {
 func TestPersistWorkspaceEnv_WarnsWithoutConfig(t *testing.T) {
 	setTestHome(t, t.TempDir())
 
-	_, stderr := testutil.CaptureOutput(t, func() {
-		persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
-	})
+	ios, _, errOut := utils.TestIOStreams()
+	persistWorkspaceEnv(ios, "https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
+	stderr := errOut.String()
 
 	assert.Contains(t, stderr, "Could not save the workspace identity and Kubernetes support")
 }
@@ -1023,9 +1024,9 @@ func TestPersistWorkspaceEnv_SkipsAnotherWorkspace(t *testing.T) {
 	// Another shell's login replaced the config while this login was in flight.
 	require.NoError(t, config.CreateConfig("https://other.example.com", "other", "token", "", "", "", "", 0, false))
 
-	_, stderr := testutil.CaptureOutput(t, func() {
-		persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
-	})
+	ios, _, errOut := utils.TestIOStreams()
+	persistWorkspaceEnv(ios, "https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
+	stderr := errOut.String()
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
@@ -1151,7 +1152,7 @@ func TestLoginVerifiesTheLoginThroughTheFactory(t *testing.T) {
 				newClient = cmdtest.NoClient
 			}
 
-			_, stderr, code := cmdtest.RunCaptured(t, newLoginCmd(newClient), ts.URL, "-t", "api-token")
+			_, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return newLoginCmd(newClient, ios) }, ts.URL, "-t", "api-token")
 
 			assert.Equal(t, tt.wantCode, code, stderr)
 			assert.Contains(t, stderr, tt.wantStderr)

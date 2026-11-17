@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var groupUpdateCmd = newGroupUpdateCmd(client.NewAlpaconAPIClient)
+var groupUpdateCmd = newGroupUpdateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newGroupUpdateCmd(newClient clientFactory) *cobra.Command {
+func newGroupUpdateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "update GROUP",
 		Short: "Update the group information",
@@ -33,14 +33,14 @@ func newGroupUpdateCmd(newClient clientFactory) *cobra.Command {
 
 			groupDetail, err := iam.UpdateGroup(alpaconClient, groupName)
 			if err != nil {
-				if utils.ReportNoChanges(err) {
+				if ios.ReportNoChanges(err) {
 					return nil
 				}
 				return utils.NewExitError("Failed to update the group info: %s.", err)
 			}
 
-			utils.CliSuccess("Group updated: %s", groupName)
-			return utils.PrintJson(groupDetail)
+			ios.Success("Group updated: %s", groupName)
+			return ios.PrintJson(groupDetail)
 		}),
 	}
 }

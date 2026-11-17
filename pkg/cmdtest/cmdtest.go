@@ -3,7 +3,9 @@
 package cmdtest
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -79,39 +80,60 @@ func NoClient() (*client.AlpaconClient, error) { return nil, ErrNoLogin }
 // Run executes cmd with args and returns the failure cmd.Execute would print and
 // its exit code. It captures nothing else, so it is safe under t.Parallel.
 func Run(cmd *cobra.Command, args ...string) (failure string, code int) {
+	ios, _, _ := utils.TestIOStreams() // formats the failure without touching the global format
+	_ = ios.SetOutputFormat(utils.OutputFormat)
+	var out strings.Builder
+	code = run(cmd, args, ios, &out, utils.OutputFormatIn(args))
+	return out.String(), code
+}
+
+// Build constructs the command under test on the streams it is handed.
+type Build func(ios *utils.IOStreams) *cobra.Command
+
+// RunCaptured runs the command build returns on test streams and returns what it wrote to
+// each; the failure is appended to stderr. It swaps nothing, so it is safe under t.Parallel.
+func RunCaptured(build Build, args ...string) (stdout, stderr string, code int) {
+	ios, out, errOut := utils.TestIOStreams()
+	return runOn(ios, out, errOut, build, args)
+}
+
+// RunJSON is RunCaptured under --output json.
+func RunJSON(build Build, args ...string) (stdout, stderr string, code int) {
+	ios, out, errOut := utils.TestIOStreams()
+	_ = ios.SetOutputFormat(utils.OutputFormatJSON)
+	return runOn(ios, out, errOut, build, args)
+}
+
+func runOn(ios *utils.IOStreams, out, errOut *bytes.Buffer, build Build, args []string) (string, string, int) {
+	cmd := build(ios)
+	cmd.SetOut(ios.Out) // Cobra's own output, help included
+	cmd.SetErr(ios.ErrOut)
+	code := run(cmd, args, ios, errOut, utils.OutputFormatIn(args))
+	return out.String(), errOut.String(), code
+}
+
+// run executes cmd as cmd.Execute does and prints its failure to w in ios's format, turning an
+// error that is not an ExitError into the one cmd.Execute prints. A parse error applies format,
+// the --output its arguments carry, as cmd.Execute does.
+func run(cmd *cobra.Command, args []string, ios *utils.IOStreams, w io.Writer, format string) int {
 	cmd.SilenceErrors, cmd.SilenceUsage = true, true // as RootCmd is
 	cmd.SetArgs(append([]string{}, args...))         // never nil, or Cobra reads os.Args[1:]
 	restore := utils.MarkHookErrors(cmd)             // as cmd.Execute does, to tell a hook's failure from a parse error
-	err := cmd.Execute()
+	failed, err := cmd.ExecuteC()
 	restore()
 	if err == nil {
-		return "", 0
+		return 0
 	}
-	var out strings.Builder
-	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
-		utils.FprintExitError(&out, exitErr)
-		return out.String(), exitErr.Code
+	exitErr, ok := errors.AsType[*utils.ExitError](err)
+	switch {
+	case ok:
+	case !utils.IsHookError(err):
+		exitErr, _ = errors.AsType[*utils.ExitError](ios.NewParseExitError(failed, format, err.Error()))
+	case utils.IsUsageError(err):
+		exitErr, _ = errors.AsType[*utils.ExitError](utils.NewUsageExitError("%s", err))
+	default:
+		exitErr, _ = errors.AsType[*utils.ExitError](utils.NewExitError("While executing the command: %s", err))
 	}
-	if utils.IsHookError(err) && !utils.IsUsageError(err) {
-		return err.Error(), utils.ExitCodeGeneralError
-	}
-	return err.Error(), utils.ExitCodeUsageError // Cobra's own parse error, or a hook's usage error
-}
-
-// RunCaptured is Run with os.Stdout and os.Stderr captured; the failure is
-// appended to stderr. Serial: it swaps both.
-func RunCaptured(t *testing.T, cmd *cobra.Command, args ...string) (stdout, stderr string, code int) {
-	t.Helper()
-	var failure string
-	stdout, stderr = testutil.CaptureOutput(t, func() { failure, code = Run(cmd, args...) })
-	return stdout, stderr + failure, code
-}
-
-// RunJSON is RunCaptured under --output json. Serial: it also sets utils.OutputFormat.
-func RunJSON(t *testing.T, cmd *cobra.Command, args ...string) (stdout, stderr string, code int) {
-	t.Helper()
-	old := utils.OutputFormat
-	utils.OutputFormat = utils.OutputFormatJSON
-	defer func() { utils.OutputFormat = old }()
-	return RunCaptured(t, cmd, args...)
+	ios.FprintExitError(w, exitErr)
+	return exitErr.Code
 }

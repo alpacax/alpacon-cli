@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var tokenDeleteCmd = newTokenDeleteCmd(client.NewAlpaconAPIClient)
+var tokenDeleteCmd = newTokenDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newTokenDeleteCmd(newClient clientFactory) *cobra.Command {
+func newTokenDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete TOKEN",
 		Aliases: []string{"rm"},
@@ -40,7 +40,7 @@ The token is resolved by name—UUID input is not supported.`,
 				return utils.NewExitError("Failed to delete the registration token: %s.", err)
 			}
 
-			utils.CliSuccess("Registration token deleted: %s", name)
+			ios.Success("Registration token deleted: %s", name)
 			return nil
 		}),
 	}

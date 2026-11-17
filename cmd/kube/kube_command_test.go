@@ -44,7 +44,7 @@ func runKubeCommand(t *testing.T, outputFormat string, args ...string) (stdout, 
 func runKubeCommandWith(t *testing.T, newClient clientFactory, outputFormat string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
 	withOutputFormat(t, outputFormat)
-	cmd := newKubeCmd(newClient)
+	cmd := newKubeCmd(newClient, utils.Stdio)
 	cmd.SilenceErrors, cmd.SilenceUsage = true, true // as RootCmd is
 	utils.MarkHookErrors(cmd)
 	cmd.SetArgs(args)

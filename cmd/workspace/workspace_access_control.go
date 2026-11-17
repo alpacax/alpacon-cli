@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workspaceAccessControlCmd = newWorkspaceAccessControlCmd(client.NewAlpaconAPIClient)
+var workspaceAccessControlCmd = newWorkspaceAccessControlCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkspaceAccessControlCmd(newClient clientFactory) *cobra.Command {
+func newWorkspaceAccessControlCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "access-control",
 		Aliases: []string{"acl"},
@@ -29,7 +29,7 @@ func newWorkspaceAccessControlCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve access control settings: %s.", err)
 			}
 
-			return utils.PrintJson(accessControlDetail)
+			return ios.PrintJson(accessControlDetail)
 		}),
 	}
 }

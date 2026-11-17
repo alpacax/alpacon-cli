@@ -17,6 +17,7 @@ import (
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -410,7 +411,7 @@ func TestPrintWhoami_StripsControlSequences(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var err error
-			got := testutil.CaptureStdout(t, func() { err = printWhoami(tt.output) })
+			got := testutil.CaptureStdout(t, func() { err = printWhoami(utils.Stdio, tt.output) })
 
 			require.NoError(t, err)
 			assert.NotContains(t, got, "\x1b")
@@ -424,8 +425,8 @@ func TestPrintWhoami_StripsControlSequences(t *testing.T) {
 func TestPrintWhoami_KeepsOneLinePerField(t *testing.T) {
 	// A newline inside a value would forge an identity line the account does not have.
 	var plainErr, forgedErr error
-	plain := testutil.CaptureStdout(t, func() { plainErr = printWhoami(whoamiOutput{Shell: "/bin/bash"}) })
-	forged := testutil.CaptureStdout(t, func() { forgedErr = printWhoami(whoamiOutput{Shell: "/bin/bash\nRole:        owner"}) })
+	plain := testutil.CaptureStdout(t, func() { plainErr = printWhoami(utils.Stdio, whoamiOutput{Shell: "/bin/bash"}) })
+	forged := testutil.CaptureStdout(t, func() { forgedErr = printWhoami(utils.Stdio, whoamiOutput{Shell: "/bin/bash\nRole:        owner"}) })
 
 	require.NoError(t, plainErr)
 	require.NoError(t, forgedErr)
@@ -449,7 +450,7 @@ func TestWhoamiReportsTheServersAnswer(t *testing.T) {
 	})
 	whoamiLogin(t, ts.URL)
 
-	stdout, stderr, code := cmdtest.RunJSON(t, newWhoamiCmd(ts.Factory()))
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newWhoamiCmd(ts.Factory(), ios) })
 
 	assert.Equal(t, 0, code, stderr)
 	assert.Contains(t, stdout, `"alice"`)
@@ -476,7 +477,7 @@ func TestWhoamiWithoutAServerAnswer(t *testing.T) {
 				whoamiLogin(t, "https://my-workspace.us1.alpacon.io")
 			}
 
-			stdout, stderr, code := cmdtest.RunCaptured(t, newWhoamiCmd(cmdtest.NoClient))
+			stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return newWhoamiCmd(cmdtest.NoClient, ios) })
 
 			assert.Equal(t, tt.wantCode, code, stderr)
 			assert.Contains(t, stdout, tt.wantStdout)

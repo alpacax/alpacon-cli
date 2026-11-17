@@ -23,7 +23,7 @@ func AddDisruptiveActionFlags(cmd *cobra.Command) {
 }
 
 // RunDisruptiveServerAction runs the action with confirmation, MFA retry, and busy-guard handling.
-func RunDisruptiveServerAction(newClient clientFactory, serverName, action, confirmMsg, successMsg, failMsg string, yes, force bool) error {
+func RunDisruptiveServerAction(ios *utils.IOStreams, newClient clientFactory, serverName, action, confirmMsg, successMsg, failMsg string, yes, force bool) error {
 	if !yes {
 		if proceed, err := utils.Confirm(confirmMsg, serverName); err != nil || !proceed {
 			return err
@@ -46,13 +46,13 @@ func RunDisruptiveServerAction(newClient clientFactory, serverName, action, conf
 		return utils.NewExitError("%s: %s.", failMsg, err)
 	}
 
-	utils.CliSuccess("%s", successMsg)
+	ios.Success("%s", successMsg)
 	return nil
 }
 
 // RunServerAction runs a non-disruptive action with confirmation and MFA retry.
 // The server applies no busy guard to it, so there is no --force to pass.
-func RunServerAction(newClient clientFactory, serverName, action, confirmMsg, successMsg, failMsg string, yes bool) error {
+func RunServerAction(ios *utils.IOStreams, newClient clientFactory, serverName, action, confirmMsg, successMsg, failMsg string, yes bool) error {
 	if !yes {
 		if proceed, err := utils.Confirm(confirmMsg, serverName); err != nil || !proceed {
 			return err
@@ -72,7 +72,7 @@ func RunServerAction(newClient clientFactory, serverName, action, confirmMsg, su
 		return utils.NewExitError("%s: %s.", failMsg, err)
 	}
 
-	utils.CliSuccess("%s", successMsg)
+	ios.Success("%s", successMsg)
 	return nil
 }
 

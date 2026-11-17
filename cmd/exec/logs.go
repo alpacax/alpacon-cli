@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newLogsCommand(newClient clientFactory) *cobra.Command {
+func newLogsCommand(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "logs JOB_ID",
 		Short: "Fetch the result of a detached command",
@@ -59,7 +59,7 @@ Run the command again later to check for completion.`,
 			// A parked command has no approval request, so this precedes the approval hold. This is the
 			// detach path's only sight of the demand: SubmitCommand returns before the verdict.
 			if event.IsAwaitingPurposeStatus(details.Status) {
-				utils.PrintPurposeDemand(
+				ios.PrintPurposeDemand(
 					utils.PurposeDemandLead, details.ID, details.PurposeExpiresAt,
 				)
 				return utils.NewSilentExitError(utils.ExitCodePurposeRequired)
@@ -75,10 +75,10 @@ Run the command again later to check for completion.`,
 				utils.EmitLocalSignal(localsignal.ApprovalPending, fields, alpaconClient)
 				requestID, lookupErr := approval.FindCommandApprovalRequestID(alpaconClient, details.ID)
 				if lookupErr != nil {
-					utils.CliWarning("failed to read approval request: %s", lookupErr)
+					ios.Warning("failed to read approval request: %s", lookupErr)
 				}
 				message := heldCommandMessage(assignee, requestID, details.Status)
-				utils.PrintPendingApproval(
+				ios.PrintPendingApproval(
 					message,
 					requestID,
 					utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", details.ID)},
@@ -94,10 +94,10 @@ Run the command again later to check for completion.`,
 				// A script-body refusal has file-execution guidance of its own.
 				if rejected.WantsFileExecution() {
 					accountFlags, accountNote := logsAccountFlags(details)
-					return reportUseFileExecution(stderr, rejected, details.Server.Name, accountFlags, false, accountNote)
+					return reportUseFileExecution(ios, stderr, rejected, details.Server.Name, accountFlags, false, accountNote)
 				}
 				rejected.CommandID = "" // the caller already named the job
-				return commandRejectionFailure(stderr, rejected, rejected)
+				return commandRejectionFailure(ios, stderr, rejected, rejected)
 			}
 
 			// Fetch output only for statuses whose outcome prints it. A status-only failure prints a
@@ -122,7 +122,7 @@ Run the command again later to check for completion.`,
 					utils.SanitizeTerminalText(details.Purpose))
 			}
 
-			stdoutLine, stderrLine, exitCode := logsCommandOutcome(details)
+			stdoutLine, stderrLine, exitCode := logsCommandOutcome(ios, details)
 			if exitCode == 0 && stderrLine == "" && details.PurposeExpiresAt != nil {
 				stderrLine = fmt.Sprintf("command finished (status: %s).\n", utils.SanitizeTerminalText(details.Status))
 			}
@@ -188,7 +188,7 @@ func logsAccountFlags(details event.EventDetails) (flags []string, note string) 
 // logsCommandOutcome guarantees a non-empty stderrLine ends with \n. Neither the
 // awaiting_purpose demand, the awaiting_approval hold, nor a rejection reaches
 // here: the caller answers all three on their own contracts first.
-func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine string, exitCode int) {
+func logsCommandOutcome(ios *utils.IOStreams, details event.EventDetails) (stdoutLine, stderrLine string, exitCode int) {
 	// These lines are written raw, outside the Cli* helpers. A Status that reached a branch equals
 	// the literal it was compared against and needs no strip; the ID, an unknown phase and the
 	// unrecognized-status fallback carry the server's own text and do.
@@ -204,11 +204,11 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 		if details.ErrorPhase != nil && *details.ErrorPhase != "" {
 			phase, desc := sanitizedPhaseParts(*details.ErrorPhase)
 			stderrLine = fmt.Sprintf("%s: [%s] %s (status=%s)\n",
-				utils.Red("Error"), phase, desc, details.Status) +
+				ios.Red("Error"), phase, desc, details.Status) +
 				phaseHintLine(*details.ErrorPhase)
 		} else {
 			stderrLine = fmt.Sprintf("%s: command failed with status: %s\n",
-				utils.Red("Error"), details.Status)
+				ios.Red("Error"), details.Status)
 		}
 		return "", stderrLine, 1
 	}
@@ -220,7 +220,7 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 		}
 		if details.ErrorPhase != nil && *details.ErrorPhase != "" {
 			phase, desc := sanitizedPhaseParts(*details.ErrorPhase)
-			stderrLine = fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, desc) +
+			stderrLine = fmt.Sprintf("%s: [%s] %s\n", ios.Red("Error"), phase, desc) +
 				phaseHintLine(*details.ErrorPhase)
 		}
 		return details.Result, stderrLine, exitCode
@@ -237,6 +237,6 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 	}
 
 	stderrLine = fmt.Sprintf("%s: command ended with unrecognised status: %s\n",
-		utils.Red("Error"), utils.SanitizeTerminalText(details.Status))
+		ios.Red("Error"), utils.SanitizeTerminalText(details.Status))
 	return details.Result, stderrLine, 1
 }

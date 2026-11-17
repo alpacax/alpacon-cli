@@ -9,6 +9,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,7 +61,7 @@ func TestExecuteTunnel_MFAWaitDoesNotCreateAnotherSessionAfterAFailedDial(t *tes
 	ac, err := client.NewAlpaconAPIClient()
 	require.NoError(t, err)
 
-	err = executeTunnel(ac, tunnelFlagValues{localPort: "0", remotePort: "5432"}, "my-server", nil)
+	err = executeTunnel(utils.Stdio, ac, tunnelFlagValues{localPort: "0", remotePort: "5432"}, "my-server", nil)
 
 	require.ErrorContains(t, err, "failed to connect to proxy server")
 	assert.Equal(t, int32(1), creates.Load()-1, "one accepted tunnel session")

@@ -35,9 +35,9 @@ type tunnelCommandRuntime interface {
 	Close(cause error)
 }
 
-var TunnelCmd = newCommand(client.NewAlpaconAPIClient)
+var TunnelCmd = newCommand(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newCommand(newAPIClient func() (*client.AlpaconClient, error)) *cobra.Command {
+func newCommand(newAPIClient func() (*client.AlpaconClient, error), ios *utils.IOStreams) *cobra.Command {
 	var flags tunnelFlagValues
 	cmd := &cobra.Command{
 		Use:   "tunnel [flags] SERVER [-- COMMAND...]", // [flags] stays before --: words after it go to the local command
@@ -86,7 +86,7 @@ func newCommand(newAPIClient func() (*client.AlpaconClient, error)) *cobra.Comma
 	`,
 		Args: validateTunnelArgs,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runTunnel(cmd, args, flags, newAPIClient)
+			return runTunnel(ios, cmd, args, flags, newAPIClient)
 		}),
 	}
 	bindTunnelFlags(cmd, &flags)
@@ -142,7 +142,7 @@ func validateTunnelArgs(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func runTunnel(cmd *cobra.Command, args []string, flags tunnelFlagValues, newAPIClient func() (*client.AlpaconClient, error)) error {
+func runTunnel(ios *utils.IOStreams, cmd *cobra.Command, args []string, flags tunnelFlagValues, newAPIClient func() (*client.AlpaconClient, error)) error {
 	if err := tunnelruntime.ValidatePorts(flags.remotePort, flags.localPort); err != nil {
 		return utils.NewUsageExitError("%s", err)
 	}
@@ -164,7 +164,7 @@ func runTunnel(cmd *cobra.Command, args []string, flags tunnelFlagValues, newAPI
 		sigChan = ch
 	}
 
-	return tunnelExitError(executeTunnelCommand(ac, flags, cmd, args, sigChan))
+	return tunnelExitError(executeTunnelCommand(ios, ac, flags, cmd, args, sigChan))
 }
 
 // tunnelExitError maps a tunnel run's exit code and error to what RunE returns.
@@ -184,17 +184,17 @@ func tunnelExitError(exitCode int, err error) error {
 	return nil
 }
 
-func executeTunnelCommand(ac *client.AlpaconClient, flags tunnelFlagValues, cmd *cobra.Command, args []string, sigChan <-chan os.Signal) (int, error) {
+func executeTunnelCommand(ios *utils.IOStreams, ac *client.AlpaconClient, flags tunnelFlagValues, cmd *cobra.Command, args []string, sigChan <-chan os.Signal) (int, error) {
 	dashIndex := cmd.ArgsLenAtDash()
 	if dashIndex >= 0 {
 		serverName, localCommand, err := extractRunInvocation(args, dashIndex)
 		if err != nil {
 			return 1, err
 		}
-		return executeTunnelRunWithInvocation(ac, flags, serverName, localCommand)
+		return executeTunnelRunWithInvocation(ios, ac, flags, serverName, localCommand)
 	}
 
-	return 0, executeTunnel(ac, flags, args[0], sigChan)
+	return 0, executeTunnel(ios, ac, flags, args[0], sigChan)
 }
 
 func handleTunnelStartError(ac *client.AlpaconClient, flags tunnelFlagValues, err error, serverName string, retry func() error) error {
@@ -210,7 +210,7 @@ func handleTunnelStartError(ac *client.AlpaconClient, flags tunnelFlagValues, er
 	return utils.InteractiveOnly(err, "open a tunnel")
 }
 
-func executeTunnel(ac *client.AlpaconClient, flags tunnelFlagValues, serverName string, sigChan <-chan os.Signal) error {
+func executeTunnel(ios *utils.IOStreams, ac *client.AlpaconClient, flags tunnelFlagValues, serverName string, sigChan <-chan os.Signal) error {
 	runtime, err := tunnelruntime.Start(flags.toStartOptions(ac, serverName))
 	if err != nil {
 		err = handleTunnelStartError(ac, flags, err, serverName, func() error {
@@ -226,14 +226,14 @@ func executeTunnel(ac *client.AlpaconClient, flags tunnelFlagValues, serverName 
 		return fmt.Errorf("failed to establish tunnel connection: %w", err)
 	}
 
-	utils.CliInfo("Tunnel ready: %s -> %s", runtime.LocalAddress(), runtime.RemoteAddress())
-	utils.CliInfo("Waiting for connections... (Ctrl+C to exit)")
+	ios.Info("Tunnel ready: %s -> %s", runtime.LocalAddress(), runtime.RemoteAddress())
+	ios.Info("Waiting for connections... (Ctrl+C to exit)")
 
 	userRequestedShutdown := false
 	select {
 	case <-sigChan:
 		userRequestedShutdown = true
-		utils.CliInfo("Shutting down tunnel...")
+		ios.Info("Shutting down tunnel...")
 		runtime.Close(nil)
 		<-runtime.Done()
 	case <-runtime.Done():
@@ -245,6 +245,6 @@ func executeTunnel(ac *client.AlpaconClient, flags tunnelFlagValues, serverName 
 		}
 	}
 
-	utils.CliInfo("Tunnel closed")
+	ios.Info("Tunnel closed")
 	return nil
 }

@@ -35,7 +35,7 @@ func noClient() (*client.AlpaconClient, error) { return nil, errors.New("no clie
 func executeWebsh(newClient clientFactory, args ...string) (stderr string, code int) {
 	var outBuf, errBuf bytes.Buffer
 	command := &cobra.Command{Use: "alpacon"}
-	command.AddCommand(newCommand(newClient))
+	command.AddCommand(newCommand(newClient, utils.Stdio))
 	command.SetArgs(append([]string{"websh"}, args...))
 	command.SetOut(&outBuf)
 	command.SetErr(&errBuf)

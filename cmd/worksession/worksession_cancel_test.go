@@ -31,7 +31,7 @@ func TestWorkSessionCancel(t *testing.T) {
 				cancelRoute: {Status: tt.status, Body: `{"code": "invalid_state", "detail": "the session is not pending"}`},
 			})
 
-			failure, code := cmdtest.Run(newWorkSessionCancelCmd(ts.Factory()), tt.arg)
+			failure, code := cmdtest.Run(newWorkSessionCancelCmd(ts.Factory(), utils.Stdio), tt.arg)
 
 			assert.Equal(t, tt.wantCode, code, failure)
 			assert.Contains(t, failure, tt.wantFailure)
@@ -43,7 +43,7 @@ func TestWorkSessionCancel(t *testing.T) {
 func TestWorkSessionCancelFailsWithoutALogin(t *testing.T) {
 	t.Parallel()
 
-	failure, code := cmdtest.Run(newWorkSessionCancelCmd(cmdtest.NoClient), "550e8400-e29b-41d4-a716-446655440000")
+	failure, code := cmdtest.Run(newWorkSessionCancelCmd(cmdtest.NoClient, utils.Stdio), "550e8400-e29b-41d4-a716-446655440000")
 
 	assert.Equal(t, utils.ExitCodeGeneralError, code)
 	assert.Contains(t, failure, "Connection to Alpacon API failed: not logged in")

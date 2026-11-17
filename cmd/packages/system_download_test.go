@@ -35,7 +35,7 @@ func TestSystemPackageDownloadSavesTheFile(t *testing.T) {
 	t.Cleanup(ts.Close)
 	dest := t.TempDir()
 
-	failure, code := cmdtest.Run(newSystemPackageDownloadCmd(cmdtest.ClientFactory(ts)), "osquery.deb", dest)
+	failure, code := cmdtest.Run(newSystemPackageDownloadCmd(cmdtest.ClientFactory(ts), utils.Stdio), "osquery.deb", dest)
 
 	assert.Equal(t, 0, code, failure)
 	content, err := os.ReadFile(filepath.Join(dest, "osquery.deb"))
@@ -50,7 +50,7 @@ func TestSystemPackageDownloadFailsOnAnUnknownPackage(t *testing.T) {
 	})
 	dest := t.TempDir()
 
-	failure, code := cmdtest.Run(newSystemPackageDownloadCmd(ts.Factory()), "absent.deb", dest)
+	failure, code := cmdtest.Run(newSystemPackageDownloadCmd(ts.Factory(), utils.Stdio), "absent.deb", dest)
 
 	assert.Equal(t, utils.ExitCodeGeneralError, code)
 	assert.Contains(t, failure, "Failed to download the system package from Alpacon")

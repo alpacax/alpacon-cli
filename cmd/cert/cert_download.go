@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var certDownloadCmd = newCertDownloadCmd(client.NewAlpaconAPIClient)
+var certDownloadCmd = newCertDownloadCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newCertDownloadCmd(newClient clientFactory) *cobra.Command {
+func newCertDownloadCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "download CERT_ID",
 		Short: "Download a certificate",
@@ -41,7 +41,7 @@ func newCertDownloadCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to download the certificate from authority: %s.", err)
 			}
 
-			utils.CliSuccess("Certificate downloaded: %s", filePath)
+			ios.Success("Certificate downloaded: %s", filePath)
 			return nil
 		}),
 	}

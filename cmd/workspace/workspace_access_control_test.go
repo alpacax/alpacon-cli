@@ -6,16 +6,19 @@ import (
 
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
 
-// Serial: it captures stdout and sets utils.OutputFormat.
 func TestWorkspaceAccessControlPrintsTheServerAnswer(t *testing.T) {
+	t.Parallel()
 	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
 		"GET /api/workspaces/access-control/-/": {Status: http.StatusOK, Body: `{"allow_sudo": true, "allow_tunneling": false}`},
 	})
 
-	stdout, stderr, code := cmdtest.RunJSON(t, newWorkspaceAccessControlCmd(ts.Factory()))
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command {
+		return newWorkspaceAccessControlCmd(ts.Factory(), ios)
+	})
 
 	assert.Equal(t, 0, code, stderr)
 	assert.JSONEq(t, `{"allow_sudo": true, "allow_tunneling": false}`, stdout)
@@ -43,7 +46,7 @@ func TestWorkspaceAccessControlFailsWithExit1(t *testing.T) {
 				}).Factory()
 			}
 
-			failure, code := cmdtest.Run(newWorkspaceAccessControlCmd(newClient))
+			failure, code := cmdtest.Run(newWorkspaceAccessControlCmd(newClient, utils.Stdio))
 
 			assert.Equal(t, utils.ExitCodeGeneralError, code)
 			assert.Contains(t, failure, tt.want)

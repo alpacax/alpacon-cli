@@ -6,9 +6,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclDeleteCmd = newAclDeleteCmd(client.NewAlpaconAPIClient)
+var aclDeleteCmd = newAclDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAclDeleteCmd(newClient clientFactory) *cobra.Command {
+func newAclDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "delete ACL_ID",
 		Aliases:    []string{"rm"},
@@ -17,7 +17,7 @@ func newAclDeleteCmd(newClient clientFactory) *cobra.Command {
 		Hidden:     true,
 		Args:       cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runCommandAclDelete(cmd, args, newClient)
+			return runCommandAclDelete(ios, cmd, args, newClient)
 		}),
 	}
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")

@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclFileAddCmd = newAclFileAddCmd(client.NewAlpaconAPIClient)
+var aclFileAddCmd = newAclFileAddCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newAclFileAddCmd(newClient clientFactory) *cobra.Command {
+func newAclFileAddCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add TOKEN",
 		Short: "Add a file ACL rule to a token",
@@ -26,7 +26,7 @@ Groupname semantics: "" = no group restriction, "*" = any group, exact name = ma
   alpacon token acl file add my-api-token --path "*" --action "*" --username "*" --groupname "*"`,
 		Args: cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runFileAclAdd(cmd, args, newClient)
+			return runFileAclAdd(ios, cmd, args, newClient)
 		}),
 	}
 	cmd.Flags().String("path", "", "File path pattern (supports * wildcard)")
@@ -38,7 +38,7 @@ Groupname semantics: "" = no group restriction, "*" = any group, exact name = ma
 	return cmd
 }
 
-func runFileAclAdd(cmd *cobra.Command, args []string, newClient clientFactory) error {
+func runFileAclAdd(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient clientFactory) error {
 	tokenArg := args[0]
 	path, _ := cmd.Flags().GetString("path")
 	action, _ := cmd.Flags().GetString("action")
@@ -69,6 +69,6 @@ func runFileAclAdd(cmd *cobra.Command, args []string, newClient clientFactory) e
 		return utils.NewExitError("Failed to add file ACL: %v.", err)
 	}
 
-	utils.CliSuccess("File ACL added to token %s: %s [%s]", tokenArg, path, action)
+	ios.Success("File ACL added to token %s: %s [%s]", tokenArg, path, action)
 	return nil
 }

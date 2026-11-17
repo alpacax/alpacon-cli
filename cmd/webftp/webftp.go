@@ -10,9 +10,9 @@ import (
 // clientFactory builds the API client a command talks to.
 type clientFactory = func() (*client.AlpaconClient, error)
 
-var WebFTPCmd = newWebFTPCmd(client.NewAlpaconAPIClient)
+var WebFTPCmd = newWebFTPCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWebFTPCmd(newClient clientFactory) *cobra.Command {
+func newWebFTPCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "webftp-log",
 		Aliases: []string{"webftp-logs"},
@@ -28,7 +28,7 @@ func newWebFTPCmd(newClient clientFactory) *cobra.Command {
 	alpacon webftp-log --tail=50 --user=admin --action=upload
 	`,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runWebFTP(cmd, args, newClient)
+			return runWebFTP(ios, cmd, args, newClient)
 		}),
 	}
 	var action string
@@ -42,7 +42,7 @@ func newWebFTPCmd(newClient clientFactory) *cobra.Command {
 	return cmd
 }
 
-func runWebFTP(cmd *cobra.Command, args []string, newClient clientFactory) error {
+func runWebFTP(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient clientFactory) error {
 	tail, _ := cmd.Flags().GetInt("tail")
 	if err := utils.CheckPositiveInt("tail", tail); err != nil {
 		return err
@@ -57,5 +57,5 @@ func runWebFTP(cmd *cobra.Command, args []string, newClient clientFactory) error
 	}
 
 	logList, err := webftp.GetWebFTPLogList(alpaconClient, tail, serverName, userName, action)
-	return utils.PrintList(logList, err, "Failed to get WebFTP logs")
+	return utils.PrintListTo(ios, logList, err, "Failed to get WebFTP logs")
 }

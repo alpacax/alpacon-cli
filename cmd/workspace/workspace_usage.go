@@ -61,9 +61,9 @@ func renderUsageEstimate(estimate *workspace.UsageEstimate) renderedUsageEstimat
 	}
 }
 
-var workspaceUsageCmd = newWorkspaceUsageCmd(client.NewAlpaconAPIClient)
+var workspaceUsageCmd = newWorkspaceUsageCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkspaceUsageCmd(newClient clientFactory) *cobra.Command {
+func newWorkspaceUsageCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "usage",
 		Short: "Retrieve workspace usage and billing estimate",
@@ -101,7 +101,7 @@ func newWorkspaceUsageCmd(newClient clientFactory) *cobra.Command {
 			if err != nil {
 				return utils.NewExitError("Failed to format usage data: %s.", err)
 			}
-			return utils.PrintJson(data)
+			return ios.PrintJson(data)
 		}),
 	}
 }

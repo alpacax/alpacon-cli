@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newKubeListCmd(newClient clientFactory) *cobra.Command {
+func newKubeListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -31,7 +31,7 @@ connected. A version or node count the agent has not reported yet is blank.`,
 				return utils.NewExitError("Failed to retrieve the clusters: %s.", err)
 			}
 
-			return utils.PrintTable(clusterList)
+			return ios.PrintTable(clusterList)
 		}),
 	}
 }

@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var csrRetryCmd = newCsrRetryCmd(client.NewAlpaconAPIClient)
+var csrRetryCmd = newCsrRetryCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newCsrRetryCmd(newClient clientFactory) *cobra.Command {
+func newCsrRetryCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "retry CSR_ID",
 		Short: "Retry a failed CSR",
@@ -32,7 +32,7 @@ func newCsrRetryCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retry the csr: %s.", err)
 			}
 
-			utils.CliSuccess("CSR retried. Run 'alpacon csr ls' to verify status.")
+			ios.Success("CSR retried. Run 'alpacon csr ls' to verify status.")
 			return nil
 		}),
 	}

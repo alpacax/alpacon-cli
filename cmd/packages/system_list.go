@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var systemPackageListCmd = newSystemPackageListCmd(client.NewAlpaconAPIClient)
+var systemPackageListCmd = newSystemPackageListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newSystemPackageListCmd(newClient clientFactory) *cobra.Command {
+func newSystemPackageListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -33,7 +33,7 @@ func newSystemPackageListCmd(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve the system packages: %s.", err)
 			}
 
-			return utils.PrintTable(packageList)
+			return ios.PrintTable(packageList)
 		}),
 	}
 }

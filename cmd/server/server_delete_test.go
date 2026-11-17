@@ -30,7 +30,7 @@ func TestServerDelete(t *testing.T) {
 				deleteRoute:                 {Status: http.StatusNoContent},
 			})
 
-			failure, code := cmdtest.Run(newServerDeleteCmd(ts.Factory()), "my-server", "-y")
+			failure, code := cmdtest.Run(newServerDeleteCmd(ts.Factory(), utils.Stdio), "my-server", "-y")
 
 			assert.Equal(t, tt.wantCode, code, failure)
 			assert.Contains(t, failure, tt.wantFailure)

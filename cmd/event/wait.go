@@ -15,9 +15,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var waitCmd = newWaitCommand(client.NewAlpaconAPIClient)
+var waitCmd = newWaitCommand(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWaitCommand(newClient func() (*client.AlpaconClient, error)) *cobra.Command {
+func newWaitCommand(newClient func() (*client.AlpaconClient, error), ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "wait",
 		Short: "Wait for one event, then exit",
@@ -53,7 +53,7 @@ Run 'alpacon work-session ls' or the Alpacon console to find a target ID.`,
   alpacon event wait --type work_session --target 550e8400-e29b-41d4-a716-446655440000 --timeout 30m
   alpacon event wait --type notification --until created`,
 		Args: cobra.NoArgs,
-		RunE: utils.WithExitError(func(cmd *cobra.Command, _ []string) error { return runWait(cmd, newClient) }),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, _ []string) error { return runWait(ios, cmd, newClient) }),
 	}
 	cmd.Flags().String("type", "", "Event type to subscribe to, e.g. work_session (required)")
 	cmd.Flags().String("target", "", "Target resource ID; omit where the server allows a subscription without one")
@@ -77,7 +77,7 @@ func validateEventTarget(target string) (string, error) {
 	return pathID.String(), nil
 }
 
-func runWait(cmd *cobra.Command, newClient func() (*client.AlpaconClient, error)) error {
+func runWait(ios *utils.IOStreams, cmd *cobra.Command, newClient func() (*client.AlpaconClient, error)) error {
 	eventType, _ := cmd.Flags().GetString("type")
 	target, _ := cmd.Flags().GetString("target")
 	untilRaw, _ := cmd.Flags().GetStringSlice("until")
@@ -136,13 +136,13 @@ func runWait(cmd *cobra.Command, newClient func() (*client.AlpaconClient, error)
 		waiter.Stop()
 	}()
 
-	reporter.Go(func() { reportOutages(waiter, done) })
+	reporter.Go(func() { reportOutages(ios, waiter, done) })
 
 	// Stripped for the same reason server text is: --type lands in a terminal, and a CI
 	// script or an agent may build it from a source the caller does not control.
 	displayType := strip(eventType)
 
-	utils.CliInfo("Waiting for a %s event (timeout %s). Press Ctrl+C to stop.", displayType, timeout)
+	ios.Info("Waiting for a %s event (timeout %s). Press Ctrl+C to stop.", displayType, timeout)
 
 	frame, outcome, err := waiter.Wait()
 	if err != nil {
@@ -156,12 +156,12 @@ func runWait(cmd *cobra.Command, newClient func() (*client.AlpaconClient, error)
 	// is the invocation the consumer just ran, so naming it back carries nothing.
 	switch outcome {
 	case eventapi.OutcomeTimeout:
-		utils.PrintPendingApproval(
+		ios.PrintPendingApproval(
 			fmt.Sprintf("Timed out after %s with no matching %s event. The outcome is still open.", timeout, displayType),
 			"", utils.NextAction{})
 		return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 	case eventapi.OutcomeCanceled:
-		utils.PrintPendingApproval(
+		ios.PrintPendingApproval(
 			fmt.Sprintf("Interrupted before a matching %s event arrived. The outcome is still open.", displayType),
 			"", utils.NextAction{})
 		return utils.NewSilentExitError(utils.ExitCodePendingApproval)
@@ -169,8 +169,8 @@ func runWait(cmd *cobra.Command, newClient func() (*client.AlpaconClient, error)
 
 	// A render failure must not change a settled outcome's exit code—renderEvent writes
 	// nothing to stdout on failure, so the failure itself only ever reaches stderr.
-	if renderErr := renderEvent(cmd.OutOrStdout(), frame, utils.OutputFormat, target, time.Now()); renderErr != nil {
-		utils.CliWarning("%s.", renderErr)
+	if renderErr := renderEvent(ios.Out, frame, ios.OutputFormat(), target, time.Now()); renderErr != nil {
+		ios.Warning("%s.", renderErr)
 	}
 
 	if outcome == eventapi.OutcomeFailed {
@@ -183,16 +183,16 @@ func runWait(cmd *cobra.Command, newClient func() (*client.AlpaconClient, error)
 // can fail on the first check and again after any reconnect, and reconnects can keep
 // failing. Draining ReconnectFailed also keeps the watcher's one-slot notice free so a
 // later outage is not dropped.
-func reportOutages(waiter *eventapi.Waiter, done <-chan struct{}) {
+func reportOutages(ios *utils.IOStreams, waiter *eventapi.Waiter, done <-chan struct{}) {
 	for {
 		select {
 		case <-done:
 			return
 		case err := <-waiter.CatchUpFailed():
 			// Reworded rather than flattened, so a refusal's hint still prints.
-			utils.CliWarning("Could not read the current state: %s. Still waiting for an event.", utils.Reword(err, strip(err.Error())))
+			ios.Warning("Could not read the current state: %s. Still waiting for an event.", utils.Reword(err, strip(err.Error())))
 		case err := <-waiter.ReconnectFailed():
-			utils.CliWarning("Lost the event channel and still reconnecting: %s. No events are being delivered until it recovers.", utils.Reword(err, strip(err.Error())))
+			ios.Warning("Lost the event channel and still reconnecting: %s. No events are being delivered until it recovers.", utils.Reword(err, strip(err.Error())))
 		}
 	}
 }

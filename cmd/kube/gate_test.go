@@ -117,7 +117,7 @@ func TestApplySurfaceGate_DisabledKeepsAPassThroughChild(t *testing.T) {
 func TestApplySurfaceGate_DisabledKeepsCredentialsAndLogout(t *testing.T) {
 	t.Parallel()
 	root := &cobra.Command{Use: "alpacon"}
-	real := newKubeCmd(nil)
+	real := newKubeCmd(nil, utils.Stdio)
 	root.AddCommand(real)
 	kept := map[string]*cobra.Command{}
 	for _, name := range []string{"credentials", "logout", "sessions"} {

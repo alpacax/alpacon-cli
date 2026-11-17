@@ -6,16 +6,17 @@ import (
 
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
 
-// Serial: it captures stdout and sets utils.OutputFormat.
 func TestUsernameGetPrintsTheUsername(t *testing.T) {
+	t.Parallel()
 	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
 		"GET /api/iam/users/-/": {Status: http.StatusOK, Body: `{"username": "alice"}`},
 	})
 
-	stdout, stderr, code := cmdtest.RunJSON(t, newUsernameGetCmd(ts.Factory()))
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newUsernameGetCmd(ts.Factory(), ios) })
 
 	assert.Equal(t, 0, code, stderr)
 	assert.JSONEq(t, `{"username": "alice"}`, stdout)
@@ -39,7 +40,7 @@ func TestUsernameGetFailsWithExit1(t *testing.T) {
 				"GET /api/iam/users/-/": {Status: tt.status, Body: tt.body},
 			})
 
-			failure, code := cmdtest.Run(newUsernameGetCmd(ts.Factory()))
+			failure, code := cmdtest.Run(newUsernameGetCmd(ts.Factory(), utils.Stdio))
 
 			assert.Equal(t, utils.ExitCodeGeneralError, code)
 			assert.Contains(t, failure, tt.want)

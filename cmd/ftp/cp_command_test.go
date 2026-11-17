@@ -9,6 +9,7 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -42,7 +43,7 @@ func cpScene(t *testing.T, createStatus int, createBody string) (*cmdtest.Fake, 
 func TestCpUploadsTheFile(t *testing.T) {
 	ts, source := cpScene(t, http.StatusCreated, `{"id": "`+uploadID+`"}`)
 
-	_, stderr, code := cmdtest.RunCaptured(t, newCpCmd(ts.Factory()), source, "my-server:/etc/app/")
+	_, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return newCpCmd(ts.Factory(), ios) }, source, "my-server:/etc/app/")
 
 	assert.Equal(t, 0, code, stderr)
 	assert.Equal(t, 1, ts.Hits(uploadCreateRoute))
@@ -74,7 +75,7 @@ func TestCpFails(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ts, source := cpScene(t, http.StatusForbidden, `{"code": "permission_denied", "detail": "denied"}`)
 
-			_, stderr, code := cmdtest.RunCaptured(t, newCpCmd(tt.newClient(ts)), source, "my-server:/etc/app/")
+			_, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return newCpCmd(tt.newClient(ts), ios) }, source, "my-server:/etc/app/")
 
 			assert.Equal(t, tt.wantCode, code, stderr)
 			assert.Contains(t, stderr, tt.want)

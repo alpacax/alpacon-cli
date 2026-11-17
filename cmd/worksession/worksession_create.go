@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -39,9 +38,9 @@ const (
 
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh", ScopeKube, ScopeKubeExec}
 
-var workSessionCreateCmd = newWorkSessionCreateCmd(client.NewAlpaconAPIClient)
+var workSessionCreateCmd = newWorkSessionCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newWorkSessionCreateCmd(newClient clientFactory) *cobra.Command {
+func newWorkSessionCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var (
 		purpose          string
 		createScopes     []string
@@ -294,8 +293,8 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 				afterApproval = KubeLoginAction(clusterName, session.ID)
 			}
 
-			if utils.OutputFormat != utils.OutputFormatJSON {
-				utils.CliSuccess("%s", createSuccessMessage(session))
+			if !ios.IsJSON() {
+				ios.Success("%s", createSuccessMessage(session))
 			}
 
 			// Cases that do not return fall through to the --wait handling below.
@@ -308,32 +307,32 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 					return utils.NewEnvelopeExitError(opCreate, nil, "Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
 				}
 				message := activeWorkSessionSetMessage("", activeSession.ID, activeSession.Description)
-				if utils.OutputFormat == utils.OutputFormatJSON {
+				if ios.IsJSON() {
 					active := activeSession.ID
-					return printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, createSuccessMessage(session)+". "+message, activeSession, &active))
+					return printWorkSessionMutationJSON(ios, newWorkSessionMutationOutput(opCreate, createSuccessMessage(session)+". "+message, activeSession, &active))
 				}
-				utils.CliSuccess("%s", message)
-				PrintSessionAdvisories(activeSession)
-				printCreateNext(clusterName, activeSession)
+				ios.Success("%s", message)
+				PrintSessionAdvisories(ios, activeSession)
+				printCreateNext(ios, clusterName, activeSession)
 				return nil
 			case useDecisionSkipScheduled:
 				if !shouldWait {
-					if utils.OutputFormat == utils.OutputFormatJSON {
-						return printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
+					if ios.IsJSON() {
+						return printWorkSessionMutationJSON(ios, newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
 					}
-					utils.CliInfo("Session is scheduled to activate. Run 'alpacon work-session use %s' once active.", session.ID)
-					PrintSessionAdvisories(session)
-					printCreateNext(clusterName, session)
+					ios.Info("Session is scheduled to activate. Run 'alpacon work-session use %s' once active.", session.ID)
+					PrintSessionAdvisories(ios, session)
+					printCreateNext(ios, clusterName, session)
 					return nil
 				}
 			case useDecisionNeedsApproval:
 				if !shouldWait {
-					return pendingExitError(session, afterApproval, fmt.Sprintf("--use requires the session to be active, and work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID), createUpdateNextActions(clusterName, session)...)
+					return pendingExitError(ios, session, afterApproval, fmt.Sprintf("--use requires the session to be active, and work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID), createUpdateNextActions(clusterName, session)...)
 				}
 			case useDecisionSettled:
 				if !shouldWait {
 					terminal := settledNegatively(session.Status, session.ID)
-					return terminalWaitExitError(opCreate, terminal, terminal)
+					return terminalWaitExitError(ios, opCreate, terminal, terminal)
 				}
 			case useDecisionUnknownStatus:
 				if !shouldWait {
@@ -344,30 +343,30 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 			if !shouldWait {
 				// Pending is not success, so a machine consumer can branch on the exit code.
 				if session.Status == wsapi.StatusPending {
-					return pendingExitError(session, afterApproval, fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID), createUpdateNextActions(clusterName, session)...)
+					return pendingExitError(ios, session, afterApproval, fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID), createUpdateNextActions(clusterName, session)...)
 				}
-				if utils.OutputFormat == utils.OutputFormatJSON {
-					return printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
+				if ios.IsJSON() {
+					return printWorkSessionMutationJSON(ios, newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
 				}
-				PrintSessionAdvisories(session)
-				printCreateNext(clusterName, session)
+				PrintSessionAdvisories(ios, session)
+				printCreateNext(ios, clusterName, session)
 				return nil
 			}
 
 			// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
-			finalSession, err := waitForApproval(ac, session.ID, useAfterCreate, ApprovalPollInterval, waitTimeout, approvalSignaled)
+			finalSession, err := waitForApproval(ios, ac, session.ID, useAfterCreate, ApprovalPollInterval, waitTimeout, approvalSignaled)
 			if err != nil {
-				return WaitExitError(opCreate, session, afterApproval, err, createUpdateNextActions(clusterName, session)...)
+				return WaitExitError(ios, opCreate, session, afterApproval, err, createUpdateNextActions(clusterName, session)...)
 			}
 
 			if !useAfterCreate {
 				message := fmt.Sprintf("Work session %s approved.", session.ID)
-				if utils.OutputFormat == utils.OutputFormatJSON {
-					return printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, message, finalSession, nil))
+				if ios.IsJSON() {
+					return printWorkSessionMutationJSON(ios, newWorkSessionMutationOutput(opCreate, message, finalSession, nil))
 				}
-				utils.CliSuccess("%s", message)
-				PrintSessionAdvisories(finalSession)
-				printCreateNext(clusterName, finalSession)
+				ios.Success("%s", message)
+				PrintSessionAdvisories(ios, finalSession)
+				printCreateNext(ios, clusterName, finalSession)
 				return nil
 			}
 
@@ -378,13 +377,13 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 				return utils.NewEnvelopeExitError(opCreate, nil, "Work session %s approved but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
 			}
 			message := activeWorkSessionSetMessage(fmt.Sprintf("Work session %s approved. ", session.ID), session.ID, desc)
-			if utils.OutputFormat == utils.OutputFormatJSON {
+			if ios.IsJSON() {
 				active := session.ID
-				return printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, message, finalSession, &active))
+				return printWorkSessionMutationJSON(ios, newWorkSessionMutationOutput(opCreate, message, finalSession, &active))
 			}
-			utils.CliSuccess("%s", message)
-			PrintSessionAdvisories(finalSession)
-			printCreateNext(clusterName, finalSession)
+			ios.Success("%s", message)
+			PrintSessionAdvisories(ios, finalSession)
+			printCreateNext(ios, clusterName, finalSession)
 			return nil
 		}),
 	}
@@ -408,36 +407,36 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 
 // WaitExitError is a failed wait on session, as 'alpacon event wait' exits: 6 settled, 4 still open
 // (printed here, offering next), 1 for a polling failure, which the caller prints.
-func WaitExitError(operation string, session *wsapi.WorkSession, next utils.NextAction, err error, pendingNext ...utils.NextAction) error {
+func WaitExitError(ios *utils.IOStreams, operation string, session *wsapi.WorkSession, next utils.NextAction, err error, pendingNext ...utils.NextAction) error {
 	var terminal *terminalWaitError
 	if errors.As(err, &terminal) {
-		return terminalWaitExitError(operation, terminal, err)
+		return terminalWaitExitError(ios, operation, terminal, err)
 	}
 	var pending *pendingWaitError
 	if errors.As(err, &pending) {
 		// The refusal a timed-out wait ended on, if any, adds its hint.
-		return pendingExitError(session, next, fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err), append(utils.RefusalNextActions(err), pendingNext...)...)
+		return pendingExitError(ios, session, next, fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err), append(utils.RefusalNextActions(err), pendingNext...)...)
 	}
 	return utils.NewEnvelopeExitError(operation, err, "%s", err)
 }
 
 // pendingExitError prints the pending approval and returns exit 4.
-func pendingExitError(session *wsapi.WorkSession, next utils.NextAction, message string, extra ...utils.NextAction) error {
-	utils.PrintPendingApproval(message, session.ApprovalRequestID, next, extra...)
+func pendingExitError(ios *utils.IOStreams, session *wsapi.WorkSession, next utils.NextAction, message string, extra ...utils.NextAction) error {
+	ios.PrintPendingApproval(message, session.ApprovalRequestID, next, extra...)
 	return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 }
 
 // terminalWaitExitError prints the settled refusal and returns exit 6.
-func terminalWaitExitError(operation string, terminal *terminalWaitError, err error) error {
-	printTerminalWait(operation, terminal, err)
+func terminalWaitExitError(ios *utils.IOStreams, operation string, terminal *terminalWaitError, err error) error {
+	printTerminalWait(ios, operation, terminal, err)
 	return utils.NewSilentExitError(utils.ExitCodeNotApproved)
 }
 
-func printTerminalWait(operation string, terminal *terminalWaitError, err error) {
-	if utils.OutputFormat == utils.OutputFormatJSON {
-		printTerminalWaitErrorJSON(operation, terminal, err)
+func printTerminalWait(ios *utils.IOStreams, operation string, terminal *terminalWaitError, err error) {
+	if ios.IsJSON() {
+		printTerminalWaitErrorJSON(ios, operation, terminal, err)
 	} else {
-		printTerminalWaitError(terminal, err)
+		printTerminalWaitError(ios, terminal, err)
 	}
 }
 
@@ -501,9 +500,9 @@ type terminalWaitErrorCtx struct {
 	WorkSessionID string `json:"work_session_id,omitempty"`
 }
 
-func printTerminalWaitErrorJSON(operation string, terminal *terminalWaitError, err error) {
+func printTerminalWaitErrorJSON(ios *utils.IOStreams, operation string, terminal *terminalWaitError, err error) {
 	utils.SignalPaused(err)
-	utils.PrintJSONError(os.Stderr, utils.JSONErrorEnvelope[terminalWaitErrorCtx]{
+	utils.PrintJSONError(ios.ErrOut, utils.JSONErrorEnvelope[terminalWaitErrorCtx]{
 		OK:          false,
 		ExitCode:    utils.ExitCodeNotApproved,
 		ErrorCode:   utils.ErrorCodeNotApproved,
@@ -526,19 +525,19 @@ func terminalWaitNextActions(sessionID string) []utils.NextAction {
 
 // printTerminalWaitError writes the refusal and its follow-ups to stderr itself rather than through
 // CliError, which appends the report-a-bug pointer: a reviewer saying no is not a bug.
-func printTerminalWaitError(terminal *terminalWaitError, err error) {
+func printTerminalWaitError(ios *utils.IOStreams, terminal *terminalWaitError, err error) {
 	utils.SignalPaused(err)
 	var sb strings.Builder
 	// The message carries a server-issued session id, so it takes the sanitizer
 	// CliError would otherwise have applied on the way out.
 	message := utils.SanitizeTerminalBlockKeepingTabs(err.Error())
-	fmt.Fprintf(&sb, "%s: %s\n", utils.Red("Error"), message)
+	fmt.Fprintf(&sb, "%s: %s\n", ios.Red("Error"), message)
 	fmt.Fprintln(&sb)
 	fmt.Fprintln(&sb, "Next:")
 	for _, action := range terminalWaitNextActions(terminal.sessionID) {
 		fmt.Fprintf(&sb, "  %s\n", action.PlainText())
 	}
-	fmt.Fprint(os.Stderr, sb.String())
+	_, _ = fmt.Fprint(ios.ErrOut, sb.String())
 }
 
 // parseExpiryFlag validates the --expires-in / --expires-at mutual exclusion
@@ -669,13 +668,13 @@ func createUpdateNextActions(clusterName string, session *wsapi.WorkSession) []u
 	}}
 }
 
-func printCreateNext(clusterName string, session *wsapi.WorkSession) {
+func printCreateNext(ios *utils.IOStreams, clusterName string, session *wsapi.WorkSession) {
 	if clusterName != "" {
-		utils.CliInfo("Next: %s", KubeLoginAction(clusterName, session.ID).Command)
+		ios.Info("Next: %s", KubeLoginAction(clusterName, session.ID).Command)
 		return
 	}
 	for _, action := range createUpdateNextActions(clusterName, session) {
-		utils.CliInfo("Next:\n  %s", action.PlainText())
+		ios.Info("Next:\n  %s", action.PlainText())
 	}
 }
 
@@ -738,11 +737,11 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 // timeout under one interval still waits the full duration. A fatal 4xx ends the wait at once and
 // other transient failures end it at MaxConsecutivePollFailures; 429s are bounded by the throttle
 // budget and the deadline instead.
-func WaitForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration) (*wsapi.WorkSession, error) {
-	return waitForApproval(ac, id, untilActive, interval, timeout, false)
+func WaitForApproval(ios *utils.IOStreams, ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration) (*wsapi.WorkSession, error) {
+	return waitForApproval(ios, ac, id, untilActive, interval, timeout, false)
 }
 
-func waitForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration, signaled bool) (*wsapi.WorkSession, error) {
+func waitForApproval(ios *utils.IOStreams, ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration, signaled bool) (*wsapi.WorkSession, error) {
 	start := time.Now()
 	deadline := start.Add(timeout)
 	// lastRefusal is the refusal (a 429 in practice) the latest poll got, if it
@@ -790,10 +789,10 @@ func waitForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 			if failures >= utils.MaxConsecutivePollFailures {
 				// The session exists and is still pending, so exit on the pending contract like the
 				// timeout: exit 1 reads as retryable, and an agent would file a second session.
-				utils.CliWarning("Approval wait gave up after %d failed polls (%s); the work session is still pending.", failures, err)
+				ios.Warning("Approval wait gave up after %d failed polls (%s); the work session is still pending.", failures, err)
 				return nil, &pendingWaitError{message: fmt.Sprintf("gave up after %d failed polls", failures)}
 			}
-			utils.CliWarning("Poll failed (%s); still waiting.", err)
+			ios.Warning("Poll failed (%s); still waiting.", err)
 			if !pollSleep(deadline, utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err))) {
 				return nil, timedOut()
 			}
@@ -834,7 +833,7 @@ func waitForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 		// window moves with it, or an extended wait would read as one that outran it.
 		elapsed := time.Since(start)
 		window := elapsed + time.Until(deadline)
-		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, elapsed.Round(time.Second), window.Round(time.Second))
+		ios.Info("%s (%s elapsed of %s)", waitMsg, elapsed.Round(time.Second), window.Round(time.Second))
 		if !pollSleep(deadline, utils.NextPollTick(interval, elapsed)) {
 			return nil, timedOut()
 		}
