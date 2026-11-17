@@ -192,8 +192,11 @@ func (h *heldKubeconfig) done() {
 	h.hold.close()
 }
 
-// relockTimeout bounds how long retake waits for a kubeconfig lock another
-// program holds. kubectl holds it only while it writes the file.
+// relockTimeout bounds how long take waits for a kubeconfig lock another
+// program holds. kubectl holds it only while it writes the file. Another
+// alpacon run on the same kubeconfig can hold it longer, from its session
+// open through its write; take then fails and the opened session is closed,
+// and a run again opens without another MFA while the step-up is credited.
 const relockTimeout = 5 * time.Second
 
 const relockTick = 100 * time.Millisecond
@@ -228,7 +231,7 @@ func (h *kubeconfigHold) letGo() {
 }
 
 // close releases the lock for good. A second Ctrl+C calls it before the
-// process exits, so a retake still running on the command's goroutine must not
+// process exits, so a take still running on the command's goroutine must not
 // create a lock file nothing would remove.
 func (h *kubeconfigHold) close() {
 	h.mu.Lock()
@@ -376,16 +379,8 @@ type kubeConfigOptions struct {
 	clusterName   string
 	workSessionID string
 	kubeconfig    string
-	proxyPort     int           // 0 leaves kubectl connecting directly
-	interrupted   func() bool   // nil when nothing can interrupt the command
-	relockTimeout time.Duration // 0 is relockTimeout; tests shorten it
-}
-
-func (o kubeConfigOptions) relockWait() time.Duration {
-	if o.relockTimeout > 0 {
-		return o.relockTimeout
-	}
-	return relockTimeout
+	proxyPort     int         // 0 leaves kubectl connecting directly
+	interrupted   func() bool // nil when nothing can interrupt the command
 }
 
 var errInterrupted = errors.New("interrupted before the kubeconfig was written")
@@ -442,7 +437,7 @@ func openKubeSession(ac *client.AlpaconClient, hold *kubeconfigHold, opts kubeCo
 
 	// Only a lock let go for the MFA step-up is opened again here, so any
 	// error but errHoldClosed comes from taking it back.
-	editor, err := hold.take(opts.relockWait())
+	editor, err := hold.take(relockTimeout)
 	if err != nil {
 		if errors.Is(err, errHoldClosed) {
 			return nil, discard(errInterrupted)
@@ -531,22 +526,18 @@ func createKubeSession(ac *client.AlpaconClient, hold *kubeconfigHold, opts kube
 		}
 		return err
 	})
+	// A first Ctrl+C during the refused create stops here, before a link is
+	// fetched and a browser opened for a wait that would end anyway.
+	if utils.StructuredErrorCode(err) == utils.AuthMFARequired && opts.isInterrupted() {
+		return nil, errInterrupted
+	}
 	stepUp := callbacks.OnMFARequired
-	// HandleCommonErrors words a step-up failure with %s, so errors.Is cannot
-	// find errInterrupted in it; the flag carries it instead.
-	var interruptedBeforeStepUp bool
 	callbacks.OnMFARequired = func(serverName string) error {
 		hold.letGo()
-		// A first Ctrl+C during the refused create stops here, before a link
-		// is fetched and a browser opened for a wait that would end anyway.
-		if opts.isInterrupted() {
-			interruptedBeforeStepUp = true
-			return errInterrupted
-		}
 		return stepUp(serverName)
 	}
 	if err = utils.HandleCommonErrors(err, "", callbacks); err != nil {
-		if interruptedBeforeStepUp || errors.Is(err, errInterrupted) {
+		if errors.Is(err, errInterrupted) {
 			return nil, errInterrupted
 		}
 		return nil, &sessionCreateError{err: err}

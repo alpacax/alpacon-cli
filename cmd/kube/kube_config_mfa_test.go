@@ -88,10 +88,11 @@ func TestOpenKubeSessionSavesTheSessionOpenedAfterMFA(t *testing.T) {
 	assert.NotContains(t, cfg.Users[0].User, "token")
 }
 
-// A first Ctrl+C during the wait ends it at the next attempt: no session is
-// opened only to be closed, and the kubeconfig is left as it was.
+// A first Ctrl+C during the refused create ends the command before the
+// step-up: no link is fetched and no browser opened for a wait that would end
+// at once.
 // Serial: t.Setenv.
-func TestOpenKubeConfigStopsTheMFAWaitAtAnInterrupt(t *testing.T) {
+func TestOpenKubeConfigStopsBeforeTheStepUpAtAnInterrupt(t *testing.T) {
 	t.Setenv("ALPACON_NO_BROWSER", "1")
 	path := filepath.Join(t.TempDir(), "config")
 	var interrupted atomic.Bool
@@ -108,18 +109,49 @@ func TestOpenKubeConfigStopsTheMFAWaitAtAnInterrupt(t *testing.T) {
 			kubeconfig:  path,
 			interrupted: interrupted.Load,
 		})
+		// The command's done releases the lock it still holds.
+		hold.close()
 	})
 
 	require.ErrorIs(t, err, errInterrupted)
 	assert.Equal(t, 1, srv.creates())
 	assert.Equal(t, 0, srv.closes())
-	// Interrupted during the refused create: no link is fetched and no
-	// browser opened for a wait that would end at once.
 	assert.Empty(t, srv.mfaLinkQueries())
 	assert.NoFileExists(t, path)
 	assert.NoFileExists(t, path+".lock")
 	exitErr := kubeConfigError(err, "prod-east", "")
 	assert.Contains(t, exitErr.Error(), "The kubeconfig was not written: interrupted")
+}
+
+// A first Ctrl+C after the link was printed ends the wait at the next attempt:
+// no session is opened only to be closed, and the lock let go for the wait is
+// not taken again.
+// Serial: t.Setenv.
+func TestOpenKubeConfigStopsTheMFAWaitAtAnInterrupt(t *testing.T) {
+	t.Setenv("ALPACON_NO_BROWSER", "1")
+	path := filepath.Join(t.TempDir(), "config")
+	srv := newSessionServer()
+	srv.mfaCreates = 1
+	ac := srv.startInMemory(t)
+
+	var err error
+	synctest.Test(t, func(t *testing.T) {
+		hold := openHold(t, path)
+		_, err = openKubeConfig(ac, hold, kubeConfigOptions{
+			clusterName: "prod-east",
+			kubeconfig:  path,
+			interrupted: func() bool { return len(srv.mfaLinkQueries()) > 0 },
+		})
+	})
+
+	require.ErrorIs(t, err, errInterrupted)
+	assert.Len(t, srv.mfaLinkQueries(), 1)
+	assert.Equal(t, 1, srv.creates())
+	assert.Equal(t, 0, srv.closes())
+	assert.NoFileExists(t, path)
+	assert.NoFileExists(t, path+".lock")
+	// An interrupt is not a refusal to open the session.
+	assert.Contains(t, kubeConfigError(err, "prod-east", "").Error(), "The kubeconfig was not written: interrupted")
 }
 
 // After the step-up the server judges the WorkSession, and a gate refusal then
@@ -169,7 +201,7 @@ func TestOpenKubeConfigClosesTheSessionWhenTheLockCannotBeRetaken(t *testing.T) 
 	var err error
 	synctest.Test(t, func(t *testing.T) {
 		hold := openHold(t, path)
-		_, err = openKubeConfig(ac, hold, kubeConfigOptions{clusterName: "prod-east", kubeconfig: path, relockTimeout: time.Second})
+		_, err = openKubeConfig(ac, hold, kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
 	})
 
 	require.Error(t, err)

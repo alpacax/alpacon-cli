@@ -712,7 +712,6 @@ func TestKubeconfigHoldLetsGoAndTakesAgain(t *testing.T) {
 	require.NoError(t, err)
 	assert.FileExists(t, path+".lock")
 	assert.NotSame(t, held, editor, "the file is reread after the lock is let go")
-	// A second take keeps the editor it holds.
 	again, err := hold.take(0)
 	require.NoError(t, err)
 	assert.Same(t, editor, again)
