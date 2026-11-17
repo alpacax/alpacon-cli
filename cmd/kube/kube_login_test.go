@@ -549,7 +549,8 @@ func TestWaitForWorkSessionReturnsARefusalInsteadOfExiting(t *testing.T) {
 	}
 }
 
-// kube login on a workspace requiring MFA for kube exec prints the step-up link once, then opens and saves the session.
+// kube login on a workspace requiring MFA for kube exec prints the step-up
+// link once, then opens and saves the session.
 // Serial: it sets HOME and env and swaps stdio. On the real clock, since the
 // captured output goes through an OS pipe, so it waits one retry interval.
 func TestKubeLoginStepsUpOnceWhenTheOpenNeedsMFA(t *testing.T) {

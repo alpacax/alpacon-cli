@@ -196,7 +196,8 @@ func (h *heldKubeconfig) done() {
 // program holds. kubectl holds it only while it writes the file. Another
 // alpacon run on the same kubeconfig can hold it longer, from its session
 // open through its write; take then fails and the opened session is closed,
-// and a run again opens without another MFA while the step-up is credited.
+// and running it again opens without another MFA while the step-up stays
+// credited.
 const relockTimeout = 5 * time.Second
 
 const relockTick = 100 * time.Millisecond
