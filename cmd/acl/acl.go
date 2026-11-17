@@ -38,9 +38,10 @@ workspaces need no configuration.`,
 			return utils.RequireSubcommand(cmd)
 		},
 	}
+	deps := newLedgerDeps()
 	cmd.AddCommand(
-		newEntryCmd(ios),
-		newAdminCmd(ios),
+		newEntryCmd(deps, ios),
+		newAdminCmd(deps, ios),
 	)
 	return cmd
 }

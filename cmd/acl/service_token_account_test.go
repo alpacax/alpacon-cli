@@ -119,18 +119,18 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 			}
 			seams := &sessionSeams{cfg: loggedIn("cached"), env: ledgerEnv()}
 			seams.cfg.WorkspaceURL = workspace.URL
-			installSeams(t, seams)
+			deps := fakeLedgerDeps(t, seams)
 			t.Setenv(client.SignerURLEnvVar, signer.URL)
-			newWorkspaceClient = func() (*client.AlpaconClient, error) {
+			deps.newWorkspaceClient = func() (*client.AlpaconClient, error) {
 				return &client.AlpaconClient{HTTPClient: httpclient.New(false), BaseURL: workspace.URL}, nil
 			}
-			entryAddCmd := newEntryAddCmd(utils.Stdio)
+			entryAddCmd := newEntryAddCmd(deps, utils.Stdio)
 			require.NoError(t, entryAddCmd.Flags().Parse(flags))
 			oldFormat := utils.OutputFormat
 			utils.OutputFormat = utils.OutputFormatJSON
 			t.Cleanup(func() { utils.OutputFormat = oldFormat })
 
-			err := runEntryAdd(utils.Stdio, entryAddCmd, nil)
+			err := runEntryAdd(deps, utils.Stdio, entryAddCmd, nil)
 			var stderr bytes.Buffer
 			if tt.wantExit == 0 {
 				require.NoError(t, err, stderr.String())
@@ -202,7 +202,8 @@ func TestBindApplicationAccounts_ReturnsAccountRefusal(t *testing.T) {
 
 func TestEntryAdd_AccountHelp(t *testing.T) {
 	t.Parallel()
-	entryAddCmd, entryListCmd := newEntryAddCmd(utils.Stdio), newEntryListCmd(utils.Stdio)
+	deps := newLedgerDeps()
+	entryAddCmd, entryListCmd := newEntryAddCmd(deps, utils.Stdio), newEntryListCmd(deps, utils.Stdio)
 	assert.Contains(t, strings.Join(strings.Fields(entryAddCmd.Long), " "), "any account bound to the application on that server")
 	assert.Contains(t, entryAddCmd.Flags().Lookup("username").Usage, "Omit to pin the entry to the application's own account")
 	assert.Contains(t, entryAddCmd.Flags().Lookup("groupname").Usage, "'' or * sets no group restriction")

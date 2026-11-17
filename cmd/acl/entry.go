@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newEntryCmd(ios *utils.IOStreams) *cobra.Command {
+func newEntryCmd(deps *ledgerDeps, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "entry",
 		Short: "Manage pre-approved command entries",
@@ -22,16 +22,16 @@ keeping it in place.`,
 		},
 	}
 	cmd.AddCommand(
-		newEntryListCmd(ios),
-		newEntryAddCmd(ios),
-		newEntryRemoveCmd(ios),
-		newEntryDisableCmd(ios),
-		newEntryEnableCmd(ios),
+		newEntryListCmd(deps, ios),
+		newEntryAddCmd(deps, ios),
+		newEntryRemoveCmd(deps, ios),
+		newEntryDisableCmd(deps, ios),
+		newEntryEnableCmd(deps, ios),
 	)
 	return cmd
 }
 
-func newEntryListCmd(ios *utils.IOStreams) *cobra.Command {
+func newEntryListCmd(deps *ledgerDeps, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -47,7 +47,7 @@ resolved.`,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 			tokenRef, _ := cmd.Flags().GetString("token")
 
-			session, err := openLedger(ios)
+			session, err := deps.openLedger(ios)
 			if err != nil {
 				return err
 			}

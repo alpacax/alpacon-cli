@@ -51,7 +51,7 @@ func TestParseEntryFile(t *testing.T) {
 		}),
 	)
 
-	entries, err := parseEntryFile(data)
+	entries, err := parseEntryFile(data, time.Now())
 
 	require.NoError(t, err)
 	assert.Equal(t, []entryDraft{
@@ -63,7 +63,7 @@ func TestParseEntryFile(t *testing.T) {
 
 func TestParseEntryFile_AllowsTrailingWhitespace(t *testing.T) {
 	t.Parallel()
-	_, err := parseEntryFile(append(fileOf(t, fileItem(nil)), "\n\n"...))
+	_, err := parseEntryFile(append(fileOf(t, fileItem(nil)), "\n\n"...), time.Now())
 	assert.NoError(t, err)
 }
 
@@ -72,7 +72,7 @@ func TestParseEntryFile_NullUsername(t *testing.T) {
 	item := fileItem(nil)
 	item["username"] = nil
 
-	entries, err := parseEntryFile(fileOf(t, fileItem(nil), item))
+	entries, err := parseEntryFile(fileOf(t, fileItem(nil), item), time.Now())
 
 	require.ErrorContains(t, err, "entry 1: username must be a string, not null")
 	assert.Nil(t, entries)
@@ -84,7 +84,7 @@ func TestParseEntryFile_NullGroupname(t *testing.T) {
 	item := fileItem(nil)
 	item["groupname"] = nil
 
-	entries, err := parseEntryFile(fileOf(t, fileItem(nil), item))
+	entries, err := parseEntryFile(fileOf(t, fileItem(nil), item), time.Now())
 
 	require.ErrorContains(t, err, "entry 1: groupname must be a string, not null")
 	assert.Nil(t, entries)
@@ -103,20 +103,21 @@ func TestParseEntryFile_NonStringAccountFields(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			data := fileOf(t, fileItem(nil), fileItem(map[string]any{tt.field: tt.value}))
-			entries, err := parseEntryFile(data)
+			entries, err := parseEntryFile(data, time.Now())
 			require.ErrorContains(t, err, "entry 1: "+tt.field+":")
 			assert.Nil(t, entries)
 			assert.True(t, utils.IsUsageError(err), "a non-string %s must be a usage error: %v", tt.field, err)
 
 			file := t.TempDir() + "/entries.json"
 			require.NoError(t, os.WriteFile(file, data, 0600))
-			entryAddCmd := newEntryAddCmd(utils.Stdio)
+			deps := newLedgerDeps()
+			entryAddCmd := newEntryAddCmd(deps, utils.Stdio)
 			require.NoError(t, entryAddCmd.Flags().Parse([]string{"--file", file}))
 			oldFormat := utils.OutputFormat
 			utils.OutputFormat = utils.OutputFormatJSON
 			t.Cleanup(func() { utils.OutputFormat = oldFormat })
 
-			err = runEntryAdd(utils.Stdio, entryAddCmd, nil)
+			err = runEntryAdd(deps, utils.Stdio, entryAddCmd, nil)
 			var exitErr *utils.ExitError
 			require.ErrorAs(t, err, &exitErr)
 			assert.Equal(t, utils.ExitCodeUsageError, exitErr.Code)
@@ -158,7 +159,7 @@ func TestParseEntryFile_Refusals(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := parseEntryFile([]byte(tt.data))
+			_, err := parseEntryFile([]byte(tt.data), time.Now())
 			assert.ErrorContains(t, err, tt.wantErr)
 		})
 	}
@@ -202,7 +203,7 @@ func TestValidateServerRefs_RefusesAnEmptyValue(t *testing.T) {
 func TestEntryAdd_ServerFlagEmptyShapesAreRefused(t *testing.T) {
 	t.Parallel()
 	for _, args := range [][]string{{"--server", ""}, {"--server", "web-01,"}, {"--server=,"}} {
-		cmd := newEntryAddCmd(utils.Stdio)
+		cmd := newEntryAddCmd(newLedgerDeps(), utils.Stdio)
 
 		require.NoError(t, cmd.Flags().Parse(args))
 		refs, err := cmd.Flags().GetStringSlice("server")
@@ -212,18 +213,18 @@ func TestEntryAdd_ServerFlagEmptyShapesAreRefused(t *testing.T) {
 }
 
 func TestValidateExpiry(t *testing.T) {
-	orig := now
-	t.Cleanup(func() { now = orig })
-	now = func() time.Time { return time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC) }
+	t.Parallel()
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
 
-	require.NoError(t, validateExpiry(""))
-	require.NoError(t, validateExpiry("2027-01-15T10:00:00+09:00"))
-	require.ErrorContains(t, validateExpiry("2027-01-15"), "RFC 3339")
-	require.ErrorContains(t, validateExpiry("2026-10-26T12:00:00Z"), "not in the future", "now is not in the future either")
-	assert.ErrorContains(t, validateExpiry("2026-10-25T12:00:00Z"), "not in the future")
+	require.NoError(t, validateExpiry("", now))
+	require.NoError(t, validateExpiry("2027-01-15T10:00:00+09:00", now))
+	require.ErrorContains(t, validateExpiry("2027-01-15", now), "RFC 3339")
+	require.ErrorContains(t, validateExpiry("2026-10-26T12:00:00Z", now), "not in the future", "now is not in the future either")
+	assert.ErrorContains(t, validateExpiry("2026-10-25T12:00:00Z", now), "not in the future")
 }
 
 func TestWorkspaceNames_FetchesOnlyWhatTheEntriesNeed(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		entries   []acl.EntryResponse
@@ -237,6 +238,7 @@ func TestWorkspaceNames_FetchesOnlyWhatTheEntriesNeed(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var paths []string
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				paths = append(paths, r.URL.Path)
@@ -244,11 +246,9 @@ func TestWorkspaceNames_FetchesOnlyWhatTheEntriesNeed(t *testing.T) {
 				_, _ = w.Write([]byte(`{"count": 0, "next": null, "results": []}`))
 			}))
 			defer ts.Close()
-			installSeams(t, &sessionSeams{})
-			newWorkspaceClient = func() (*client.AlpaconClient, error) {
+			session := &ledgerSession{workspaceURL: ts.URL, newWorkspaceClient: func() (*client.AlpaconClient, error) {
 				return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, nil
-			}
-			session := &ledgerSession{workspaceURL: ts.URL}
+			}}
 
 			session.workspaceNames(tt.entries)
 
@@ -259,7 +259,7 @@ func TestWorkspaceNames_FetchesOnlyWhatTheEntriesNeed(t *testing.T) {
 
 func TestParseEntryFile_DefaultApplicationAccount(t *testing.T) {
 	t.Parallel()
-	entries, err := parseEntryFile(fileOf(t, fileItem(map[string]any{"username": nil})))
+	entries, err := parseEntryFile(fileOf(t, fileItem(map[string]any{"username": nil})), time.Now())
 	require.NoError(t, err)
 	assert.Empty(t, entries[0].Username)
 	assert.True(t, entries[0].usernameOmitted, "an absent username must default to the application account")
@@ -278,7 +278,7 @@ func TestEntryRemove_RequiresConfirmationInProcess(t *testing.T) {
 			utils.OutputFormat = utils.OutputFormatJSON
 			t.Cleanup(func() { utils.OutputFormat = previous })
 
-			entryRemoveCmd := newEntryRemoveCmd(utils.Stdio)
+			entryRemoveCmd := newEntryRemoveCmd(newLedgerDeps(), utils.Stdio)
 			err := entryRemoveCmd.RunE(entryRemoveCmd, args)
 
 			var exitErr *utils.ExitError
@@ -294,7 +294,7 @@ func TestEntryRemove_RequiresConfirmationInProcess(t *testing.T) {
 }
 
 func TestAdminRevoke_RequiresConfirmationBeforeDeleting(t *testing.T) {
-	installSeams(t, &sessionSeams{cfg: loggedIn("cached"), env: ledgerEnv()})
+	deps := fakeLedgerDeps(t, &sessionSeams{cfg: loggedIn("cached"), env: ledgerEnv()})
 	deleted := false
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -316,7 +316,7 @@ func TestAdminRevoke_RequiresConfirmationBeforeDeleting(t *testing.T) {
 	os.Stdin, utils.OutputFormat = stdin, utils.OutputFormatJSON
 	t.Cleanup(func() { os.Stdin, utils.OutputFormat = previousStdin, previousFormat; _ = stdin.Close() })
 
-	adminRevokeCmd := newAdminRevokeCmd(utils.Stdio)
+	adminRevokeCmd := newAdminRevokeCmd(deps, utils.Stdio)
 	err = adminRevokeCmd.RunE(adminRevokeCmd, []string{"alice"})
 
 	var exitErr *utils.ExitError

@@ -25,19 +25,33 @@ type ledgerSession struct {
 	workspaceID  string
 	workspaceURL string
 	workspace    *client.AlpaconClient
+	// newWorkspaceClient builds the client workspaceAPI keeps in workspace.
+	newWorkspaceClient func() (*client.AlpaconClient, error)
 }
 
-// Seams for the parts of opening a session that reach outside this process.
-var (
-	loadConfig         = config.LoadConfig
-	fetchAuthEnv       = auth0.FetchAuthEnv
-	newWorkspaceClient = client.NewAlpaconAPIClient
-	authorizeSigner    = runSignerDeviceCode
-	now                = time.Now
-)
+// ledgerDeps is what an acl command reaches outside this process: the config,
+// the workspace, the signer's authorization and the clock.
+type ledgerDeps struct {
+	loadConfig         func() (config.Config, error)
+	fetchAuthEnv       func(workspaceURL string, httpClient *http.Client) (*auth0.AuthEnvResponse, error)
+	newWorkspaceClient func() (*client.AlpaconClient, error)
+	authorizeSigner    func(ios *utils.IOStreams, cfg config.Config, envInfo *auth0.AuthEnvResponse, target config.SignerTarget) (string, error)
+	now                func() time.Time
+}
 
-func openLedger(ios *utils.IOStreams) (*ledgerSession, error) {
-	session, err := newLedgerSession(ios)
+// newLedgerDeps returns the real dependencies, which every acl command runs on.
+func newLedgerDeps() *ledgerDeps {
+	return &ledgerDeps{
+		loadConfig:         config.LoadConfig,
+		fetchAuthEnv:       auth0.FetchAuthEnv,
+		newWorkspaceClient: client.NewAlpaconAPIClient,
+		authorizeSigner:    runSignerDeviceCode,
+		now:                time.Now,
+	}
+}
+
+func (d *ledgerDeps) openLedger(ios *utils.IOStreams) (*ledgerSession, error) {
+	session, err := d.newLedgerSession(ios)
 	if err != nil {
 		return nil, utils.NewExitError("%s", sentence(upperFirst(err.Error())))
 	}
@@ -46,13 +60,13 @@ func openLedger(ios *utils.IOStreams) (*ledgerSession, error) {
 
 // newLedgerSession checks the workspace uses the ledger, authorizes the signer
 // when nothing usable is cached, and confirms the Command ACL admin role here.
-func newLedgerSession(ios *utils.IOStreams) (*ledgerSession, error) {
-	return newLedgerSessionWithCheck(ios, nil)
+func (d *ledgerDeps) newLedgerSession(ios *utils.IOStreams) (*ledgerSession, error) {
+	return d.newLedgerSessionWithCheck(ios, nil)
 }
 
 // newLedgerSessionWithCheck validates workspace data before contacting the signer.
-func newLedgerSessionWithCheck(ios *utils.IOStreams, check func(*ledgerSession) error) (*ledgerSession, error) {
-	cfg, err := loadConfig()
+func (d *ledgerDeps) newLedgerSessionWithCheck(ios *utils.IOStreams, check func(*ledgerSession) error) (*ledgerSession, error) {
+	cfg, err := d.loadConfig()
 	if err != nil {
 		return nil, errors.New("not logged in. Run 'alpacon login' first")
 	}
@@ -60,7 +74,7 @@ func newLedgerSessionWithCheck(ios *utils.IOStreams, check func(*ledgerSession) 
 		return nil, errors.New("managing pre-approved commands needs your own sign-in, not an API token. Run 'alpacon login' without -t to sign in through the browser")
 	}
 
-	envInfo, err := fetchAuthEnv(cfg.WorkspaceURL, httpclient.New(cfg.Insecure))
+	envInfo, err := d.fetchAuthEnv(cfg.WorkspaceURL, httpclient.New(cfg.Insecure))
 	if err != nil {
 		return nil, fmt.Errorf("could not read %s's settings: %w", cfg.WorkspaceURL, err)
 	}
@@ -69,7 +83,7 @@ func newLedgerSessionWithCheck(ios *utils.IOStreams, check func(*ledgerSession) 
 	}
 	workspaceID := envInfo.Auth0.WorkspaceID
 
-	session := &ledgerSession{workspaceID: workspaceID, workspaceURL: cfg.WorkspaceURL}
+	session := &ledgerSession{workspaceID: workspaceID, workspaceURL: cfg.WorkspaceURL, newWorkspaceClient: d.newWorkspaceClient}
 	if check != nil {
 		if err := check(session); err != nil {
 			return nil, err
@@ -81,9 +95,9 @@ func newLedgerSessionWithCheck(ios *utils.IOStreams, check func(*ledgerSession) 
 		return nil, err
 	}
 
-	token, cached := cfg.SignerToken(now(), target)
+	token, cached := cfg.SignerToken(d.now(), target)
 	if !cached {
-		token, err = authorizeSigner(ios, cfg, envInfo, target)
+		token, err = d.authorizeSigner(ios, cfg, envInfo, target)
 		if err != nil {
 			return nil, err
 		}
@@ -171,7 +185,7 @@ func (s *ledgerSession) workspaceAPI() (*client.AlpaconClient, error) {
 	if s.workspace != nil {
 		return s.workspace, nil
 	}
-	ac, err := newWorkspaceClient()
+	ac, err := s.newWorkspaceClient()
 	if err != nil {
 		return nil, fmt.Errorf("connection to Alpacon API failed: %w", err)
 	}

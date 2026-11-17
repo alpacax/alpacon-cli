@@ -30,9 +30,8 @@ func ledgerEnv() *auth0.AuthEnvResponse {
 	}
 }
 
-// sessionSeams points every seam newLedgerSession reaches at the given values
-// and restores them when the test ends. The config file lives in a temp HOME,
-// since a refused token is cleared from it.
+// sessionSeams holds the values fakeLedgerDeps' dependencies answer with, and
+// what they were asked.
 type sessionSeams struct {
 	cfg          config.Config
 	cfgErr       error
@@ -43,15 +42,13 @@ type sessionSeams struct {
 	target       config.SignerTarget
 }
 
-func installSeams(t *testing.T, s *sessionSeams) {
+// fakeLedgerDeps returns dependencies that answer newLedgerSession from s. The
+// config file lives in a temp HOME, since a refused token is cleared from it.
+func fakeLedgerDeps(t *testing.T, s *sessionSeams) *ledgerDeps {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	origLoad, origFetch, origAuthorize, origNow, origWorkspace := loadConfig, fetchAuthEnv, authorizeSigner, now, newWorkspaceClient
-	t.Cleanup(func() {
-		loadConfig, fetchAuthEnv, authorizeSigner, now, newWorkspaceClient = origLoad, origFetch, origAuthorize, origNow, origWorkspace
-	})
-
-	loadConfig = func() (config.Config, error) {
+	deps := newLedgerDeps()
+	deps.loadConfig = func() (config.Config, error) {
 		cfg := s.cfg
 		// A cached token in these fixtures was issued for whichever signer the
 		// test points at, unless the fixture names another one.
@@ -62,13 +59,14 @@ func installSeams(t *testing.T, s *sessionSeams) {
 		}
 		return cfg, s.cfgErr
 	}
-	fetchAuthEnv = func(string, *http.Client) (*auth0.AuthEnvResponse, error) { return s.env, nil }
-	authorizeSigner = func(_ *utils.IOStreams, _ config.Config, _ *auth0.AuthEnvResponse, target config.SignerTarget) (string, error) {
+	deps.fetchAuthEnv = func(string, *http.Client) (*auth0.AuthEnvResponse, error) { return s.env, nil }
+	deps.authorizeSigner = func(_ *utils.IOStreams, _ config.Config, _ *auth0.AuthEnvResponse, target config.SignerTarget) (string, error) {
 		s.target = target
 		s.authorizes++
 		return s.authorized, s.authorizeErr
 	}
-	now = func() time.Time { return time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC) }
+	deps.now = func() time.Time { return time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC) }
+	return deps
 }
 
 // stubSigner serves /api/acl/me/ with the given status and body and records
@@ -106,10 +104,10 @@ const adminOfWorkspace = `{"is_ledger_admin": true, "workspace_ids": ["` + testW
 
 func TestNewLedgerSession_UsesTheCachedSignerToken(t *testing.T) {
 	seams := &sessionSeams{cfg: loggedIn("cached"), env: ledgerEnv()}
-	installSeams(t, seams)
+	deps := fakeLedgerDeps(t, seams)
 	auths := stubSigner(t, http.StatusOK, adminOfWorkspace)
 
-	session, err := newLedgerSession(utils.Stdio)
+	session, err := deps.newLedgerSession(utils.Stdio)
 
 	require.NoError(t, err)
 	assert.Equal(t, testWorkspaceID, session.workspaceID)
@@ -119,10 +117,10 @@ func TestNewLedgerSession_UsesTheCachedSignerToken(t *testing.T) {
 
 func TestNewLedgerSession_AuthorizesWhenNothingIsCached(t *testing.T) {
 	seams := &sessionSeams{cfg: loggedIn(""), env: ledgerEnv(), authorized: "fresh"}
-	installSeams(t, seams)
+	deps := fakeLedgerDeps(t, seams)
 	auths := stubSigner(t, http.StatusOK, adminOfWorkspace)
 
-	_, err := newLedgerSession(utils.Stdio)
+	_, err := deps.newLedgerSession(utils.Stdio)
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, seams.authorizes)
@@ -155,10 +153,10 @@ func TestNewLedgerSession_Refusals(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			installSeams(t, &tt.seams)
+			deps := fakeLedgerDeps(t, &tt.seams)
 			auths := stubSigner(t, http.StatusOK, adminOfWorkspace)
 
-			_, err := newLedgerSession(utils.Stdio)
+			_, err := deps.newLedgerSession(utils.Stdio)
 
 			require.ErrorContains(t, err, tt.wantErr)
 			assert.Empty(t, *auths, "nothing reaches the signer")
@@ -177,10 +175,10 @@ func TestNewLedgerSession_NotACommandACLAdminHere(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			installSeams(t, &sessionSeams{cfg: loggedIn("cached"), env: ledgerEnv()})
+			deps := fakeLedgerDeps(t, &sessionSeams{cfg: loggedIn("cached"), env: ledgerEnv()})
 			stubSigner(t, http.StatusOK, tt.body)
 
-			_, err := newLedgerSession(utils.Stdio)
+			_, err := deps.newLedgerSession(utils.Stdio)
 
 			require.ErrorContains(t, err, "not a Command ACL admin of this workspace")
 		})
@@ -191,7 +189,7 @@ func TestNewLedgerSession_NotACommandACLAdminHere(t *testing.T) {
 // dropped and the next command authorizes again instead of failing the same way.
 func TestNewLedgerSession_DropsARefusedSignerToken(t *testing.T) {
 	seams := &sessionSeams{env: ledgerEnv()}
-	installSeams(t, seams)
+	deps := fakeLedgerDeps(t, seams)
 	stubSigner(t, http.StatusUnauthorized, `{"detail": "Given token not valid for any token type", "code": "token_not_valid"}`)
 	require.NoError(t, config.CreateConfig(testWorkspaceURL, "ws1", "", "", "access", "refresh", "alpacon.io", 3600, false))
 	cfg, err := config.LoadConfig()
@@ -200,7 +198,7 @@ func TestNewLedgerSession_DropsARefusedSignerToken(t *testing.T) {
 	seams.cfg, err = config.LoadConfig()
 	require.NoError(t, err)
 
-	_, err = newLedgerSession(utils.Stdio)
+	_, err = deps.newLedgerSession(utils.Stdio)
 
 	require.ErrorContains(t, err, "Run the command again to authorize once more")
 	after, err := config.LoadConfig()
@@ -281,11 +279,10 @@ func TestAuthorizationFailureMessage(t *testing.T) {
 // shell has switched workspaces, resolving there would file a name from one
 // workspace under the other's ledger.
 func TestWorkspaceAPI_RefusesAWorkspaceTheSessionWasNotOpenedFor(t *testing.T) {
-	installSeams(t, &sessionSeams{})
-	newWorkspaceClient = func() (*client.AlpaconClient, error) {
+	t.Parallel()
+	session := &ledgerSession{workspaceURL: testWorkspaceURL, newWorkspaceClient: func() (*client.AlpaconClient, error) {
 		return &client.AlpaconClient{BaseURL: "https://ws2.us1.alpacon.io"}, nil
-	}
-	session := &ledgerSession{workspaceURL: testWorkspaceURL}
+	}}
 
 	_, err := session.workspaceAPI()
 	require.ErrorContains(t, err, "workspace changed")
@@ -297,13 +294,12 @@ func TestWorkspaceAPI_RefusesAWorkspaceTheSessionWasNotOpenedFor(t *testing.T) {
 }
 
 func TestWorkspaceAPI_BuildsOneClientForTheSessionsWorkspace(t *testing.T) {
-	installSeams(t, &sessionSeams{})
+	t.Parallel()
 	builds := 0
-	newWorkspaceClient = func() (*client.AlpaconClient, error) {
+	session := &ledgerSession{workspaceURL: testWorkspaceURL, newWorkspaceClient: func() (*client.AlpaconClient, error) {
 		builds++
 		return &client.AlpaconClient{BaseURL: testWorkspaceURL}, nil
-	}
-	session := &ledgerSession{workspaceURL: testWorkspaceURL}
+	}}
 
 	first, err := session.workspaceAPI()
 	require.NoError(t, err)
@@ -375,10 +371,10 @@ func TestNewLedgerSession_DoesNotSendACachedTokenToAnotherSigner(t *testing.T) {
 	cfg := loggedIn("cached")
 	cfg.Signer.Target = config.SignerTarget{URL: "https://signer.example.com", Audience: client.DefaultSignerAudience}
 	seams := &sessionSeams{cfg: cfg, env: ledgerEnv(), authorized: "fresh"}
-	installSeams(t, seams)
+	deps := fakeLedgerDeps(t, seams)
 	auths := stubSigner(t, http.StatusOK, adminOfWorkspace)
 
-	_, err := newLedgerSession(utils.Stdio)
+	_, err := deps.newLedgerSession(utils.Stdio)
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, seams.authorizes)
@@ -388,10 +384,10 @@ func TestNewLedgerSession_DoesNotSendACachedTokenToAnotherSigner(t *testing.T) {
 
 func TestNewLedgerSession_RefusesAPlainHTTPSigner(t *testing.T) {
 	seams := &sessionSeams{cfg: loggedIn("cached"), env: ledgerEnv()}
-	installSeams(t, seams)
+	deps := fakeLedgerDeps(t, seams)
 	t.Setenv(client.SignerURLEnvVar, "http://signer.example.com")
 
-	_, err := newLedgerSession(utils.Stdio)
+	_, err := deps.newLedgerSession(utils.Stdio)
 
 	require.ErrorContains(t, err, "https")
 	assert.Equal(t, 0, seams.authorizes)
@@ -401,10 +397,10 @@ func TestNewLedgerSession_RefusesAPlainHTTPSigner(t *testing.T) {
 // run, so the message points at the configuration instead of a retry.
 func TestNewLedgerSession_AFreshTokenRefusedPointsAtTheAudience(t *testing.T) {
 	seams := &sessionSeams{cfg: loggedIn(""), env: ledgerEnv(), authorized: "fresh"}
-	installSeams(t, seams)
+	deps := fakeLedgerDeps(t, seams)
 	stubSigner(t, http.StatusUnauthorized, `{"detail": "Given token not valid for any token type"}`)
 
-	_, err := newLedgerSession(utils.Stdio)
+	_, err := deps.newLedgerSession(utils.Stdio)
 
 	require.ErrorContains(t, err, client.SignerAudienceEnvVar)
 	assert.NotContains(t, err.Error(), "Run the command again")
