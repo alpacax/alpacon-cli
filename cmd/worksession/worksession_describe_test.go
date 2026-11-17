@@ -5,12 +5,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestWorkSessionDescribePrintsAdvisories(t *testing.T) {
+	workSessionDescribeCmd := newWorkSessionDescribeCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/ses-x/" {
@@ -42,6 +45,7 @@ func TestWorkSessionDescribePrintsAdvisories(t *testing.T) {
 // A cluster session shows its cluster, and one created with a duration shows
 // no expiry until it activates rather than year one.
 func TestWorkSessionDescribeShowsAClusterSession(t *testing.T) {
+	workSessionDescribeCmd := newWorkSessionDescribeCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/ses-k/" {
@@ -71,6 +75,7 @@ func TestWorkSessionDescribeShowsAClusterSession(t *testing.T) {
 // A caller who does not manage the session is named only the targets it reaches, and the rows
 // say how many more there are; JSON passes the counts through as sent.
 func TestWorkSessionDescribeSaysHowManyTheCallerDoesNotReach(t *testing.T) {
+	workSessionDescribeCmd := newWorkSessionDescribeCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	const body = `{
 		"id":"550e8400-e29b-41d4-a716-446655440000","status":"active","added_at":"2026-05-30T00:00:00Z",
 		"servers":[{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","name":"web-1"}],"servers_hidden":1,
@@ -112,6 +117,7 @@ func TestWorkSessionDescribeSaysHowManyTheCallerDoesNotReach(t *testing.T) {
 }
 
 func TestWorkSessionDescribeShowsAHiddenCluster(t *testing.T) {
+	workSessionDescribeCmd := newWorkSessionDescribeCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/550e8400-e29b-41d4-a716-446655440000/" {

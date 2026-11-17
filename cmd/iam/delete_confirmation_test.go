@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -12,8 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Serial: it runs package-level commands and sets HOME and OutputFormat.
+// Serial: it sets HOME and OutputFormat.
 func TestDeleteCommands_StopForConfirmationBeforeAnyRequest(t *testing.T) {
+	userDeleteCmd := newUserDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
+	groupDeleteCmd := newGroupDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	t.Setenv("HOME", t.TempDir()) // a regression that skips the check must not reach a real login
 	savedFormat := utils.OutputFormat
 	t.Cleanup(func() { utils.OutputFormat = savedFormat })

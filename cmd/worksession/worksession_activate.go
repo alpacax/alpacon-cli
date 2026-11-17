@@ -2,12 +2,9 @@ package worksession
 
 import (
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var workSessionActivateCmd = newWorkSessionActivateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newWorkSessionActivateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

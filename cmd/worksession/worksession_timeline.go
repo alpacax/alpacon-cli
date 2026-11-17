@@ -9,7 +9,6 @@ import (
 	"unicode/utf8"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -23,8 +22,6 @@ type recordingJSON struct {
 	RecordChunksTotal *int            `json:"record_chunks_total"`
 	Status            string          `json:"status"`
 }
-
-var workSessionTimelineCmd = newWorkSessionTimelineCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newWorkSessionTimelineCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var noRecords bool

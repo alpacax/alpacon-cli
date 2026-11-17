@@ -2,13 +2,10 @@ package agent
 
 import (
 	"github.com/alpacax/alpacon-cli/api/server"
-	"github.com/alpacax/alpacon-cli/client"
 	servercmd "github.com/alpacax/alpacon-cli/cmd/server"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var restartAgentCmd = newRestartAgentCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newRestartAgentCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{

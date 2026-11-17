@@ -25,8 +25,6 @@ var (
 	validMethodsList     = strings.Join(validMethods, ", ")
 )
 
-var serverCreateCmd = newServerCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newServerCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var createJSON bool
 	cmd := &cobra.Command{

@@ -127,9 +127,7 @@ func buildRemoteExecArgs(parsed WebshArgs, username, serverName string) execCmd.
 // clientFactory builds the API client a command talks to.
 type clientFactory = func() (*client.AlpaconClient, error)
 
-var WebshCmd = newCommand(client.NewAlpaconAPIClient, utils.Stdio)
-
-func newCommand(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+func NewWebshCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "websh [flags] [USER@]SERVER [COMMAND...]", // [flags] stays first: words after SERVER go to the remote command
 		Short: "Open a Websh terminal or run a command",

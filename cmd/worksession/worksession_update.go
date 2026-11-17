@@ -16,8 +16,6 @@ import (
 
 const noSessionToUpdate = "No SESSION_ID given and no active work session. Pass an ID, set ALPACON_WORK_SESSION, or run 'alpacon work-session use <id>' first."
 
-var workSessionUpdateCmd = newWorkSessionUpdateCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newWorkSessionUpdateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var (
 		updateTitle       string

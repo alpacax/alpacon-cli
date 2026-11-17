@@ -35,9 +35,7 @@ type tunnelCommandRuntime interface {
 	Close(cause error)
 }
 
-var TunnelCmd = newCommand(client.NewAlpaconAPIClient, utils.Stdio)
-
-func newCommand(newAPIClient func() (*client.AlpaconClient, error), ios *utils.IOStreams) *cobra.Command {
+func NewTunnelCmd(newAPIClient func() (*client.AlpaconClient, error), ios *utils.IOStreams) *cobra.Command {
 	var flags tunnelFlagValues
 	cmd := &cobra.Command{
 		Use:   "tunnel [flags] SERVER [-- COMMAND...]", // [flags] stays before --: words after it go to the local command

@@ -6,12 +6,9 @@ import (
 	"strings"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var workSessionRecordingCmd = newWorkSessionRecordingCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newWorkSessionRecordingCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var terminalIndex int

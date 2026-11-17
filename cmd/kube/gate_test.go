@@ -13,8 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newGateTree builds a kube look-alike so these tests can run in parallel without reading
-// the package-level KubeCmd; cmd/kube_gate_test.go covers the real tree.
+// newGateTree builds a small kube look-alike; cmd/kube_gate_test.go covers the real tree.
 func newGateTree() (root, real *cobra.Command) {
 	root = &cobra.Command{Use: "alpacon", Run: func(*cobra.Command, []string) {}}
 	real = &cobra.Command{Use: "kube", Aliases: []string{"k8s", "clusters"}, Short: "Access Kubernetes clusters"}
@@ -117,7 +116,7 @@ func TestApplySurfaceGate_DisabledKeepsAPassThroughChild(t *testing.T) {
 func TestApplySurfaceGate_DisabledKeepsCredentialsAndLogout(t *testing.T) {
 	t.Parallel()
 	root := &cobra.Command{Use: "alpacon"}
-	real := newKubeCmd(nil, utils.Stdio)
+	real := NewKubeCmd(nil, utils.Stdio)
 	root.AddCommand(real)
 	kept := map[string]*cobra.Command{}
 	for _, name := range []string{"credentials", "logout", "sessions"} {
@@ -150,7 +149,7 @@ func TestApplySurfaceGate_DisabledHelpTopicReturnsNotEnabled(t *testing.T) {
 			var out bytes.Buffer
 			root.SetOut(&out)
 			root.SetErr(&out)
-			root.SilenceErrors, root.SilenceUsage = true, true // as RootCmd sets them
+			root.SilenceErrors, root.SilenceUsage = true, true // as the root sets them
 			root.SetArgs(args)
 
 			err := root.Execute()

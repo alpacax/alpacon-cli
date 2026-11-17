@@ -7,12 +7,9 @@ import (
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/security"
 	serverapi "github.com/alpacax/alpacon-cli/api/server"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var aclServerAddCmd = newAclServerAddCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newAclServerAddCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{

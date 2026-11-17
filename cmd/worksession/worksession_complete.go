@@ -7,8 +7,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workSessionCompleteCmd = newWorkSessionCompleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newWorkSessionCompleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "complete SESSION_ID",

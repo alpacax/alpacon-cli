@@ -9,21 +9,23 @@ import (
 // clientFactory builds the API client a command talks to.
 type clientFactory = func() (*client.AlpaconClient, error)
 
-var ServerCmd = &cobra.Command{
-	Use:     "server",
-	Aliases: []string{"servers"},
-	Short:   "Manage registered servers",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return utils.RequireSubcommand(cmd)
-	},
-}
-
-func init() {
-	ServerCmd.AddCommand(serverListCmd)
-	ServerCmd.AddCommand(serverDetailCmd)
-	ServerCmd.AddCommand(serverCreateCmd)
-	ServerCmd.AddCommand(serverDeleteCmd)
-	ServerCmd.AddCommand(serverUpdateCmd)
-	ServerCmd.AddCommand(tokenCmd)
-	ServerCmd.AddCommand(serverRefreshCmd)
+func NewServerCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "server",
+		Aliases: []string{"servers"},
+		Short:   "Manage registered servers",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return utils.RequireSubcommand(cmd)
+		},
+	}
+	cmd.AddCommand(
+		newServerListCmd(newClient, ios),
+		newServerDetailCmd(newClient, ios),
+		newServerCreateCmd(newClient, ios),
+		newServerDeleteCmd(newClient, ios),
+		newServerUpdateCmd(newClient, ios),
+		newTokenCmd(newClient, ios),
+		newServerRefreshCmd(newClient, ios),
+	)
+	return cmd
 }

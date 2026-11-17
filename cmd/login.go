@@ -30,8 +30,6 @@ const (
 // default. Add a region here when it launches.
 var knownCloudRegions = []string{"us1", "ap1"}
 
-var loginCmd = newLoginCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newLoginCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var (
 		insecure, noBrowser       bool

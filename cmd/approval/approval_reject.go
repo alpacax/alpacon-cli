@@ -5,19 +5,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var approvalRejectCmd = &cobra.Command{
-	Use:   "reject",
-	Short: "Reject a request (moved to the Alpacon console)",
-	Long: `Rejecting requests has moved to the Alpacon console (web).
+func newApprovalRejectCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reject",
+		Short: "Reject a request (moved to the Alpacon console)",
+		Long: `Rejecting requests has moved to the Alpacon console (web).
 
 The CLI is an execution and request surface only; a human approves or rejects
 out of band in the web console or Slack. The server rejects approve/reject from
 the CLI credential channel. Use 'alpacon approval ls' to track status.`,
-	Args: cobra.ArbitraryArgs,
-	Example: `  # Reject in the Alpacon console (web), then track status here:
+		Args: cobra.ArbitraryArgs,
+		Example: `  # Reject in the Alpacon console (web), then track status here:
   alpacon approval ls --status rejected`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		// Non-zero exit: a script that expected the reject must not read this as success.
-		return utils.NewExitError("%s", approveRejectExcludedMessage)
-	}),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			// Non-zero exit: a script that expected the reject must not read this as success.
+			return utils.NewExitError("%s", approveRejectExcludedMessage)
+		}),
+	}
 }

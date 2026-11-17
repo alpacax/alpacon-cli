@@ -274,6 +274,7 @@ func TestWorkSessionExtendCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 }
 
 func TestWorkSessionCancelCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
+	workSessionCancelCmd := newWorkSessionCancelCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	var sawCancel bool
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

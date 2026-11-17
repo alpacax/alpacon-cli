@@ -11,14 +11,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var checkOnly bool
-
-var updateCmd = &cobra.Command{
-	Use:   "update",
-	Short: "Update the CLI to the latest release",
-	// 'alpacon update check', a typo for --check, must fail, not replace the binary.
-	Args: cobra.NoArgs,
-	Long: `Update the CLI to the latest release.
+func newUpdateCmd(ios *utils.IOStreams) *cobra.Command {
+	var checkOnly bool
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update the CLI to the latest release",
+		// 'alpacon update check', a typo for --check, must fail, not replace the binary.
+		Args: cobra.NoArgs,
+		Long: `Update the CLI to the latest release.
 
 A binary a package manager or a version manager installed is left to that tool:
 the command prints how to update through it instead of replacing the file. A
@@ -30,60 +30,59 @@ never has to parse prose:
 
   0  already on the latest release
   8  a newer release exists`,
-	Example: `  alpacon update
+		Example: `  alpacon update
   alpacon update --check`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		if selfupdate.IsUnknownVersion(utils.Version) {
-			return utils.NewExitError("This build's version %q matches no release, so there is nothing to update from. Install a released build to use 'alpacon update'.", utils.Version)
-		}
-
-		if checkOnly {
-			release, err := selfupdate.LatestRelease(selfupdate.DefaultReleaseAPIURL)
-			if err != nil {
-				return utils.NewExitError("Could not check for updates: %s", err)
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			if selfupdate.IsUnknownVersion(utils.Version) {
+				return utils.NewExitError("This build's version %q matches no release, so there is nothing to update from. Install a released build to use 'alpacon update'.", utils.Version)
 			}
-			message, code := checkOutcome(utils.Version, release.Version)
-			utils.CliInfo("%s", message)
-			if code != 0 {
-				// The check succeeded; "Error" would contradict the exit code scripts read.
-				utils.CliInfo("%s", checkAction(installKind()))
-				return utils.NewSilentExitError(code)
+
+			if checkOnly {
+				release, err := selfupdate.LatestRelease(selfupdate.DefaultReleaseAPIURL)
+				if err != nil {
+					return utils.NewExitError("Could not check for updates: %s", err)
+				}
+				message, code := checkOutcome(utils.Version, release.Version)
+				ios.Info("%s", message)
+				if code != 0 {
+					// The check succeeded; "Error" would contradict the exit code scripts read.
+					ios.Info("%s", checkAction(installKind()))
+					return utils.NewSilentExitError(code)
+				}
+				return nil
+			}
+
+			executable, err := selfupdate.ResolveExecutablePath()
+			if err != nil {
+				return utils.NewExitError("Could not find the running binary: %s", err)
+			}
+
+			result, err := selfupdate.Run(selfupdate.Options{
+				ReleaseAPIURL:  selfupdate.DefaultReleaseAPIURL,
+				CurrentVersion: utils.Version,
+				GOOS:           runtime.GOOS,
+				GOARCH:         runtime.GOARCH,
+				ExecutablePath: executable,
+				Runner:         selfupdate.ExecRunner,
+			})
+			if err != nil {
+				return utils.NewExitError("%s", updateFailureMessage(err))
+			}
+
+			message, code := reportResult(result, utils.Version)
+			switch {
+			case code != 0:
+				return utils.NewExitErrorWithCode(code, "%s", message)
+			case result.AlreadyCurrent:
+				ios.Info("%s", message)
+			default:
+				ios.Success("%s", message) // Info would read like the "already up to date" line.
 			}
 			return nil
-		}
-
-		executable, err := selfupdate.ResolveExecutablePath()
-		if err != nil {
-			return utils.NewExitError("Could not find the running binary: %s", err)
-		}
-
-		result, err := selfupdate.Run(selfupdate.Options{
-			ReleaseAPIURL:  selfupdate.DefaultReleaseAPIURL,
-			CurrentVersion: utils.Version,
-			GOOS:           runtime.GOOS,
-			GOARCH:         runtime.GOARCH,
-			ExecutablePath: executable,
-			Runner:         selfupdate.ExecRunner,
-		})
-		if err != nil {
-			return utils.NewExitError("%s", updateFailureMessage(err))
-		}
-
-		message, code := reportResult(result, utils.Version)
-		switch {
-		case code != 0:
-			return utils.NewExitErrorWithCode(code, "%s", message)
-		case result.AlreadyCurrent:
-			utils.CliInfo("%s", message)
-		default:
-			utils.CliSuccess("%s", message) // Info would read like the "already up to date" line.
-		}
-		return nil
-	}),
-}
-
-func init() {
-	updateCmd.Flags().BoolVar(&checkOnly, "check", false, "Report whether a newer release exists without installing it")
+		}),
+	}
+	cmd.Flags().BoolVar(&checkOnly, "check", false, "Report whether a newer release exists without installing it")
+	return cmd
 }
 
 func upToDateMessage(current string) string {

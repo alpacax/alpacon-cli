@@ -6,25 +6,28 @@ import (
 	"os"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
+	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // Packages install stdout as the completion file, and Homebrew runs it with no
-// Alpacon config. Serial: the expected script comes from RootCmd.
+// Alpacon config. Serial: the child it runs is a helper process.
 func TestCompletionWritesOnlyTheScriptToStdout(t *testing.T) {
 	tests := []struct {
 		shell string
-		gen   func(io.Writer) error
+		gen   func(*cobra.Command, io.Writer) error
 	}{
-		{shell: "bash", gen: func(w io.Writer) error { return RootCmd.GenBashCompletionV2(w, true) }},
-		{shell: "zsh", gen: RootCmd.GenZshCompletion},
-		{shell: "fish", gen: func(w io.Writer) error { return RootCmd.GenFishCompletion(w, true) }},
+		{shell: "bash", gen: func(root *cobra.Command, w io.Writer) error { return root.GenBashCompletionV2(w, true) }},
+		{shell: "zsh", gen: (*cobra.Command).GenZshCompletion},
+		{shell: "fish", gen: func(root *cobra.Command, w io.Writer) error { return root.GenFishCompletion(w, true) }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.shell, func(t *testing.T) {
 			var want bytes.Buffer
-			require.NoError(t, tc.gen(&want))
+			require.NoError(t, tc.gen(newRootCmd(cmdtest.NoClient, utils.Stdio), &want))
 
 			home := t.TempDir()
 
@@ -49,7 +52,7 @@ func TestCompletionHelperProcess(t *testing.T) {
 	if !ok {
 		os.Exit(2)
 	}
-	RootCmd.SetArgs(args)
+	os.Args = append([]string{"alpacon"}, args...)
 	Execute()
 	os.Exit(0)
 }

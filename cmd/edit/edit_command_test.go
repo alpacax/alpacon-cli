@@ -58,7 +58,7 @@ func TestEditLeavesAnUnchangedFileAlone(t *testing.T) {
 	ts := editServer(t, http.StatusCreated, &uploads)
 
 	_, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
-		return newEditCmd(cmdtest.ClientFactory(ts), ios)
+		return NewEditCmd(cmdtest.ClientFactory(ts), ios)
 	}, "my-server:/etc/app.conf", "--editor", "true")
 
 	assert.Equal(t, 0, code, stderr)
@@ -91,7 +91,7 @@ func TestEditFails(t *testing.T) {
 				newClient = cmdtest.NoClient
 			}
 
-			_, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return newEditCmd(newClient, ios) }, tt.target, "--editor", "true")
+			_, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return NewEditCmd(newClient, ios) }, tt.target, "--editor", "true")
 
 			assert.Equal(t, tt.wantCode, code, stderr)
 			assert.Contains(t, stderr, tt.want)

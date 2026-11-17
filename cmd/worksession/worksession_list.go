@@ -55,8 +55,6 @@ func markActiveFor(ac *client.AlpaconClient, sessions []wsapi.WorkSessionAttribu
 	MarkActive(sessions, activeUUID)
 }
 
-var workSessionListCmd = newWorkSessionListCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newWorkSessionListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var (
 		statusFilter    string

@@ -7,11 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/selfupdate"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -130,30 +129,12 @@ func runVersionCommand(t *testing.T, args []string, fails bool) (stdout, stderr 
 	return stdout, stderr, exitErr.Code
 }
 
-// executeRootCommand parses args with RootCmd's own flags, so a broken flag registration fails the
-// caller, and puts every flag it set back to its default afterwards.
+// executeRootCommand parses args with a fresh root's own flags, so a broken flag registration fails
+// the caller.
 func executeRootCommand(t *testing.T, args []string) error {
 	t.Helper()
-	RootCmd.SetArgs(args)
-	t.Cleanup(func() {
-		RootCmd.SetArgs(nil)
-		resetChangedFlags(t, RootCmd)
-	})
-	_, err := RootCmd.ExecuteC()
+	root := newRootCmd(client.NewAlpaconAPIClient, utils.Stdio)
+	root.SetArgs(args)
+	_, err := root.ExecuteC()
 	return err
-}
-
-func resetChangedFlags(t *testing.T, cmd *cobra.Command) {
-	t.Helper()
-	for _, flags := range []*pflag.FlagSet{cmd.LocalNonPersistentFlags(), cmd.PersistentFlags()} {
-		flags.VisitAll(func(flag *pflag.Flag) {
-			if flag.Changed {
-				require.NoError(t, flag.Value.Set(flag.DefValue))
-				flag.Changed = false
-			}
-		})
-	}
-	for _, child := range cmd.Commands() {
-		resetChangedFlags(t, child)
-	}
 }

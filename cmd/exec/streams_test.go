@@ -16,7 +16,7 @@ import (
 
 func TestExecAppliesItsOwnOutputFlagToTheInjectedStreams(t *testing.T) {
 	t.Parallel()
-	build := func(ios *utils.IOStreams) *cobra.Command { return newCommand(cmdtest.NoClient, ios) }
+	build := func(ios *utils.IOStreams) *cobra.Command { return NewExecCmd(cmdtest.NoClient, ios) }
 
 	_, stderr, code := cmdtest.RunCaptured(build, "--output", "json", "--bogus")
 
@@ -65,7 +65,7 @@ func TestExecDetachPrintsIntoTheStreamsItWasBuiltWith(t *testing.T) {
 			require.NoError(t, os.WriteFile(script, []byte("#!/bin/bash\necho deploy\n"), 0o600))
 			ios, out, errOut := utils.TestIOStreams()
 			require.NoError(t, ios.SetOutputFormat(tt.format))
-			command := newCommand(testClientFactory(ts.URL), ios)
+			command := NewExecCmd(testClientFactory(ts.URL), ios)
 
 			err := command.RunE(command, []string{"--detach", "--file", "/opt/deploy.sh", "--file-from", script, "root@prod"})
 

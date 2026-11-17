@@ -2,12 +2,9 @@ package worksession
 
 import (
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var workSessionCancelCmd = newWorkSessionCancelCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newWorkSessionCancelCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

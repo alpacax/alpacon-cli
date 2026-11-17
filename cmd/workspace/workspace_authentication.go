@@ -2,16 +2,13 @@ package workspace
 
 import (
 	"github.com/alpacax/alpacon-cli/api/workspace"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var workspaceAuthenticationCmd = newWorkspaceAuthenticationCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newWorkspaceAuthenticationCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:     "authentication",
 		Aliases: []string{"auth"},
 		Short:   "Retrieve workspace authentication settings",
@@ -41,8 +38,6 @@ func newWorkspaceAuthenticationCmd(newClient clientFactory, ios *utils.IOStreams
 			return ios.PrintJson(authenticationDetail)
 		}),
 	}
-}
-
-func init() {
-	workspaceAuthenticationCmd.AddCommand(workspaceAuthenticationUpdateCmd)
+	cmd.AddCommand(newWorkspaceAuthenticationUpdateCmd(newClient, ios))
+	return cmd
 }

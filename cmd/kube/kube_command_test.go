@@ -44,8 +44,8 @@ func runKubeCommand(t *testing.T, outputFormat string, args ...string) (stdout, 
 func runKubeCommandWith(t *testing.T, newClient clientFactory, outputFormat string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
 	withOutputFormat(t, outputFormat)
-	cmd := newKubeCmd(newClient, utils.Stdio)
-	cmd.SilenceErrors, cmd.SilenceUsage = true, true // as RootCmd is
+	cmd := NewKubeCmd(newClient, utils.Stdio)
+	cmd.SilenceErrors, cmd.SilenceUsage = true, true // as the root is
 	utils.MarkHookErrors(cmd)
 	cmd.SetArgs(args)
 	var err error
@@ -304,7 +304,7 @@ func TestKubeSessionsCommandRefusals(t *testing.T) {
 			defer ts.Close()
 
 			_, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
-				return newKubeCmd(apiClientTo(ts), ios)
+				return NewKubeCmd(apiClientTo(ts), ios)
 			}, tt.args...)
 
 			assert.Equal(t, tt.wantCode, code, stderr)

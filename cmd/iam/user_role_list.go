@@ -4,12 +4,9 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/rbac"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var userRoleListCmd = newUserRoleListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newUserRoleListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -119,6 +119,12 @@ func runWorkSessionHelper(t *testing.T, outputFormat, serverURL string, args ...
 // It sets process-wide state (env, utils.OutputFormat, stdin, stdout and stderr), so its callers stay serial.
 func runWorkSessionHelperWithEnv(t *testing.T, env []string, outputFormat, serverURL string, args ...string) (string, string, int) {
 	t.Helper()
+	return runWorkSessionTree(t, NewWorkSessionCmd(client.NewAlpaconAPIClient, utils.Stdio), env, outputFormat, serverURL, args...)
+}
+
+// runWorkSessionTree is runWorkSessionHelperWithEnv on a tree the caller built.
+func runWorkSessionTree(t *testing.T, root *cobra.Command, env []string, outputFormat, serverURL string, args ...string) (string, string, int) {
+	t.Helper()
 	// outputFormat and serverURL are adjacent strings: a transposed call site
 	// still compiles.
 	require.Contains(t, []string{utils.OutputFormatTable, utils.OutputFormatJSON}, outputFormat)
@@ -137,17 +143,14 @@ func runWorkSessionHelperWithEnv(t *testing.T, env []string, outputFormat, serve
 	t.Cleanup(func() {
 		utils.OutputFormat, os.Stdin = origFormat, origStdin
 		_ = stdin.Close()
-		resetWorkSessionFlags(WorkSessionCmd)
 	})
 	utils.OutputFormat, os.Stdin = outputFormat, stdin
-	resetWorkSessionFlags(WorkSessionCmd)
 
-	WorkSessionCmd.SetArgs(args)
-	restore := utils.MarkHookErrors(WorkSessionCmd)
-	defer restore()
+	root.SetArgs(args)
+	utils.MarkHookErrors(root)
 	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		runErr = WorkSessionCmd.Execute()
+		runErr = root.Execute()
 		if exitErr, ok := errors.AsType[*utils.ExitError](runErr); ok {
 			utils.FprintExitError(os.Stderr, exitErr)
 		}
@@ -162,23 +165,6 @@ func runWorkSessionHelperWithEnv(t *testing.T, env []string, outputFormat, serve
 		return stdout, stderr, utils.ExitCodeGeneralError // cmd.Execute exits 1 on a hook's own unmarked error
 	}
 	return stdout, stderr, utils.ExitCodeUsageError // a Cobra error or a usage-marked hook error
-}
-
-// resetWorkSessionFlags restores every flag in cmd's tree to its unchanged default and un-silences Cobra:
-// the package-level commands retain flag values between runs.
-func resetWorkSessionFlags(cmd *cobra.Command) {
-	cmd.SilenceErrors, cmd.SilenceUsage = false, false
-	cmd.Flags().VisitAll(func(f *pflag.Flag) {
-		if slice, ok := f.Value.(pflag.SliceValue); ok {
-			_ = slice.Replace(nil)
-		} else {
-			_ = f.Value.Set(f.DefValue)
-		}
-		f.Changed = false
-	})
-	for _, sub := range cmd.Commands() {
-		resetWorkSessionFlags(sub)
-	}
 }
 
 func writeWorkSessionTestConfig(t *testing.T, home, workspaceURL string) {
@@ -212,10 +198,10 @@ func TestRunWorkSessionHelper_ExitsLikeExecuteForAnErrorRunEReturns(t *testing.T
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			probe := &cobra.Command{Use: "probe", RunE: func(*cobra.Command, []string) error { return tc.err }}
-			WorkSessionCmd.AddCommand(probe)
-			t.Cleanup(func() { WorkSessionCmd.RemoveCommand(probe) })
+			root := NewWorkSessionCmd(client.NewAlpaconAPIClient, utils.Stdio)
+			root.AddCommand(probe)
 
-			_, _, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, "http://127.0.0.1:1", "probe")
+			_, _, exitCode := runWorkSessionTree(t, root, nil, utils.OutputFormatTable, "http://127.0.0.1:1", "probe")
 
 			assert.Equal(t, tc.wantCode, exitCode)
 		})

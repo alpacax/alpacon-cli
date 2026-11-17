@@ -40,7 +40,7 @@ func executeWebsh(newClient clientFactory, args ...string) (stderr string, code 
 func executeWebshCaptured(newClient clientFactory, args ...string) (stdout, stderr, failure string, code int) {
 	ios, outBuf, errBuf := utils.TestIOStreams()
 	command := &cobra.Command{Use: "alpacon"}
-	command.AddCommand(newCommand(newClient, ios))
+	command.AddCommand(NewWebshCmd(newClient, ios))
 	command.SetArgs(append([]string{"websh"}, args...))
 	command.SetOut(ios.Out)
 	command.SetErr(ios.ErrOut)

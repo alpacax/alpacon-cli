@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -38,6 +39,7 @@ func TestSetUsernameErrorText(t *testing.T) {
 }
 
 func TestUsernameGetCommand_StripsControlSequences(t *testing.T) {
+	usernameGetCmd := newUsernameGetCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	// JSON escapes it on the wire, so what reaches the printer is a real ESC byte.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

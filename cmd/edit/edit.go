@@ -43,9 +43,7 @@ var guiEditors = map[string]bool{
 	"zed":           true,
 }
 
-var EditCmd = newEditCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
-func newEditCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+func NewEditCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "edit [USER@]SERVER:PATH",
 		Short: "Edit a remote file with your local editor",

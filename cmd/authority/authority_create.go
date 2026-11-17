@@ -10,8 +10,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var authorityCreateCmd = newAuthorityCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newAuthorityCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "create",

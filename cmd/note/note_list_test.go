@@ -13,6 +13,8 @@ import (
 )
 
 func TestNoteLsParsesFlags(t *testing.T) {
+	t.Parallel()
+	noteCmd := NewNoteCmd(cmdtest.NoClient, utils.Stdio)
 	tests := []struct {
 		name           string
 		args           []string
@@ -47,7 +49,7 @@ func TestNoteLsParsesFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd, flags, err := NoteCmd.Find(tt.args)
+			cmd, flags, err := noteCmd.Find(tt.args)
 			require.NoError(t, err)
 			require.Equal(t, "ls", cmd.Name())
 

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/auth0"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
@@ -883,12 +884,9 @@ func runLoginCommandHelper(t *testing.T, args []string) (stdout, stderr string, 
 			noBrowserValue = true
 		}
 	}
+	loginCmd := newLoginCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	require.NoError(t, loginCmd.Flags().Set("token", token))
 	require.NoError(t, loginCmd.Flags().Set("no-browser", fmt.Sprintf("%t", noBrowserValue)))
-	t.Cleanup(func() {
-		require.NoError(t, loginCmd.Flags().Set("token", ""))
-		require.NoError(t, loginCmd.Flags().Set("no-browser", "false"))
-	})
 
 	var runErr error
 	stdout, stderr = testutil.CaptureOutput(t, func() {

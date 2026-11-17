@@ -6,12 +6,9 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/rbac"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var userRoleHistoryCmd = newUserRoleHistoryCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newUserRoleHistoryCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{

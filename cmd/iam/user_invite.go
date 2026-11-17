@@ -4,13 +4,10 @@ import (
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/iam"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var userInviteCmd = newUserInviteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newUserInviteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

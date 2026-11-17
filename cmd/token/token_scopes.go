@@ -2,12 +2,9 @@ package token
 
 import (
 	"github.com/alpacax/alpacon-cli/api/auth"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var tokenScopesCmd = newTokenScopesCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newTokenScopesCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

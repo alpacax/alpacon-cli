@@ -12,10 +12,11 @@ import (
 // selfUserPK is the alias the IAM user routes accept in place of a UUID to mean the caller.
 const selfUserPK = "-"
 
-var userRoleCmd = &cobra.Command{
-	Use:   "role",
-	Short: "Manage the workspace roles a user holds",
-	Long: `Grant and revoke the workspace RBAC roles a user holds.
+func newUserRoleCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "role",
+		Short: "Manage the workspace roles a user holds",
+		Long: `Grant and revoke the workspace RBAC roles a user holds.
 
 A role binding is immutable—the server has no update path, so changing a user's
 roles means revoking one binding and granting another. Bindings created here are
@@ -43,15 +44,25 @@ run 'alpacon login' first.
 gate that refuses tokens elsewhere and asks instead for a token carrying the
 role_audit_log:read scope. How far it reaches depends on the reader, and it says
 so above its table.`,
-	Example: `  alpacon user role ls john
+		Example: `  alpacon user role ls john
   alpacon user role catalog
   alpacon user role describe superuser
   alpacon user role grant john operator --reason "on-call rotation Q3"
   alpacon user role revoke john superuser --cascade
   alpacon user role history john`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return utils.RequireSubcommand(cmd)
-	},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return utils.RequireSubcommand(cmd)
+		},
+	}
+	cmd.AddCommand(
+		newUserRoleListCmd(newClient, ios),
+		newUserRoleCatalogCmd(newClient, ios),
+		newUserRoleDescribeCmd(newClient, ios),
+		newUserRoleGrantCmd(newClient, ios),
+		newUserRoleRevokeCmd(newClient, ios),
+		newUserRoleHistoryCmd(newClient, ios),
+	)
+	return cmd
 }
 
 // subject is who a command acts on. PK addresses the user in the path: "-", the server's self
@@ -62,15 +73,6 @@ type subject struct {
 	PK    string
 	ID    string
 	Label string
-}
-
-func init() {
-	userRoleCmd.AddCommand(userRoleListCmd)
-	userRoleCmd.AddCommand(userRoleCatalogCmd)
-	userRoleCmd.AddCommand(userRoleDescribeCmd)
-	userRoleCmd.AddCommand(userRoleGrantCmd)
-	userRoleCmd.AddCommand(userRoleRevokeCmd)
-	userRoleCmd.AddCommand(userRoleHistoryCmd)
 }
 
 func resolveSubject(ac *client.AlpaconClient, args []string) (subject, error) {

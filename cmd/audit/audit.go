@@ -10,9 +10,7 @@ import (
 // clientFactory builds the API client a command talks to.
 type clientFactory = func() (*client.AlpaconClient, error)
 
-var AuditCmd = newAuditCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
-func newAuditCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+func NewAuditCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "audit",
 		Aliases: []string{"audit-log"},

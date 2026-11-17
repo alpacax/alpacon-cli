@@ -194,6 +194,7 @@ func TestCreateSignRequestErrorText_ServerHintReplacesTheLocalSentence(t *testin
 
 // A failed home lookup fails csr create alone, as an ExitError from its RunE.
 func TestCSRCreateReturnsHomeLookupFailure(t *testing.T) {
+	csrCreateCmd := newCsrCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	home := t.TempDir() // no config here, so the command never reaches a real workspace
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)

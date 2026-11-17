@@ -44,15 +44,18 @@ import (
 // clientFactory builds the API client a command talks to.
 type clientFactory = func() (*client.AlpaconClient, error)
 
-var showVersion bool
-
-var RootCmd = &cobra.Command{
-	Use:           "alpacon",
-	Aliases:       []string{"ac"},
-	SilenceErrors: true, // Execute reports every error once, in the --output format
-	SilenceUsage:  true,
-	Short:         "Use Alpacon, the AI-native PAM, from the terminal",
-	Long: `Alpacon CLI is the command-line client for Alpacon, the AI-native PAM.
+// newRootCmd builds the whole command tree, handing each command the client factory and the streams it takes.
+func newRootCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	var showVersion bool
+	var output string
+	versionCmd := newVersionCmd(ios)
+	root := &cobra.Command{
+		Use:           "alpacon",
+		Aliases:       []string{"ac"},
+		SilenceErrors: true, // Execute reports every error once, in the --output format
+		SilenceUsage:  true,
+		Short:         "Use Alpacon, the AI-native PAM, from the terminal",
+		Long: `Alpacon CLI is the command-line client for Alpacon, the AI-native PAM.
 Humans, AI agents, and CI/CD run commands—each judged, recorded, and bounded.
 
 Quick start (for humans and AI agents):
@@ -76,25 +79,67 @@ session that targets the cluster (scopes kube, kube_exec) and writes the
 kubeconfig context kubectl uses.
 
 See 'alpacon work-session --help' for session lifecycle and error codes.`,
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		return utils.SetOutputFormat(utils.OutputFormat)
-	},
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		if showVersion {
-			return runVersion(utils.Stdio)
-		}
-		utils.ShowLogo(buildWelcomeLines())
-		return nil
-	}),
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			return ios.SetOutputFormat(output)
+		},
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			if showVersion {
+				return runVersion(ios)
+			}
+			utils.ShowLogo(buildWelcomeLines())
+			return nil
+		}),
+	}
+	// A local, not utils.OutputFormat: binding the global would write its default each time a tree is built.
+	root.PersistentFlags().StringVar(&output, "output", utils.OutputFormatTable, "Output format: table or json")
+	root.Flags().BoolVarP(&showVersion, "version", "v", false, versionCmd.Short)
+	root.AddCommand(
+		versionCmd,
+		newUpdateCmd(ios),
+		newLoginCmd(newClient, ios),
+		newLogoutCmd(newClient, ios),
+		iam.NewUserCmd(newClient, ios),
+		iam.NewGroupCmd(newClient, ios),
+		server.NewServerCmd(newClient, ios),
+		agent.NewAgentCmd(newClient, ios),
+		apicmd.NewApiCmd(newClient),
+		websh.NewWebshCmd(newClient, ios),
+		exec.NewExecCmd(newClient, ios),
+		ftp.NewCpCmd(newClient, ios),
+		edit.NewEditCmd(newClient, ios),
+		packages.NewPackagesCmd(newClient, ios),
+		log.NewLogCmd(newClient, ios),
+		event.NewEventCmd(newClient, ios),
+		note.NewNoteCmd(newClient, ios),
+		authority.NewAuthorityCmd(newClient, ios),
+		csr.NewCsrCmd(newClient, ios),
+		cert.NewCertCmd(newClient, ios),
+		token.NewTokenCmd(newClient, ios),
+		tunnel.NewTunnelCmd(newClient, ios),
+		username.NewUsernameCmd(newClient, ios),
+		workspace.NewWorkspaceCmd(newClient, ios),
+		revoke.NewRevokeCmd(newClient, ios),
+		audit.NewAuditCmd(newClient, ios),
+		webhook.NewWebhookCmd(newClient, ios),
+		webftp.NewWebFTPCmd(newClient, ios),
+		worksession.NewWorkSessionCmd(newClient, ios),
+		approval.NewApprovalCmd(newClient, ios),
+		kube.NewKubeCmd(newClient, ios),
+		acl.NewAclCmd(ios),
+		newWhoamiCmd(newClient, ios),
+	)
+	return root
 }
 
 func Execute() {
-	kube.ApplySurfaceGate(RootCmd, kubernetesSurfaceEnabled())
-	RootCmd.InitDefaultCompletionCmd()
-	rejectUnknownSubcommands(RootCmd)
-	utils.MarkHookErrors(RootCmd)
-	keepWithOwnParser(RootCmd, os.Args[1:])
-	cmd, err := RootCmd.ExecuteC()
+	utils.LocalSignalConsoleOrigin = localSignalConsoleOrigin
+	root := newRootCmd(client.NewAlpaconAPIClient, utils.Stdio)
+	kube.ApplySurfaceGate(root, kubernetesSurfaceEnabled())
+	root.InitDefaultCompletionCmd()
+	rejectUnknownSubcommands(root)
+	utils.MarkHookErrors(root)
+	keepWithOwnParser(root, os.Args[1:])
+	cmd, err := root.ExecuteC()
 	exitErr, isExitErr := errors.AsType[*utils.ExitError](err)
 	switch {
 	case err == nil:
@@ -163,84 +208,13 @@ func kubernetesSurfaceEnabled() bool {
 	return (cfg.AccessToken != "" || cfg.Token != "") && cfg.KubernetesSurface
 }
 
-func init() {
-	utils.LocalSignalConsoleOrigin = func() (string, string) {
-		cfg, err := config.LoadConfig()
-		if err != nil {
-			return "", ""
-		}
-		return cfg.WorkspaceURL, cfg.BaseDomain
+// localSignalConsoleOrigin names the console a local signal links to, from the saved login.
+func localSignalConsoleOrigin() (string, string) {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return "", ""
 	}
-	RootCmd.PersistentFlags().StringVar(
-		&utils.OutputFormat, "output", utils.OutputFormatTable,
-		"Output format: table or json",
-	)
-
-	RootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, versionCmd.Short)
-	RootCmd.AddCommand(versionCmd)
-
-	RootCmd.AddCommand(updateCmd)
-
-	RootCmd.AddCommand(loginCmd)
-
-	RootCmd.AddCommand(logoutCmd)
-
-	RootCmd.AddCommand(iam.UserCmd)
-	RootCmd.AddCommand(iam.GroupCmd)
-
-	RootCmd.AddCommand(server.ServerCmd)
-
-	RootCmd.AddCommand(agent.AgentCmd)
-
-	RootCmd.AddCommand(apicmd.ApiCmd)
-
-	RootCmd.AddCommand(websh.WebshCmd)
-
-	RootCmd.AddCommand(exec.ExecCmd)
-
-	RootCmd.AddCommand(ftp.CpCmd)
-
-	RootCmd.AddCommand(edit.EditCmd)
-
-	RootCmd.AddCommand(packages.PackagesCmd)
-
-	RootCmd.AddCommand(log.LogCmd)
-
-	RootCmd.AddCommand(event.EventCmd)
-
-	RootCmd.AddCommand(note.NoteCmd)
-
-	RootCmd.AddCommand(authority.AuthorityCmd)
-
-	RootCmd.AddCommand(csr.CsrCmd)
-
-	RootCmd.AddCommand(cert.CertCmd)
-
-	RootCmd.AddCommand(token.TokenCmd)
-
-	RootCmd.AddCommand(tunnel.TunnelCmd)
-
-	RootCmd.AddCommand(username.UsernameCmd)
-
-	RootCmd.AddCommand(workspace.WorkspaceCmd)
-
-	RootCmd.AddCommand(revoke.RevokeCmd)
-
-	RootCmd.AddCommand(audit.AuditCmd)
-
-	RootCmd.AddCommand(webhook.WebhookCmd)
-
-	RootCmd.AddCommand(webftp.WebFTPCmd)
-
-	RootCmd.AddCommand(worksession.WorkSessionCmd)
-
-	RootCmd.AddCommand(approval.ApprovalCmd)
-
-	RootCmd.AddCommand(kube.KubeCmd)
-
-	RootCmd.AddCommand(acl.AclCmd)
-
-	RootCmd.AddCommand(whoamiCmd)
+	return cfg.WorkspaceURL, cfg.BaseDomain
 }
 
 // buildWelcomeLines composes the lines shown beside the Pacabot art when alpacon

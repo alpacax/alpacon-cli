@@ -13,10 +13,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var AclCmd = &cobra.Command{
-	Use:   "acl",
-	Short: "Manage pre-approved commands",
-	Long: `Manage the command pre-approval ledger: the pre-approved commands a service
+func NewAclCmd(ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "acl",
+		Short: "Manage pre-approved commands",
+		Long: `Manage the command pre-approval ledger: the pre-approved commands a service
 token may run without each run being judged again, and the Command ACL admins
 who may change them. The web console shows the same entries under
 Pre-approved commands on a service token's page. A personal API token has no
@@ -33,14 +34,15 @@ ledger keep managing command ACLs with 'alpacon token acl command'.
 
 Set ALPACON_AI_URL to reach a self-hosted command signer; Alpacon Cloud
 workspaces need no configuration.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return utils.RequireSubcommand(cmd)
-	},
-}
-
-func init() {
-	AclCmd.AddCommand(entryCmd)
-	AclCmd.AddCommand(adminCmd)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return utils.RequireSubcommand(cmd)
+		},
+	}
+	cmd.AddCommand(
+		newEntryCmd(ios),
+		newAdminCmd(ios),
+	)
+	return cmd
 }
 
 // errEmptyServerScope refuses an empty server value: an empty scope is every

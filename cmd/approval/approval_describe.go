@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	approvalapi "github.com/alpacax/alpacon-cli/api/approval"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -15,8 +14,6 @@ type describeRow struct {
 	Field string `table:"Field"`
 	Value string `table:"Value"`
 }
-
-var approvalDescribeCmd = newApprovalDescribeCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newApprovalDescribeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

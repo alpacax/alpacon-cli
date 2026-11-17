@@ -2,12 +2,9 @@ package revoke
 
 import (
 	"github.com/alpacax/alpacon-cli/api/cert"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var revokeListCmd = newRevokeListCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newRevokeListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{

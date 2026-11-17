@@ -2,13 +2,10 @@ package agent
 
 import (
 	"github.com/alpacax/alpacon-cli/api/server"
-	"github.com/alpacax/alpacon-cli/client"
 	servercmd "github.com/alpacax/alpacon-cli/cmd/server"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var installPAMCmd = newInstallPAMCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newInstallPAMCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{

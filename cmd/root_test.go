@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -76,7 +77,7 @@ func TestBuildWelcomeLines(t *testing.T) {
 func TestLocalSignalConsoleOrigin(t *testing.T) {
 	home := t.TempDir()
 	setTestHome(t, home)
-	workspace, base := utils.LocalSignalConsoleOrigin()
+	workspace, base := localSignalConsoleOrigin()
 	assert.Empty(t, workspace)
 	assert.Empty(t, base)
 
@@ -84,12 +85,12 @@ func TestLocalSignalConsoleOrigin(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dir, 0700))
 	file := filepath.Join(dir, "config.json")
 	require.NoError(t, os.WriteFile(file, []byte(`{"workspace_url":"https://my-workspace.ap1.alpacon.io","base_domain":"alpacon.io"}`), 0600))
-	workspace, base = utils.LocalSignalConsoleOrigin()
+	workspace, base = localSignalConsoleOrigin()
 	assert.Equal(t, "https://my-workspace.ap1.alpacon.io", workspace)
 	assert.Equal(t, "alpacon.io", base)
 
 	require.NoError(t, os.WriteFile(file, []byte(`{"workspace_url":"http://10.0.0.5:8080"}`), 0600))
-	workspace, base = utils.LocalSignalConsoleOrigin()
+	workspace, base = localSignalConsoleOrigin()
 	assert.Equal(t, "http://10.0.0.5:8080", workspace)
 	assert.Empty(t, base)
 }
@@ -118,7 +119,8 @@ func TestHostFromURL(t *testing.T) {
 }
 
 func TestRootRegistersAPICommand(t *testing.T) {
-	command, _, err := RootCmd.Find([]string{"api"})
+	t.Parallel()
+	command, _, err := newTestRoot().Find([]string{"api"})
 
 	require.NoError(t, err)
 	assert.Equal(t, "api", command.Name())
@@ -342,4 +344,10 @@ func TestRejectUnknownSubcommandsRespectsCommandSettings(t *testing.T) {
 	require.NoError(t, declared.ValidateArgs([]string{"word"}))
 	require.ErrorContains(t, parent.ValidateArgs([]string{"word"}), "unknown command")
 	assert.ErrorContains(t, nested.ValidateArgs([]string{"word"}), "unknown command")
+}
+
+// newTestRoot builds a tree that dials nothing and writes to its own buffers, so parallel tests can share none of it.
+func newTestRoot() *cobra.Command {
+	ios, _, _ := utils.TestIOStreams()
+	return newRootCmd(cmdtest.NoClient, ios)
 }

@@ -4,12 +4,9 @@ import (
 	"fmt"
 
 	"github.com/alpacax/alpacon-cli/api/cert"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var authorityDeleteCmd = newAuthorityDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newAuthorityDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{

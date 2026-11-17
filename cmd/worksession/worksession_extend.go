@@ -6,13 +6,10 @@ import (
 	"strings"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var workSessionExtendCmd = newWorkSessionExtendCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newWorkSessionExtendCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var (

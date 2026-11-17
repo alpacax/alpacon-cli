@@ -38,8 +38,6 @@ const (
 
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh", ScopeKube, ScopeKubeExec}
 
-var workSessionCreateCmd = newWorkSessionCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newWorkSessionCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var (
 		purpose          string

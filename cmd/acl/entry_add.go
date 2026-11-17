@@ -16,10 +16,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var entryAddCmd = &cobra.Command{
-	Use:   "add",
-	Short: "Pre-approve a command for a service token",
-	Long: `Pre-approve a command pattern for a service token.
+func newEntryAddCmd(ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add",
+		Short: "Pre-approve a command for a service token",
+		Long: `Pre-approve a command pattern for a service token.
 
 Use * as a wildcard for arguments; a pattern without one pre-approves that exact
 command line.
@@ -43,26 +44,25 @@ out; it can only be service_token.
 Only a service token can be pre-approved commands: a personal API token has no
 command list on the ledger. Existing entries for personal API tokens are still
 listed and can be revoked.`,
-	Example: `  alpacon acl entry add --token deploy-bot --command "systemctl restart nginx" \
+		Example: `  alpacon acl entry add --token deploy-bot --command "systemctl restart nginx" \
     --server web-01
 
   alpacon acl entry add --token deploy-bot --command "docker compose *" \
     --username deploy --server web-01,web-02 --expires-at 2027-01-15T10:00:00Z
 
   alpacon acl entry add --file entries.json`,
-	Args: cobra.NoArgs,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error { return runEntryAdd(utils.Stdio, cmd, args) }),
-}
-
-func init() {
-	entryAddCmd.Flags().String("token", "", "Service token the entry pre-approves the command for (name or ID)")
-	entryAddCmd.Flags().StringP("command", "c", "", "Command pattern to pre-approve (supports * wildcard)")
-	entryAddCmd.Flags().String("username", "", "Omit to pin the entry to the application's own account; '' or * matches any account bound to the application on that server; the application username matches only its own account; any other value is refused")
-	entryAddCmd.Flags().String("groupname", "", "'' or * sets no group restriction; the application username matches its own group; any other value is refused")
-	entryAddCmd.Flags().StringSlice("server", nil, "Servers the entry covers, by name or ID (repeatable or comma-separated; default: every server)")
-	entryAddCmd.Flags().String("expires-at", "", "Expiry time in RFC 3339 (default: no expiry)")
-	entryAddCmd.Flags().Bool("disabled", false, "Issue the entry disabled")
-	entryAddCmd.Flags().String("file", "", "Issue every entry in this JSON file")
+		Args: cobra.NoArgs,
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error { return runEntryAdd(ios, cmd, args) }),
+	}
+	cmd.Flags().String("token", "", "Service token the entry pre-approves the command for (name or ID)")
+	cmd.Flags().StringP("command", "c", "", "Command pattern to pre-approve (supports * wildcard)")
+	cmd.Flags().String("username", "", "Omit to pin the entry to the application's own account; '' or * matches any account bound to the application on that server; the application username matches only its own account; any other value is refused")
+	cmd.Flags().String("groupname", "", "'' or * sets no group restriction; the application username matches its own group; any other value is refused")
+	cmd.Flags().StringSlice("server", nil, "Servers the entry covers, by name or ID (repeatable or comma-separated; default: every server)")
+	cmd.Flags().String("expires-at", "", "Expiry time in RFC 3339 (default: no expiry)")
+	cmd.Flags().Bool("disabled", false, "Issue the entry disabled")
+	cmd.Flags().String("file", "", "Issue every entry in this JSON file")
+	return cmd
 }
 
 func runEntryAdd(ios *utils.IOStreams, cmd *cobra.Command, args []string) error {

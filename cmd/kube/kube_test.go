@@ -101,7 +101,7 @@ func TestKubeListPrintsTable(t *testing.T) {
 	ts := httptest.NewServer(f.handler(t))
 	defer ts.Close()
 	stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
-		return newKubeCmd(apiClientTo(ts), ios)
+		return NewKubeCmd(apiClientTo(ts), ios)
 	}, "ls")
 
 	require.Equal(t, 0, code, stderr)
@@ -117,7 +117,7 @@ func TestKubeListJSON(t *testing.T) {
 	ts := httptest.NewServer(f.handler(t))
 	defer ts.Close()
 	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command {
-		return newKubeCmd(apiClientTo(ts), ios)
+		return NewKubeCmd(apiClientTo(ts), ios)
 	}, "ls")
 
 	require.Equal(t, 0, code, stderr)
@@ -134,7 +134,7 @@ func TestKubeListEmptyJSON(t *testing.T) {
 	ts := httptest.NewServer(f.handler(t))
 	defer ts.Close()
 	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command {
-		return newKubeCmd(apiClientTo(ts), ios)
+		return NewKubeCmd(apiClientTo(ts), ios)
 	}, "ls")
 
 	require.Equal(t, 0, code, stderr)
@@ -148,7 +148,7 @@ func TestKubeDescribePrintsRows(t *testing.T) {
 	ts := httptest.NewServer(f.handler(t))
 	defer ts.Close()
 	stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
-		return newKubeCmd(apiClientTo(ts), ios)
+		return NewKubeCmd(apiClientTo(ts), ios)
 	}, "describe", "prod-east")
 
 	require.Equal(t, 0, code, stderr)
@@ -169,7 +169,7 @@ func TestKubeDescribeJSONIsRawBody(t *testing.T) {
 	ts := httptest.NewServer(f.handler(t))
 	defer ts.Close()
 	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command {
-		return newKubeCmd(apiClientTo(ts), ios)
+		return NewKubeCmd(apiClientTo(ts), ios)
 	}, "describe", "prod-east")
 
 	require.Equal(t, 0, code, stderr)
@@ -194,18 +194,20 @@ func TestKubeDescribeGroupLookupFailureShowsUUIDs(t *testing.T) {
 
 // Serial: it reads the package-level KubeCmd.
 func TestKubeCommandNamesAndAliases(t *testing.T) {
-	assert.Equal(t, "kube", KubeCmd.Name())
-	assert.Equal(t, []string{"k8s", "clusters"}, KubeCmd.Aliases)
+	t.Parallel()
+	kubeCmd := NewKubeCmd(cmdtest.NoClient, utils.Stdio)
+	assert.Equal(t, "kube", kubeCmd.Name())
+	assert.Equal(t, []string{"k8s", "clusters"}, kubeCmd.Aliases)
 	for name, aliases := range map[string][]string{"ls": {"list"}, "describe": {"desc"}} {
-		sub, _, err := KubeCmd.Find([]string{name})
+		sub, _, err := kubeCmd.Find([]string{name})
 		require.NoError(t, err)
 		assert.Equal(t, aliases, sub.Aliases)
 	}
 
 	for _, path := range [][]string{{"ls"}, {"list"}, {"describe"}, {"desc"}, {"config"}, {"login"}, {"credentials"}, {"proxy"}, {"logout"}, {"sessions"}} {
-		found, _, err := KubeCmd.Find(path)
+		found, _, err := kubeCmd.Find(path)
 		require.NoError(t, err, "%v", path)
-		assert.NotSame(t, KubeCmd, found, "%v must resolve to a subcommand", path)
+		assert.NotSame(t, kubeCmd, found, "%v must resolve to a subcommand", path)
 	}
 }
 

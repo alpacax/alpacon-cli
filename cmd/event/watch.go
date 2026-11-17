@@ -15,8 +15,6 @@ import (
 // Covers one provision + dial (watchHandshakeTimeout in api/event) plus the subscribe.
 const watchConnectTimeout = 15 * time.Second
 
-var watchCmd = newWatchCommand(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newWatchCommand(newClient func() (*client.AlpaconClient, error), ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "watch",
@@ -44,10 +42,6 @@ Run 'alpacon work-session ls' or the Alpacon console to find a target ID.`,
 	cmd.Flags().String("type", "", "Event type to subscribe to, e.g. work_session or notification (required)")
 	cmd.Flags().String("target", "", "Target resource ID; omit where the server allows a subscription without one")
 	return cmd
-}
-
-func init() {
-	EventCmd.AddCommand(watchCmd)
 }
 
 func runWatch(ios *utils.IOStreams, cmd *cobra.Command, newClient func() (*client.AlpaconClient, error)) error {

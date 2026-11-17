@@ -2,12 +2,9 @@ package server
 
 import (
 	"github.com/alpacax/alpacon-cli/api/server"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var serverDetailCmd = newServerDetailCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 func newServerDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{

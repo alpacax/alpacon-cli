@@ -11,21 +11,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclServerCmd = &cobra.Command{
-	Use:   "server",
-	Short: "Manage server ACL rules for a token",
-	Long: `Control which servers an API token can access.
+func newAclServerCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "server",
+		Short: "Manage server ACL rules for a token",
+		Long: `Control which servers an API token can access.
 
 Deny-by-default: if no server ACL exists for a token, access to all servers is denied.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return utils.RequireSubcommand(cmd)
-	},
-}
-
-func init() {
-	aclServerCmd.AddCommand(aclServerAddCmd)
-	aclServerCmd.AddCommand(aclServerListCmd)
-	aclServerCmd.AddCommand(aclServerDeleteCmd)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return utils.RequireSubcommand(cmd)
+		},
+	}
+	cmd.AddCommand(
+		newAclServerAddCmd(newClient, ios),
+		newAclServerListCmd(newClient, ios),
+		newAclServerDeleteCmd(newClient, ios),
+	)
+	return cmd
 }
 
 // maxConcurrentServerLookups bounds the burst a long --servers list sends at once.

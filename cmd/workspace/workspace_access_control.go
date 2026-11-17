@@ -2,15 +2,12 @@ package workspace
 
 import (
 	"github.com/alpacax/alpacon-cli/api/workspace"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var workspaceAccessControlCmd = newWorkspaceAccessControlCmd(client.NewAlpaconAPIClient, utils.Stdio)
-
 func newWorkspaceAccessControlCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:     "access-control",
 		Aliases: []string{"acl"},
 		Short:   "Retrieve workspace access control settings",
@@ -32,8 +29,6 @@ func newWorkspaceAccessControlCmd(newClient clientFactory, ios *utils.IOStreams)
 			return ios.PrintJson(accessControlDetail)
 		}),
 	}
-}
-
-func init() {
-	workspaceAccessControlCmd.AddCommand(workspaceAccessControlUpdateCmd)
+	cmd.AddCommand(newWorkspaceAccessControlUpdateCmd(newClient, ios))
+	return cmd
 }
