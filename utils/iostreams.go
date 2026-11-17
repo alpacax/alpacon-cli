@@ -66,8 +66,8 @@ type stdoutWriter struct{}
 
 func (stdoutWriter) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
 
-// Pager returns where a table goes: through the pager for the process's stdout, and straight
-// to Out for any other writer, which is never a terminal.
+// Pager returns where a table goes: through the process pager when Out is the process's stdout
+// writer, and straight to Out for any other writer.
 func (s *IOStreams) Pager() (io.Writer, func()) {
 	if _, ok := s.Out.(stdoutWriter); ok {
 		return WriteToPager()
