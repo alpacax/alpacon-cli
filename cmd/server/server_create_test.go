@@ -15,7 +15,6 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -49,12 +48,6 @@ func TestPrintGuideFields_StripsControlSequences(t *testing.T) {
 	assert.Equal(t, 3, strings.Count(got, "\n"), "one line per field")
 	assert.Contains(t, got, "  Platform : Debian\n")
 	assert.Contains(t, got, "  Server   : web-01URL      : https://evil.example.com\n")
-}
-
-func captureGuideStderr(t *testing.T, fn func()) string {
-	t.Helper()
-	_, stderr := testutil.CaptureOutput(t, fn)
-	return stderr
 }
 
 // The guide strings are what the operator pastes into a root shell, so the
@@ -109,6 +102,7 @@ func TestPrintGuideCommand(t *testing.T) {
 // Every command the guide echoes must be sanitized; one added to the response and
 // printed directly would slip past unnoticed.
 func TestDisplayAnsibleGuideFromJSON_WarnsOnEveryAlteredField(t *testing.T) {
+	t.Parallel()
 	fields := []struct {
 		name  string
 		build func(string) server.AnsibleGuideJsonResponse
@@ -131,9 +125,10 @@ func TestDisplayAnsibleGuideFromJSON_WarnsOnEveryAlteredField(t *testing.T) {
 	}
 	for _, f := range fields {
 		t.Run(f.name, func(t *testing.T) {
-			got := captureGuideStderr(t, func() {
-				displayAnsibleGuideFromJSON(utils.Stdio, f.build("ansible-galaxy install\x1b[2Kevil"))
-			})
+			t.Parallel()
+			ios, _, errOut := utils.TestIOStreams()
+			displayAnsibleGuideFromJSON(ios, f.build("ansible-galaxy install\x1b[2Kevil"))
+			got := errOut.String()
 
 			assert.NotContains(t, got, "\x1b[2K")
 			assert.Contains(t, got, "Warning")
@@ -142,6 +137,7 @@ func TestDisplayAnsibleGuideFromJSON_WarnsOnEveryAlteredField(t *testing.T) {
 }
 
 func TestDisplayGuideFromJSON_WarnsOnEveryAlteredField(t *testing.T) {
+	t.Parallel()
 	fields := []struct {
 		name  string
 		build func(string) server.RegistrationMethodGuideJsonResponse
@@ -155,9 +151,10 @@ func TestDisplayGuideFromJSON_WarnsOnEveryAlteredField(t *testing.T) {
 	}
 	for _, f := range fields {
 		t.Run(f.name, func(t *testing.T) {
-			got := captureGuideStderr(t, func() {
-				displayGuideFromJSON(utils.Stdio, f.build("curl real.example.com\x1b[2Kevil"))
-			})
+			t.Parallel()
+			ios, _, errOut := utils.TestIOStreams()
+			displayGuideFromJSON(ios, f.build("curl real.example.com\x1b[2Kevil"))
+			got := errOut.String()
 
 			assert.NotContains(t, got, "\x1b[2K")
 			assert.Contains(t, got, "Warning")
@@ -166,12 +163,13 @@ func TestDisplayGuideFromJSON_WarnsOnEveryAlteredField(t *testing.T) {
 }
 
 func TestDisplayGuideFromJSON_StaysQuietOnACleanGuide(t *testing.T) {
-	got := captureGuideStderr(t, func() {
-		displayGuideFromJSON(utils.Stdio, server.RegistrationMethodGuideJsonResponse{
-			InstallCommands: []string{"curl -fsSL https://demo.alpacon.io/i.sh | sudo bash"},
-			RegisterCommand: "alpamon register --token abc",
-		})
+	t.Parallel()
+	ios, _, errOut := utils.TestIOStreams()
+	displayGuideFromJSON(ios, server.RegistrationMethodGuideJsonResponse{
+		InstallCommands: []string{"curl -fsSL https://demo.alpacon.io/i.sh | sudo bash"},
+		RegisterCommand: "alpamon register --token abc",
 	})
+	got := errOut.String()
 
 	assert.NotContains(t, got, "Warning")
 	assert.Contains(t, got, "curl -fsSL https://demo.alpacon.io/i.sh | sudo bash\n")

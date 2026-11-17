@@ -268,6 +268,7 @@ func TestKubeLogoutCommandFirstInterruptDuringTheClose(t *testing.T) {
 }
 
 func TestKubeSessionsCommandRefusals(t *testing.T) {
+	t.Parallel()
 	const notEnabled = "Kubernetes support is not enabled"
 	tests := []struct {
 		name       string
@@ -285,6 +286,7 @@ func TestKubeSessionsCommandRefusals(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
@@ -301,7 +303,9 @@ func TestKubeSessionsCommandRefusals(t *testing.T) {
 			}))
 			defer ts.Close()
 
-			_, stderr, code := runKubeCommandWith(t, apiClientTo(ts), utils.OutputFormatTable, tt.args...)
+			_, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
+				return newKubeCmd(apiClientTo(ts), ios)
+			}, tt.args...)
 
 			assert.Equal(t, tt.wantCode, code, stderr)
 			assert.Contains(t, stderr, tt.wantStderr)

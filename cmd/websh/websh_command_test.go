@@ -1,9 +1,9 @@
 package websh
 
 import (
-	"bytes"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
@@ -33,22 +33,28 @@ func noClient() (*client.AlpaconClient, error) { return nil, errors.New("no clie
 // executeWebsh runs the websh command in process under a root, as in the real tree, and prints its
 // ExitError the way cmd.Execute does.
 func executeWebsh(newClient clientFactory, args ...string) (stderr string, code int) {
-	var outBuf, errBuf bytes.Buffer
+	_, stderr, failure, code := executeWebshCaptured(newClient, args...)
+	return stderr + failure, code
+}
+
+func executeWebshCaptured(newClient clientFactory, args ...string) (stdout, stderr, failure string, code int) {
+	ios, outBuf, errBuf := utils.TestIOStreams()
 	command := &cobra.Command{Use: "alpacon"}
-	command.AddCommand(newCommand(newClient, utils.Stdio))
+	command.AddCommand(newCommand(newClient, ios))
 	command.SetArgs(append([]string{"websh"}, args...))
-	command.SetOut(&outBuf)
-	command.SetErr(&errBuf)
+	command.SetOut(ios.Out)
+	command.SetErr(ios.ErrOut)
 	err := command.Execute()
 	if err == nil {
-		return errBuf.String(), 0
+		return outBuf.String(), errBuf.String(), "", 0
 	}
 	exitErr, ok := errors.AsType[*utils.ExitError](err)
 	if !ok {
-		return err.Error(), -1
+		return outBuf.String(), errBuf.String(), err.Error(), -1
 	}
-	utils.FprintExitError(&errBuf, exitErr)
-	return errBuf.String(), exitErr.Code
+	var rendered strings.Builder
+	ios.FprintExitError(&rendered, exitErr)
+	return outBuf.String(), errBuf.String(), rendered.String(), exitErr.Code
 }
 
 func TestWebshRefusesABadCommandLineWithExit2(t *testing.T) {
@@ -155,20 +161,15 @@ func TestWebshCommandRefusedByTheWorkSessionGateExits3WithTheDiagnostic(t *testi
 	assert.Contains(t, banner, "whoami on my-server was refused by the work_session gate and did not run.")
 }
 
-// Serial: the warning and the table go to the process streams.
 func TestWebshRecordsShowsTheRecordsReadBeforeAFailureAndExits1WithNoErrorLine(t *testing.T) {
+	t.Parallel()
 	newClient := stubClient(func(req *http.Request) (int, string) {
 		if req.URL.Query().Get("cursor") == "" {
 			return http.StatusOK, `{"next": "TOKEN2", "results": [{"added_at": "2026-11-10T09:00:00Z", "record": "ls -la"}]}`
 		}
 		return http.StatusBadRequest, `{"detail": "boom"}`
 	})
-	var stderr string
-	var code int
-
-	stdout, warning := testutil.CaptureOutput(t, func() {
-		stderr, code = executeWebsh(newClient, "records", "550e8400-e29b-41d4-a716-446655440000")
-	})
+	stdout, warning, stderr, code := executeWebshCaptured(newClient, "records", "550e8400-e29b-41d4-a716-446655440000")
 
 	assert.Equal(t, utils.ExitCodeGeneralError, code)
 	assert.Empty(t, stderr)

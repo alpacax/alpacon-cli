@@ -20,11 +20,12 @@ import (
 )
 
 func TestReportDownloadRejectionExitsSixInEitherFormat(t *testing.T) {
+	t.Parallel()
 	for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 		t.Run(format, func(t *testing.T) {
-			previous := utils.OutputFormat
-			utils.OutputFormat = format
-			t.Cleanup(func() { utils.OutputFormat = previous })
+			t.Parallel()
+			ios, _, stderr := utils.TestIOStreams()
+			require.NoError(t, ios.SetOutputFormat(format))
 			rejected := &event.CommandRejectedError{Cause: "account_bound_to_other_person", Reported: true, ConsoleURL: "https://console.example/commands/1", WorkSessionID: "550e8400-e29b-41d4-a716-446655440000"}
 
 			err := reportDownloadRejection(fmt.Errorf("download command: %w", rejected), "[prod:/a]")
@@ -32,8 +33,7 @@ func TestReportDownloadRejectionExitsSixInEitherFormat(t *testing.T) {
 			var exitErr *utils.ExitError
 			require.ErrorAs(t, err, &exitErr)
 			assert.Equal(t, utils.ExitCodeNotApproved, exitErr.Code)
-			var stderr bytes.Buffer
-			utils.FprintExitError(&stderr, exitErr)
+			ios.FprintExitError(stderr, exitErr)
 			if format == utils.OutputFormatTable {
 				assert.Contains(t, stderr.String(), "Failed to download from '[prod:/a]': command was rejected")
 				return
