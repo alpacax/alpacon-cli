@@ -180,36 +180,33 @@ func TestDetachResultLinesSanitizesJobID(t *testing.T) {
 	assert.Equal(t, "Run `alpacon exec logs job-1` to check the result.", line2)
 }
 
-// stubApprovalWaitSeams swaps the wait loop's seams and poll interval, restored on cleanup, and
-// returns a denial carrying the plugin line for code. Its CommandID is "cmd-1", since a denial
-// without one never enters the loop.
-func stubApprovalWaitSeams(t *testing.T, interval time.Duration, code string) *event.RemoteCommandError {
-	t.Helper()
-	origStepUp, origStream, origInterval, origGetCommand := runPresenceStepUp, streamApprovedCommand, approvalWaitPollInterval, getCommandByID
-	t.Cleanup(func() {
-		runPresenceStepUp, streamApprovedCommand, approvalWaitPollInterval, getCommandByID = origStepUp, origStream, origInterval, origGetCommand
-	})
-	approvalWaitPollInterval = interval
-	return &event.RemoteCommandError{Output: denialLine(code), ExitCode: 1, CommandID: "cmd-1"}
+// approvalWaitDeps returns dependencies of the test's own, polling every interval, for it to set
+// fakes on, and a denial carrying the plugin line for code. Its CommandID is "cmd-1", since a
+// denial without one never enters the loop.
+func approvalWaitDeps(interval time.Duration, code string) (*execDeps, *event.RemoteCommandError) {
+	deps := newExecDeps()
+	deps.approvalWaitPollInterval = interval
+	return deps, &event.RemoteCommandError{Output: denialLine(code), ExitCode: 1, CommandID: "cmd-1"}
 }
 
 func TestRunExecWithApprovalWait_NullHeldAfterCancelDoesNotEndTheWait(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+		deps, denial := approvalWaitDeps(10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 		denial.Held = &utils.HeldRequest{ApprovalRequest: heldRequestUUID, StatusPath: heldStatusPath}
 		submits := 0
-		runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+		deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 			submits++
 			return denial
 		}
 		polls := 0
-		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+		deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 			polls++
 			status, requestID := "pending_approval", heldRequestUUID
 			return event.EventDetails{SudoGrantStatus: &status, SudoApprovalRequestID: &requestID}, nil
 		}
 
-		err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "sudo reboot", "", "", nil, "", "", 80*time.Millisecond, io.Discard)
+		err := deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "sudo reboot", "", "", nil, "", "", 80*time.Millisecond, io.Discard)
 
 		var remoteErr *event.RemoteCommandError
 		require.ErrorAs(t, err, &remoteErr)
@@ -222,18 +219,19 @@ func TestRunExecWithApprovalWait_NullHeldAfterCancelDoesNotEndTheWait(t *testing
 }
 
 func TestRunExecWithApprovalWait_TimeoutCarriesTheLatestHeld(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
-		runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+		deps, denial := approvalWaitDeps(10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+		deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 			return denial
 		}
 		held := &utils.HeldRequest{ApprovalRequest: heldRequestUUID, StatusPath: heldStatusPath}
-		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+		deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 			status := "pending_approval"
 			return event.EventDetails{SudoGrantStatus: &status, Held: held}, nil
 		}
 
-		err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "sudo reboot", "", "", nil, "", "", 80*time.Millisecond, io.Discard)
+		err := deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "sudo reboot", "", "", nil, "", "", 80*time.Millisecond, io.Discard)
 
 		var remoteErr *event.RemoteCommandError
 		require.ErrorAs(t, err, &remoteErr)
@@ -242,13 +240,13 @@ func TestRunExecWithApprovalWait_TimeoutCarriesTheLatestHeld(t *testing.T) {
 }
 
 func TestRunExecWithApprovalWait_ExpiredDeadlineDoesNotClaimApprovalWasLate(t *testing.T) {
-	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
-	runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+	deps, denial := approvalWaitDeps(time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+	deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 		return denial
 	}
 	past := time.Date(2001, 11, 6, 17, 20, 0, 0, time.UTC)
 	polls := 0
-	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+	deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 		polls++
 		if polls == 1 {
 			status := "pending_approval"
@@ -259,7 +257,7 @@ func TestRunExecWithApprovalWait_ExpiredDeadlineDoesNotClaimApprovalWasLate(t *t
 	}
 
 	stderr := captureStderr(t, func() {
-		_ = RunExecWithApprovalWait(utils.Stdio, nil, "srv", "sudo reboot", "", "", nil, "", "", time.Minute, io.Discard)
+		_ = deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "sudo reboot", "", "", nil, "", "", time.Minute, io.Discard)
 	})
 
 	assert.Contains(t, stderr, "The approval deadline (2001-11-06T17:20:00Z) has passed and the command was denied again.")
@@ -270,12 +268,12 @@ func TestRunExecWithApprovalWait_ExpiredDeadlineDoesNotClaimApprovalWasLate(t *t
 func TestRunExecWithApprovalWait_DeadlineCanPassDuringTheRerun(t *testing.T) {
 	stderr := captureStderr(t, func() {
 		synctest.Test(t, func(t *testing.T) {
-			denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+			deps, denial := approvalWaitDeps(10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 			expiresAt := time.Now().Add(15 * time.Millisecond)
 			denial.Held = &utils.HeldRequest{ApprovalRequest: heldRequestUUID, ExpiresAt: &expiresAt}
 			submits := 0
 			var rerunStarted time.Time
-			runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+			deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 				submits++
 				if submits == 2 {
 					rerunStarted = time.Now()
@@ -283,12 +281,12 @@ func TestRunExecWithApprovalWait_DeadlineCanPassDuringTheRerun(t *testing.T) {
 				}
 				return denial
 			}
-			getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+			deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 				status := "authorized"
 				return event.EventDetails{SudoGrantStatus: &status}, nil
 			}
 
-			_ = RunExecWithApprovalWait(utils.Stdio, nil, "srv", "sudo reboot", "", "", nil, "", "", time.Minute, io.Discard)
+			_ = deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "sudo reboot", "", "", nil, "", "", time.Minute, io.Discard)
 
 			assert.Equal(t, 2, submits)
 			assert.True(t, rerunStarted.Before(expiresAt), "re-run started at %s, deadline %s", rerunStarted, expiresAt)
@@ -300,18 +298,18 @@ func TestRunExecWithApprovalWait_DeadlineCanPassDuringTheRerun(t *testing.T) {
 }
 
 func TestRunExecWithApprovalWait_ApprovalWithNoDeadlineKeepsTheReusedGrantWarning(t *testing.T) {
-	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+	deps, denial := approvalWaitDeps(time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 	denial.Held = &utils.HeldRequest{ApprovalRequest: heldRequestUUID, StatusPath: heldStatusPath}
-	runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+	deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 		return denial
 	}
-	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+	deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 		status := "authorized"
 		return event.EventDetails{SudoGrantStatus: &status}, nil
 	}
 
 	stderr := captureStderr(t, func() {
-		_ = RunExecWithApprovalWait(utils.Stdio, nil, "srv", "sudo reboot", "", "", nil, "", "", time.Minute, io.Discard)
+		_ = deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "sudo reboot", "", "", nil, "", "", time.Minute, io.Discard)
 	})
 
 	assert.Contains(t, stderr, "the grant appears already used or expired")
@@ -319,35 +317,39 @@ func TestRunExecWithApprovalWait_ApprovalWithNoDeadlineKeepsTheReusedGrantWarnin
 }
 
 func TestRunExecWithApprovalWait_PollsTheCommandDetailInsteadOfResubmitting(t *testing.T) {
-	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		deps, denial := approvalWaitDeps(time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 
-	submits := 0
-	runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
-		submits++
-		if submits == 1 {
-			return denial
+		submits := 0
+		deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+			submits++
+			if submits == 1 {
+				return denial
+			}
+			return nil
 		}
-		return nil
-	}
 
-	polls := 0
-	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
-		polls++
-		status := "pending_approval"
-		if polls >= 3 {
-			status = "authorized"
+		polls := 0
+		deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+			polls++
+			status := "pending_approval"
+			if polls >= 3 {
+				status = "authorized"
+			}
+			return event.EventDetails{SudoGrantStatus: &status}, nil
 		}
-		return event.EventDetails{SudoGrantStatus: &status}, nil
-	}
 
-	err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "cmd", "", "", nil, "", "", time.Second, io.Discard)
+		err := deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "cmd", "", "", nil, "", "", time.Second, io.Discard)
 
-	require.NoError(t, err)
-	assert.Equal(t, 2, submits, "one first attempt and one run after approval")
-	assert.Equal(t, 3, polls)
+		require.NoError(t, err)
+		assert.Equal(t, 2, submits, "one first attempt and one run after approval")
+		assert.Equal(t, 3, polls)
+	})
 }
 
 func TestRunExecWithApprovalWait_RejectionEndsTheWaitWithoutAGrant(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		status  string
@@ -359,44 +361,47 @@ func TestRunExecWithApprovalWait_RejectionEndsTheWaitWithoutAGrant(t *testing.T)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				deps, denial := approvalWaitDeps(time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 
-			runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
-				return denial
-			}
-			status := tt.status
-			getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
-				return event.EventDetails{SudoGrantStatus: &status}, nil
-			}
+				deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+					return denial
+				}
+				status := tt.status
+				deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+					return event.EventDetails{SudoGrantStatus: &status}, nil
+				}
 
-			err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "cmd", "", "", nil, "", "", time.Minute, io.Discard)
+				err := deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "cmd", "", "", nil, "", "", time.Minute, io.Discard)
 
-			var rejected *event.CommandRejectedError
-			require.ErrorAs(t, err, &rejected)
-			// A lapsed window told as a reviewer's refusal points the user at the
-			// wrong next move, so the sentence is asserted, not only the type.
-			assert.Contains(t, rejected.Error(), tt.message)
+				var rejected *event.CommandRejectedError
+				require.ErrorAs(t, err, &rejected)
+				// A lapsed window told as a reviewer's refusal points the user at the
+				// wrong next move, so the sentence is asserted, not only the type.
+				assert.Contains(t, rejected.Error(), tt.message)
+			})
 		})
 	}
 }
 
 func TestRunExecWithApprovalWait_SecondDenialDoesNotOpenAnotherWait(t *testing.T) {
-	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+	deps, denial := approvalWaitDeps(time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 
 	submits := 0
-	runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+	deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 		submits++
 		return denial
 	}
 	polls := 0
-	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+	deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 		polls++
 		status := "authorized"
 		return event.EventDetails{SudoGrantStatus: &status}, nil
 	}
 
 	stderr := captureStderr(t, func() {
-		err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "cmd", "", "", nil, "", "", time.Minute, io.Discard)
+		err := deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "cmd", "", "", nil, "", "", time.Minute, io.Discard)
 		assert.ErrorIs(t, err, denial)
 	})
 
@@ -406,33 +411,37 @@ func TestRunExecWithApprovalWait_SecondDenialDoesNotOpenAnotherWait(t *testing.T
 }
 
 func TestRunExecWithApprovalWait_TimeoutCarriesTheApprovalRequestID(t *testing.T) {
-	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		deps, denial := approvalWaitDeps(time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 
-	runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
-		return denial
-	}
-	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
-		status := "pending_approval"
-		requestID := "req-9"
-		return event.EventDetails{SudoGrantStatus: &status, SudoApprovalRequestID: &requestID}, nil
-	}
+		deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+			return denial
+		}
+		deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+			status := "pending_approval"
+			requestID := "req-9"
+			return event.EventDetails{SudoGrantStatus: &status, SudoApprovalRequestID: &requestID}, nil
+		}
 
-	err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "cmd", "", "", nil, "", "", 20*time.Millisecond, io.Discard)
+		err := deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "cmd", "", "", nil, "", "", 20*time.Millisecond, io.Discard)
 
-	var remoteErr *event.RemoteCommandError
-	require.ErrorAs(t, err, &remoteErr)
-	assert.Equal(t, "req-9", remoteErr.ApprovalRequestID)
+		var remoteErr *event.RemoteCommandError
+		require.ErrorAs(t, err, &remoteErr)
+		assert.Equal(t, "req-9", remoteErr.ApprovalRequestID)
+	})
 }
 
 // TestRunExecWithApprovalWait_EntersLoopOnIntentDeviation pins that an intent-deviation denial
 // (the same approval branch as SUDO_APPROVAL_REQUIRED, with only the code swapped) enters the poll
 // loop, and that a grant on the polled command detail runs the command once more.
 func TestRunExecWithApprovalWait_EntersLoopOnIntentDeviation(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_INTENT_DEVIATION")
+		deps, denial := approvalWaitDeps(time.Millisecond, "SUDO_INTENT_DEVIATION")
 
 		submits := 0
-		runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+		deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 			submits++
 			if submits == 1 {
 				return denial
@@ -440,7 +449,7 @@ func TestRunExecWithApprovalWait_EntersLoopOnIntentDeviation(t *testing.T) {
 			return nil // a reviewer approved it; the post-approval run succeeds
 		}
 		polls := 0
-		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+		deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 			polls++
 			status := "pending_approval"
 			if polls >= 2 {
@@ -448,12 +457,12 @@ func TestRunExecWithApprovalWait_EntersLoopOnIntentDeviation(t *testing.T) {
 			}
 			return event.EventDetails{SudoGrantStatus: &status}, nil
 		}
-		streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		deps.streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
 			t.Fatal("a denial-code wait polls the command detail; it never resumes a held job")
 			return nil
 		}
 
-		err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", time.Second, io.Discard)
+		err := deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", time.Second, io.Discard)
 
 		require.NoError(t, err)
 		assert.Equal(t, 2, submits, "one first attempt and one run after approval")
@@ -462,23 +471,25 @@ func TestRunExecWithApprovalWait_EntersLoopOnIntentDeviation(t *testing.T) {
 }
 
 func TestRunExecWithApprovalWait_TimesOutAfterWindow(t *testing.T) {
+	// Serial: the exact window counts the local signal's wait for its state-file lock, which a
+	// parallel neighbour's signal holds.
 	synctest.Test(t, func(t *testing.T) {
 		const waitTimeout = 60 * time.Millisecond
-		denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
-		runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+		deps, denial := approvalWaitDeps(10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+		deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 			return denial
 		}
-		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+		deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 			status := "pending_approval"
 			return event.EventDetails{SudoGrantStatus: &status}, nil
 		}
-		streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		deps.streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
 			t.Fatal("stream must not run when approval never lands")
 			return nil
 		}
 
 		start := time.Now()
-		err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
+		err := deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
 		elapsed := time.Since(start)
 
 		require.ErrorIs(t, err, denial, "timeout returns the last pending denial for the caller's handler")
@@ -553,7 +564,7 @@ func TestRunWithApprovalWait_DeniedCommandDoesNotResubmit(t *testing.T) {
 	}`), &details))
 	runs := 0
 
-	err := runWithApprovalWait(utils.Stdio, nil, func() error {
+	err := newExecDeps().runWithApprovalWait(utils.Stdio, nil, func() error {
 		runs++
 		return details.Rejection()
 	}, time.Minute, io.Discard)
@@ -564,11 +575,12 @@ func TestRunWithApprovalWait_DeniedCommandDoesNotResubmit(t *testing.T) {
 }
 
 func TestRunExecWithApprovalWait_TransientPollFailureKeepsWaiting(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+		deps, denial := approvalWaitDeps(time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 
 		submits := 0
-		runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+		deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 			submits++
 			if submits == 1 {
 				return denial
@@ -576,7 +588,7 @@ func TestRunExecWithApprovalWait_TransientPollFailureKeepsWaiting(t *testing.T) 
 			return nil // a reviewer approved it; the post-approval run succeeds
 		}
 		polls := 0
-		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+		deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 			polls++
 			if polls == 1 {
 				return event.EventDetails{}, &statusError{status: http.StatusBadGateway}
@@ -584,12 +596,12 @@ func TestRunExecWithApprovalWait_TransientPollFailureKeepsWaiting(t *testing.T) 
 			status := "authorized"
 			return event.EventDetails{SudoGrantStatus: &status}, nil
 		}
-		streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		deps.streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
 			t.Fatal("a denial-code wait polls the command detail; it never resumes a held job")
 			return nil
 		}
 
-		err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", time.Second, io.Discard)
+		err := deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", time.Second, io.Discard)
 
 		require.NoError(t, err)
 		assert.Equal(t, 2, polls, "the failed poll must not end the wait")
@@ -598,15 +610,16 @@ func TestRunExecWithApprovalWait_TransientPollFailureKeepsWaiting(t *testing.T) 
 
 // Reporting the last poll failure instead would exit 1 on a request still open.
 func TestRunExecWithApprovalWait_TimeoutReportsThePendingDenial(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		const waitTimeout = 80 * time.Millisecond
-		denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
-		runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+		deps, denial := approvalWaitDeps(10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+		deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 			return denial
 		}
 
 		polls := 0
-		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+		deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 			polls++
 			// Alternate so the failure count never reaches the give-up bound.
 			if polls%2 == 0 {
@@ -615,35 +628,35 @@ func TestRunExecWithApprovalWait_TimeoutReportsThePendingDenial(t *testing.T) {
 			status := "pending_approval"
 			return event.EventDetails{SudoGrantStatus: &status}, nil
 		}
-		streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		deps.streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
 			t.Fatal("stream must not run when approval never lands")
 			return nil
 		}
 
-		err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
+		err := deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
 
 		require.ErrorIs(t, err, denial, "a timed-out wait reports the pending denial, not the last poll failure")
 	})
 }
 
 func TestRunExecWithApprovalWait_GivesUpAfterConsecutivePollFailures(t *testing.T) {
-	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
-	runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+	deps, denial := approvalWaitDeps(time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+	deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 		return denial
 	}
 	polls := 0
-	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+	deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 		polls++
 		return event.EventDetails{}, &statusError{status: http.StatusBadGateway}
 	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+	deps.streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
 		t.Fatal("stream must not run when approval never lands")
 		return nil
 	}
 
 	var err error
 	stderr := captureStderr(t, func() {
-		err = RunExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+		err = deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
 	})
 
 	// The request is still open, so giving up must exit on the pending contract
@@ -657,20 +670,20 @@ func TestRunExecWithApprovalWait_GivesUpAfterConsecutivePollFailures(t *testing.
 // the client puts the body itself into the message, so escape sequences would
 // otherwise reach the terminal.
 func TestRunExecWithApprovalWait_GiveUpWarningSanitizesServerText(t *testing.T) {
-	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
-	runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+	deps, denial := approvalWaitDeps(time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+	deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 		return denial
 	}
-	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+	deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 		return event.EventDetails{}, fmt.Errorf("\x1b[2Kbad gateway page: %w", &statusError{status: http.StatusBadGateway})
 	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+	deps.streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
 		t.Fatal("stream must not run when approval never lands")
 		return nil
 	}
 
 	stderr := captureStderr(t, func() {
-		_ = RunExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+		_ = deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
 	})
 
 	assert.NotContains(t, stderr, "\x1b[2K")
@@ -678,23 +691,23 @@ func TestRunExecWithApprovalWait_GiveUpWarningSanitizesServerText(t *testing.T) 
 }
 
 func TestRunExecWithApprovalWait_FatalClientErrorEndsTheWaitOnThePendingContract(t *testing.T) {
-	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
-	runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+	deps, denial := approvalWaitDeps(10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+	deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 		return denial
 	}
 	polls := 0
-	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+	deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 		polls++
 		return event.EventDetails{}, &statusError{status: http.StatusUnauthorized}
 	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+	deps.streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
 		t.Fatal("stream must not run when approval never lands")
 		return nil
 	}
 
 	var err error
 	stderr := captureStderr(t, func() {
-		err = RunExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+		err = deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
 	})
 
 	// The status read says nothing about the approval request, which is still open,
@@ -710,78 +723,84 @@ func TestRunExecWithApprovalWait_FatalClientErrorEndsTheWaitOnThePendingContract
 // status GET refused. Without the deadline extension the wait would time out
 // before the third poll (t=80ms) ever fires.
 func TestRunExecWithApprovalWait_ThrottleExtendsTheDeadline(t *testing.T) {
-	const waitTimeout = 60 * time.Millisecond
-	const pollInterval = 20 * time.Millisecond
-	denial := stubApprovalWaitSeams(t, pollInterval, "SUDO_APPROVAL_REQUIRED")
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		const waitTimeout = 60 * time.Millisecond
+		const pollInterval = 20 * time.Millisecond
+		deps, denial := approvalWaitDeps(pollInterval, "SUDO_APPROVAL_REQUIRED")
 
-	submits := 0
-	runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
-		submits++
-		if submits == 1 {
-			return denial
+		submits := 0
+		deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+			submits++
+			if submits == 1 {
+				return denial
+			}
+			return nil // a reviewer approved it; the post-approval run succeeds
 		}
-		return nil // a reviewer approved it; the post-approval run succeeds
-	}
-	polls := 0
-	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
-		polls++
-		if polls < 3 {
-			return event.EventDetails{}, &statusError{status: http.StatusTooManyRequests}
+		polls := 0
+		deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+			polls++
+			if polls < 3 {
+				return event.EventDetails{}, &statusError{status: http.StatusTooManyRequests}
+			}
+			status := "authorized"
+			return event.EventDetails{SudoGrantStatus: &status}, nil
 		}
-		status := "authorized"
-		return event.EventDetails{SudoGrantStatus: &status}, nil
-	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
-		t.Fatal("a denial-code wait polls the command detail; it never resumes a held job")
-		return nil
-	}
+		deps.streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+			t.Fatal("a denial-code wait polls the command detail; it never resumes a held job")
+			return nil
+		}
 
-	start := time.Now()
-	err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
-	elapsed := time.Since(start)
+		start := time.Now()
+		err := deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
+		elapsed := time.Since(start)
 
-	require.NoError(t, err)
-	assert.Equal(t, 2, submits, "one first attempt and one run after approval")
-	assert.Equal(t, 3, polls)
-	assert.GreaterOrEqual(t, elapsed, waitTimeout, "the throttle extension must carry the wait past the original deadline")
+		require.NoError(t, err)
+		assert.Equal(t, 2, submits, "one first attempt and one run after approval")
+		assert.Equal(t, 3, polls)
+		assert.GreaterOrEqual(t, elapsed, waitTimeout, "the throttle extension must carry the wait past the original deadline")
+	})
 }
 
 // A run of 429s must not end the wait through the failed-poll cap. That cap is
 // for a server the CLI cannot reach; a 429 is the server answering, and the
 // throttle budget plus the deadline are what bound it.
 func TestRunExecWithApprovalWait_SustainedThrottleDoesNotTripTheFailureCap(t *testing.T) {
-	const waitTimeout = 150 * time.Millisecond
-	const pollInterval = 2 * time.Millisecond
-	throttled := utils.MaxConsecutivePollFailures + 1
-	denial := stubApprovalWaitSeams(t, pollInterval, "SUDO_APPROVAL_REQUIRED")
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		const waitTimeout = 150 * time.Millisecond
+		const pollInterval = 2 * time.Millisecond
+		throttled := utils.MaxConsecutivePollFailures + 1
+		deps, denial := approvalWaitDeps(pollInterval, "SUDO_APPROVAL_REQUIRED")
 
-	submits := 0
-	runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
-		submits++
-		if submits == 1 {
-			return denial
+		submits := 0
+		deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+			submits++
+			if submits == 1 {
+				return denial
+			}
+			return nil
 		}
-		return nil
-	}
-	polls := 0
-	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
-		polls++
-		if polls <= throttled {
-			return event.EventDetails{}, &statusError{status: http.StatusTooManyRequests}
+		polls := 0
+		deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+			polls++
+			if polls <= throttled {
+				return event.EventDetails{}, &statusError{status: http.StatusTooManyRequests}
+			}
+			status := "authorized"
+			return event.EventDetails{SudoGrantStatus: &status}, nil
 		}
-		status := "authorized"
-		return event.EventDetails{SudoGrantStatus: &status}, nil
-	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
-		t.Fatal("a denial-code wait polls the command detail; it never resumes a held job")
-		return nil
-	}
+		deps.streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+			t.Fatal("a denial-code wait polls the command detail; it never resumes a held job")
+			return nil
+		}
 
-	err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
+		err := deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
 
-	require.NoError(t, err)
-	assert.Equal(t, throttled+1, polls)
-	assert.Equal(t, 2, submits, "one first attempt and one run after approval")
+		require.NoError(t, err)
+		assert.Equal(t, throttled+1, polls)
+		assert.Equal(t, 2, submits, "one first attempt and one run after approval")
+	})
 }
 
 // A wait that stays throttled shows only a spinner, so a user cannot tell a slow approver from a
@@ -791,10 +810,10 @@ func TestRunExecWithApprovalWait_ThrottleWarnsOnce(t *testing.T) {
 	const waitTimeout = 150 * time.Millisecond
 	const pollInterval = 2 * time.Millisecond
 	throttled := utils.MaxConsecutivePollFailures + 1
-	denial := stubApprovalWaitSeams(t, pollInterval, "SUDO_APPROVAL_REQUIRED")
+	deps, denial := approvalWaitDeps(pollInterval, "SUDO_APPROVAL_REQUIRED")
 
 	submits := 0
-	runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+	deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 		submits++
 		if submits == 1 {
 			return denial
@@ -802,7 +821,7 @@ func TestRunExecWithApprovalWait_ThrottleWarnsOnce(t *testing.T) {
 		return nil
 	}
 	polls := 0
-	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+	deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 		polls++
 		if polls <= throttled {
 			return event.EventDetails{}, &statusError{status: http.StatusTooManyRequests}
@@ -810,14 +829,14 @@ func TestRunExecWithApprovalWait_ThrottleWarnsOnce(t *testing.T) {
 		status := "authorized"
 		return event.EventDetails{SudoGrantStatus: &status}, nil
 	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+	deps.streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
 		t.Fatal("a denial-code wait polls the command detail; it never resumes a held job")
 		return nil
 	}
 
 	var err error
 	stderr := captureStderr(t, func() {
-		err = RunExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
+		err = deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
 	})
 
 	require.NoError(t, err)
@@ -834,22 +853,22 @@ func TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait(t *testing.T) {
 	origin := utils.LocalSignalConsoleOrigin
 	t.Cleanup(func() { utils.LocalSignalConsoleOrigin = origin })
 	utils.LocalSignalConsoleOrigin = func() (string, string) { return "https://console.example", "" }
-	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
-	runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+	deps, denial := approvalWaitDeps(10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+	deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 		return denial
 	}
-	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+	deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 		status := "rejected"
 		return event.EventDetails{SudoGrantStatus: &status, CommandRejection: event.CommandRejection{RejectionGate: types.SentString{Value: "approval", Sent: true}}, ConsoleURL: "https://console.example/commands/1"}, nil
 	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+	deps.streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
 		t.Fatal("stream must not run for a rejected command")
 		return nil
 	}
 
 	var err error
 	stderr := captureStderr(t, func() {
-		err = RunExecWithApprovalWait(utils.Stdio, &client.AlpaconClient{BaseURL: "https://console.example"}, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+		err = deps.runExecWithApprovalWait(utils.Stdio, &client.AlpaconClient{BaseURL: "https://console.example"}, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
 	})
 	assert.Contains(t, stderr, "==== ALPACON: COMMAND DENIED ====\n")
 	assert.Contains(t, stderr, "\nhttps://console.example/commands/1\n")
@@ -885,8 +904,7 @@ func TestApprovalOutcomeOf(t *testing.T) {
 }
 
 func TestPollApprovalOnceLegacyExpiry(t *testing.T) {
-	original := getCommandByID
-	t.Cleanup(func() { getCommandByID = original })
+	t.Parallel()
 	cases := []struct {
 		name, status, cause string
 		want                approvalOutcome
@@ -897,7 +915,9 @@ func TestPollApprovalOnceLegacyExpiry(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+			t.Parallel()
+			deps := newExecDeps()
+			deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 				grantStatus := "expired"
 				requestID := "apr-1"
 				return event.EventDetails{
@@ -908,7 +928,7 @@ func TestPollApprovalOnceLegacyExpiry(t *testing.T) {
 				}, nil
 			}
 
-			read, err := pollApprovalOnce(nil, "cmd-1")
+			read, err := deps.pollApprovalOnce(nil, "cmd-1")
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, read.outcome)
 			assert.Equal(t, "apr-1", read.requestID)
@@ -921,8 +941,7 @@ func TestPollApprovalOnceLegacyExpiry(t *testing.T) {
 }
 
 func TestPollApprovalOnceSettlesACompletedSignatureRefusal(t *testing.T) {
-	original := getCommandByID
-	t.Cleanup(func() { getCommandByID = original })
+	t.Parallel()
 	cases := []struct {
 		name, cause string
 		want        approvalOutcome
@@ -932,7 +951,9 @@ func TestPollApprovalOnceSettlesACompletedSignatureRefusal(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+			t.Parallel()
+			deps := newExecDeps()
+			deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 				grantStatus := "pending_approval"
 				return event.EventDetails{
 					Status:           "completed",
@@ -941,7 +962,7 @@ func TestPollApprovalOnceSettlesACompletedSignatureRefusal(t *testing.T) {
 				}, nil
 			}
 
-			read, err := pollApprovalOnce(nil, "cmd-1")
+			read, err := deps.pollApprovalOnce(nil, "cmd-1")
 
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, read.outcome)
@@ -957,13 +978,13 @@ func TestPollApprovalOnceSettlesACompletedSignatureRefusal(t *testing.T) {
 func TestRunExecWithApprovalWait_APendingReadDoesNotRefillTheThrottleBudget(t *testing.T) {
 	const waitTimeout = 100 * time.Millisecond
 	const pollInterval = time.Millisecond
-	denial := stubApprovalWaitSeams(t, pollInterval, "SUDO_APPROVAL_REQUIRED")
+	deps, denial := approvalWaitDeps(pollInterval, "SUDO_APPROVAL_REQUIRED")
 
-	runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+	deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 		return denial
 	}
 	polls := 0
-	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+	deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 		polls++
 		// A throttled stretch long enough to spend the whole allowance, then one
 		// clean read of a grant sitting exactly where it was.
@@ -973,7 +994,7 @@ func TestRunExecWithApprovalWait_APendingReadDoesNotRefillTheThrottleBudget(t *t
 		status := "pending_approval"
 		return event.EventDetails{SudoGrantStatus: &status}, nil
 	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+	deps.streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
 		t.Fatal("stream must not run when approval never lands")
 		return nil
 	}
@@ -983,7 +1004,7 @@ func TestRunExecWithApprovalWait_APendingReadDoesNotRefillTheThrottleBudget(t *t
 	_ = captureStderr(t, func() {
 		synctest.Test(t, func(*testing.T) {
 			start := time.Now()
-			err = RunExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
+			err = deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
 			elapsed = time.Since(start)
 		})
 	})
@@ -1001,28 +1022,27 @@ func captureStderr(t *testing.T, fn func()) string {
 }
 
 func TestPrintPresenceStepUpLink(t *testing.T) {
-	original := mfaLinkByServerName
-	t.Cleanup(func() { mfaLinkByServerName = original })
-
 	// The link is printed unconditionally: api/mfa never hands back an empty URL
 	// with a nil error, so there is nothing left for this caller to filter.
 	t.Run("prints the link", func(t *testing.T) {
-		mfaLinkByServerName = func(*client.AlpaconClient, string) (string, error) {
+		deps := newExecDeps()
+		deps.mfaLinkByServerName = func(*client.AlpaconClient, string) (string, error) {
 			return "https://example.com/mfa", nil
 		}
 
-		stderr := captureStderr(t, func() { printPresenceStepUpLink(utils.Stdio, nil, "my-server") })
+		stderr := captureStderr(t, func() { deps.printPresenceStepUpLink(utils.Stdio, nil, "my-server") })
 
 		assert.Contains(t, stderr, "https://example.com/mfa")
 		assert.Contains(t, stderr, "MFA verification link")
 	})
 
 	t.Run("stays silent when the link cannot be fetched", func(t *testing.T) {
-		mfaLinkByServerName = func(*client.AlpaconClient, string) (string, error) {
+		deps := newExecDeps()
+		deps.mfaLinkByServerName = func(*client.AlpaconClient, string) (string, error) {
 			return "", errors.New("failed to parse MFA URL response")
 		}
 
-		stderr := captureStderr(t, func() { printPresenceStepUpLink(utils.Stdio, nil, "my-server") })
+		stderr := captureStderr(t, func() { deps.printPresenceStepUpLink(utils.Stdio, nil, "my-server") })
 
 		assert.Empty(t, stderr)
 	})
@@ -1033,11 +1053,11 @@ func TestPrintPresenceStepUpLink(t *testing.T) {
 // runs on its own once approved, so the re-run advice a repeated denial gets
 // would contradict the pending text printed right after it.
 func TestRunExecWithApprovalWait_StatusHoldAfterApprovalWarnsWithoutReentering(t *testing.T) {
-	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+	deps, denial := approvalWaitDeps(time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 	held := &event.PendingApprovalError{CommandID: "cmd-2"}
 
 	submits := 0
-	runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+	deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 		submits++
 		if submits == 1 {
 			return denial
@@ -1045,14 +1065,14 @@ func TestRunExecWithApprovalWait_StatusHoldAfterApprovalWarnsWithoutReentering(t
 		return held
 	}
 	polls := 0
-	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+	deps.getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 		polls++
 		status := "authorized"
 		return event.EventDetails{SudoGrantStatus: &status}, nil
 	}
 
 	stderr := captureStderr(t, func() {
-		err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "cmd", "", "", nil, "", "", time.Minute, io.Discard)
+		err := deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "cmd", "", "", nil, "", "", time.Minute, io.Discard)
 		assert.ErrorIs(t, err, held)
 	})
 

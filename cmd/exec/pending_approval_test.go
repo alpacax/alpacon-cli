@@ -125,10 +125,9 @@ func runExecLogsHelper(t *testing.T, workspaceURL, outputFormat string, args ...
 // per tick.
 func runExecWaitHelper(t *testing.T, workspaceURL string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
-	orig := approvalWaitPollInterval
-	t.Cleanup(func() { approvalWaitPollInterval = orig })
-	approvalWaitPollInterval = 10 * time.Millisecond
-	return runExecHelper(t, workspaceURL, args...)
+	deps := newExecDeps()
+	deps.approvalWaitPollInterval = 10 * time.Millisecond
+	return runInProcessOn(t, deps, workspaceURL, "", "", args)
 }
 
 // TestExecStatusAwaitingApprovalExits4WithJSONSignal drives the status-level HITL

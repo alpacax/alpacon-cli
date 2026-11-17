@@ -27,7 +27,7 @@ const (
 )
 
 // refusalsFrom returns the errors the detach lane (SubmitCommand) and the streaming lane
-// (RunExecWithApprovalWait) produce against a server answering status and body.
+// (runExecWithApprovalWait) produce against a server answering status and body.
 func refusalsFrom(t *testing.T, status int, body string) (detach, stream error) {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +49,7 @@ func refusalsFrom(t *testing.T, status int, body string) (detach, stream error) 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	_, detach = event.SubmitCommand(ac, "prod", "echo hi", "", "", nil, "", "")
-	stream = RunExecWithApprovalWait(utils.Stdio, ac, "prod", "echo hi", "", "", nil, "", "", 0, io.Discard)
+	stream = newExecDeps().runExecWithApprovalWait(utils.Stdio, ac, "prod", "echo hi", "", "", nil, "", "", 0, io.Discard)
 	return detach, stream
 }
 

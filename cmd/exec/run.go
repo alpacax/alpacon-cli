@@ -64,18 +64,29 @@ const (
 	outcomeExpired
 )
 
-// approvalWaitPollInterval is the base gap of the --wait poll loop—slower than
-// the MFA poll (api/mfa/mfa.go) since each tick reads the command detail rather
-// than re-running the command; a var so tests can shorten it.
-var approvalWaitPollInterval = 5 * time.Second
+// execDeps is what a run reaches outside this process, so a test drives the
+// deadline and resume logic on fakes of its own instead of real network I/O.
+type execDeps struct {
+	runPresenceStepUp     func(ios *utils.IOStreams, ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error
+	streamApprovedCommand func(ac *client.AlpaconClient, commandID string, out io.Writer, timeout time.Duration) error
+	mfaLinkByServerName   func(ac *client.AlpaconClient, serverName string) (string, error)
+	getCommandByID        func(ac *client.AlpaconClient, commandID string) (event.EventDetails, error)
+	// approvalWaitPollInterval is the base gap of the --wait poll loop—slower than the MFA poll
+	// (api/mfa/mfa.go), since each tick reads the command detail rather than re-running the command.
+	approvalWaitPollInterval time.Duration
+}
 
-// Test seams so a unit test can drive the deadline/resume logic without real network I/O.
-var (
-	runPresenceStepUp     = RunExecWithPresenceStepUp
-	streamApprovedCommand = event.StreamApprovedCommand
-	mfaLinkByServerName   = mfa.GetMFALinkByServerName
-	getCommandByID        = event.GetCommandByID
-)
+// newExecDeps returns the real dependencies, which every exec command runs on.
+func newExecDeps() *execDeps {
+	d := &execDeps{
+		streamApprovedCommand:    event.StreamApprovedCommand,
+		mfaLinkByServerName:      mfa.GetMFALinkByServerName,
+		getCommandByID:           event.GetCommandByID,
+		approvalWaitPollInterval: 5 * time.Second,
+	}
+	d.runPresenceStepUp = d.runExecWithPresenceStepUp // bound to d, so it reads the link lookup d holds
+	return d
+}
 
 // sudoDenialHints maps a non-interactive sudo denial code to guidance. The codes mirror the
 // server's by hand, which is why sudoDenialHint falls back to naming a code this table lacks.
@@ -441,19 +452,19 @@ func credentialInlineHint(ios *utils.IOStreams, invokedAs Invocation) string {
 		ios.Yellow("Hint:"), credentialInlineExample(invokedAs))
 }
 
-// RunExecWithPresenceStepUp runs a command via RunCommandWithRetry and, when it is denied for a
+// runExecWithPresenceStepUp runs a command via RunCommandWithRetry and, when it is denied for a
 // missing recent MFA (SUDO_PRESENCE_REQUIRED) on an interactive terminal, offers an MFA step-up
 // and retries once. A non-interactive caller gets the verification link to complete out of band
 // and the denial unchanged, so commandResultFailure prints the static hint. Interactive websh keeps
 // its own sudo MFA flow.
-func RunExecWithPresenceStepUp(ios *utils.IOStreams, ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
-	return runWithPresenceStepUp(ios, ac, serverName, func() error {
+func (d *execDeps) runExecWithPresenceStepUp(ios *utils.IOStreams, ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
+	return d.runWithPresenceStepUp(ios, ac, serverName, func() error {
 		return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
 	})
 }
 
-// runWithPresenceStepUp is RunExecWithPresenceStepUp over a commandRun.
-func runWithPresenceStepUp(ios *utils.IOStreams, ac *client.AlpaconClient, serverName string, run commandRun) error {
+// runWithPresenceStepUp is runExecWithPresenceStepUp over a commandRun.
+func (d *execDeps) runWithPresenceStepUp(ios *utils.IOStreams, ac *client.AlpaconClient, serverName string, run commandRun) error {
 	err := run()
 	// A real presence denial exits non-zero, so require a RemoteCommandError as well as the line: a
 	// command that prints the line and succeeds must not trigger a step-up and a re-run.
@@ -463,7 +474,7 @@ func runWithPresenceStepUp(ios *utils.IOStreams, ac *client.AlpaconClient, serve
 	}
 
 	if !utils.IsInteractiveShell() {
-		printPresenceStepUpLink(ios, ac, serverName)
+		d.printPresenceStepUpLink(ios, ac, serverName)
 		return err
 	}
 
@@ -480,8 +491,8 @@ func runWithPresenceStepUp(ios *utils.IOStreams, ac *client.AlpaconClient, serve
 // printPresenceStepUpLink prints the verification link for a non-interactive presence denial, so a
 // human reading the logs can complete MFA out of band and re-run. A link that cannot be fetched is
 // dropped silently; the static denial hint carries the actionable part.
-func printPresenceStepUpLink(ios *utils.IOStreams, ac *client.AlpaconClient, serverName string) {
-	url, err := mfaLinkByServerName(ac, serverName)
+func (d *execDeps) printPresenceStepUpLink(ios *utils.IOStreams, ac *client.AlpaconClient, serverName string) {
+	url, err := d.mfaLinkByServerName(ac, serverName)
 	if err != nil {
 		return
 	}
@@ -508,8 +519,8 @@ func isApprovalDenial(ios *utils.IOStreams, err error) bool {
 
 // pollApprovalOnce reads the grant the denial left behind. The command it names
 // already ran and was blocked, so this is a status read, not a re-attempt.
-func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalPoll, error) {
-	details, err := getCommandByID(ac, cmdID)
+func (d *execDeps) pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalPoll, error) {
+	details, err := d.getCommandByID(ac, cmdID)
 	if err != nil {
 		return approvalPoll{outcome: outcomePending}, err
 	}
@@ -529,7 +540,7 @@ func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalPoll, err
 	return approvalPoll{outcome: outcome, requestID: requestID, held: details.Held, rejected: rejected}, nil
 }
 
-// RunExecWithApprovalWait runs a command via RunExecWithPresenceStepUp and, when it is denied with
+// runExecWithApprovalWait runs a command via runExecWithPresenceStepUp and, when it is denied with
 // an approval request in flight and waitTimeout is positive, polls the command's detail until a
 // reviewer grants or refuses the request or the timeout elapses. A job the server parked at
 // awaiting_approval is instead streamed once approved. With no positive waitTimeout, or on a
@@ -541,19 +552,19 @@ func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalPoll, err
 //
 // The poll reads sudo_grant_status rather than re-submitting the command, which would file a
 // fresh approval request on every tick.
-func RunExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
-	return runWithApprovalWait(ios, ac, func() error {
-		return utils.WithSignalFields(runPresenceStepUp(ios, ac, serverName, command, username, groupname, env, workSessionID, purpose, out), localsignal.Fields{Argv0: localsignal.Argv0(command), Server: serverName, Account: username, Session: workSessionID})
+func (d *execDeps) runExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
+	return d.runWithApprovalWait(ios, ac, func() error {
+		return utils.WithSignalFields(d.runPresenceStepUp(ios, ac, serverName, command, username, groupname, env, workSessionID, purpose, out), localsignal.Fields{Argv0: localsignal.Argv0(command), Server: serverName, Account: username, Session: workSessionID})
 	}, waitTimeout, out)
 }
 
-// RunFileExecWithApprovalWait is RunExecWithApprovalWait for the verified file
+// runFileExecWithApprovalWait is runExecWithApprovalWait for the verified file
 // lane. Only the submission differs—the file object in place of a command
 // line—so the presence step-up, the approval wait and the re-run after a grant
 // are the same layers the generic lane runs through.
-func RunFileExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, serverName string, file event.FileExecution, username, groupname, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
-	return runWithApprovalWait(ios, ac, func() error {
-		err := runWithPresenceStepUp(ios, ac, serverName, func() error {
+func (d *execDeps) runFileExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, serverName string, file event.FileExecution, username, groupname, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
+	return d.runWithApprovalWait(ios, ac, func() error {
+		err := d.runWithPresenceStepUp(ios, ac, serverName, func() error {
 			// One stream for the attempt and its MFA retries; see RunCommandWithRetry.
 			stream := event.NewCommandStream(ac)
 			defer stream.Close()
@@ -565,9 +576,9 @@ func RunFileExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient,
 	}, waitTimeout, out)
 }
 
-// runWithApprovalWait is RunExecWithApprovalWait over a commandRun: run is the
+// runWithApprovalWait is runExecWithApprovalWait over a commandRun: run is the
 // first attempt and, once a reviewer grants the request, the re-run.
-func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run commandRun, waitTimeout time.Duration, out io.Writer) (result error) {
+func (d *execDeps) runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run commandRun, waitTimeout time.Duration, out io.Writer) (result error) {
 	err := run()
 	err = utils.WithSignalFields(err, utils.SignalFields(err), ac)
 	announced := false
@@ -602,7 +613,7 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 		defer spinner.Stop()
 		// The wait is inside the stream call, so the spinner has to survive it—
 		// StopWriter retires it the moment the approved command's output starts.
-		return streamApprovedCommand(ac, pendingErr.CommandID, spinner.StopWriter(out), waitTimeout)
+		return d.streamApprovedCommand(ac, pendingErr.CommandID, spinner.StopWriter(out), waitTimeout)
 	}
 
 	if waitTimeout <= 0 || !isApprovalDenial(ios, err) {
@@ -629,7 +640,7 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 	deadline := started.Add(waitTimeout)
 	timer := time.NewTimer(waitTimeout)
 	defer timer.Stop()
-	poll := time.NewTimer(approvalWaitPollInterval)
+	poll := time.NewTimer(d.approvalWaitPollInterval)
 	defer poll.Stop()
 	failures := 0
 	throttles := 0
@@ -650,7 +661,7 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 			ios.Warning("%s", utils.HintOnly(fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", waitTimeout), lastRefusal))
 			return pendingWithApprovalDetails(pendingDenial, lastRequestID, lastHeld)
 		case <-poll.C:
-			read, err := pollApprovalOnce(ac, cmdID)
+			read, err := d.pollApprovalOnce(ac, cmdID)
 			lastRefusal = nil
 			if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
 				lastRefusal = err
@@ -660,7 +671,7 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 				// A 429 means the server is answering, so it does not count toward the failure cap;
 				// the throttle budget and the deadline bound it.
 				if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
-					delay := utils.NextPollBackoff(approvalWaitPollInterval, throttles, utils.RetryAfter(err))
+					delay := utils.NextPollBackoff(d.approvalWaitPollInterval, throttles, utils.RetryAfter(err))
 					throttles++
 					budget.WarnThrottled(delay)
 					if newDeadline, extended := budget.Extend(deadline, delay); extended {
@@ -682,7 +693,7 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 					ios.Warning("Approval wait gave up after %d failed polls (%s); the command is still pending.", failures, err)
 					return pendingWithApprovalDetails(pendingDenial, lastRequestID, lastHeld)
 				}
-				poll.Reset(utils.NextPollBackoff(approvalWaitPollInterval, failures-1, utils.RetryAfter(err)))
+				poll.Reset(utils.NextPollBackoff(d.approvalWaitPollInterval, failures-1, utils.RetryAfter(err)))
 				continue
 			case err != nil:
 				spinner.Stop()
@@ -714,7 +725,7 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 			}
 			// A fixed gap over a 30m wait outspends the server's service-token
 			// throttle, so the gap widens as the wait ages.
-			poll.Reset(utils.NextPollTick(approvalWaitPollInterval, time.Since(started)))
+			poll.Reset(utils.NextPollTick(d.approvalWaitPollInterval, time.Since(started)))
 		}
 	}
 }
