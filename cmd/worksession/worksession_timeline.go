@@ -25,11 +25,11 @@ type recordingJSON struct {
 	Status            string          `json:"status"`
 }
 
-var noRecords bool
-
 var workSessionTimelineCmd = newWorkSessionTimelineCmd(client.NewAlpaconAPIClient)
 
 func newWorkSessionTimelineCmd(newClient clientFactory) *cobra.Command {
+	var noRecords bool
+
 	cmd := &cobra.Command{
 		Use:     "timeline SESSION_ID",
 		Aliases: []string{"tl"},

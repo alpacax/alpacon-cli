@@ -11,12 +11,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	statusFilter string
-	typeFilter   string
-	myRequests   bool
-)
-
 var validStatuses = []string{"pending", "approved", "rejected", "cancelled", "expired", "recorded"}
 
 var validTypes = []string{
@@ -28,6 +22,10 @@ var validTypes = []string{
 var approvalListCmd = newApprovalListCmd(client.NewAlpaconAPIClient)
 
 func newApprovalListCmd(newClient clientFactory) *cobra.Command {
+	var (
+		statusFilter, typeFilter string
+		myRequests               bool
+	)
 	cmd := &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},

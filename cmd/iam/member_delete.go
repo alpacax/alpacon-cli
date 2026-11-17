@@ -7,11 +7,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var memberDeleteRequest iam.MemberDeleteRequest
-
 var memberDeleteCmd = newMemberDeleteCmd(client.NewAlpaconAPIClient)
 
 func newMemberDeleteCmd(newClient clientFactory) *cobra.Command {
+	var memberDeleteRequest iam.MemberDeleteRequest
 	cmd := &cobra.Command{
 		Use:     "delete",
 		Aliases: []string{"rm"},
@@ -22,7 +21,7 @@ func newMemberDeleteCmd(newClient clientFactory) *cobra.Command {
 	`,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 			if memberDeleteRequest.Group == "" || memberDeleteRequest.User == "" {
-				if err := promptForDeleteMembers(); err != nil {
+				if err := promptForDeleteMembers(&memberDeleteRequest); err != nil {
 					return err
 				}
 			}
@@ -54,7 +53,7 @@ func newMemberDeleteCmd(newClient clientFactory) *cobra.Command {
 	return cmd
 }
 
-func promptForDeleteMembers() error {
+func promptForDeleteMembers(memberDeleteRequest *iam.MemberDeleteRequest) error {
 	var err error
 	if memberDeleteRequest.Group == "" {
 		if memberDeleteRequest.Group, err = utils.ReadRequiredInput("Group: "); err != nil {

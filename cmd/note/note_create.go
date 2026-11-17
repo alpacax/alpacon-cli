@@ -7,13 +7,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	noteRequest note.NoteCreateRequest
-)
-
 var noteCreateCmd = newNoteCreateCmd(client.NewAlpaconAPIClient)
 
 func newNoteCreateCmd(newClient clientFactory) *cobra.Command {
+	var noteRequest note.NoteCreateRequest
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a note on the specified server",

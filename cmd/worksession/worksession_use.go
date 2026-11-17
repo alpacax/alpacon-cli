@@ -11,11 +11,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var unsetActiveWorkSession bool
-
 var workSessionUseCmd = newWorkSessionUseCmd(client.NewAlpaconAPIClient)
 
 func newWorkSessionUseCmd(newClient clientFactory) *cobra.Command {
+	var unsetActiveWorkSession bool
+
 	cmd := &cobra.Command{
 		Use:   "use [SESSION_ID]",
 		Short: "Set or clear the active work-session",

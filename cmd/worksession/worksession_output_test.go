@@ -10,6 +10,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
@@ -122,16 +123,13 @@ func TestWorkSessionCreateCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
-	resetCreateCommandState(t)
-	purpose = "incident"
-	createScopes = []string{"command"}
-	createServers = []string{"prod"}
-	expiresAt = "2026-06-01T12:00:00Z"
-	requesterType = "user"
+	clearWorkSessionAgentEnvironment(t)
+	cmd := newWorkSessionCreateCmd(client.NewAlpaconAPIClient)
+	require.NoError(t, cmd.ParseFlags([]string{"--purpose", "incident", "--scope", "command", "--server", "prod", "--expires-at", "2026-06-01T12:00:00Z"}))
 
 	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		runErr = workSessionCreateCmd.RunE(workSessionCreateCmd, nil)
+		runErr = cmd.RunE(cmd, nil)
 	})
 	require.NoError(t, runErr)
 
@@ -174,12 +172,11 @@ func TestWorkSessionUseCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
-	unsetActiveWorkSession = false
-	t.Cleanup(func() { unsetActiveWorkSession = false })
+	cmd := newWorkSessionUseCmd(client.NewAlpaconAPIClient)
 
 	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		runErr = workSessionUseCmd.RunE(workSessionUseCmd, []string{"ses-active"})
+		runErr = cmd.RunE(cmd, []string{"ses-active"})
 	})
 	require.NoError(t, runErr)
 
@@ -212,12 +209,12 @@ func TestWorkSessionUnsetCommandJSONOutput_OperationIsUnset(t *testing.T) {
 	setupWorkSessionCommandConfig(t, "http://example.invalid")
 	withWorkSessionCommandJSONMode(t)
 	require.NoError(t, config.SetActiveWorkSession("ses-active"))
-	unsetActiveWorkSession = true
-	t.Cleanup(func() { unsetActiveWorkSession = false })
+	cmd := newWorkSessionUseCmd(client.NewAlpaconAPIClient)
+	require.NoError(t, cmd.ParseFlags([]string{"--unset"}))
 
 	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		runErr = workSessionUseCmd.RunE(workSessionUseCmd, nil)
+		runErr = cmd.RunE(cmd, nil)
 	})
 	require.NoError(t, runErr)
 
@@ -249,16 +246,12 @@ func TestWorkSessionExtendCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
-	extendExpiresIn = ""
-	extendExpiresAt = "2026-06-01T12:00:00Z"
-	t.Cleanup(func() {
-		extendExpiresIn = ""
-		extendExpiresAt = ""
-	})
+	cmd := newWorkSessionExtendCmd(client.NewAlpaconAPIClient)
+	require.NoError(t, cmd.ParseFlags([]string{"--expires-at", "2026-06-01T12:00:00Z"}))
 
 	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		runErr = workSessionExtendCmd.RunE(workSessionExtendCmd, []string{"ses-active"})
+		runErr = cmd.RunE(cmd, []string{"ses-active"})
 	})
 	require.NoError(t, runErr)
 
@@ -508,41 +501,11 @@ func withWorkSessionCommandJSONMode(t *testing.T) {
 	t.Cleanup(func() { utils.OutputFormat = old })
 }
 
-func resetCreateCommandState(t *testing.T) {
+func clearWorkSessionAgentEnvironment(t *testing.T) {
 	t.Helper()
-	// create reads the environment for an AI agent; a run inside one must not
-	// turn these sessions into agent sessions.
 	for _, name := range aiagent.Variables() {
 		t.Setenv(name, "")
 	}
-	createAccount = ""
-	t.Cleanup(func() { createAccount = "" })
-	purpose = ""
-	createScopes = nil
-	createServers = nil
-	createCluster = ""
-	expiresIn = ""
-	expiresAt = ""
-	requesterType = "user"
-	wait = false
-	waitApproval = ""
-	useAfterCreate = false
-	createSudo = nil
-	createSudoReason = ""
-	t.Cleanup(func() {
-		purpose = ""
-		createScopes = nil
-		createServers = nil
-		createCluster = ""
-		expiresIn = ""
-		expiresAt = ""
-		requesterType = "user"
-		wait = false
-		waitApproval = ""
-		useAfterCreate = false
-		createSudo = nil
-		createSudoReason = ""
-	})
 }
 
 // The envelope's work_session is a typed re-marshal, so every count and the objects that carry

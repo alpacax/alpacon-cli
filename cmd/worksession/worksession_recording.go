@@ -12,11 +12,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var terminalIndex int
-
 var workSessionRecordingCmd = newWorkSessionRecordingCmd(client.NewAlpaconAPIClient)
 
 func newWorkSessionRecordingCmd(newClient clientFactory) *cobra.Command {
+	var terminalIndex int
+
 	cmd := &cobra.Command{
 		Use:     "recording SESSION_ID",
 		Aliases: []string{"rec"},

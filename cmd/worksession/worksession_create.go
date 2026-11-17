@@ -39,25 +39,25 @@ const (
 
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh", ScopeKube, ScopeKubeExec}
 
-var (
-	purpose          string
-	createScopes     []string
-	createServers    []string
-	createCluster    string
-	expiresIn        string
-	expiresAt        string
-	requesterType    string
-	wait             bool
-	waitApproval     string
-	useAfterCreate   bool
-	createSudo       []string
-	createSudoReason string
-	createAccount    string
-)
-
 var workSessionCreateCmd = newWorkSessionCreateCmd(client.NewAlpaconAPIClient)
 
 func newWorkSessionCreateCmd(newClient clientFactory) *cobra.Command {
+	var (
+		purpose          string
+		createScopes     []string
+		createServers    []string
+		createCluster    string
+		expiresIn        string
+		expiresAt        string
+		requesterType    string
+		wait             bool
+		waitApproval     string
+		useAfterCreate   bool
+		createSudo       []string
+		createSudoReason string
+		createAccount    string
+	)
+
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new work session",

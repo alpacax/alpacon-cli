@@ -14,22 +14,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	updateTitle       string
-	updateDescription string
-	updateScopes      []string
-	updateServers     []string
-	updateStartsAt    string
-	updateExpiresAt   string
-	updateSudo        []string
-	updateSudoReason  string
-)
-
 const noSessionToUpdate = "No SESSION_ID given and no active work session. Pass an ID, set ALPACON_WORK_SESSION, or run 'alpacon work-session use <id>' first."
 
 var workSessionUpdateCmd = newWorkSessionUpdateCmd(client.NewAlpaconAPIClient)
 
 func newWorkSessionUpdateCmd(newClient clientFactory) *cobra.Command {
+	var (
+		updateTitle       string
+		updateDescription string
+		updateScopes      []string
+		updateServers     []string
+		updateStartsAt    string
+		updateExpiresAt   string
+		updateSudo        []string
+		updateSudoReason  string
+	)
+
 	cmd := &cobra.Command{
 		Use:   "update [SESSION_ID]",
 		Short: "Update an existing work session",

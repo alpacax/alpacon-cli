@@ -17,15 +17,6 @@ import (
 )
 
 var (
-	createMethod       string
-	createPlatform     string
-	createName         string
-	createTokenName    string
-	createNewTokenName string
-	createJSON         bool
-)
-
-var (
 	validPlatforms     = []string{"debian", "rhel", "suse", "darwin", "windows"}
 	validPlatformsList = strings.Join(validPlatforms, ", ")
 	// The server's ansible method does not support suse.
@@ -38,6 +29,7 @@ var (
 var serverCreateCmd = newServerCreateCmd(client.NewAlpaconAPIClient)
 
 func newServerCreateCmd(newClient clientFactory) *cobra.Command {
+	var createJSON bool
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Register a new server with a registration token",
@@ -118,11 +110,11 @@ func newServerCreateCmd(newClient clientFactory) *cobra.Command {
 			return nil
 		}),
 	}
-	cmd.Flags().StringVarP(&createMethod, "method", "m", "token-install", fmt.Sprintf("registration method: %s", validMethodsList))
-	cmd.Flags().StringVarP(&createPlatform, "platform", "p", "", fmt.Sprintf("target OS platform: %s (suse is not supported with --method ansible)", validPlatformsList))
-	cmd.Flags().StringVarP(&createName, "name", "n", "", "server name (optional; hostname used if not set)")
-	cmd.Flags().StringVarP(&createTokenName, "token", "t", "", "existing registration token name")
-	cmd.Flags().StringVar(&createNewTokenName, "new-token", "", "create a new registration token with this name")
+	cmd.Flags().StringP("method", "m", "token-install", fmt.Sprintf("registration method: %s", validMethodsList))
+	cmd.Flags().StringP("platform", "p", "", fmt.Sprintf("target OS platform: %s (suse is not supported with --method ansible)", validPlatformsList))
+	cmd.Flags().StringP("name", "n", "", "server name (optional; hostname used if not set)")
+	cmd.Flags().StringP("token", "t", "", "existing registration token name")
+	cmd.Flags().String("new-token", "", "create a new registration token with this name")
 	cmd.Flags().BoolVar(&createJSON, "json", false, "output the installation guide as structured JSON instead of markdown")
 	cmd.MarkFlagsMutuallyExclusive("token", "new-token")
 	return cmd
@@ -141,10 +133,11 @@ func writeJSONGuide(v any) error {
 // user's choice.
 func resolveMethod(cmd *cobra.Command) (string, error) {
 	if cmd.Flags().Changed("method") {
-		if refusal := methodRefusal(createMethod); refusal != "" {
+		method, _ := cmd.Flags().GetString("method")
+		if refusal := methodRefusal(method); refusal != "" {
 			return "", utils.NewUsageExitError("%s", refusal)
 		}
-		return createMethod, nil
+		return method, nil
 	}
 	if !utils.IsInteractiveShell() {
 		return "token-install", nil
@@ -154,10 +147,11 @@ func resolveMethod(cmd *cobra.Command) (string, error) {
 
 func resolvePlatform(cmd *cobra.Command, method string) (string, error) {
 	if cmd.Flags().Changed("platform") {
-		if refusal := platformRefusal(method, createPlatform); refusal != "" {
+		platform, _ := cmd.Flags().GetString("platform")
+		if refusal := platformRefusal(method, platform); refusal != "" {
 			return "", utils.NewUsageExitError("%s", refusal)
 		}
-		return createPlatform, nil
+		return platform, nil
 	}
 	return selectPlatform(method)
 }
@@ -211,7 +205,8 @@ func platformsForMethod(method string) ([]string, string) {
 // caller is scripting, so it returns empty and the server falls back to the hostname.
 func resolveName(cmd *cobra.Command) (string, error) {
 	if cmd.Flags().Changed("name") {
-		return createName, nil
+		name, _ := cmd.Flags().GetString("name")
+		return name, nil
 	}
 	if cmd.Flags().Changed("token") || cmd.Flags().Changed("new-token") {
 		return "", nil
@@ -223,6 +218,7 @@ func resolveName(cmd *cobra.Command) (string, error) {
 // --new-token, or of the user's interactive choice.
 func resolveTokenID(cmd *cobra.Command, ac *client.AlpaconClient) (string, error) {
 	if cmd.Flags().Changed("token") {
+		createTokenName, _ := cmd.Flags().GetString("token")
 		token, err := server.GetRegistrationTokenByName(ac, createTokenName)
 		if err != nil {
 			if errors.Is(err, server.ErrRegistrationTokenNotFound) {
@@ -233,7 +229,8 @@ func resolveTokenID(cmd *cobra.Command, ac *client.AlpaconClient) (string, error
 		return token.ID, nil
 	}
 	if cmd.Flags().Changed("new-token") {
-		return createTokenAndWarn(ac, createNewTokenName)
+		newTokenName, _ := cmd.Flags().GetString("new-token")
+		return createTokenAndWarn(ac, newTokenName)
 	}
 	return selectOrCreateToken(ac)
 }

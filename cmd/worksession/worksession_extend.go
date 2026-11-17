@@ -13,15 +13,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	extendExpiresIn string
-	extendExpiresAt string
-	extendReason    string
-)
-
 var workSessionExtendCmd = newWorkSessionExtendCmd(client.NewAlpaconAPIClient)
 
 func newWorkSessionExtendCmd(newClient clientFactory) *cobra.Command {
+	var (
+		extendExpiresIn string
+		extendExpiresAt string
+		extendReason    string
+	)
+
 	cmd := &cobra.Command{
 		Use:   "extend SESSION_ID",
 		Short: "Extend an approved or active work session",

@@ -24,17 +24,16 @@ const (
 		"Note: Root permission may be required for certain paths."
 )
 
-var csrFlags struct {
-	domains   string
-	ips       string
-	validDays int
-	keyPath   string
-	csrPath   string
-}
-
 var csrCreateCmd = newCsrCreateCmd(client.NewAlpaconAPIClient)
 
 func newCsrCreateCmd(newClient clientFactory) *cobra.Command {
+	var csrFlags struct {
+		domains   string
+		ips       string
+		validDays int
+		keyPath   string
+		csrPath   string
+	}
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a CSR",

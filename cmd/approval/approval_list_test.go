@@ -122,8 +122,7 @@ func TestListRequestsEndpoint(t *testing.T) {
 	}
 }
 
-// Serial: the command's flags write package-level variables, and the success
-// case captures stdout and sets utils.OutputFormat.
+// Serial: it captures stdout and sets utils.OutputFormat.
 func TestApprovalListCommand(t *testing.T) {
 	const listBody = `{"count": 1, "results": [{"id": "550e8400-e29b-41d4-a716-446655440000", "request_type": "sudo", "request_data": "systemctl restart nginx", "status": "pending", "requested_by": {"name": "alice"}, "added_at": "2026-11-01T09:00:00Z"}]}`
 	tests := []struct {
@@ -151,8 +150,8 @@ func TestApprovalListCommand(t *testing.T) {
 	}
 }
 
-// Serial: the command's flags write package-level variables.
 func TestApprovalListCommandFails(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		args     []string
@@ -166,6 +165,7 @@ func TestApprovalListCommandFails(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ts := cmdtest.Server(t, map[string]cmdtest.Reply{
 				"GET /api/approvals/approvals/": {Status: tt.status, Body: `{"detail": "unavailable"}`},
 			})

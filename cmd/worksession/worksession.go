@@ -30,12 +30,6 @@ const (
 	opUse       = "use"
 )
 
-var (
-	statusFilter    string
-	requesterFilter string
-	userFilter      string
-)
-
 var WorkSessionCmd = &cobra.Command{
 	Use:     "work-session",
 	Aliases: []string{"session"},

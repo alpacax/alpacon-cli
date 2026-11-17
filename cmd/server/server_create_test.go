@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/server"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -178,10 +179,9 @@ func TestDisplayGuideFromJSON_StaysQuietOnACleanGuide(t *testing.T) {
 }
 
 func TestResolvePlatform_AcceptsSuseFromFlag(t *testing.T) {
-	prev := createPlatform
-	t.Cleanup(func() { createPlatform = prev })
+	t.Parallel()
 	cmd := &cobra.Command{Use: "create"}
-	cmd.Flags().StringVarP(&createPlatform, "platform", "p", "", "")
+	cmd.Flags().StringP("platform", "p", "", "")
 	require.NoError(t, cmd.Flags().Parse([]string{"--platform", "suse"}))
 
 	got, err := resolvePlatform(cmd, "token-install")
@@ -314,7 +314,7 @@ func TestServerCreate_RejectsAnsibleSuseBeforeAnyRequest(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config.json"), cfg, 0600))
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	cmd := newServerCreateCommand(t)
+	cmd := newServerCreateCmd(client.NewAlpaconAPIClient) // reads the expired login above
 	require.NoError(t, cmd.ParseFlags([]string{"-m", "ansible", "-p", "suse", "-t", "prod-token"}))
 
 	err = cmd.RunE(cmd, nil)
@@ -326,22 +326,4 @@ func TestServerCreate_RejectsAnsibleSuseBeforeAnyRequest(t *testing.T) {
 	utils.FprintExitError(&stderr, exitErr)
 	assert.Contains(t, stderr.String(), `"suse" is not supported with the ansible method`)
 	assert.Zero(t, requests.Load())
-}
-
-// newServerCreateCommand returns a command running serverCreateCmd's RunE on its own flag set, bound to the same
-// package-level variables, which it restores when the test ends.
-func newServerCreateCommand(t *testing.T) *cobra.Command {
-	t.Helper()
-	method, platform, name, token, newToken, asJSON := createMethod, createPlatform, createName, createTokenName, createNewTokenName, createJSON
-	t.Cleanup(func() {
-		createMethod, createPlatform, createName, createTokenName, createNewTokenName, createJSON = method, platform, name, token, newToken, asJSON
-	})
-	cmd := &cobra.Command{Use: "create", RunE: serverCreateCmd.RunE}
-	cmd.Flags().StringVarP(&createMethod, "method", "m", "token-install", "")
-	cmd.Flags().StringVarP(&createPlatform, "platform", "p", "", "")
-	cmd.Flags().StringVarP(&createName, "name", "n", "", "")
-	cmd.Flags().StringVarP(&createTokenName, "token", "t", "", "")
-	cmd.Flags().StringVar(&createNewTokenName, "new-token", "", "")
-	cmd.Flags().BoolVar(&createJSON, "json", false, "")
-	return cmd
 }

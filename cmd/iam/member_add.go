@@ -9,11 +9,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var memberRequest iam.MemberAddRequest
-
 var memberAddCmd = newMemberAddCmd(client.NewAlpaconAPIClient)
 
 func newMemberAddCmd(newClient clientFactory) *cobra.Command {
+	var memberRequest iam.MemberAddRequest
 	cmd := &cobra.Command{
 		Use:   "add",
 		Short: "Add a member to a group with a specific role",
@@ -23,7 +22,7 @@ func newMemberAddCmd(newClient clientFactory) *cobra.Command {
 	`,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 			if memberRequest.Group == "" || memberRequest.User == "" || memberRequest.Role == "" {
-				if err := promptForMembers(); err != nil {
+				if err := promptForMembers(&memberRequest); err != nil {
 					return err
 				}
 			}
@@ -48,7 +47,7 @@ func newMemberAddCmd(newClient clientFactory) *cobra.Command {
 	return cmd
 }
 
-func promptForMembers() error {
+func promptForMembers(memberRequest *iam.MemberAddRequest) error {
 	var err error
 	if memberRequest.Group == "" {
 		if memberRequest.Group, err = utils.ReadRequiredInput("Group: "); err != nil {
