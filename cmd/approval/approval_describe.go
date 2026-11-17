@@ -26,10 +26,10 @@ func newApprovalDescribeCmd(newClient clientFactory, ios *utils.IOStreams) *cobr
 The table shows the decision context the server sends for the request type:
 the command or sudo detail, its risk assessment, the work session and the
 requested changes. For a file execution, the AI evidence rows list each claim
-behind the AI's verdict beside the script lines it rests on (L3, L40-41), and
-the script below is then printed with line numbers; a claim marked Not placed
-could not be located in the script. Use --output json to print the full raw
-response.`,
+behind the AI's verdict beside the script lines it rests on (L3, L40-41); a
+claim marked Not placed could not be located in the script. When at least one
+claim is placed, the script below is printed with line numbers. Use --output
+json to print the full raw response.`,
 		Args: cobra.ExactArgs(1),
 		Example: `  alpacon approval describe 550e8400-e29b-41d4-a716-446655440000
   alpacon approval desc 550e8400-e29b-41d4-a716-446655440000`,
@@ -115,14 +115,14 @@ func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecutio
 // evidenceRows are the "AI evidence" rows: each claim beside the script lines
 // it rests on. As in the console, a range the script does not have and a
 // repeated one are left out, and a claim left with none reads as not placed.
-// placed reports whether any claim kept a range, which is when the script is
-// printed with line numbers.
+// placed reports whether any claim kept a range.
 func evidenceRows(req *approvalapi.ApprovalRequest) (rows []describeRow, placed bool) {
 	if req.Metadata == nil || req.Metadata.Command == nil {
 		return nil, false
 	}
 	c := req.Metadata.Command
-	// Counted as the server counts the lines its ranges point at.
+	// Counted as the server counts the lines its ranges point at. The server
+	// sends no evidence with a withheld script, so a zero count is only a guard.
 	lineCount := 0
 	if fe := c.FileExecution; fe != nil && fe.Content != nil {
 		lineCount = strings.Count(*fe.Content, "\n") + 1
@@ -207,8 +207,8 @@ func fileExecutionScript(fe *approvalapi.FileExecution) (string, bool) {
 }
 
 // numberedFileExecutionScript is the script with each line numbered, so the
-// line ranges of the AI evidence above it can be found. The empty line after
-// a final newline is numbered too, since the server's ranges count it.
+// evidence line ranges can be found in it. The empty line after a final
+// newline is numbered too, since the server's ranges count it.
 func numberedFileExecutionScript(content string) string {
 	body, _ := utils.SanitizeTerminalBlock(content)
 	lines := strings.Split(body, "\n")

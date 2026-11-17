@@ -10,9 +10,10 @@ import (
 // viewer who may decide the request and is not its requester.
 //
 // It decodes leniently, because it only helps the approver read the script: a
-// value that is not a list reads as no evidence, an item that is not a claim
-// is dropped, and so is a range that is not a pair of line numbers. A claim
-// left with no range stays, unlocated, as the server keeps one.
+// value that is not a list reads as no evidence, an item without a non-blank
+// claim and a ranges list is dropped, and so is a range that is not a pair of
+// line numbers. A claim left with no range stays, unlocated, as the server
+// keeps one.
 type VerdictEvidence []EvidenceClaim
 
 // EvidenceClaim is one claim and the script lines it rests on. An empty Ranges
@@ -24,8 +25,8 @@ type EvidenceClaim struct {
 
 // EvidenceRange is a span of 1-based script lines, both ends included.
 type EvidenceRange struct {
-	StartLine int
-	EndLine   int
+	StartLine int `json:"start_line"`
+	EndLine   int `json:"end_line"`
 }
 
 func (v *VerdictEvidence) UnmarshalJSON(data []byte) error {
@@ -36,22 +37,19 @@ func (v *VerdictEvidence) UnmarshalJSON(data []byte) error {
 	}
 	for _, item := range items {
 		var c struct {
-			Claim  *string           `json:"claim"`
+			Claim  string            `json:"claim"`
 			Ranges []json.RawMessage `json:"ranges"`
 		}
-		if json.Unmarshal(item, &c) != nil || c.Claim == nil || strings.TrimSpace(*c.Claim) == "" || c.Ranges == nil {
+		if json.Unmarshal(item, &c) != nil || strings.TrimSpace(c.Claim) == "" || c.Ranges == nil {
 			continue
 		}
-		claim := EvidenceClaim{Claim: *c.Claim, Ranges: []EvidenceRange{}}
+		claim := EvidenceClaim{Claim: c.Claim, Ranges: []EvidenceRange{}}
 		for _, raw := range c.Ranges {
-			var r struct {
-				StartLine *int `json:"start_line"`
-				EndLine   *int `json:"end_line"`
-			}
-			if json.Unmarshal(raw, &r) != nil || r.StartLine == nil || r.EndLine == nil || *r.StartLine < 1 || *r.EndLine < *r.StartLine {
+			var r EvidenceRange
+			if json.Unmarshal(raw, &r) != nil || r.StartLine < 1 || r.EndLine < r.StartLine {
 				continue
 			}
-			claim.Ranges = append(claim.Ranges, EvidenceRange{StartLine: *r.StartLine, EndLine: *r.EndLine})
+			claim.Ranges = append(claim.Ranges, r)
 		}
 		*v = append(*v, claim)
 	}

@@ -107,6 +107,12 @@ func TestFileExecutionStripsEscapes(t *testing.T) {
 	assert.NotContains(t, script, "\x1b")
 }
 
+func TestNumberedFileExecutionScriptStripsEscapes(t *testing.T) {
+	t.Parallel()
+	got := numberedFileExecutionScript("echo \x1b[2Kgone\necho \u009bred\nok \u202edenied")
+	assert.Equal(t, "Script (37 bytes):\n1 | echo gone\n2 | echo red\n3 | ok denied", got)
+}
+
 func TestOtherRequestTypesHaveNoFileExecution(t *testing.T) {
 	t.Parallel()
 	assert.Nil(t, fileExecutionOf(decodeFixture(t, `{"id":"a","request_type":"sudo"}`)))
