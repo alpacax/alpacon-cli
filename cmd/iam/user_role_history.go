@@ -53,13 +53,12 @@ such group, only the changes that name both of them. Neither is an error, and th
 rows may not name you at all. A change that names an object you do not reach
 shows its kind and a hidden count under Target, and its reason as (withheld).
 
-This is the one 'alpacon user role' command an API token can reach on an Alpacon
-Cloud workspace. The audit log sits outside the gate that refuses tokens on the
-other RBAC routes, and asks instead for a token carrying the role_audit_log:read
-scope. A personal token then reads what its account reaches. A service token is
-let in but reads nothing, so the command exits 1 saying so (error_code
-role_audit_reach_none), or fails earlier without USER, since the token has no
-account of its own to default to.`,
+This is the one 'alpacon user role' command an API token can reach. The audit log
+sits outside the gate that refuses tokens on the other RBAC routes, and asks
+instead for a token carrying the role_audit_log:read scope. A personal token then
+reads what its account reaches. A service token is let in but reads nothing, so
+the command exits 1 saying so (error_code role_audit_reach_none), or fails earlier
+without USER, since the token has no account of its own to default to.`,
 		Example: `  alpacon user role history
   alpacon user role history john
   alpacon user role history john --tail 100
