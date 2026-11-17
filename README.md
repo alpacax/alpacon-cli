@@ -535,6 +535,8 @@ $ alpacon audit <filters>                        # workspace audit log
 
 Run `alpacon --help` for the full list, or `alpacon <command> --help` for details on any command.
 
+Messages on stderr are colored only when stderr is a terminal. Set `NO_COLOR` to any non-empty value to turn color off.
+
 ## When a command is denied
 
 When a command or file transfer receives a 403 gate refusal, or a submitted command is later rejected, the CLI prints a red banner on a color terminal, or the same plain-text box on redirected stderr, before its error. Plan, rate, token scope, role, MFA, authentication, and validation refusals do not produce denial signals:

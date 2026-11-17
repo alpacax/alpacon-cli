@@ -110,17 +110,21 @@ func WorkSessionExitError(err error, operation, target, authMethod, activeWS str
 		Code: ExitCodeWorkSessionDenied,
 		msg:  "%s: %s",
 		args: []any{workSessionMessage(operation), err},
-		print: func(text, envelope io.Writer) {
-			if OutputFormat == OutputFormatJSON {
-				PrintJSONError(envelope, buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS, hint))
+		print: func(w io.Writer, s *IOStreams) {
+			if s.IsJSON() {
+				PrintJSONError(w, buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS, hint))
 				return
 			}
-			_, _ = fmt.Fprintln(text, buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS, hint))
+			_, _ = fmt.Fprintln(w, s.workSessionDiagnostic(code, operation, target, authMethod, activeWS, hint))
 		},
 	}
 }
 
 func buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS, hint string) string {
+	return Stdio.workSessionDiagnostic(code, operation, target, authMethod, activeWS, hint)
+}
+
+func (s *IOStreams) workSessionDiagnostic(code, operation, target, authMethod, activeWS, hint string) string {
 	reason := workSessionReasonMap[code]
 	authDisplay := authMethod
 	if authMethod == "Browser login" {
@@ -128,7 +132,7 @@ func buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS, h
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%s: %s\n", Red("Error"), workSessionMessage(operation))
+	fmt.Fprintf(&sb, "%s: %s\n", s.Red("Error"), workSessionMessage(operation))
 	fmt.Fprintln(&sb)
 	fmt.Fprintf(&sb, "  %-14s: %s\n", "auth", authDisplay)
 	fmt.Fprintf(&sb, "  %-14s: %s\n", "reason", reason)

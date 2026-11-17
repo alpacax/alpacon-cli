@@ -3,7 +3,6 @@ package utils
 import (
 	"fmt"
 	"math"
-	"os"
 	"time"
 )
 
@@ -81,6 +80,11 @@ func purposeNextActions(commandID string) []NextAction {
 // message on stderr. A nil expiresAt reports no deadline. It never exits, so the exit-code
 // contract stays with the caller.
 func PrintPurposeDemand(message, commandID string, expiresAt *time.Time) {
+	Stdio.PrintPurposeDemand(message, commandID, expiresAt)
+}
+
+// PrintPurposeDemand is the package-level PrintPurposeDemand on s.
+func (s *IOStreams) PrintPurposeDemand(message, commandID string, expiresAt *time.Time) {
 	// Sanitized once: the id is server-supplied and every line below writes it to the terminal.
 	commandID = SanitizeTerminalText(commandID)
 	remaining := remainingPurposeWindow(expiresAt)
@@ -90,7 +94,7 @@ func PrintPurposeDemand(message, commandID string, expiresAt *time.Time) {
 	}
 	message += fmt.Sprintf(" If no purpose arrives by %s, the command is judged again without one: it runs, waits for a human approver (who is notified then), or is refused. Read the result with `alpacon exec logs %s`; do not resubmit.", deadline, commandID)
 
-	if OutputFormat == OutputFormatJSON {
+	if s.IsJSON() {
 		envelope := purposeRequiredJSON{
 			OK:                    false,
 			Status:                PurposeRequiredStatus,
@@ -103,18 +107,18 @@ func PrintPurposeDemand(message, commandID string, expiresAt *time.Time) {
 			Context:               purposeRequiredCtx{CommandID: commandID, DeadlineSeconds: remaining},
 			NextActions:           purposeNextActions(commandID),
 		}
-		if err := PrintJSONValue(os.Stdout, envelope); err != nil {
+		if err := PrintJSONValue(s.Out, envelope); err != nil {
 			// Fall back to a minimal, still-parseable object so a machine consumer
 			// always sees the status field.
-			_, _ = fmt.Fprintf(os.Stdout, `{"ok":false,"status":%q}`+"\n", PurposeRequiredStatus)
+			_, _ = fmt.Fprintf(s.Out, `{"ok":false,"status":%q}`+"\n", PurposeRequiredStatus)
 		}
 		return
 	}
 
-	CliWarning("%s", message)
-	fmt.Fprintf(os.Stderr, "  %s\n", purposeGuidance)
+	s.Warning("%s", message)
+	fmt.Fprintf(s.ErrOut, "  %s\n", purposeGuidance)
 	for _, action := range purposeNextActions(commandID) {
-		fmt.Fprintf(os.Stderr, "  %s\n", action.PlainText())
+		fmt.Fprintf(s.ErrOut, "  %s\n", action.PlainText())
 	}
 }
 
@@ -132,7 +136,10 @@ type purposeAnswerJSON struct {
 // PrintPurposeAccepted reports a recorded purpose. There is no verdict yet—the
 // command re-enters judgment on the worker—so the result names where to read
 // the outcome rather than pretending to carry it.
-func PrintPurposeAccepted(commandID string) {
+func PrintPurposeAccepted(commandID string) { Stdio.PrintPurposeAccepted(commandID) }
+
+// PrintPurposeAccepted is the package-level PrintPurposeAccepted on s.
+func (s *IOStreams) PrintPurposeAccepted(commandID string) {
 	commandID = SanitizeTerminalText(commandID)
 	next := NextAction{
 		Command:     fmt.Sprintf("alpacon exec logs %s", commandID),
@@ -140,7 +147,7 @@ func PrintPurposeAccepted(commandID string) {
 	}
 	message := "Purpose recorded. The command is being judged again with it in hand."
 
-	if OutputFormat == OutputFormatJSON {
+	if s.IsJSON() {
 		envelope := purposeAnswerJSON{
 			OK:          true,
 			Status:      "purpose_recorded",
@@ -148,14 +155,14 @@ func PrintPurposeAccepted(commandID string) {
 			CommandID:   commandID,
 			NextActions: []NextAction{next},
 		}
-		if err := PrintJSONValue(os.Stdout, envelope); err != nil {
-			_, _ = fmt.Fprintf(os.Stdout, `{"ok":true,"status":"purpose_recorded"}`+"\n")
+		if err := PrintJSONValue(s.Out, envelope); err != nil {
+			_, _ = fmt.Fprintf(s.Out, `{"ok":true,"status":"purpose_recorded"}`+"\n")
 		}
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "%s\n", message)
-	fmt.Fprintf(os.Stderr, "  %s\n", next.PlainText())
+	fmt.Fprintf(s.ErrOut, "%s\n", message)
+	fmt.Fprintf(s.ErrOut, "  %s\n", next.PlainText())
 }
 
 // PrintPurposeRefused reports a rejected answer. The server answers a settled
@@ -163,7 +170,10 @@ func PrintPurposeAccepted(commandID string) {
 // message nor the envelope can say which happened—hence the pointer at the
 // command's own state rather than a guess, and never at a resubmission.
 // It never exits; the caller owns the exit-code contract.
-func PrintPurposeRefused(commandID string, cause error) {
+func PrintPurposeRefused(commandID string, cause error) { Stdio.PrintPurposeRefused(commandID, cause) }
+
+// PrintPurposeRefused is the package-level PrintPurposeRefused on s.
+func (s *IOStreams) PrintPurposeRefused(commandID string, cause error) {
 	commandID = SanitizeTerminalText(commandID)
 	message := fmt.Sprintf(
 		"failed to state the purpose for %s: %s. The demand may have expired, it may already have been answered, "+
@@ -182,7 +192,7 @@ func PrintPurposeRefused(commandID string, cause error) {
 	}
 	actions = append(actions, next)
 
-	if OutputFormat == OutputFormatJSON {
+	if s.IsJSON() {
 		envelope := purposeAnswerJSON{
 			OK:          false,
 			Status:      "purpose_refused",
@@ -191,14 +201,14 @@ func PrintPurposeRefused(commandID string, cause error) {
 			CommandID:   commandID,
 			NextActions: actions,
 		}
-		if err := PrintJSONValue(os.Stdout, envelope); err != nil {
-			_, _ = fmt.Fprintf(os.Stdout, `{"ok":false,"status":"purpose_refused"}`+"\n")
+		if err := PrintJSONValue(s.Out, envelope); err != nil {
+			_, _ = fmt.Fprintf(s.Out, `{"ok":false,"status":"purpose_refused"}`+"\n")
 		}
 		return
 	}
 
-	CliWarning("%s", message)
+	s.Warning("%s", message)
 	for _, action := range actions {
-		fmt.Fprintf(os.Stderr, "  %s\n", action.PlainText())
+		fmt.Fprintf(s.ErrOut, "  %s\n", action.PlainText())
 	}
 }
