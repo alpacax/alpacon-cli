@@ -92,7 +92,7 @@ func Execute() {
 	kube.ApplySurfaceGate(RootCmd, kubernetesSurfaceEnabled())
 	RootCmd.InitDefaultCompletionCmd()
 	rejectUnknownSubcommands(RootCmd)
-	markHookErrors(RootCmd)
+	utils.MarkHookErrors(RootCmd)
 	keepWithOwnParser(RootCmd, os.Args[1:])
 	cmd, err := RootCmd.ExecuteC()
 	exitErr, isExitErr := errors.AsType[*utils.ExitError](err)
@@ -103,7 +103,7 @@ func Execute() {
 	case isExitErr: // a converted command's failure, printed after its deferred calls ran
 		utils.PrintExitError(exitErr)
 		utils.Exit(exitErr.Code)
-	case !errors.As(err, new(hookError)):
+	case !utils.IsHookError(err):
 		utils.CliParseErrorWithExit(cmd, utils.OutputFormatIn(os.Args[1:]), err.Error())
 	case utils.IsUsageError(err):
 		utils.CliUsageErrorWithExit("%s", err)
@@ -151,33 +151,6 @@ func rejectUnknownSubcommands(c *cobra.Command) {
 	for _, sub := range c.Commands() {
 		rejectUnknownSubcommands(sub)
 	}
-}
-
-// hookError marks an error a command's own hook returned; any other error is Cobra rejecting the command line.
-type hookError struct{ err error }
-
-func (e hookError) Error() string { return e.err.Error() }
-func (e hookError) Unwrap() error { return e.err }
-
-// markHookErrors wraps what every error-returning hook of c and its subcommands returns.
-func markHookErrors(c *cobra.Command) {
-	for _, hook := range []*func(*cobra.Command, []string) error{
-		&c.PersistentPreRunE, &c.PreRunE, &c.RunE, &c.PostRunE, &c.PersistentPostRunE,
-	} {
-		if run := *hook; run != nil {
-			*hook = func(cmd *cobra.Command, args []string) error { return markHookError(run(cmd, args)) }
-		}
-	}
-	for _, sub := range c.Commands() {
-		markHookErrors(sub)
-	}
-}
-
-func markHookError(err error) error {
-	if err == nil {
-		return nil
-	}
-	return hookError{err: err}
 }
 
 // kubernetesSurfaceEnabled reads the answer the last login or switch recorded;

@@ -81,7 +81,9 @@ func NoClient() (*client.AlpaconClient, error) { return nil, ErrNoLogin }
 func Run(cmd *cobra.Command, args ...string) (failure string, code int) {
 	cmd.SilenceErrors, cmd.SilenceUsage = true, true // as RootCmd is
 	cmd.SetArgs(append([]string{}, args...))         // never nil, or Cobra reads os.Args[1:]
+	restore := utils.MarkHookErrors(cmd)             // as cmd.Execute does, to tell a hook's failure from a parse error
 	err := cmd.Execute()
+	restore()
 	if err == nil {
 		return "", 0
 	}
@@ -90,7 +92,10 @@ func Run(cmd *cobra.Command, args ...string) (failure string, code int) {
 		utils.FprintExitError(&out, exitErr)
 		return out.String(), exitErr.Code
 	}
-	return err.Error(), utils.ExitCodeUsageError // a leaf has no hooks, so this is Cobra's own parse error
+	if utils.IsHookError(err) && !utils.IsUsageError(err) {
+		return err.Error(), utils.ExitCodeGeneralError
+	}
+	return err.Error(), utils.ExitCodeUsageError // Cobra's own parse error, or a hook's usage error
 }
 
 // RunCaptured is Run with os.Stdout and os.Stderr captured; the failure is

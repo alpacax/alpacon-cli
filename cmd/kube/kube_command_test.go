@@ -46,7 +46,7 @@ func runKubeCommandWith(t *testing.T, newClient clientFactory, outputFormat stri
 	withOutputFormat(t, outputFormat)
 	cmd := newKubeCmd(newClient)
 	cmd.SilenceErrors, cmd.SilenceUsage = true, true // as RootCmd is
-	markRunErrors(cmd)
+	utils.MarkHookErrors(cmd)
 	cmd.SetArgs(args)
 	var err error
 	stdout, stderr = testutil.CaptureOutput(t, func() { err = cmd.Execute() })
@@ -72,35 +72,10 @@ func reportExit(w io.Writer, err error) int {
 		return exitErr.Code
 	}
 	_, _ = fmt.Fprintln(w, err)
-	if errors.As(err, new(runError)) && !utils.IsUsageError(err) {
+	if utils.IsHookError(err) && !utils.IsUsageError(err) {
 		return utils.ExitCodeGeneralError // cmd.Execute exits 1 on a hook's own unmarked error
 	}
 	return utils.ExitCodeUsageError // a Cobra error or a usage-marked hook error
-}
-
-// runError marks an error a command's own hook returned, as cmd.Execute's markHookErrors does.
-type runError struct{ err error }
-
-func (e runError) Error() string { return e.err.Error() }
-func (e runError) Unwrap() error { return e.err }
-
-// markRunErrors wraps every error-returning hook in c's tree with runError.
-func markRunErrors(c *cobra.Command) {
-	for _, hook := range []*func(*cobra.Command, []string) error{
-		&c.PersistentPreRunE, &c.PreRunE, &c.RunE, &c.PostRunE, &c.PersistentPostRunE,
-	} {
-		if run := *hook; run != nil {
-			*hook = func(cmd *cobra.Command, args []string) error {
-				if err := run(cmd, args); err != nil {
-					return runError{err: err}
-				}
-				return nil
-			}
-		}
-	}
-	for _, sub := range c.Commands() {
-		markRunErrors(sub)
-	}
 }
 
 func newLogoutScene(t *testing.T, workspaceURL string) logoutScene {
@@ -399,7 +374,7 @@ func TestReportExit_ExitsLikeExecute(t *testing.T) {
 			t.Parallel()
 			probe := &cobra.Command{Use: "probe", Args: cobra.NoArgs, SilenceErrors: true, SilenceUsage: true,
 				RunE: func(*cobra.Command, []string) error { return tc.err }}
-			markRunErrors(probe)
+			utils.MarkHookErrors(probe)
 			probe.SetArgs(append([]string{}, tc.args...)) // never nil, or Cobra reads os.Args[1:]
 			probe.SetOut(io.Discard)
 			probe.SetErr(io.Discard)

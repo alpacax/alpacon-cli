@@ -1,9 +1,11 @@
 package cmdtest
 
 import (
+	"errors"
 	"os"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
@@ -23,4 +25,38 @@ func TestRunWithoutArgumentsIgnoresTheTestBinarysArguments(t *testing.T) {
 
 	assert.Equal(t, 0, code, failure)
 	assert.True(t, ran, "the command must run")
+}
+
+func TestRunExitsAsExecuteDoes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		args     []string
+		runErr   error
+		wantCode int
+	}{
+		{name: "a hook's plain error exits 1", runErr: errors.New("failed to read input"), wantCode: utils.ExitCodeGeneralError},
+		{name: "a hook's usage error exits 2", runErr: utils.MarkUsageError(errors.New("bad flag")), wantCode: utils.ExitCodeUsageError},
+		{name: "an unknown flag exits 2", args: []string{"--nope"}, wantCode: utils.ExitCodeUsageError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := &cobra.Command{Use: "probe", RunE: func(*cobra.Command, []string) error { return tt.runErr }}
+
+			failure, code := Run(cmd, tt.args...)
+
+			assert.Equal(t, tt.wantCode, code, failure)
+		})
+	}
+}
+
+func TestRunLeavesTheCommandsHooksAsTheyWere(t *testing.T) {
+	t.Parallel()
+	cmd := &cobra.Command{Use: "probe", RunE: func(*cobra.Command, []string) error { return errors.New("boom") }}
+	_, _ = Run(cmd)
+
+	err := cmd.RunE(cmd, nil)
+
+	assert.False(t, utils.IsHookError(err), "Run must restore the original RunE")
 }
