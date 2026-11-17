@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newCloseCommand(newClient clientFactory) *cobra.Command {
+func newCloseCommand(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "close SESSION_ID",
 		Short:   "Close a Websh session",
@@ -25,7 +25,7 @@ func newCloseCommand(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to close websh session: %s.", err)
 			}
 
-			utils.CliSuccess("Session '%s' has been closed.", sessionID)
+			ios.Success("Session '%s' has been closed.", sessionID)
 			return nil
 		}),
 	}

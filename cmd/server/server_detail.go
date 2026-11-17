@@ -7,33 +7,37 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var serverDetailCmd = &cobra.Command{
-	Use:     "describe SERVER",
-	Aliases: []string{"desc"},
-	Short:   "Show details of a server",
-	Long: `
+var serverDetailCmd = newServerDetailCmd(client.NewAlpaconAPIClient, utils.Stdio)
+
+func newServerDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:     "describe SERVER",
+		Aliases: []string{"desc"},
+		Short:   "Show details of a server",
+		Long: `
 	The describe command fetches and displays detailed information about a specific server, 
 	including its status, and other relevant attributes. 
 	This command is useful for getting an in-depth understanding of a server's current state and configuration.
 	`,
-	Example: `
+		Example: `
 	alpacon server describe my-server
 	alpacon server desc my-server
 	`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		serverName := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			serverName := args[0]
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		serverDetail, err := server.GetServerDetail(alpaconClient, serverName)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve the server details: %s.", err)
-		}
+			serverDetail, err := server.GetServerDetail(alpaconClient, serverName)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the server details: %s.", err)
+			}
 
-		return utils.PrintJson(serverDetail)
-	}),
+			return ios.PrintJson(serverDetail)
+		}),
+	}
 }

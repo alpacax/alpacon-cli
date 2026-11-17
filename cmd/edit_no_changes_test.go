@@ -38,6 +38,9 @@ func TestEditorCommandsExitZeroWhenNothingChanged(t *testing.T) {
 			handled := false
 			guards := returningIfConds(body)
 			directCalls(body, func(call *ast.CallExpr) {
+				if sel, isSel := call.Fun.(*ast.SelectorExpr); isSel && sel.Sel.Name == "ReportNoChanges" && guards[call] {
+					handled = true // ios.ReportNoChanges, the IOStreams method
+				}
 				path, name, ok := calledFunc(call, imports)
 				switch {
 				case !ok:
@@ -52,7 +55,7 @@ func TestEditorCommandsExitZeroWhenNothingChanged(t *testing.T) {
 				return
 			}
 			checked++
-			assert.True(t, handled, "%s calls an editor function without an if utils.ReportNoChanges(err) { return nil } guard",
+			assert.True(t, handled, "%s calls an editor function without an if ios.ReportNoChanges(err) { return nil } guard",
 				file.fset.Position(editorCall.Pos()))
 		})
 	}

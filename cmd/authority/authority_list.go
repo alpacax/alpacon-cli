@@ -7,30 +7,34 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var authorityListCmd = &cobra.Command{
-	Use:     "ls",
-	Aliases: []string{"list"},
-	Short:   "List certificate authorities",
-	Long: `
+var authorityListCmd = newAuthorityListCmd(client.NewAlpaconAPIClient, utils.Stdio)
+
+func newAuthorityListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List certificate authorities",
+		Long: `
  	Displays a comprehensive list of all certificate authorities that have been initialized within the system, 
 	including their status and configuration details
 	`,
-	Example: `
+		Example: `
 	alpacon authority ls
 	alpacon authority list
 	`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		authorityList, err := cert.GetAuthorityList(alpaconClient)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve the authority list: %s.", err)
-		}
+			authorityList, err := cert.GetAuthorityList(alpaconClient)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the authority list: %s.", err)
+			}
 
-		return utils.PrintTable(authorityList)
-	}),
+			return ios.PrintTable(authorityList)
+		}),
+	}
 }

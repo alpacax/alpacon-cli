@@ -2,7 +2,6 @@ package authority
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/alpacax/alpacon-cli/api/cert"
 	"github.com/alpacax/alpacon-cli/api/server"
@@ -11,35 +10,39 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var authorityCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new certificate authority",
-	Long: `
+var authorityCreateCmd = newAuthorityCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
+
+func newAuthorityCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:   "create",
+		Short: "Create a new certificate authority",
+		Long: `
   	Initializes a new certificate authority within the system, allowing you to sign and manage certificates and define their policies.
 
 	CA creation requires an Alpacon API that accepts requests without an owner field.
 	`,
-	Example: `alpacon authority create`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+		Example: `alpacon authority create`,
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		authorityRequest, err := promptForAuthority(alpaconClient)
-		if err != nil {
-			return err
-		}
+			authorityRequest, err := promptForAuthority(alpaconClient)
+			if err != nil {
+				return err
+			}
 
-		response, err := cert.CreateAuthority(alpaconClient, authorityRequest)
-		if err != nil {
-			return utils.NewExitError("Failed to create the new authority: %s.", err)
-		}
+			response, err := cert.CreateAuthority(alpaconClient, authorityRequest)
+			if err != nil {
+				return utils.NewExitError("Failed to create the new authority: %s.", err)
+			}
 
-		installAuthorityInfo(response)
-		return nil
-	}),
+			installAuthorityInfo(ios, response)
+			return nil
+		}),
+	}
 }
 
 func promptForAuthority(ac *client.AlpaconClient) (cert.AuthorityRequest, error) {
@@ -78,10 +81,10 @@ func promptForAuthority(ac *client.AlpaconClient) (cert.AuthorityRequest, error)
 	return authorityRequest, nil
 }
 
-func installAuthorityInfo(response cert.AuthorityCreateResponse) {
-	fmt.Fprintln(os.Stderr)
-	utils.PrintHeader("Installation instruction")
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, response.Instruction)
-	utils.CliWarning("After leaving this page, you cannot obtain the script again for security.")
+func installAuthorityInfo(ios *utils.IOStreams, response cert.AuthorityCreateResponse) {
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	ios.PrintHeader("Installation instruction")
+	_, _ = fmt.Fprintln(ios.ErrOut)
+	_, _ = fmt.Fprintln(ios.ErrOut, response.Instruction)
+	ios.Warning("After leaving this page, you cannot obtain the script again for security.")
 }

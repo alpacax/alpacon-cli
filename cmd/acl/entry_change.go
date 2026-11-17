@@ -39,7 +39,7 @@ trail; to stop an entry for a while instead, disable it.`,
 			}
 		}
 
-		session, err := openLedger()
+		session, err := openLedger(utils.Stdio)
 		if err != nil {
 			return err
 		}
@@ -71,7 +71,7 @@ in the ledger and 'alpacon acl entry enable' turns it back on.`,
 	Example: `  alpacon acl entry disable 550e8400-e29b-41d4-a716-446655440000`,
 	Args:    cobra.ExactArgs(1),
 	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		return setEntryEnabled(args[0], false)
+		return setEntryEnabled(utils.Stdio, args[0], false)
 	}),
 }
 
@@ -81,7 +81,7 @@ var entryEnableCmd = &cobra.Command{
 	Example: `  alpacon acl entry enable 550e8400-e29b-41d4-a716-446655440000`,
 	Args:    cobra.ExactArgs(1),
 	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		return setEntryEnabled(args[0], true)
+		return setEntryEnabled(utils.Stdio, args[0], true)
 	}),
 }
 
@@ -89,12 +89,12 @@ func init() {
 	entryRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 }
 
-func setEntryEnabled(entryID string, enabled bool) error {
+func setEntryEnabled(ios *utils.IOStreams, entryID string, enabled bool) error {
 	if err := requireEntryIDs([]string{entryID}); err != nil {
 		return err
 	}
 
-	session, err := openLedger()
+	session, err := openLedger(ios)
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func setEntryEnabled(entryID string, enabled bool) error {
 	if err != nil {
 		return session.fail(action, err)
 	}
-	utils.CliSuccess("%s %q (%s)", done, entry.CommandPattern, entry.ID)
+	ios.Success("%s %q (%s)", done, entry.CommandPattern, entry.ID)
 	return nil
 }
 

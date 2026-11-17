@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newListCommand(newClient clientFactory) *cobra.Command {
+func newListCommand(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -19,7 +19,7 @@ and --user to filter by the requesting user.`,
   alpacon exec ls --tail 10
   alpacon exec ls --tail 10 --server my-server --user admin`,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, _ []string) error {
-			return listFromFlags(cmd, newClient)
+			return listFromFlags(ios, cmd, newClient)
 		}),
 	}
 	cmd.Flags().IntP("tail", "t", 25, "Number of command entries to show, newest first")
@@ -28,7 +28,7 @@ and --user to filter by the requesting user.`,
 	return cmd
 }
 
-func listFromFlags(cmd *cobra.Command, newClient clientFactory) error {
+func listFromFlags(ios *utils.IOStreams, cmd *cobra.Command, newClient clientFactory) error {
 	tail, _ := cmd.Flags().GetInt("tail")
 	serverName, _ := cmd.Flags().GetString("server")
 	userName, _ := cmd.Flags().GetString("user")
@@ -46,5 +46,5 @@ func listFromFlags(cmd *cobra.Command, newClient clientFactory) error {
 		return utils.NewExitError("Failed to retrieve the commands: %s.", err)
 	}
 
-	return utils.PrintTable(eventList)
+	return ios.PrintTable(eventList)
 }

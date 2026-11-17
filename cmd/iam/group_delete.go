@@ -7,54 +7,56 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var groupDeleteCmd = &cobra.Command{
-	Use:     "delete GROUP",
-	Aliases: []string{"rm"},
-	Short:   "Delete a specified group",
-	Long: `
+var groupDeleteCmd = newGroupDeleteCmd(client.NewAlpaconAPIClient, utils.Stdio)
+
+func newGroupDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "delete GROUP",
+		Aliases: []string{"rm"},
+		Short:   "Delete a specified group",
+		Long: `
 	This command is used to permanently delete a specified group from the Alpacon. 
 	The command requires the exact group name as an argument.
 	NOTE : alpacon(Alpacon users) group cannot delete or update memberships
 	`,
-	Example: `
+		Example: `
 	alpacon group delete developers
 	alpacon group rm developers
 	alpacon group delete developers -y
 	`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		groupName := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			groupName := args[0]
 
-		yes, _ := cmd.Flags().GetBool("yes")
-		if !yes {
-			if proceed, err := utils.Confirm("Delete group '%s'?", groupName); err != nil || !proceed {
-				return err
+			yes, _ := cmd.Flags().GetBool("yes")
+			if !yes {
+				if proceed, err := utils.Confirm("Delete group '%s'?", groupName); err != nil || !proceed {
+					return err
+				}
 			}
-		}
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		if err := alpaconClient.LoadCurrentUser(); err != nil {
-			return utils.NewExitError("Failed to load current user: %s", err)
-		}
+			if err := alpaconClient.LoadCurrentUser(); err != nil {
+				return utils.NewExitError("Failed to load current user: %s", err)
+			}
 
-		if alpaconClient.Privileges == "general" {
-			return utils.NewExitError("You do not have the permission to delete groups.")
-		}
+			if alpaconClient.Privileges == "general" {
+				return utils.NewExitError("You do not have the permission to delete groups.")
+			}
 
-		err = iam.DeleteGroup(alpaconClient, groupName)
-		if err != nil {
-			return utils.NewExitError("Failed to delete the group: %s", err)
-		}
+			err = iam.DeleteGroup(alpaconClient, groupName)
+			if err != nil {
+				return utils.NewExitError("Failed to delete the group: %s", err)
+			}
 
-		utils.CliSuccess("Group deleted: %s", groupName)
-		return nil
-	}),
-}
-
-func init() {
-	groupDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+			ios.Success("Group deleted: %s", groupName)
+			return nil
+		}),
+	}
+	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	return cmd
 }

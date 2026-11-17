@@ -7,37 +7,39 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var revokeListCmd = &cobra.Command{
-	Use:     "ls",
-	Aliases: []string{"list"},
-	Short:   "List certificate revoke requests",
-	Long: `
+var revokeListCmd = newRevokeListCmd(client.NewAlpaconAPIClient, utils.Stdio)
+
+func newRevokeListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List certificate revoke requests",
+		Long: `
 	List all certificate revoke requests with optional filtering by status or certificate.
 	`,
-	Example: `
+		Example: `
 	alpacon revoke list
 	alpacon revoke ls --status=requested
 	alpacon revoke ls --certificate=550e8400-e29b-41d4-a716-446655440000
 	`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		status, _ := cmd.Flags().GetString("status")
-		certificate, _ := cmd.Flags().GetString("certificate")
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			status, _ := cmd.Flags().GetString("status")
+			certificate, _ := cmd.Flags().GetString("certificate")
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		requestList, err := cert.GetRevokeRequestList(alpaconClient, status, certificate)
-		if err != nil {
-			return utils.NewExitError("Failed to get revoke requests: %s.", err)
-		}
+			requestList, err := cert.GetRevokeRequestList(alpaconClient, status, certificate)
+			if err != nil {
+				return utils.NewExitError("Failed to get revoke requests: %s.", err)
+			}
 
-		return utils.PrintTable(requestList)
-	}),
-}
-
-func init() {
-	revokeListCmd.Flags().String("status", "", "Filter by status (requested, revoking, revoked, failed, denied, canceled)")
-	revokeListCmd.Flags().String("certificate", "", "Filter by certificate ID")
+			return ios.PrintTable(requestList)
+		}),
+	}
+	cmd.Flags().String("status", "", "Filter by status (requested, revoking, revoked, failed, denied, canceled)")
+	cmd.Flags().String("certificate", "", "Filter by certificate ID")
+	return cmd
 }

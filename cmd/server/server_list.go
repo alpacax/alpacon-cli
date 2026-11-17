@@ -7,29 +7,33 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var serverListCmd = &cobra.Command{
-	Use:     "ls",
-	Aliases: []string{"list"},
-	Short:   "List servers",
-	Long: `
+var serverListCmd = newServerListCmd(client.NewAlpaconAPIClient, utils.Stdio)
+
+func newServerListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List servers",
+		Long: `
 	Display a detailed list of all servers registered in the Alpacon.
 	This command provides information such as server ID, name, status, and other relevant details.
 	`,
-	Example: `
+		Example: `
 	alpacon server ls
 	alpacon server list
 	`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		serverList, err := server.GetServerList(alpaconClient)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve the servers: %s.", err)
-		}
+			serverList, err := server.GetServerList(alpaconClient)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the servers: %s.", err)
+			}
 
-		return utils.PrintTable(serverList)
-	}),
+			return ios.PrintTable(serverList)
+		}),
+	}
 }

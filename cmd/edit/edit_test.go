@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	ftpapi "github.com/alpacax/alpacon-cli/api/ftp"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -182,7 +183,7 @@ func TestRunEditRestrictsDownloadedFilePermissions(t *testing.T) {
 		tempRoot: tempRoot,
 	}
 
-	_, err := runEdit(editOptions{
+	_, err := runEdit(utils.Stdio, editOptions{
 		Target: editTarget{Server: "prod", RemotePath: "/etc/secret.conf"},
 		Editor: "true",
 	}, deps)
@@ -213,7 +214,7 @@ func TestRunEditNoChangesSkipsUploadAndRemovesTemp(t *testing.T) {
 		tempRoot: tempRoot,
 	}
 
-	result, err := runEdit(editOptions{
+	result, err := runEdit(utils.Stdio, editOptions{
 		Target: editTarget{Server: "prod", RemotePath: "/etc/app.conf"},
 		Editor: "true",
 	}, deps)
@@ -248,7 +249,7 @@ func TestRunEditSuccessfulUploadRemovesEditorSidecarFiles(t *testing.T) {
 		tempRoot: tempRoot,
 	}
 
-	result, err := runEdit(editOptions{
+	result, err := runEdit(utils.Stdio, editOptions{
 		Target: editTarget{Server: "prod", RemotePath: "/etc/app.conf"},
 		Editor: "true",
 	}, deps)
@@ -282,7 +283,7 @@ func TestRunEditUploadFailurePreservesTempPath(t *testing.T) {
 		tempRoot: tempRoot,
 	}
 
-	result, err := runEdit(editOptions{
+	result, err := runEdit(utils.Stdio, editOptions{
 		Target: editTarget{Server: "prod", RemotePath: "/etc/app.conf"},
 		Editor: "true",
 	}, deps)
@@ -314,7 +315,7 @@ func TestRunEditEditorFailureWithoutChangeRemovesTemp(t *testing.T) {
 		tempRoot:     tempRoot,
 	}
 
-	result, err := runEdit(editOptions{
+	result, err := runEdit(utils.Stdio, editOptions{
 		Target: editTarget{Server: "prod", RemotePath: "/etc/app.conf"},
 		Editor: "true",
 	}, deps)
@@ -346,7 +347,7 @@ func TestRunEditEditorFailureAfterChangePreservesTemp(t *testing.T) {
 		tempRoot:     tempRoot,
 	}
 
-	result, err := runEdit(editOptions{
+	result, err := runEdit(utils.Stdio, editOptions{
 		Target: editTarget{Server: "prod", RemotePath: "/etc/app.conf"},
 		Editor: "true",
 	}, deps)
@@ -381,7 +382,7 @@ func TestRunEditLargeFileDeclineRemovesTempAndSkipsEditor(t *testing.T) {
 		tempRoot: tempRoot,
 	}
 
-	result, err := runEdit(editOptions{
+	result, err := runEdit(utils.Stdio, editOptions{
 		Target: editTarget{Server: "prod", RemotePath: "/var/log/big.log"},
 		Editor: "true",
 	}, deps)

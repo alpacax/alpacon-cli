@@ -44,7 +44,7 @@ resolved.`,
 	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 		tokenRef, _ := cmd.Flags().GetString("token")
 
-		session, err := openLedger()
+		session, err := openLedger(utils.Stdio)
 		if err != nil {
 			return err
 		}

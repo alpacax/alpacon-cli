@@ -1,10 +1,8 @@
 package exec
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -548,31 +546,20 @@ func TestReRunHintQuotesServer(t *testing.T) {
 	}
 }
 
-// reportRefusal runs report under format and returns the exit and what reaching cmd.Execute would
-// print: what report wrote, then the failure FprintExitError writes.
-func reportRefusal(t *testing.T, format string, report func(io.Writer) error) (exitCode int, stderr string) {
-	t.Helper()
-	orig := utils.OutputFormat
-	t.Cleanup(func() { utils.OutputFormat = orig })
-	utils.OutputFormat = format
-	var buf bytes.Buffer
-
-	err := report(&buf)
-
-	exitErr, ok := errors.AsType[*utils.ExitError](err)
-	require.True(t, ok, "a refusal must return utils.ExitError: %v", err)
-	utils.FprintExitError(&buf, exitErr)
-	return exitErr.Code, buf.String()
-}
-
 func TestCodedRefusalOfAnInvalidIDExitsTwoInEitherFormat(t *testing.T) {
+	t.Parallel()
 	for _, format := range []string{utils.OutputFormatJSON, utils.OutputFormatTable} {
 		t.Run(format, func(t *testing.T) {
+			t.Parallel()
 			_, idErr := api.RequireID("../x", "work session")
 
-			exitCode, stderr := reportRefusal(t, format, func(w io.Writer) error {
-				return codedRefusal(w, "command", idErr, "work session ID is unusable", "")
-			})
+			ios, _, errOut := utils.TestIOStreams()
+			require.NoError(t, ios.SetOutputFormat(format))
+			err := codedRefusal(ios, ios.ErrOut, "command", idErr, "work session ID is unusable", "")
+			var exitErr *utils.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			ios.FprintExitError(errOut, exitErr)
+			exitCode, stderr := exitErr.Code, errOut.String()
 
 			assert.Equal(t, utils.ExitCodeUsageError, exitCode)
 			if format == utils.OutputFormatTable {
@@ -593,6 +580,7 @@ func TestCodedRefusalOfAnInvalidIDExitsTwoInEitherFormat(t *testing.T) {
 }
 
 func TestCodedRefusalOfAUsageErrorExitsTwoOnlyInPlaceOfOne(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		code     int
@@ -603,11 +591,16 @@ func TestCodedRefusalOfAUsageErrorExitsTwoOnlyInPlaceOfOne(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			flagErr := utils.MarkUsageError(errors.New("bad flag"))
 
-			exitCode, stderr := reportRefusal(t, utils.OutputFormatTable, func(w io.Writer) error {
-				return codedRefusalWithExit(w, tc.code, "command", flagErr, "the flag is unusable", "", nil)
-			})
+			ios, _, errOut := utils.TestIOStreams()
+			require.NoError(t, ios.SetOutputFormat(utils.OutputFormatTable))
+			err := codedRefusalWithExit(ios, ios.ErrOut, tc.code, "command", flagErr, "the flag is unusable", "", nil)
+			var exitErr *utils.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			ios.FprintExitError(errOut, exitErr)
+			exitCode, stderr := exitErr.Code, errOut.String()
 
 			assert.Equal(t, tc.wantExit, exitCode)
 			assert.Contains(t, stderr, "the flag is unusable.")

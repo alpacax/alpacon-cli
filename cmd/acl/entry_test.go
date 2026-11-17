@@ -117,7 +117,7 @@ func TestParseEntryFile_NonStringAccountFields(t *testing.T) {
 			utils.OutputFormat = utils.OutputFormatJSON
 			t.Cleanup(func() { utils.OutputFormat = oldFormat })
 
-			err = runEntryAdd(entryAddCmd, nil)
+			err = runEntryAdd(utils.Stdio, entryAddCmd, nil)
 			var exitErr *utils.ExitError
 			require.ErrorAs(t, err, &exitErr)
 			assert.Equal(t, utils.ExitCodeUsageError, exitErr.Code)

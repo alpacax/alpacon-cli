@@ -1,9 +1,13 @@
 package cert
 
 import (
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
+
+// clientFactory builds the API client a command talks to.
+type clientFactory = func() (*client.AlpaconClient, error)
 
 var CertCmd = &cobra.Command{
 	Use:     "cert",

@@ -131,7 +131,7 @@ func TestEntryAdd_ApplicationAccount(t *testing.T) {
 			utils.OutputFormat = utils.OutputFormatJSON
 			t.Cleanup(func() { utils.OutputFormat = oldFormat })
 
-			err := runEntryAdd(entryAddCmd, nil)
+			err := runEntryAdd(utils.Stdio, entryAddCmd, nil)
 			var stderr bytes.Buffer
 			if tt.wantExit == 0 {
 				require.NoError(t, err, stderr.String())

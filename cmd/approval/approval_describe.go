@@ -16,53 +16,57 @@ type describeRow struct {
 	Value string `table:"Value"`
 }
 
-var approvalDescribeCmd = &cobra.Command{
-	Use:     "describe REQUEST_ID",
-	Aliases: []string{"desc"},
-	Short:   "Show details of an approval request",
-	Long: `Show an approval request.
+var approvalDescribeCmd = newApprovalDescribeCmd(client.NewAlpaconAPIClient, utils.Stdio)
+
+func newApprovalDescribeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:     "describe REQUEST_ID",
+		Aliases: []string{"desc"},
+		Short:   "Show details of an approval request",
+		Long: `Show an approval request.
 
 The table shows the decision context the server sends for the request type:
 the command or sudo detail, its risk assessment, the work session and the
 requested changes. Use --output json to print the full raw response.`,
-	Args: cobra.ExactArgs(1),
-	Example: `  alpacon approval describe 550e8400-e29b-41d4-a716-446655440000
+		Args: cobra.ExactArgs(1),
+		Example: `  alpacon approval describe 550e8400-e29b-41d4-a716-446655440000
   alpacon approval desc 550e8400-e29b-41d4-a716-446655440000`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			ac, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		if utils.OutputFormat == utils.OutputFormatJSON {
-			body, err := approvalapi.GetApprovalRequestRaw(ac, args[0])
+			if ios.IsJSON() {
+				body, err := approvalapi.GetApprovalRequestRaw(ac, args[0])
+				if err != nil {
+					return utils.NewExitError("Failed to retrieve approval request: %s.", err)
+				}
+				return ios.PrintJson(body)
+			}
+
+			req, err := approvalapi.GetApprovalRequest(ac, args[0])
 			if err != nil {
 				return utils.NewExitError("Failed to retrieve approval request: %s.", err)
 			}
-			return utils.PrintJson(body)
-		}
 
-		req, err := approvalapi.GetApprovalRequest(ac, args[0])
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve approval request: %s.", err)
-		}
-
-		fe := fileExecutionOf(req)
-		rows := describeRows(req, fe)
-		var script string
-		var hasScript bool
-		if fe != nil {
-			script, hasScript = fileExecutionScript(fe)
-		}
-		if err := utils.PrintTable(rows); err != nil {
-			return err
-		}
-		if hasScript {
-			fmt.Println()
-			fmt.Println(script)
-		}
-		return nil
-	}),
+			fe := fileExecutionOf(req)
+			rows := describeRows(req, fe)
+			var script string
+			var hasScript bool
+			if fe != nil {
+				script, hasScript = fileExecutionScript(fe)
+			}
+			if err := ios.PrintTable(rows); err != nil {
+				return err
+			}
+			if hasScript {
+				_, _ = fmt.Fprintln(ios.Out)
+				_, _ = fmt.Fprintln(ios.Out, script)
+			}
+			return nil
+		}),
+	}
 }
 
 func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecution) []describeRow {

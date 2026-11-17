@@ -3,7 +3,6 @@ package iam
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/rbac"
@@ -12,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userRoleHistoryCmd = newUserRoleHistoryCmd(client.NewAlpaconAPIClient)
+var userRoleHistoryCmd = newUserRoleHistoryCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
-func newUserRoleHistoryCmd(newClient func() (*client.AlpaconClient, error)) *cobra.Command {
+func newUserRoleHistoryCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "history [USER]",
 		Short: "Show who changed a user's roles, and why",
@@ -53,13 +52,12 @@ such group, only the changes that name both of them. Neither is an error, and th
 rows may not name you at all. A change that names an object you do not reach
 shows its kind and a hidden count under Target, and its reason as (withheld).
 
-This is the one 'alpacon user role' command an API token can reach on an Alpacon
-Cloud workspace. The audit log sits outside the gate that refuses tokens on the
-other RBAC routes, and asks instead for a token carrying the role_audit_log:read
-scope. A personal token then reads what its account reaches. A service token is
-let in but reads nothing, so the command exits 1 saying so (error_code
-role_audit_reach_none), or fails earlier without USER, since the token has no
-account of its own to default to.`,
+This is the one 'alpacon user role' command an API token can reach. The audit log
+sits outside the gate that refuses tokens on the other RBAC routes, and asks
+instead for a token carrying the role_audit_log:read scope. A personal token then
+reads what its account reaches. A service token is let in but reads nothing, so
+the command exits 1 saying so (error_code role_audit_reach_none), or fails earlier
+without USER, since the token has no account of its own to default to.`,
 		Example: `  alpacon user role history
   alpacon user role history john
   alpacon user role history john --tail 100
@@ -92,25 +90,25 @@ account of its own to default to.`,
 				return utils.NewExitErrorWithErrorCode(utils.ExitCodeGeneralError, errorCodeReachNone, "This credential may not read the role-change log (reach: none), so it says nothing about %s's roles. A service token gets this; run 'alpacon login' to read it as your account.", subj.Label)
 			}
 			if reach.Changed {
-				utils.CliWarning(reachChangedWarning)
+				ios.Warning(reachChangedWarning)
 			}
 
 			rows := rbac.AuditAttributesFrom(entries, time.Local)
-			if utils.OutputFormat == utils.OutputFormatJSON {
-				return printRoleHistoryJSON(reach, rows)
+			if ios.IsJSON() {
+				return printRoleHistoryJSON(ios, reach, rows)
 			}
 
 			line := reachLine(reach)
-			_, _ = fmt.Fprintln(utils.TrackedStderr(), line)
-			if err := utils.PrintTable(rows); err != nil {
+			_, _ = fmt.Fprintln(ios.ErrOut, line)
+			if err := ios.PrintTable(rows); err != nil {
 				return err
 			}
 			repeatLine, repeatWarning := noticesToRepeat(reach, utils.LastOutputPaged())
 			if repeatLine {
-				_, _ = fmt.Fprintln(utils.TrackedStderr(), line)
+				_, _ = fmt.Fprintln(ios.ErrOut, line)
 			}
 			if repeatWarning {
-				utils.CliWarning(reachChangedWarning)
+				ios.Warning(reachChangedWarning)
 			}
 			return nil
 		}),
@@ -144,9 +142,9 @@ type roleHistoryOutput struct {
 	Entries      []rbac.RoleAuditAttributes `json:"entries"`
 }
 
-func printRoleHistoryJSON(reach rbac.Reach, rows []rbac.RoleAuditAttributes) error {
+func printRoleHistoryJSON(ios *utils.IOStreams, reach rbac.Reach, rows []rbac.RoleAuditAttributes) error {
 	output := roleHistoryOutput{Reach: reach.Raw, ReachChanged: reach.Changed, Entries: jsonSlice(rows)}
-	if err := utils.PrintJSONValue(os.Stdout, output); err != nil {
+	if err := utils.PrintJSONValue(ios.Out, output); err != nil {
 		return utils.NewExitError("Failed to marshal data to JSON: %s", err)
 	}
 

@@ -46,14 +46,14 @@ func (e hintedRefusal) ErrorHint() string   { return e.hint }
 
 func TestCodedRefusalHint_ServerHintReplacesTheLocalOne(t *testing.T) {
 	t.Parallel()
-	local := credentialInlineHint(ExecInvocation)
+	local := credentialInlineHint(utils.Stdio, ExecInvocation)
 	const serverHint = "Move the secret out of the command line and pass it through the environment."
 
-	got := codedRefusalHint(hintedRefusal{code: "command_inline_credential", hint: serverHint}, local)
-	assert.Equal(t, denialHintLine(serverHint+"\n"), got)
+	got := codedRefusalHint(utils.Stdio, hintedRefusal{code: "command_inline_credential", hint: serverHint}, local)
+	assert.Equal(t, denialHintLine(utils.Stdio, serverHint+"\n"), got)
 	assert.NotContains(t, got, "--env")
 
-	assert.Equal(t, local, codedRefusalHint(hintedRefusal{code: "command_inline_credential"}, local))
+	assert.Equal(t, local, codedRefusalHint(utils.Stdio, hintedRefusal{code: "command_inline_credential"}, local))
 }
 
 // TestCredentialInlineHint pins the --env hint, which never echoes a credential value. Its example
@@ -71,7 +71,7 @@ func TestCredentialInlineHint(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			hint := credentialInlineHint(tt.invokedAs)
+			hint := credentialInlineHint(utils.Stdio, tt.invokedAs)
 			assert.Contains(t, hint, "--env")
 			assert.Contains(t, hint, "Hint:")
 			assert.Contains(t, hint, tt.want)

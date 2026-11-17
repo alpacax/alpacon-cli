@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"net/http"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,7 +14,10 @@ import (
 	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -407,7 +411,7 @@ func TestPrintWhoami_StripsControlSequences(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var err error
-			got := testutil.CaptureStdout(t, func() { err = printWhoami(tt.output) })
+			got := testutil.CaptureStdout(t, func() { err = printWhoami(utils.Stdio, tt.output) })
 
 			require.NoError(t, err)
 			assert.NotContains(t, got, "\x1b")
@@ -421,10 +425,63 @@ func TestPrintWhoami_StripsControlSequences(t *testing.T) {
 func TestPrintWhoami_KeepsOneLinePerField(t *testing.T) {
 	// A newline inside a value would forge an identity line the account does not have.
 	var plainErr, forgedErr error
-	plain := testutil.CaptureStdout(t, func() { plainErr = printWhoami(whoamiOutput{Shell: "/bin/bash"}) })
-	forged := testutil.CaptureStdout(t, func() { forgedErr = printWhoami(whoamiOutput{Shell: "/bin/bash\nRole:        owner"}) })
+	plain := testutil.CaptureStdout(t, func() { plainErr = printWhoami(utils.Stdio, whoamiOutput{Shell: "/bin/bash"}) })
+	forged := testutil.CaptureStdout(t, func() { forgedErr = printWhoami(utils.Stdio, whoamiOutput{Shell: "/bin/bash\nRole:        owner"}) })
 
 	require.NoError(t, plainErr)
 	require.NoError(t, forgedErr)
 	assert.Equal(t, strings.Count(plain, "\n"), strings.Count(forged, "\n"))
+}
+
+// whoamiLogin saves an API-token login to ts in a fresh home directory. Serial: it sets it.
+func whoamiLogin(t *testing.T, workspaceURL string) {
+	t.Helper()
+	setTestHome(t, t.TempDir())
+	t.Setenv("ALPACON_WORK_SESSION", "")
+	require.NoError(t, config.CreateConfig(workspaceURL, "my-workspace", "api-token", "", "", "", "", 0, false))
+}
+
+// Serial: it sets the home directory, captures stdout and sets utils.OutputFormat.
+func TestWhoamiReportsTheServersAnswer(t *testing.T) {
+	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+		"GET /api/iam/users/-/":            {Status: http.StatusOK, Body: `{"id": "550e8400-e29b-41d4-a716-446655440000", "username": "alice", "email": "alice@example.com", "is_staff": true}`},
+		"GET /api/iam/memberships/":        {Status: http.StatusOK, Body: `{"count": 1, "results": [{"group_name": "developers", "role": "member"}]}`},
+		"GET /api/work-sessions/sessions/": {Status: http.StatusOK, Body: `{"count": 0, "results": []}`},
+	})
+	whoamiLogin(t, ts.URL)
+
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newWhoamiCmd(ts.Factory(), ios) })
+
+	assert.Equal(t, 0, code, stderr)
+	assert.Contains(t, stdout, `"alice"`)
+	assert.Contains(t, stdout, `"alice@example.com"`)
+	assert.Contains(t, stdout, `"my-workspace"`)
+}
+
+// Serial: it sets the home directory and captures stdout and stderr.
+func TestWhoamiWithoutAServerAnswer(t *testing.T) {
+	tests := []struct {
+		name       string
+		loggedIn   bool
+		wantCode   int
+		wantStdout string
+		wantStderr string
+	}{
+		{name: "client cannot be built", loggedIn: true, wantStdout: "my-workspace", wantStderr: "Showing local config only. Server fields are unavailable."},
+		{name: "not logged in", wantCode: utils.ExitCodeGeneralError, wantStderr: "Not logged in. Run 'alpacon login' to authenticate."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setTestHome(t, t.TempDir())
+			if tt.loggedIn {
+				whoamiLogin(t, "https://my-workspace.us1.alpacon.io")
+			}
+
+			stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return newWhoamiCmd(cmdtest.NoClient, ios) })
+
+			assert.Equal(t, tt.wantCode, code, stderr)
+			assert.Contains(t, stdout, tt.wantStdout)
+			assert.Contains(t, stderr, tt.wantStderr)
+		})
+	}
 }

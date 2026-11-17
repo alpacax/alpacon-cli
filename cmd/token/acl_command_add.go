@@ -8,10 +8,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclCommandAddCmd = &cobra.Command{
-	Use:   "add TOKEN",
-	Short: "Add a command ACL rule to a token",
-	Long: `Define which server-side shell commands an API token is allowed to execute
+var aclCommandAddCmd = newAclCommandAddCmd(client.NewAlpaconAPIClient, utils.Stdio)
+
+func newAclCommandAddCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add TOKEN",
+		Short: "Add a command ACL rule to a token",
+		Long: `Define which server-side shell commands an API token is allowed to execute
 via websh or exec (e.g., "whoami", "systemctl status *", "docker compose *").
 
 Use * as a wildcard to match any arguments. Without a wildcard, only the exact
@@ -24,27 +27,28 @@ On servers that manage command ACLs on the command pre-approval ledger, this
 write is refused with command_acl_moved; a Command ACL admin issues the entry
 under Pre-approved commands on the service token's page in the web console, and a
 personal API token has no command list on the ledger.`,
-	Example: `  alpacon token acl command add my-api-token --command="whoami"
+		Example: `  alpacon token acl command add my-api-token --command="whoami"
   alpacon token acl command add my-api-token --command="docker *" --username=root
   alpacon token acl command add my-api-token --command="systemctl status *" --username="*" --groupname="*"`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(runCommandAclAdd),
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return runCommandAclAdd(ios, cmd, args, newClient)
+		}),
+	}
+	cmd.Flags().StringP("command", "c", "", "Server-side shell command (supports * wildcard)")
+	cmd.Flags().String("username", "", `Username restriction: "" = token owner only, "*" = any user`)
+	cmd.Flags().String("groupname", "", `Groupname restriction: "" = no restriction, "*" = any group`)
+	_ = cmd.MarkFlagRequired("command")
+	return cmd
 }
 
-func init() {
-	aclCommandAddCmd.Flags().StringP("command", "c", "", "Server-side shell command (supports * wildcard)")
-	aclCommandAddCmd.Flags().String("username", "", `Username restriction: "" = token owner only, "*" = any user`)
-	aclCommandAddCmd.Flags().String("groupname", "", `Groupname restriction: "" = no restriction, "*" = any group`)
-	_ = aclCommandAddCmd.MarkFlagRequired("command")
-}
-
-func runCommandAclAdd(cmd *cobra.Command, args []string) error {
+func runCommandAclAdd(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient clientFactory) error {
 	tokenArg := args[0]
 	command, _ := cmd.Flags().GetString("command")
 	username, _ := cmd.Flags().GetString("username")
 	groupname, _ := cmd.Flags().GetString("groupname")
 
-	alpaconClient, err := client.NewAlpaconAPIClient()
+	alpaconClient, err := newClient()
 	if err != nil {
 		return utils.NewExitError("Connection to Alpacon API failed: %v. Consider re-logging.", err)
 	}
@@ -64,6 +68,6 @@ func runCommandAclAdd(cmd *cobra.Command, args []string) error {
 		return utils.NewExitError("Failed to add the command ACL: %v.", err)
 	}
 
-	utils.CliSuccess("Command ACL added to token %s: %s", tokenArg, command)
+	ios.Success("Command ACL added to token %s: %s", tokenArg, command)
 	return nil
 }

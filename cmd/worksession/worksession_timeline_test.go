@@ -13,7 +13,6 @@ import (
 	"time"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
-	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -281,11 +280,12 @@ func TestPrintRecordingsSectionTo_StripsControlSequences(t *testing.T) {
 // A bidi override in a server name reaches the terminal through --output json
 // too, so the JSON goes out escaped rather than verbatim.
 func TestOutputTimelineJSON_EscapesFormatChars(t *testing.T) {
+	t.Parallel()
 	rows := []wsapi.TimelineAttributes{{Server: "prod\u202edb"}}
-	var err error
-	out := testutil.CaptureStdout(t, func() {
-		err = outputTimelineJSON(rows, nil, "ses-1", nil)
-	})
+	ios, stdout, _ := utils.TestIOStreams()
+
+	err := outputTimelineJSON(ios, rows, nil, "ses-1", nil)
+	out := stdout.String()
 	require.NoError(t, err)
 	assert.NotContains(t, out, "\u202e")
 	assert.Contains(t, out, `\u202e`)
@@ -294,10 +294,11 @@ func TestOutputTimelineJSON_EscapesFormatChars(t *testing.T) {
 // outputTimelineJSON must emit recordings as [] not null when the session has no
 // terminal.
 func TestOutputTimelineJSON_RecordingsEmptyArrayNotNull(t *testing.T) {
-	var err error
-	out := testutil.CaptureStdout(t, func() {
-		err = outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, "ses-1", nil)
-	})
+	t.Parallel()
+	ios, stdout, _ := utils.TestIOStreams()
+
+	err := outputTimelineJSON(ios, []wsapi.TimelineAttributes{}, nil, "ses-1", nil)
+	out := stdout.String()
 	require.NoError(t, err)
 	var result map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal([]byte(out), &result))
@@ -305,10 +306,11 @@ func TestOutputTimelineJSON_RecordingsEmptyArrayNotNull(t *testing.T) {
 }
 
 func TestOutputTimelineJSON_BothKeysPresent(t *testing.T) {
-	var err error
-	out := testutil.CaptureStdout(t, func() {
-		err = outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, "ses-1", nil)
-	})
+	t.Parallel()
+	ios, stdout, _ := utils.TestIOStreams()
+
+	err := outputTimelineJSON(ios, []wsapi.TimelineAttributes{}, nil, "ses-1", nil)
+	out := stdout.String()
 	require.NoError(t, err)
 	var keys map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal([]byte(out), &keys))

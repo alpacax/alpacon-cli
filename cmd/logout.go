@@ -18,54 +18,58 @@ const (
 	blacklistURL = "/api/auth0/token/blacklist/"
 )
 
-var logoutCmd = &cobra.Command{
-	Use:   "logout",
-	Short: "Log out of Alpacon",
-	Long:  "Log out of Alpacon. This command removes your authentication credentials stored locally on your system.",
-	Example: `
+var logoutCmd = newLogoutCmd(client.NewAlpaconAPIClient, utils.Stdio)
+
+func newLogoutCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:   "logout",
+		Short: "Log out of Alpacon",
+		Long:  "Log out of Alpacon. This command removes your authentication credentials stored locally on your system.",
+		Example: `
 	alpacon logout
 	`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		validConfig, err := config.LoadConfig()
-		if err != nil {
-			utils.CliInfo("You are not logged in.")
-			return nil
-		}
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			validConfig, err := config.LoadConfig()
+			if err != nil {
+				ios.Info("You are not logged in.")
+				return nil
+			}
 
-		if validConfig.IsMultiWorkspaceMode() {
-			utils.CliWarning("This will log you out from all workspaces associated with this account.")
-		}
+			if validConfig.IsMultiWorkspaceMode() {
+				ios.Warning("This will log you out from all workspaces associated with this account.")
+			}
 
-		return reportLogout(runLogout(validConfig))
-	}),
+			return reportLogout(ios, runLogout(ios, newClient, validConfig))
+		}),
+	}
 }
 
 // runLogout asks the server to end the session as far as it can, then removes
 // the local credentials unless another shell has logged in since.
-func runLogout(validConfig config.Config) error {
-	if !endServerSession(validConfig) {
-		utils.CliWarning("The server-side session may still be valid.")
+func runLogout(ios *utils.IOStreams, newClient clientFactory, validConfig config.Config) error {
+	if !endServerSession(ios, newClient, validConfig) {
+		ios.Warning("The server-side session may still be valid.")
 	}
 	return config.DeleteConfig(validConfig)
 }
 
 // endServerSession reports whether every server call succeeded. A failed call
 // only warns, so an offline or expired session can still be logged out.
-func endServerSession(validConfig config.Config) bool {
+func endServerSession(ios *utils.IOStreams, newClient clientFactory, validConfig config.Config) bool {
 	if _, err := url.Parse(validConfig.WorkspaceURL); err != nil { // every server call below would fail on the same URL
-		utils.CliWarning("Skipped the server logout: the workspace URL does not parse: %s.", err)
+		ios.Warning("Skipped the server logout: the workspace URL does not parse: %s.", err)
 		return false
 	}
 
 	httpClient := httpclient.New(validConfig.Insecure)
 	ok := true
 	warn := func(format string, err error) {
-		utils.CliWarning(format, err)
+		ios.Warning(format, err)
 		ok = false
 	}
 
 	// Built first, so it reads the login this command loaded.
-	ac, err := client.NewAlpaconAPIClient()
+	ac, err := newClient()
 	if err != nil {
 		warn("Failed to create Alpacon API client: %s.", err)
 		if utils.ClassifyError(err) == utils.ErrorCodeNetwork { // later calls would wait out the same timeout
@@ -105,14 +109,14 @@ func endServerSession(validConfig config.Config) bool {
 	return ok
 }
 
-func reportLogout(err error) error {
+func reportLogout(ios *utils.IOStreams, err error) error {
 	switch {
 	case errors.Is(err, config.ErrLoginChanged):
-		utils.CliWarning("Logged out, but kept the config: another shell logged in since this command started.")
+		ios.Warning("Logged out, but kept the config: another shell logged in since this command started.")
 	case err != nil:
 		return utils.NewExitError("Log out from Alpacon failed: %s.", err)
 	default:
-		utils.CliSuccess("Logout succeeded!")
+		ios.Success("Logout succeeded!")
 	}
 	return nil
 }

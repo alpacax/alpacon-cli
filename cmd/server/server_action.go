@@ -23,14 +23,14 @@ func AddDisruptiveActionFlags(cmd *cobra.Command) {
 }
 
 // RunDisruptiveServerAction runs the action with confirmation, MFA retry, and busy-guard handling.
-func RunDisruptiveServerAction(serverName, action, confirmMsg, successMsg, failMsg string, yes, force bool) error {
+func RunDisruptiveServerAction(ios *utils.IOStreams, newClient clientFactory, serverName, action, confirmMsg, successMsg, failMsg string, yes, force bool) error {
 	if !yes {
 		if proceed, err := utils.Confirm(confirmMsg, serverName); err != nil || !proceed {
 			return err
 		}
 	}
 
-	alpaconClient, err := client.NewAlpaconAPIClient()
+	alpaconClient, err := newClient()
 	if err != nil {
 		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
@@ -46,20 +46,20 @@ func RunDisruptiveServerAction(serverName, action, confirmMsg, successMsg, failM
 		return utils.NewExitError("%s: %s.", failMsg, err)
 	}
 
-	utils.CliSuccess("%s", successMsg)
+	ios.Success("%s", successMsg)
 	return nil
 }
 
 // RunServerAction runs a non-disruptive action with confirmation and MFA retry.
 // The server applies no busy guard to it, so there is no --force to pass.
-func RunServerAction(serverName, action, confirmMsg, successMsg, failMsg string, yes bool) error {
+func RunServerAction(ios *utils.IOStreams, newClient clientFactory, serverName, action, confirmMsg, successMsg, failMsg string, yes bool) error {
 	if !yes {
 		if proceed, err := utils.Confirm(confirmMsg, serverName); err != nil || !proceed {
 			return err
 		}
 	}
 
-	alpaconClient, err := client.NewAlpaconAPIClient()
+	alpaconClient, err := newClient()
 	if err != nil {
 		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
@@ -72,7 +72,7 @@ func RunServerAction(serverName, action, confirmMsg, successMsg, failMsg string,
 		return utils.NewExitError("%s: %s.", failMsg, err)
 	}
 
-	utils.CliSuccess("%s", successMsg)
+	ios.Success("%s", successMsg)
 	return nil
 }
 

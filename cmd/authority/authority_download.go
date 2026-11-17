@@ -7,52 +7,53 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var authorityDownloadCmd = &cobra.Command{
-	Use:     "download-crt AUTHORITY",
-	Aliases: []string{"download-cert"},
-	Short:   "Download a root certificate",
-	Long: `
+var authorityDownloadCmd = newAuthorityDownloadCmd(client.NewAlpaconAPIClient, utils.Stdio)
+
+func newAuthorityDownloadCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "download-crt AUTHORITY",
+		Aliases: []string{"download-cert"},
+		Short:   "Download a root certificate",
+		Long: `
 	Download a root certificate from the server and save it to a specified file path.
 	The path argument should include the file name and extension where the certificate will be stored.
 	For example, '/path/to/root.crt'. The recommended file extension for certificates is '.crt'.`,
-	Example: `
+		Example: `
 	alpacon authority download-crt "Root CA" --out=/path/to/root.crt
 	`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		authorityName := args[0]
-		filePath, _ := cmd.Flags().GetString("out")
-		if filePath == "" {
-			var err error
-			if filePath, err = promptForCertificate(); err != nil {
-				return err
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			authorityName := args[0]
+			filePath, _ := cmd.Flags().GetString("out")
+			if filePath == "" {
+				var err error
+				if filePath, err = promptForCertificate(); err != nil {
+					return err
+				}
 			}
-		}
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		authorityID, err := cert.GetAuthorityIDByName(alpaconClient, authorityName)
-		if err != nil {
-			return utils.NewExitError("Failed to find authority: %s.", err)
-		}
+			authorityID, err := cert.GetAuthorityIDByName(alpaconClient, authorityName)
+			if err != nil {
+				return utils.NewExitError("Failed to find authority: %s.", err)
+			}
 
-		err = cert.DownloadRootCertificate(alpaconClient, authorityID, filePath)
-		if err != nil {
-			return utils.NewExitError("Failed to download the root certificate from authority: %s.", err)
-		}
+			err = cert.DownloadRootCertificate(alpaconClient, authorityID, filePath)
+			if err != nil {
+				return utils.NewExitError("Failed to download the root certificate from authority: %s.", err)
+			}
 
-		utils.CliSuccess("Root certificate downloaded: %s", filePath)
-		return nil
-	}),
-}
-
-func init() {
+			ios.Success("Root certificate downloaded: %s", filePath)
+			return nil
+		}),
+	}
 	var filePath string
-	authorityDownloadCmd.Flags().StringVarP(&filePath, "out", "o", "", "path where root certificate should be stored")
-
+	cmd.Flags().StringVarP(&filePath, "out", "o", "", "path where root certificate should be stored")
+	return cmd
 }
 
 func promptForCertificate() (string, error) {

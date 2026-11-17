@@ -8,20 +8,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclFileListCmd = &cobra.Command{
-	Use:     "ls TOKEN",
-	Aliases: []string{"list"},
-	Short:   "List file ACL rules for a token",
-	Example: `  alpacon token acl file ls my-api-token
+var aclFileListCmd = newAclFileListCmd(client.NewAlpaconAPIClient, utils.Stdio)
+
+func newAclFileListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:     "ls TOKEN",
+		Aliases: []string{"list"},
+		Short:   "List file ACL rules for a token",
+		Example: `  alpacon token acl file ls my-api-token
   alpacon token acl file list my-api-token`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(runFileAclList),
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return runFileAclList(ios, cmd, args, newClient)
+		}),
+	}
 }
 
-func runFileAclList(_ *cobra.Command, args []string) error {
+func runFileAclList(ios *utils.IOStreams, _ *cobra.Command, args []string, newClient clientFactory) error {
 	tokenID := args[0]
 
-	alpaconClient, err := client.NewAlpaconAPIClient()
+	alpaconClient, err := newClient()
 	if err != nil {
 		return utils.NewExitError("Connection to Alpacon API failed: %v. Consider re-logging.", err)
 	}
@@ -36,5 +42,5 @@ func runFileAclList(_ *cobra.Command, args []string) error {
 		return utils.NewExitError("Failed to retrieve file ACLs: %v.", err)
 	}
 
-	return utils.PrintTable(acls)
+	return ios.PrintTable(acls)
 }

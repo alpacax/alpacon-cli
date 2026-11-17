@@ -51,7 +51,7 @@ listed and can be revoked.`,
 
   alpacon acl entry add --file entries.json`,
 	Args: cobra.NoArgs,
-	RunE: utils.WithExitError(runEntryAdd),
+	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error { return runEntryAdd(utils.Stdio, cmd, args) }),
 }
 
 func init() {
@@ -65,7 +65,7 @@ func init() {
 	entryAddCmd.Flags().String("file", "", "Issue every entry in this JSON file")
 }
 
-func runEntryAdd(cmd *cobra.Command, args []string) error {
+func runEntryAdd(ios *utils.IOStreams, cmd *cobra.Command, args []string) error {
 	file, _ := cmd.Flags().GetString("file")
 
 	var drafts []entryDraft
@@ -89,7 +89,7 @@ func runEntryAdd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	session, err := newLedgerSessionWithCheck(func(s *ledgerSession) error {
+	session, err := newLedgerSessionWithCheck(ios, func(s *ledgerSession) error {
 		if flagged != nil {
 			request, err := flagged.resolve(s)
 			if err != nil {
@@ -116,9 +116,9 @@ func runEntryAdd(cmd *cobra.Command, args []string) error {
 		return session.fail("pre-approve the command", err)
 	}
 
-	printWarnings(issued)
+	printWarnings(ios, issued)
 	for _, entry := range issued {
-		utils.CliSuccess("Pre-approved %q (%s)", entry.CommandPattern, entry.ID)
+		ios.Success("Pre-approved %q (%s)", entry.CommandPattern, entry.ID)
 	}
 	return nil
 }

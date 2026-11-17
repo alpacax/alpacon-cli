@@ -29,15 +29,15 @@ const (
 
 // Gates for describeRBACError. gateRoleRead is first so the zero value is the safest gate.
 const (
-	// gateRoleRead is a read on /api/rbac/. An API token is refused outright on an
-	// Alpacon Cloud workspace. The role and binding reads narrow a caller who cannot see
-	// the target to 200 rather than refusing, so an uncoded 403 from them is unexpected;
-	// the troubleshoot read is the exception, and it refuses with a code.
+	// gateRoleRead is a read on /api/rbac/, which refuses an API token outright. The role
+	// and binding reads narrow a caller who cannot see the target to 200 rather than
+	// refusing, so an uncoded 403 from them is unexpected; the troubleshoot read is the
+	// exception, and it refuses with a code.
 	gateRoleRead rbacGate = iota
 	// gateRoleWrite is a binding write: the superuser role, plus the same token refusal.
 	gateRoleWrite
-	// gateAuditRead: the audit log is the one /api/rbac/ route that accepts an API token on
-	// every deployment, so its only refusal is a missing role_audit_log:read scope.
+	// gateAuditRead: the audit log is the one /api/rbac/ route that accepts an API token,
+	// so its only refusal is a missing role_audit_log:read scope.
 	gateAuditRead
 	// gateUserRead: /api/iam/users/{id}/effective-permissions/ pins user:read, and API tokens
 	// are accepted on the IAM routes, so a refusal is about the permission, not the credential.
@@ -62,8 +62,7 @@ type rewritten struct {
 // which needs both the gate and the credential to name a fix that can work.
 //
 // The credential kind must come off the client: config.IsSaaS only reports that an
-// access token is stored, which cannot separate a refused Alpacon Cloud token session
-// from a working self-hosted one.
+// access token is stored, which does not say which credential this request carried.
 func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error {
 	if err == nil {
 		return nil
@@ -108,14 +107,14 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 		// A narrowed audit view comes back as a short list, not a refusal, so a missing scope
 		// is the only 403 left here; a bearer, which that gate cannot refuse, hits the default.
 		case gate == gateAuditRead && !ac.IsBearerAuth():
-			return rewrite(err, "this API token is missing the role_audit_log:read scope, which the role history requires. Widen the token's scopes, or run 'alpacon login' to read it through a browser session")
+			return rewrite(err, "this API token is missing the role_audit_log:read scope, which the role history requires. Widen the token's scopes, or run 'alpacon login' to read it signed in as a user")
 		case gate == gateRoleWrite && !ac.IsBearerAuth():
-			return rewrite(err, "a role-binding write requires the superuser role, and this credential may be refused outright: the RBAC API accepts no API token on an Alpacon Cloud workspace. Run 'alpacon login' to authenticate through the browser")
+			return rewrite(err, "a role-binding write requires the superuser role, and this credential may be refused outright: the RBAC API accepts no API token. Run 'alpacon login' to sign in as a user instead of with an API token")
 		case gate == gateRoleWrite:
 			return rewrite(err, "a role-binding write requires the superuser role")
 		case !ac.IsBearerAuth():
-			// Lead with the reading that holds on both deployments: only Alpacon Cloud refuses the token.
-			return rewrite(err, "your account may not see the account or role named. On an Alpacon Cloud workspace the cause is the credential instead: the RBAC API refuses API tokens there, so run 'alpacon login' to authenticate through the browser")
+			// Lead with the account: a self-hosted username/password login is not bearer either, so it lands here too.
+			return rewrite(err, "your account may not see the account or role named. If this credential is an API token the cause is the token instead: the RBAC API refuses API tokens, so run 'alpacon login' to sign in as a user instead")
 		default:
 			return rewrite(err, "this workspace refused the read without stating a reason, which usually means your account may not see the account or role named")
 		}
@@ -149,9 +148,9 @@ func permissionDeniedMessage(gate rbacGate) string {
 func tokenScopeMissingMessage(err error) string {
 	_, missing := utils.ParseErrorGateAndMissing(err)
 	if len(missing) == 0 {
-		return "this API token is missing a scope this command requires; widen the token's scopes, or run 'alpacon login' to authenticate through a browser session"
+		return "this API token is missing a scope this command requires; widen the token's scopes, or run 'alpacon login' to sign in as a user"
 	}
-	return fmt.Sprintf("this API token is missing the required scope(s): %s; widen the token's scopes, or run 'alpacon login' to authenticate through a browser session", strings.Join(missing, ", "))
+	return fmt.Sprintf("this API token is missing the required scope(s): %s; widen the token's scopes, or run 'alpacon login' to sign in as a user", strings.Join(missing, ", "))
 }
 
 func (e *rewritten) Error() string { return e.message }

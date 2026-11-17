@@ -7,28 +7,32 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var revokeDenyCmd = &cobra.Command{
-	Use:   "deny REQUEST_ID",
-	Short: "Deny a revoke request",
-	Long: `
+var revokeDenyCmd = newRevokeDenyCmd(client.NewAlpaconAPIClient, utils.Stdio)
+
+func newRevokeDenyCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:   "deny REQUEST_ID",
+		Short: "Deny a revoke request",
+		Long: `
 	Denies a pending certificate revoke request, preventing the certificate from being revoked.
 	`,
-	Example: `alpacon revoke deny 550e8400-e29b-41d4-a716-446655440000`,
-	Args:    cobra.ExactArgs(1),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		requestId := args[0]
+		Example: `alpacon revoke deny 550e8400-e29b-41d4-a716-446655440000`,
+		Args:    cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			requestId := args[0]
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		_, err = cert.DenyRevokeRequest(alpaconClient, requestId)
-		if err != nil {
-			return utils.NewExitError("Failed to deny the revoke request: %s.", err)
-		}
+			_, err = cert.DenyRevokeRequest(alpaconClient, requestId)
+			if err != nil {
+				return utils.NewExitError("Failed to deny the revoke request: %s.", err)
+			}
 
-		utils.CliSuccess("Revoke request denied. Run 'alpacon revoke ls' to verify status.")
-		return nil
-	}),
+			ios.Success("Revoke request denied. Run 'alpacon revoke ls' to verify status.")
+			return nil
+		}),
+	}
 }

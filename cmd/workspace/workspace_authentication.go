@@ -8,35 +8,39 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workspaceAuthenticationCmd = &cobra.Command{
-	Use:     "authentication",
-	Aliases: []string{"auth"},
-	Short:   "Retrieve workspace authentication settings",
-	Long:    "Display the current workspace authentication settings including MFA requirements, timeout, and allowed methods.",
-	Example: `
+var workspaceAuthenticationCmd = newWorkspaceAuthenticationCmd(client.NewAlpaconAPIClient, utils.Stdio)
+
+func newWorkspaceAuthenticationCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:     "authentication",
+		Aliases: []string{"auth"},
+		Short:   "Retrieve workspace authentication settings",
+		Long:    "Display the current workspace authentication settings including MFA requirements, timeout, and allowed methods.",
+		Example: `
 	alpacon workspace authentication
 	alpacon ws auth`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		isSaaS, err := config.IsSaaS()
-		if err != nil {
-			return utils.NewExitError("Not logged in. Run 'alpacon login' first.")
-		}
-		if !isSaaS {
-			return utils.NewExitError("This command is only available on Alpacon Cloud workspaces.")
-		}
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			isSaaS, err := config.IsSaaS()
+			if err != nil {
+				return utils.NewExitError("Not logged in. Run 'alpacon login' first.")
+			}
+			if !isSaaS {
+				return utils.NewExitError("This command is only available on Alpacon Cloud workspaces.")
+			}
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		authenticationDetail, err := workspace.GetAuthentication(alpaconClient)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve authentication settings: %s.", err)
-		}
+			authenticationDetail, err := workspace.GetAuthentication(alpaconClient)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve authentication settings: %s.", err)
+			}
 
-		return utils.PrintJson(authenticationDetail)
-	}),
+			return ios.PrintJson(authenticationDetail)
+		}),
+	}
 }
 
 func init() {

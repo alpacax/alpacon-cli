@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/alpacax/alpacon-cli/pkg/selfupdate"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -14,25 +13,25 @@ var versionCmd = &cobra.Command{
 	Short: "Display the current CLI version",
 	Long:  "Displays the current version of the CLI and checks if there is an available update.",
 	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		return runVersion()
+		return runVersion(utils.Stdio)
 	}),
 }
 
-func runVersion() error {
-	if utils.OutputFormat == utils.OutputFormatJSON {
-		return printVersionJSON()
+func runVersion(ios *utils.IOStreams) error {
+	if ios.IsJSON() {
+		return printVersionJSON(ios)
 	}
-	utils.CliInfo("Current version: %s", utils.Version)
+	ios.Info("Current version: %s", utils.Version)
 	release, err := selfupdate.LatestRelease(selfupdate.DefaultReleaseAPIURL)
 	if err != nil {
-		utils.CliWarning("Could not check for updates: %s", err)
+		ios.Warning("Could not check for updates: %s", err)
 		return nil
 	}
 	if selfupdate.IsOutdated(utils.Version, release.Version) {
-		utils.CliWarning("%s", upgradeNotice(utils.Version, release.Version, release.HTMLURL))
+		ios.Warning("%s", upgradeNotice(utils.Version, release.Version, release.HTMLURL))
 		return nil
 	}
-	utils.CliInfo("You are up to date!")
+	ios.Info("You are up to date!")
 	return nil
 }
 
@@ -65,12 +64,12 @@ func newVersionOutput(current string, release *selfupdate.Release) versionOutput
 }
 
 // Exits 0 even when the lookup fails; scripts branch on 'alpacon update --check'.
-func printVersionJSON() error {
+func printVersionJSON(ios *utils.IOStreams) error {
 	release, err := selfupdate.LatestRelease(selfupdate.DefaultReleaseAPIURL)
 	if err != nil {
-		utils.CliWarning("Could not check for updates: %s", err)
+		ios.Warning("Could not check for updates: %s", err)
 	}
-	if err := utils.PrintJSONValue(os.Stdout, newVersionOutput(utils.Version, release)); err != nil {
+	if err := utils.PrintJSONValue(ios.Out, newVersionOutput(utils.Version, release)); err != nil {
 		return utils.NewExitError("Failed to print the version: %s", err)
 	}
 	return nil

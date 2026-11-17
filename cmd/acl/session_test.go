@@ -13,6 +13,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -62,7 +63,7 @@ func installSeams(t *testing.T, s *sessionSeams) {
 		return cfg, s.cfgErr
 	}
 	fetchAuthEnv = func(string, *http.Client) (*auth0.AuthEnvResponse, error) { return s.env, nil }
-	authorizeSigner = func(_ config.Config, _ *auth0.AuthEnvResponse, target config.SignerTarget) (string, error) {
+	authorizeSigner = func(_ *utils.IOStreams, _ config.Config, _ *auth0.AuthEnvResponse, target config.SignerTarget) (string, error) {
 		s.target = target
 		s.authorizes++
 		return s.authorized, s.authorizeErr
@@ -108,7 +109,7 @@ func TestNewLedgerSession_UsesTheCachedSignerToken(t *testing.T) {
 	installSeams(t, seams)
 	auths := stubSigner(t, http.StatusOK, adminOfWorkspace)
 
-	session, err := newLedgerSession()
+	session, err := newLedgerSession(utils.Stdio)
 
 	require.NoError(t, err)
 	assert.Equal(t, testWorkspaceID, session.workspaceID)
@@ -121,7 +122,7 @@ func TestNewLedgerSession_AuthorizesWhenNothingIsCached(t *testing.T) {
 	installSeams(t, seams)
 	auths := stubSigner(t, http.StatusOK, adminOfWorkspace)
 
-	_, err := newLedgerSession()
+	_, err := newLedgerSession(utils.Stdio)
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, seams.authorizes)
@@ -157,7 +158,7 @@ func TestNewLedgerSession_Refusals(t *testing.T) {
 			installSeams(t, &tt.seams)
 			auths := stubSigner(t, http.StatusOK, adminOfWorkspace)
 
-			_, err := newLedgerSession()
+			_, err := newLedgerSession(utils.Stdio)
 
 			require.ErrorContains(t, err, tt.wantErr)
 			assert.Empty(t, *auths, "nothing reaches the signer")
@@ -179,7 +180,7 @@ func TestNewLedgerSession_NotACommandACLAdminHere(t *testing.T) {
 			installSeams(t, &sessionSeams{cfg: loggedIn("cached"), env: ledgerEnv()})
 			stubSigner(t, http.StatusOK, tt.body)
 
-			_, err := newLedgerSession()
+			_, err := newLedgerSession(utils.Stdio)
 
 			require.ErrorContains(t, err, "not a Command ACL admin of this workspace")
 		})
@@ -199,7 +200,7 @@ func TestNewLedgerSession_DropsARefusedSignerToken(t *testing.T) {
 	seams.cfg, err = config.LoadConfig()
 	require.NoError(t, err)
 
-	_, err = newLedgerSession()
+	_, err = newLedgerSession(utils.Stdio)
 
 	require.ErrorContains(t, err, "Run the command again to authorize once more")
 	after, err := config.LoadConfig()
@@ -334,7 +335,7 @@ func TestCacheSignerToken_FailsOnceTheConfigMoved(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, tt.move(started))
 
-			token, err := cacheSignerToken(started, testTarget(), "signer", 86400)
+			token, err := cacheSignerToken(utils.Stdio, started, testTarget(), "signer", 86400)
 
 			require.ErrorContains(t, err, "Run the command again")
 			assert.Empty(t, token)
@@ -348,7 +349,7 @@ func TestCacheSignerToken_ReturnsTheSavedToken(t *testing.T) {
 	started, err := config.LoadConfig()
 	require.NoError(t, err)
 
-	token, err := cacheSignerToken(started, testTarget(), "signer", 86400)
+	token, err := cacheSignerToken(utils.Stdio, started, testTarget(), "signer", 86400)
 
 	require.NoError(t, err)
 	assert.Equal(t, "signer", token)
@@ -377,7 +378,7 @@ func TestNewLedgerSession_DoesNotSendACachedTokenToAnotherSigner(t *testing.T) {
 	installSeams(t, seams)
 	auths := stubSigner(t, http.StatusOK, adminOfWorkspace)
 
-	_, err := newLedgerSession()
+	_, err := newLedgerSession(utils.Stdio)
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, seams.authorizes)
@@ -390,7 +391,7 @@ func TestNewLedgerSession_RefusesAPlainHTTPSigner(t *testing.T) {
 	installSeams(t, seams)
 	t.Setenv(client.SignerURLEnvVar, "http://signer.example.com")
 
-	_, err := newLedgerSession()
+	_, err := newLedgerSession(utils.Stdio)
 
 	require.ErrorContains(t, err, "https")
 	assert.Equal(t, 0, seams.authorizes)
@@ -403,7 +404,7 @@ func TestNewLedgerSession_AFreshTokenRefusedPointsAtTheAudience(t *testing.T) {
 	installSeams(t, seams)
 	stubSigner(t, http.StatusUnauthorized, `{"detail": "Given token not valid for any token type"}`)
 
-	_, err := newLedgerSession()
+	_, err := newLedgerSession(utils.Stdio)
 
 	require.ErrorContains(t, err, client.SignerAudienceEnvVar)
 	assert.NotContains(t, err.Error(), "Run the command again")
@@ -437,7 +438,7 @@ func TestCacheSignerToken_FailsAfterALogout(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, config.DeleteConfig(started))
 
-	token, err := cacheSignerToken(started, testTarget(), "signer", 86400)
+	token, err := cacheSignerToken(utils.Stdio, started, testTarget(), "signer", 86400)
 
 	require.ErrorContains(t, err, "logout")
 	assert.Empty(t, token)

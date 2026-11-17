@@ -34,7 +34,7 @@ type kubeConfigFlagValues struct {
 	proxyPort   int
 }
 
-func newKubeConfigCmd(newClient clientFactory) *cobra.Command {
+func newKubeConfigCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var flags kubeConfigFlagValues
 	cmd := &cobra.Command{
 		Use:   "config CLUSTER",
@@ -70,7 +70,7 @@ port instead of connecting to the cluster's proxy host directly.`,
   alpacon kube config prod-east --proxy-port 18443`,
 		Args: cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runKubeConfig(cmd, args[0], flags, newClient)
+			return runKubeConfig(ios, cmd, args[0], flags, newClient)
 		}),
 	}
 	cmd.Flags().StringVar(&flags.workSession, "work-session", "", "WorkSession ID to open the kube session under; it must target the cluster (default: ALPACON_WORK_SESSION)")
@@ -111,7 +111,7 @@ type sessionCreateError struct{ err error }
 func (e *sessionCreateError) Error() string { return e.err.Error() }
 func (e *sessionCreateError) Unwrap() error { return e.err }
 
-func runKubeConfig(cmd *cobra.Command, cluster string, flags kubeConfigFlagValues, newClient clientFactory) error {
+func runKubeConfig(ios *utils.IOStreams, cmd *cobra.Command, cluster string, flags kubeConfigFlagValues, newClient clientFactory) error {
 	clusterName := strings.TrimSpace(cluster) // as kube login and logout read it
 	proxyPort := 0
 	if cmd.Flags().Changed("proxy-port") {
@@ -140,7 +140,7 @@ func runKubeConfig(cmd *cobra.Command, cluster string, flags kubeConfigFlagValue
 	// The file is opened, locked, and checked before the session exists: its
 	// token is handed out once, so a file it cannot be written to must be
 	// found out while there is still nothing to lose.
-	held, err := holdKubeconfig(path, func(msg string) { utils.CliErrorWithExit("%s", msg) })
+	held, err := holdKubeconfig(ios, path, func(msg string) { utils.CliErrorWithExit("%s", msg) })
 	if err != nil {
 		return utils.NewExitError("Failed to open the kubeconfig: %s.", err)
 	}
@@ -159,7 +159,7 @@ func runKubeConfig(cmd *cobra.Command, cluster string, flags kubeConfigFlagValue
 	// A write to a closed pipe ends the process with SIGPIPE, skipping the defer and leaving the lock file.
 	held.done()
 
-	return printKubeConfigResult(cmd.OutOrStdout(), result, ac.Insecure)
+	return printKubeConfigResult(ios, ios.Out, result, ac.Insecure)
 }
 
 // interruptedMessage is how a command ends on a second Ctrl+C.
@@ -174,12 +174,12 @@ type heldKubeconfig struct {
 
 // holdKubeconfig opens and locks the kubeconfig and watches for Ctrl+C. A second Ctrl+C exits from the
 // watcher, where no deferred done runs, so it releases the lock first, which kubectl's own writes wait on.
-func holdKubeconfig(path string, quit func(msg string)) (*heldKubeconfig, error) {
+func holdKubeconfig(ios *utils.IOStreams, path string, quit func(msg string)) (*heldKubeconfig, error) {
 	hold, err := openKubeconfigHold(path)
 	if err != nil {
 		return nil, err
 	}
-	interrupt := watchInterrupt("Interrupted; stopping once the kube session is closed. Press Ctrl+C again to quit now.", func() {
+	interrupt := watchInterrupt(ios, "Interrupted; stopping once the kube session is closed. Press Ctrl+C again to quit now.", func() {
 		hold.close()
 		quit(interruptedMessage)
 	})
@@ -296,7 +296,7 @@ type interruptWatch struct {
 	stop    func()
 }
 
-func watchInterrupt(firstNotice string, quit func()) *interruptWatch {
+func watchInterrupt(ios *utils.IOStreams, firstNotice string, quit func()) *interruptWatch {
 	w := &interruptWatch{first: make(chan struct{}), signals: make(chan os.Signal, 2), done: make(chan struct{})}
 	signal.Notify(w.signals, os.Interrupt, syscall.SIGTERM)
 	w.stop = sync.OnceFunc(func() {
@@ -312,7 +312,7 @@ func watchInterrupt(firstNotice string, quit func()) *interruptWatch {
 					return
 				}
 				close(w.first)
-				utils.CliWarning("%s", firstNotice)
+				ios.Warning("%s", firstNotice)
 			case <-w.done:
 				return
 			}
@@ -571,38 +571,38 @@ func validatePort(port int) error {
 	return nil
 }
 
-func printKubeConfigResult(stdout io.Writer, result *kubeConfigResult, insecure bool) error {
-	printKubeConfigWarnings(result, insecure)
+func printKubeConfigResult(ios *utils.IOStreams, stdout io.Writer, result *kubeConfigResult, insecure bool) error {
+	printKubeConfigWarnings(ios, result, insecure)
 
-	if utils.OutputFormat == utils.OutputFormatJSON {
+	if ios.IsJSON() {
 		if err := utils.PrintJSONValue(stdout, result); err != nil {
 			return utils.NewExitError("Failed to print the result: %s.", err)
 		}
 		return nil
 	}
 
-	utils.CliInfo("Context %q written to %s (token expires %s).", result.Context, result.Kubeconfig, formatTime(&result.TokenExpiresAt, time.Local))
-	printKubeConfigNext(result)
+	ios.Info("Context %q written to %s (token expires %s).", result.Context, result.Kubeconfig, formatTime(&result.TokenExpiresAt, time.Local))
+	printKubeConfigNext(ios, result)
 	return nil
 }
 
 // printKubeConfigWarnings says what about the written context the user may
 // not expect, in either output format.
-func printKubeConfigWarnings(result *kubeConfigResult, insecure bool) {
+func printKubeConfigWarnings(ios *utils.IOStreams, result *kubeConfigResult, insecure bool) {
 	if result.plaintext {
-		utils.CliWarning("The proxy URL %s is plain http, so kubectl will send the session token unencrypted.", result.ProxyURL)
+		ios.Warning("The proxy URL %s is plain http, so kubectl will send the session token unencrypted.", result.ProxyURL)
 	}
 	if insecure {
-		utils.CliWarning("This workspace skips TLS certificate verification, so the context written for kubectl skips it too.")
+		ios.Warning("This workspace skips TLS certificate verification, so the context written for kubectl skips it too.")
 	}
 	if result.replacedServer != "" {
-		utils.CliWarning("The %s entries pointed at %s and now point at this workspace.", result.Context, result.replacedServer)
+		ios.Warning("The %s entries pointed at %s and now point at this workspace.", result.Context, result.replacedServer)
 	}
 	if kubeconfig.Shadowed(result.Kubeconfig) {
-		utils.CliWarning("KUBECONFIG lists files before %s; kubectl takes current-context and %s from the first file that sets them.", result.Kubeconfig, result.Context)
+		ios.Warning("KUBECONFIG lists files before %s; kubectl takes current-context and %s from the first file that sets them.", result.Kubeconfig, result.Context)
 	}
 	if line := rbacDriftWarningLine(result.clusterName, result.RBACDriftWarning); line != "" {
-		utils.CliWarning("%s", line)
+		ios.Warning("%s", line)
 	}
 }
 
@@ -627,14 +627,14 @@ func rbacDriftWarningLine(clusterName string, raw json.RawMessage) string {
 	return fmt.Sprintf("Cluster %q has RBAC bindings made outside Alpacon that widen what this session's identity may do%s; the workspace policy allows the session anyway.", clusterName, detail)
 }
 
-func printKubeConfigNext(result *kubeConfigResult) {
+func printKubeConfigNext(ios *utils.IOStreams, result *kubeConfigResult) {
 	if result.PreviousContext != "" && result.PreviousContext != result.Context {
-		utils.CliInfo("Switched current-context from %q.", result.PreviousContext)
+		ios.Info("Switched current-context from %q.", result.PreviousContext)
 	}
 	if kubeconfig.ReadByDefault(result.Kubeconfig) {
-		utils.CliInfo("Next: kubectl get pods -A")
+		ios.Info("Next: kubectl get pods -A")
 	} else {
-		utils.CliInfo("Next: kubectl --kubeconfig %s get pods -A", shellQuote(result.Kubeconfig))
+		ios.Info("Next: kubectl --kubeconfig %s get pods -A", shellQuote(result.Kubeconfig))
 	}
 }
 

@@ -29,7 +29,7 @@ const (
 	logoutInterruptMessage = "Interrupted; finishing what was started on this machine. Press Ctrl+C again to quit now."
 )
 
-func newKubeLogoutCmd() *cobra.Command {
+func newKubeLogoutCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var kubeconfigFlag string
 	cmd := &cobra.Command{
 		Use:   "logout [CLUSTER]",
@@ -53,7 +53,7 @@ another with 'kubectl config use-context NAME'.`,
   alpacon kube logout prod-east --kubeconfig ~/.kube/alpacon`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runKubeLogoutCommand(cmd.OutOrStdout(), args, kubeconfigFlag)
+			return runKubeLogoutCommand(ios, newClient, ios.Out, args, kubeconfigFlag)
 		}),
 	}
 	cmd.Flags().StringVar(&kubeconfigFlag, "kubeconfig", "", "kubeconfig file to clean (default: every file kubectl reads)")
@@ -203,7 +203,7 @@ func (l *logoutLocks) release() {
 	}
 }
 
-func runKubeLogoutCommand(stdout io.Writer, args []string, kubeconfigFlag string) error {
+func runKubeLogoutCommand(ios *utils.IOStreams, newClient clientFactory, stdout io.Writer, args []string, kubeconfigFlag string) error {
 	paths, err := kubeconfig.SearchPaths(kubeconfigFlag)
 	if err != nil {
 		return utils.NewEnvelopeExitError(opKubeLogout, err, "Failed to find the kubeconfig: %s.", err)
@@ -230,24 +230,26 @@ func runKubeLogoutCommand(stdout io.Writer, args []string, kubeconfigFlag string
 		workspaceURL = login.WorkspaceURL
 	}
 
-	result, logoutErr := kubeLogout(kubeLogoutInput{
+	result, logoutErr := kubeLogout(ios, kubeLogoutInput{
 		cluster:      cluster,
 		paths:        paths,
 		explicit:     kubeconfigFlag != "",
 		store:        store,
 		workspaceURL: workspaceURL,
-		closer:       closeSavedSession,
+		closer: func(record kubeSessionRecord, cancel <-chan struct{}) error {
+			return closeSavedSession(newClient, record, cancel)
+		},
 	})
 	for _, w := range result.warnings {
-		utils.CliWarning(w.format, w.args...)
+		ios.Warning(w.format, w.args...)
 	}
 	if logoutErr == nil {
-		return printKubeLogoutResult(stdout, result, true)
+		return printKubeLogoutResult(ios, stdout, result, true)
 	}
 	// What was done before the failure is still reported: the files edited and
 	// the sessions closed are gone either way.
 	if result.Found {
-		if err := printKubeLogoutResult(stdout, result, false); err != nil {
+		if err := printKubeLogoutResult(ios, stdout, result, false); err != nil {
 			return err
 		}
 	}
@@ -265,9 +267,9 @@ func expectedLogoutFailure(err error) bool {
 
 // closeSavedSession closes the record's session under closeTimeout, which also
 // covers the access-token refresh building the client can run.
-func closeSavedSession(record kubeSessionRecord, cancel <-chan struct{}) error {
+func closeSavedSession(newClient clientFactory, record kubeSessionRecord, cancel <-chan struct{}) error {
 	_, err := within(closeTimeout, cancel, func() (struct{}, error) {
-		ac, err := recordClient(&record)
+		ac, err := recordClient(newClient, &record)
 		if err != nil {
 			return struct{}{}, err
 		}
@@ -326,7 +328,7 @@ func exitLogoutInterrupted(msg string) {
 // close the session. A failure before the first edit changes nothing. A failure
 // after it does not stop the rest, since the token must not outlive the context,
 // and is returned once everything else is done.
-func kubeLogout(in kubeLogoutInput) (*kubeLogoutResult, error) {
+func kubeLogout(ios *utils.IOStreams, in kubeLogoutInput) (*kubeLogoutResult, error) {
 	context := contextPrefix + in.cluster
 	result := &kubeLogoutResult{Cluster: in.cluster, Context: context, Kubeconfigs: []string{}, Sessions: []loggedOutSession{}}
 
@@ -335,7 +337,7 @@ func kubeLogout(in kubeLogoutInput) (*kubeLogoutResult, error) {
 	// The watch runs until the command returns, so a first Ctrl+C during the
 	// close gives up on the close rather than killing the process before its
 	// result is printed.
-	watch := watchInterrupt(logoutInterruptMessage, quitLogout(locks, &localDone, exitLogoutInterrupted))
+	watch := watchInterrupt(ios, logoutInterruptMessage, quitLogout(locks, &localDone, exitLogoutInterrupted))
 	defer watch.stop()
 	defer locks.release()
 	interrupted := watch.fired.Load
@@ -670,8 +672,8 @@ func closeLoggedOutSession(result *kubeLogoutResult, in kubeLogoutInput, record 
 
 // printKubeLogoutResult reports the result; complete is false when the logout
 // failed partway and an error follows.
-func printKubeLogoutResult(stdout io.Writer, result *kubeLogoutResult, complete bool) error {
-	if utils.OutputFormat == utils.OutputFormatJSON {
+func printKubeLogoutResult(ios *utils.IOStreams, stdout io.Writer, result *kubeLogoutResult, complete bool) error {
+	if ios.IsJSON() {
 		if err := utils.PrintJSONValue(stdout, result); err != nil {
 			return utils.NewExitError("Failed to print the result: %s.", err)
 		}
@@ -679,23 +681,23 @@ func printKubeLogoutResult(stdout io.Writer, result *kubeLogoutResult, complete 
 	}
 	if !result.Found {
 		for _, line := range notFoundLines(result) {
-			utils.CliInfo("%s", line)
+			ios.Info("%s", line)
 		}
 		return nil
 	}
 	if complete {
-		utils.CliSuccess("Logged out of %s.", result.Cluster)
+		ios.Success("Logged out of %s.", result.Cluster)
 	}
 	for _, path := range result.Kubeconfigs {
-		utils.CliInfo("Removed %s from %s.", result.Context, path)
+		ios.Info("Removed %s from %s.", result.Context, path)
 	}
 	for _, session := range result.Sessions {
 		if session.Closed {
-			utils.CliInfo("Closed the kube session %s.", session.ID)
+			ios.Info("Closed the kube session %s.", session.ID)
 		}
 	}
 	if result.currentUnset {
-		utils.CliInfo("current-context is now unset; pick one with 'kubectl config use-context NAME'.")
+		ios.Info("current-context is now unset; pick one with 'kubectl config use-context NAME'.")
 	}
 	return nil
 }

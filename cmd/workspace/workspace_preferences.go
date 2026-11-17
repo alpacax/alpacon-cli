@@ -7,27 +7,31 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workspacePreferencesCmd = &cobra.Command{
-	Use:     "preferences",
-	Aliases: []string{"prefs"},
-	Short:   "Retrieve workspace preferences",
-	Long:    "Display the current workspace preferences including language, timezone, and other settings.",
-	Example: `
+var workspacePreferencesCmd = newWorkspacePreferencesCmd(client.NewAlpaconAPIClient, utils.Stdio)
+
+func newWorkspacePreferencesCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:     "preferences",
+		Aliases: []string{"prefs"},
+		Short:   "Retrieve workspace preferences",
+		Long:    "Display the current workspace preferences including language, timezone, and other settings.",
+		Example: `
 	alpacon workspace preferences
 	alpacon ws preferences`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		preferencesDetail, err := workspace.GetPreferences(alpaconClient)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve workspace preferences: %s.", err)
-		}
+			preferencesDetail, err := workspace.GetPreferences(alpaconClient)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve workspace preferences: %s.", err)
+			}
 
-		return utils.PrintJson(preferencesDetail)
-	}),
+			return ios.PrintJson(preferencesDetail)
+		}),
+	}
 }
 
 func init() {

@@ -197,7 +197,7 @@ func TestEnsureSecureConnection_HTTPS(t *testing.T) {
 		BaseURL:    "https://secure.example.com",
 	}
 
-	err := EnsureSecureConnection(ac)
+	err := EnsureSecureConnection(utils.Stdio, ac)
 
 	assert.NoError(t, err)
 }
@@ -212,7 +212,7 @@ func TestEnsureSecureConnection_RefusesHTTPWithoutTerminal(t *testing.T) {
 		BaseURL:    "http://plain.example.com",
 	}
 
-	err := EnsureSecureConnection(ac)
+	err := EnsureSecureConnection(utils.Stdio, ac)
 
 	var exitErr *utils.ExitError
 	require.ErrorAs(t, err, &exitErr)

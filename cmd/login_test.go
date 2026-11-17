@@ -14,8 +14,10 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -992,7 +994,7 @@ func TestPersistWorkspaceEnv(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	require.NoError(t, config.CreateConfig("https://ws.example.com", "ws", "token", "", "", "", "", 0, false))
 
-	persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
+	persistWorkspaceEnv(utils.Stdio, "https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "frozen", cfg.SchemaName)
@@ -1000,7 +1002,7 @@ func TestPersistWorkspaceEnv(t *testing.T) {
 	assert.Equal(t, "token", cfg.Token)
 
 	// A server that stops reporting either keeps the schema name and turns the surface back off.
-	persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{})
+	persistWorkspaceEnv(utils.Stdio, "https://ws.example.com", &auth0.AuthEnvResponse{})
 	cfg, err = config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "frozen", cfg.SchemaName)
@@ -1010,9 +1012,9 @@ func TestPersistWorkspaceEnv(t *testing.T) {
 func TestPersistWorkspaceEnv_WarnsWithoutConfig(t *testing.T) {
 	setTestHome(t, t.TempDir())
 
-	_, stderr := testutil.CaptureOutput(t, func() {
-		persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
-	})
+	ios, _, errOut := utils.TestIOStreams()
+	persistWorkspaceEnv(ios, "https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
+	stderr := errOut.String()
 
 	assert.Contains(t, stderr, "Could not save the workspace identity and Kubernetes support")
 }
@@ -1022,9 +1024,9 @@ func TestPersistWorkspaceEnv_SkipsAnotherWorkspace(t *testing.T) {
 	// Another shell's login replaced the config while this login was in flight.
 	require.NoError(t, config.CreateConfig("https://other.example.com", "other", "token", "", "", "", "", 0, false))
 
-	_, stderr := testutil.CaptureOutput(t, func() {
-		persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
-	})
+	ios, _, errOut := utils.TestIOStreams()
+	persistWorkspaceEnv(ios, "https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
+	stderr := errOut.String()
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
@@ -1123,4 +1125,38 @@ func TestPromptForCredentialsReturnsTypedPassword(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "alice", username)
 	assert.Equal(t, "pw", password)
+}
+
+// Serial: it sets HOME and captures stdout and stderr.
+func TestLoginVerifiesTheLoginThroughTheFactory(t *testing.T) {
+	tests := []struct {
+		name        string
+		noClient    bool
+		wantCode    int
+		wantStderr  string
+		wantWhoamis int
+	}{
+		{name: "verified", wantStderr: "Login succeeded!", wantWhoamis: 1},
+		{name: "client cannot be built", noClient: true, wantCode: utils.ExitCodeGeneralError, wantStderr: "Connection to Alpacon API failed: not logged in"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(homeEnvVar(), t.TempDir())
+			ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+				"GET /api/auth/env/":    {Status: http.StatusOK, Body: `{"auth0": {"method": "legacy"}}`},
+				"GET /api/status/":      {Status: http.StatusOK, Body: `{}`},
+				"GET /api/auth/whoami/": {Status: http.StatusOK, Body: `{"principal_type": "user"}`},
+			})
+			newClient := ts.Factory()
+			if tt.noClient {
+				newClient = cmdtest.NoClient
+			}
+
+			_, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return newLoginCmd(newClient, ios) }, ts.URL, "-t", "api-token")
+
+			assert.Equal(t, tt.wantCode, code, stderr)
+			assert.Contains(t, stderr, tt.wantStderr)
+			assert.Equal(t, tt.wantWhoamis, ts.Hits("GET /api/auth/whoami/"))
+		})
+	}
 }

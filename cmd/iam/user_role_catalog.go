@@ -7,11 +7,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userRoleCatalogCmd = &cobra.Command{
-	Use:     "catalog",
-	Aliases: []string{"roles"},
-	Short:   "List the workspace roles that exist",
-	Long: `List the RBAC roles defined in this workspace.
+var userRoleCatalogCmd = newUserRoleCatalogCmd(client.NewAlpaconAPIClient, utils.Stdio)
+
+func newUserRoleCatalogCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "catalog",
+		Aliases: []string{"roles"},
+		Short:   "List the workspace roles that exist",
+		Long: `List the RBAC roles defined in this workspace.
 
 Role names are matched exactly and are case-sensitive wherever a command takes
 one, so this is the list to check a spelling against.
@@ -28,33 +31,32 @@ it. On an older Alpacon release the server may match on the name alone and hide
 every role ending in :owner, :master, :member or :manager, including ones granted
 by hand such as service_token:manager. If a role you expected is missing, drop
 the flag and read the whole catalog.`,
-	Example: `  alpacon user role catalog
+		Example: `  alpacon user role catalog
   alpacon user role catalog --hide-object-roles
   alpacon user role catalog --output json`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		// Filter only when hiding: --hide-object-roles=false asks for the whole catalog, and
-		// auto_assigned=true would return nothing but the roles the flag hides.
-		var autoAssigned *bool
-		if hide, _ := cmd.Flags().GetBool("hide-object-roles"); hide {
-			value := false
-			autoAssigned = &value
-		}
+			// Filter only when hiding: --hide-object-roles=false asks for the whole catalog, and
+			// auto_assigned=true would return nothing but the roles the flag hides.
+			var autoAssigned *bool
+			if hide, _ := cmd.Flags().GetBool("hide-object-roles"); hide {
+				value := false
+				autoAssigned = &value
+			}
 
-		roles, err := rbac.GetRoleCatalog(alpaconClient, autoAssigned)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve the role catalog: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
-		}
+			roles, err := rbac.GetRoleCatalog(alpaconClient, autoAssigned)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the role catalog: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
+			}
 
-		return utils.PrintTable(rbac.RoleAttributesFrom(roles))
-	}),
-}
-
-func init() {
+			return ios.PrintTable(rbac.RoleAttributesFrom(roles))
+		}),
+	}
 	// The name predates hiding by the server's auto_assigned answer; scripts already pass it.
-	userRoleCatalogCmd.Flags().Bool("hide-object-roles", false, "Hide the roles the server counts as assigned on its own, such as group:member or user:owner")
+	cmd.Flags().Bool("hide-object-roles", false, "Hide the roles the server counts as assigned on its own, such as group:member or user:owner")
+	return cmd
 }

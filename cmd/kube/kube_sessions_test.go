@@ -88,7 +88,7 @@ func TestListKubeSessionsFiltersOnTheServer(t *testing.T) {
 			ts := httptest.NewServer(f.handler(t))
 			defer ts.Close()
 
-			rows, err := listKubeSessions(newSessionClient(ts), tt.cluster, tt.all)
+			rows, err := listKubeSessions(utils.Stdio, newSessionClient(ts), tt.cluster, tt.all)
 
 			require.NoError(t, err)
 			require.Len(t, rows, 1)
@@ -107,7 +107,7 @@ func TestListKubeSessionsUnknownClusterFailsBeforeTheList(t *testing.T) {
 	ts := httptest.NewServer(f.handler(t))
 	defer ts.Close()
 
-	_, err := listKubeSessions(newSessionClient(ts), "missing", false)
+	_, err := listKubeSessions(utils.Stdio, newSessionClient(ts), "missing", false)
 
 	var lookupErr *clusterLookupError
 	require.ErrorAs(t, err, &lookupErr)
@@ -137,7 +137,7 @@ func TestListKubeSessionsAskClusterNamesOnlyWhenNeeded(t *testing.T) {
 			ts := httptest.NewServer(f.handler(t))
 			defer ts.Close()
 
-			rows, err := listKubeSessions(newSessionClient(ts), tt.cluster, false)
+			rows, err := listKubeSessions(utils.Stdio, newSessionClient(ts), tt.cluster, false)
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantCalls, f.clusterCalls)

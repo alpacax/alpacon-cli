@@ -197,9 +197,10 @@ func (e *rewordedError) Unwrap() error { return e.err }
 
 // PrintRefusalHints writes err's refusal guidance to w, one "Hint:" line per
 // RefusalNextActions entry, for output written outside the Cli* helpers.
-func PrintRefusalHints(w io.Writer, err error) {
-	printRefusalNextActions(w, err)
-}
+func PrintRefusalHints(w io.Writer, err error) { Stdio.PrintRefusalHints(w, err) }
+
+// PrintRefusalHints is the package-level PrintRefusalHints in s's color.
+func (s *IOStreams) PrintRefusalHints(w io.Writer, err error) { s.printRefusalNextActions(w, err) }
 
 // HintOnly returns an error that reads as message and carries refusal's hint,
 // sanitized, and nothing else of it: no code, no status, no wrapped error. A
@@ -221,10 +222,13 @@ func (e *hintOnlyError) ErrorHint() string { return e.hint }
 // RawTerminalHintLines renders err's refusal guidance for a terminal that may
 // be in raw mode, where a bare newline leaves the cursor where it stood: one
 // "Hint:" line per RefusalNextActions entry, each ending in \r\n.
-func RawTerminalHintLines(err error) string {
+func RawTerminalHintLines(err error) string { return Stdio.RawTerminalHintLines(err) }
+
+// RawTerminalHintLines is the package-level RawTerminalHintLines in s's color.
+func (s *IOStreams) RawTerminalHintLines(err error) string {
 	var sb strings.Builder
 	for _, action := range RefusalNextActions(err) {
-		fmt.Fprintf(&sb, "%s %s\r\n", Yellow("Hint:"), action.PlainText())
+		fmt.Fprintf(&sb, "%s %s\r\n", s.Yellow("Hint:"), action.PlainText())
 	}
 	return sb.String()
 }
@@ -243,8 +247,8 @@ func refusalErrorIn(args []any) error {
 
 // printRefusalNextActions writes err's refusal guidance, one "Hint:" line per
 // action. Nothing is written for an error that carries none.
-func printRefusalNextActions(w io.Writer, err error) {
+func (s *IOStreams) printRefusalNextActions(w io.Writer, err error) {
 	for _, action := range RefusalNextActions(err) {
-		_, _ = fmt.Fprintf(w, "%s %s\n", Yellow("Hint:"), action.PlainText())
+		_, _ = fmt.Fprintf(w, "%s %s\n", s.Yellow("Hint:"), action.PlainText())
 	}
 }
