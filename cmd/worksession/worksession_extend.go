@@ -13,16 +13,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	extendExpiresIn string
-	extendExpiresAt string
-	extendReason    string
-)
+var workSessionExtendCmd = newWorkSessionExtendCmd(client.NewAlpaconAPIClient)
 
-var workSessionExtendCmd = &cobra.Command{
-	Use:   "extend SESSION_ID",
-	Short: "Extend an approved or active work session",
-	Long: `Extend the expiry of an approved or active work session.
+func newWorkSessionExtendCmd(newClient clientFactory) *cobra.Command {
+	var (
+		extendExpiresIn string
+		extendExpiresAt string
+		extendReason    string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "extend SESSION_ID",
+		Short: "Extend an approved or active work session",
+		Long: `Extend the expiry of an approved or active work session.
 
 --reason is required: a short justification an approver judges the request by.
 Whether the extension applies immediately or waits for approval follows the
@@ -31,49 +34,55 @@ is queued for review the CLI reports that and exits (see "Exit codes" in the
 README) rather than waiting. Check back with
 'alpacon work-session describe SESSION_ID', or run 'extend' again with a new
 reason once the request settles.`,
-	Args: cobra.ExactArgs(1),
-	Example: `  alpacon work-session extend 550e8400-e29b-41d4-a716-446655440000 --expires-in 2h --reason "customer escalation, still triaging"
+		Args: cobra.ExactArgs(1),
+		Example: `  alpacon work-session extend 550e8400-e29b-41d4-a716-446655440000 --expires-in 2h --reason "customer escalation, still triaging"
   alpacon work-session extend 550e8400-e29b-41d4-a716-446655440000 --expires-at 2026-05-09T10:00:00Z --reason "customer escalation, still triaging"`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		id := args[0]
-		expiresAtVal, err := parseExpiryFlag(extendExpiresIn, extendExpiresAt)
-		if err != nil {
-			if extendExpiresIn == "" && extendExpiresAt == "" {
-				if !utils.IsInteractiveShell() {
-					return utils.NewUsageEnvelopeExitError(opExtend, "Non-interactive mode requires --expires-in or --expires-at.")
-				}
-				if extendExpiresIn, err = utils.ReadRequiredInput("Expires in (e.g. 1h, 2h, 4h): "); err != nil {
-					return err
-				}
-				expiresAtVal, err = parseExpiryFlag(extendExpiresIn, "")
-				if err != nil {
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			id := args[0]
+			expiresAtVal, err := parseExpiryFlag(extendExpiresIn, extendExpiresAt)
+			if err != nil {
+				if extendExpiresIn == "" && extendExpiresAt == "" {
+					if !utils.IsInteractiveShell() {
+						return utils.NewUsageEnvelopeExitError(opExtend, "Non-interactive mode requires --expires-in or --expires-at.")
+					}
+					if extendExpiresIn, err = utils.ReadRequiredInput("Expires in (e.g. 1h, 2h, 4h): "); err != nil {
+						return err
+					}
+					expiresAtVal, err = parseExpiryFlag(extendExpiresIn, "")
+					if err != nil {
+						return utils.NewUsageEnvelopeExitError(opExtend, "Invalid expiry: %s.", err)
+					}
+				} else {
 					return utils.NewUsageEnvelopeExitError(opExtend, "Invalid expiry: %s.", err)
 				}
-			} else {
-				return utils.NewUsageEnvelopeExitError(opExtend, "Invalid expiry: %s.", err)
 			}
-		}
 
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewEnvelopeExitError(opExtend, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			ac, err := newClient()
+			if err != nil {
+				return utils.NewEnvelopeExitError(opExtend, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		req := wsapi.WorkSessionExtendRequest{ExpiresAt: expiresAtVal, Reason: strings.TrimSpace(extendReason)}
-		session, status, err := wsapi.ExtendWorkSession(ac, id, req)
-		if err != nil {
-			return utils.NewEnvelopeExitError(opExtend, err, "%s", extendErrorMessage(id, err))
-		}
+			req := wsapi.WorkSessionExtendRequest{ExpiresAt: expiresAtVal, Reason: strings.TrimSpace(extendReason)}
+			session, status, err := wsapi.ExtendWorkSession(ac, id, req)
+			if err != nil {
+				return utils.NewEnvelopeExitError(opExtend, err, "%s", extendErrorMessage(id, err))
+			}
 
-		// Branch on the status, not PendingExtensionRequest: a 200 body can still carry a stale
-		// request.
-		if status == http.StatusAccepted {
-			printExtendPending(id, session.PendingExtensionRequest, session.ConsoleURL, ac)
-			return utils.NewSilentExitError(utils.ExitCodePendingApproval)
-		}
+			// Branch on the status, not PendingExtensionRequest: a 200 body can still carry a stale
+			// request.
+			if status == http.StatusAccepted {
+				printExtendPending(id, session.PendingExtensionRequest, session.ConsoleURL, ac)
+				return utils.NewSilentExitError(utils.ExitCodePendingApproval)
+			}
 
-		return printExtendSuccess(id, formatMutationExpiresAt(session.ExpiresAt))
-	}),
+			return printExtendSuccess(id, formatMutationExpiresAt(session.ExpiresAt))
+		}),
+	}
+	cmd.Flags().StringVar(&extendExpiresIn, "expires-in", "", "New expiry set to now + duration (e.g. 2h)")
+	cmd.Flags().StringVar(&extendExpiresAt, "expires-at", "", "New absolute expiry time (RFC3339)")
+	cmd.Flags().StringVar(&extendReason, "reason", "", "Why the session needs more time (required)")
+	cmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
+	return cmd
 }
 
 func printExtendSuccess(id, expiresAt string) error {
@@ -142,11 +151,4 @@ type extendPendingCtx struct {
 	// the request's own deadline—when it lapses undecided, not the session's.
 	RequestedExpiresAt string `json:"requested_expires_at,omitempty"`
 	RequestExpiresAt   string `json:"request_expires_at,omitempty"`
-}
-
-func init() {
-	workSessionExtendCmd.Flags().StringVar(&extendExpiresIn, "expires-in", "", "New expiry set to now + duration (e.g. 2h)")
-	workSessionExtendCmd.Flags().StringVar(&extendExpiresAt, "expires-at", "", "New absolute expiry time (RFC3339)")
-	workSessionExtendCmd.Flags().StringVar(&extendReason, "reason", "", "Why the session needs more time (required)")
-	workSessionExtendCmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
 }

@@ -12,61 +12,63 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var terminalIndex int
+var workSessionRecordingCmd = newWorkSessionRecordingCmd(client.NewAlpaconAPIClient)
 
-var workSessionRecordingCmd = &cobra.Command{
-	Use:     "recording SESSION_ID",
-	Aliases: []string{"rec"},
-	Short:   "Show a Websh session recording",
-	Long: `Show the recording of one Websh terminal in a work session.
+func newWorkSessionRecordingCmd(newClient clientFactory) *cobra.Command {
+	var terminalIndex int
+
+	cmd := &cobra.Command{
+		Use:     "recording SESSION_ID",
+		Aliases: []string{"rec"},
+		Short:   "Show a Websh session recording",
+		Long: `Show the recording of one Websh terminal in a work session.
 
 --index counts the session's terminals in timeline order, starting at 1. Only the
 chosen terminal's recording is downloaded. Tunnels are not terminals and are not counted.
 The [N] beside each terminal in 'alpacon work-session timeline' is its --index.`,
-	Args: cobra.ExactArgs(1),
-	Example: `  alpacon work-session recording 550e8400-e29b-41d4-a716-446655440000
+		Args: cobra.ExactArgs(1),
+		Example: `  alpacon work-session recording 550e8400-e29b-41d4-a716-446655440000
   alpacon work-session recording 550e8400-e29b-41d4-a716-446655440000 --index 2
   alpacon work-session rec 550e8400-e29b-41d4-a716-446655440000`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewEnvelopeExitError(opRecording, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			ac, err := newClient()
+			if err != nil {
+				return utils.NewEnvelopeExitError(opRecording, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		sessionID := args[0]
+			sessionID := args[0]
 
-		// Only the terminal list is read whole; the recording itself comes from the
-		// per-session records route, so one recording costs one session's bytes.
-		terminals, err := wsapi.ListTerminalSessionIDs(ac, sessionID)
-		if err != nil {
-			return utils.NewEnvelopeExitError(opRecording, err, "Failed to retrieve work session timeline: %s.", err)
-		}
+			// Only the terminal list is read whole; the recording itself comes from the
+			// per-session records route, so one recording costs one session's bytes.
+			terminals, err := wsapi.ListTerminalSessionIDs(ac, sessionID)
+			if err != nil {
+				return utils.NewEnvelopeExitError(opRecording, err, "Failed to retrieve work session timeline: %s.", err)
+			}
 
-		// No terminals is a not-found state (no error_code); a bad --index is a usage_error.
-		if len(terminals) == 0 {
-			return utils.NewEnvelopeExitError(opRecording, nil, "No recordings found for session %s.", sessionID)
-		}
+			// No terminals is a not-found state (no error_code); a bad --index is a usage_error.
+			if len(terminals) == 0 {
+				return utils.NewEnvelopeExitError(opRecording, nil, "No recordings found for session %s.", sessionID)
+			}
 
-		if terminalIndex < 1 || terminalIndex > len(terminals) {
-			return utils.NewUsageEnvelopeExitError(opRecording, "Terminal index %d out of range (session has %d terminal(s)).", terminalIndex, len(terminals))
-		}
+			if terminalIndex < 1 || terminalIndex > len(terminals) {
+				return utils.NewUsageEnvelopeExitError(opRecording, "Terminal index %d out of range (session has %d terminal(s)).", terminalIndex, len(terminals))
+			}
 
-		record, addedAt, found, err := wsapi.GetTerminalRecording(ac, sessionID, terminals[terminalIndex-1])
-		if err != nil {
-			return utils.NewEnvelopeExitError(opRecording, err, "Failed to retrieve recording: %s.", err)
-		}
-		if !found {
-			return utils.NewEnvelopeExitError(opRecording, nil, "Terminal %d of %d in session %s has no recording; try another --index.", terminalIndex, len(terminals), sessionID)
-		}
+			record, addedAt, found, err := wsapi.GetTerminalRecording(ac, sessionID, terminals[terminalIndex-1])
+			if err != nil {
+				return utils.NewEnvelopeExitError(opRecording, err, "Failed to retrieve recording: %s.", err)
+			}
+			if !found {
+				return utils.NewEnvelopeExitError(opRecording, nil, "Terminal %d of %d in session %s has no recording; try another --index.", terminalIndex, len(terminals), sessionID)
+			}
 
-		printRecordingHeader(os.Stdout, addedAt, terminalIndex, len(terminals))
-		printRecordingContent(os.Stdout, record)
-		return nil
-	}),
-}
-
-func init() {
-	workSessionRecordingCmd.Flags().IntVar(&terminalIndex, "index", 1, "Terminal to display (1-based, in timeline order)")
+			printRecordingHeader(os.Stdout, addedAt, terminalIndex, len(terminals))
+			printRecordingContent(os.Stdout, record)
+			return nil
+		}),
+	}
+	cmd.Flags().IntVar(&terminalIndex, "index", 1, "Terminal to display (1-based, in timeline order)")
+	return cmd
 }
 
 func printRecordingHeader(w io.Writer, addedAt string, idx, total int) {

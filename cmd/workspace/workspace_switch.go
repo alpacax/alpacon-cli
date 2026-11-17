@@ -16,50 +16,57 @@ import (
 
 var errRefreshRejected = errors.New("refresh token refused")
 
-var workspaceSwitchCmd = &cobra.Command{
-	Use:   "switch WORKSPACE",
-	Short: "Switch to a different workspace",
-	Long:  "Switch to another workspace in your account. A workspace your access token does not list yet, such as one created after the token was issued, is looked up again after one token renewal.",
-	Example: `
+var workspaceSwitchCmd = newWorkspaceSwitchCmd(client.NewAlpaconAPIClient)
+
+func newWorkspaceSwitchCmd(newClient clientFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:   "switch WORKSPACE",
+		Short: "Switch to a different workspace",
+		Long:  "Switch to another workspace in your account. A workspace your access token does not list yet, such as one created after the token was issued, is looked up again after one token renewal.",
+		Example: `
 	alpacon workspace switch my-other-workspace
 	alpacon ws switch staging
 	`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		targetName := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			targetName := args[0]
 
-		cfg, err := config.LoadConfig()
-		if err != nil {
-			return utils.NewExitError("Not logged in. Run 'alpacon login' first.")
-		}
+			cfg, err := config.LoadConfig()
+			if err != nil {
+				return utils.NewExitError("Not logged in. Run 'alpacon login' first.")
+			}
 
-		if !cfg.IsMultiWorkspaceMode() {
-			return utils.NewExitError("Workspace switching is available for Auth0-based logins only. Re-login with 'alpacon login <workspace_url>' to enable multi-workspace mode.")
-		}
+			if !cfg.IsMultiWorkspaceMode() {
+				return utils.NewExitError("Workspace switching is available for Auth0-based logins only. Re-login with 'alpacon login <workspace_url>' to enable multi-workspace mode.")
+			}
 
-		if cfg.WorkspaceIdentity() == targetName {
-			utils.CliInfo("Already on workspace %q.", targetName)
+			if cfg.WorkspaceIdentity() == targetName {
+				utils.CliInfo("Already on workspace %q.", targetName)
+				return nil
+			}
+
+			newURL, newName, renewed, err := resolveSwitchTarget(cfg, targetName, func(cfg config.Config) (*config.RenewedToken, error) {
+				return renewWorkspaceClaim(cfg, httpclient.New(cfg.Insecure))
+			})
+			if err != nil {
+				return utils.NewExitError("%s", err)
+			}
+
+			// The env endpoint needs no credential, so the answer is in hand before
+			// the switch and lands in the same save as the workspace it describes.
+			kubernetesSurface := fetchKubernetesSurface(newURL, newName, cfg.Insecure)
+
+			if err := commitSwitch(cfg, newURL, newName, kubernetesSurface, renewed, func() error {
+				_, err := newClient()
+				return err
+			}); err != nil {
+				return utils.NewExitError("%s", err)
+			}
+
+			utils.CliSuccess("Switched to workspace %q (%s)", newName, newURL)
 			return nil
-		}
-
-		newURL, newName, renewed, err := resolveSwitchTarget(cfg, targetName, func(cfg config.Config) (*config.RenewedToken, error) {
-			return renewWorkspaceClaim(cfg, httpclient.New(cfg.Insecure))
-		})
-		if err != nil {
-			return utils.NewExitError("%s", err)
-		}
-
-		// The env endpoint needs no credential, so the answer is in hand before
-		// the switch and lands in the same save as the workspace it describes.
-		kubernetesSurface := fetchKubernetesSurface(newURL, newName, cfg.Insecure)
-
-		if err := commitSwitch(cfg, newURL, newName, kubernetesSurface, renewed, verifyConnection); err != nil {
-			return utils.NewExitError("%s", err)
-		}
-
-		utils.CliSuccess("Switched to workspace %q (%s)", newName, newURL)
-		return nil
-	}),
+		}),
+	}
 }
 
 // resolveSwitchTarget looks targetName up in the token's workspaces claim, fixed when the token is issued,
@@ -107,11 +114,6 @@ func renewWorkspaceClaim(cfg config.Config, httpClient *http.Client) (*config.Re
 		return nil, err
 	}
 	return &config.RenewedToken{AccessToken: tokenRes.AccessToken, ExpiresIn: tokenRes.ExpiresIn}, nil
-}
-
-func verifyConnection() error {
-	_, err := client.NewAlpaconAPIClient()
-	return err
 }
 
 // commitSwitch saves the new workspace with its Kubernetes surface answer and any renewed token, then runs verify;

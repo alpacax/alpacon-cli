@@ -8,20 +8,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var aclServerListCmd = &cobra.Command{
-	Use:     "ls TOKEN",
-	Aliases: []string{"list"},
-	Short:   "List server ACL rules for a token",
-	Example: `  alpacon token acl server ls my-api-token
+var aclServerListCmd = newAclServerListCmd(client.NewAlpaconAPIClient)
+
+func newAclServerListCmd(newClient clientFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:     "ls TOKEN",
+		Aliases: []string{"list"},
+		Short:   "List server ACL rules for a token",
+		Example: `  alpacon token acl server ls my-api-token
   alpacon token acl server list my-api-token`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(runServerAclList),
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return runServerAclList(cmd, args, newClient)
+		}),
+	}
 }
 
-func runServerAclList(_ *cobra.Command, args []string) error {
+func runServerAclList(_ *cobra.Command, args []string, newClient clientFactory) error {
 	tokenID := args[0]
 
-	alpaconClient, err := client.NewAlpaconAPIClient()
+	alpaconClient, err := newClient()
 	if err != nil {
 		return utils.NewExitError("Connection to Alpacon API failed: %v. Consider re-logging.", err)
 	}

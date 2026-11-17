@@ -18,6 +18,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -45,7 +46,7 @@ func runKubeCommandWith(t *testing.T, newClient clientFactory, outputFormat stri
 	withOutputFormat(t, outputFormat)
 	cmd := newKubeCmd(newClient)
 	cmd.SilenceErrors, cmd.SilenceUsage = true, true // as RootCmd is
-	markRunErrors(cmd)
+	utils.MarkHookErrors(cmd)
 	cmd.SetArgs(args)
 	var err error
 	stdout, stderr = testutil.CaptureOutput(t, func() { err = cmd.Execute() })
@@ -71,35 +72,10 @@ func reportExit(w io.Writer, err error) int {
 		return exitErr.Code
 	}
 	_, _ = fmt.Fprintln(w, err)
-	if errors.As(err, new(runError)) && !utils.IsUsageError(err) {
+	if utils.IsHookError(err) && !utils.IsUsageError(err) {
 		return utils.ExitCodeGeneralError // cmd.Execute exits 1 on a hook's own unmarked error
 	}
 	return utils.ExitCodeUsageError // a Cobra error or a usage-marked hook error
-}
-
-// runError marks an error a command's own hook returned, as cmd.Execute's markHookErrors does.
-type runError struct{ err error }
-
-func (e runError) Error() string { return e.err.Error() }
-func (e runError) Unwrap() error { return e.err }
-
-// markRunErrors wraps every error-returning hook in c's tree with runError.
-func markRunErrors(c *cobra.Command) {
-	for _, hook := range []*func(*cobra.Command, []string) error{
-		&c.PersistentPreRunE, &c.PreRunE, &c.RunE, &c.PostRunE, &c.PersistentPostRunE,
-	} {
-		if run := *hook; run != nil {
-			*hook = func(cmd *cobra.Command, args []string) error {
-				if err := run(cmd, args); err != nil {
-					return runError{err: err}
-				}
-				return nil
-			}
-		}
-	}
-	for _, sub := range c.Commands() {
-		markRunErrors(sub)
-	}
 }
 
 func newLogoutScene(t *testing.T, workspaceURL string) logoutScene {
@@ -341,7 +317,7 @@ func TestCloseSavedSessionRefusesAMovedLogin(t *testing.T) {
 	record := testRecord("prod-east")
 	record.WorkspaceURL = "https://elsewhere.example.com"
 
-	err := closeSavedSession(record, nil)
+	err := closeSavedSession(client.NewAlpaconAPIClient, record, nil)
 
 	require.ErrorContains(t, err, "moved to another workspace")
 	assert.Zero(t, calls.Load())
@@ -398,14 +374,125 @@ func TestReportExit_ExitsLikeExecute(t *testing.T) {
 			t.Parallel()
 			probe := &cobra.Command{Use: "probe", Args: cobra.NoArgs, SilenceErrors: true, SilenceUsage: true,
 				RunE: func(*cobra.Command, []string) error { return tc.err }}
-			markRunErrors(probe)
-			probe.SetArgs(tc.args)
+			utils.MarkHookErrors(probe)
+			probe.SetArgs(append([]string{}, tc.args...)) // never nil, or Cobra reads os.Args[1:]
 			probe.SetOut(io.Discard)
 			probe.SetErr(io.Discard)
 
 			code := reportExit(io.Discard, probe.Execute())
 
 			assert.Equal(t, tc.wantCode, code)
+		})
+	}
+}
+
+func TestCloseSavedSessionClosesThroughTheFactory(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		noLogin   bool
+		wantErr   string
+		wantCalls int32
+	}{
+		{name: "closes the saved session", wantCalls: 1},
+		{name: "no login", noLogin: true, wantErr: "not logged in"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var calls atomic.Int32
+			ts := closeServer(t, http.StatusOK, &calls)
+			newClient := apiClientTo(ts)
+			if tt.noLogin {
+				newClient = func() (*client.AlpaconClient, error) { return nil, errors.New("not logged in") }
+			}
+			record := testRecord("prod-east")
+			record.WorkspaceURL = ts.URL
+			record.KubeSessionID = "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47"
+
+			err := closeSavedSession(newClient, record, nil)
+
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tt.wantErr)
+			}
+			assert.Equal(t, tt.wantCalls, calls.Load())
+		})
+	}
+}
+
+// countingFactory builds clients for ts and counts the builds, so a test sees
+// whether a command went through the factory it was given.
+func countingFactory(ts *httptest.Server, builds *atomic.Int32) clientFactory {
+	newClient := apiClientTo(ts)
+	return func() (*client.AlpaconClient, error) {
+		builds.Add(1)
+		return newClient()
+	}
+}
+
+func TestKubeLogoutCommandClosesThroughTheFactory(t *testing.T) {
+	var calls, builds atomic.Int32
+	ts := closeServer(t, http.StatusOK, &calls)
+	scene := newLogoutScene(t, ts.URL)
+	require.NoError(t, config.CreateConfig(ts.URL, "ws", "token", "", "", "", "", 0, false))
+
+	_, stderr, code := runKubeCommandWith(t, countingFactory(ts, &builds), utils.OutputFormatJSON, "logout", "prod-east")
+
+	require.Equal(t, 0, code, stderr)
+	assert.Equal(t, int32(1), builds.Load())
+	assert.Equal(t, int32(1), calls.Load())
+	assert.NoFileExists(t, scene.store.recordPath(scene.record.key()))
+}
+
+func TestKubeCredentialsCommandChecksTheSessionThroughTheFactory(t *testing.T) {
+	sessionRoute := "GET /api/kubernetes/sessions/3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47/"
+	tests := []struct {
+		name     string
+		reply    cmdtest.Reply
+		wantCode int
+		wantOut  string
+		wantErr  string
+	}{
+		{
+			name:    "open session",
+			reply:   cmdtest.Reply{Status: http.StatusOK, Body: `{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","token_expired_at":"2099-01-01T00:00:00Z","closed_at":null}`},
+			wantOut: `{"apiVersion":"client.authentication.k8s.io/v1","kind":"ExecCredential","status":{"token":"tok","expirationTimestamp":"2099-01-01T00:00:00Z"}}`,
+		},
+		{
+			name:     "ended session",
+			reply:    cmdtest.Reply{Status: http.StatusNotFound, Body: `{"detail":"Not found."}`},
+			wantCode: utils.ExitCodeWorkSessionDenied,
+			wantErr:  "alpacon kube login",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := cmdtest.Server(t, map[string]cmdtest.Reply{sessionRoute: tt.reply})
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home) // os.UserHomeDir reads it on Windows
+			t.Setenv("KUBERNETES_EXEC_INFO", "")
+			store, err := defaultKubeSessionStore()
+			require.NoError(t, err)
+			record := testRecord("prod-east")
+			record.WorkspaceURL = ts.URL
+			record.KubeSessionID = "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47"
+			record.TokenExpiredAt = time.Now().Add(time.Hour).UTC()
+			require.NoError(t, store.write(record))
+			require.NoError(t, config.CreateConfig(ts.URL, "ws", "token", "", "", "", "", 0, false))
+			var builds atomic.Int32
+
+			stdout, stderr, code := runKubeCommandWith(t, countingFactory(ts.Server, &builds), utils.OutputFormatTable, "credentials", "--cluster", "prod-east")
+
+			assert.Equal(t, tt.wantCode, code, stderr)
+			if tt.wantOut != "" {
+				assert.JSONEq(t, tt.wantOut, stdout)
+			}
+			assert.Contains(t, stderr, tt.wantErr)
+			assert.Equal(t, int32(1), builds.Load())
+			assert.Equal(t, 1, ts.Hits(sessionRoute))
 		})
 	}
 }

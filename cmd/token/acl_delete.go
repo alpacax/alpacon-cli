@@ -1,20 +1,25 @@
 package token
 
 import (
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var aclDeleteCmd = &cobra.Command{
-	Use:        "delete ACL_ID",
-	Aliases:    []string{"rm"},
-	Short:      "Delete a command ACL rule",
-	Deprecated: "use 'alpacon token acl command delete' instead",
-	Hidden:     true,
-	Args:       cobra.ExactArgs(1),
-	RunE:       utils.WithExitError(runCommandAclDelete),
-}
+var aclDeleteCmd = newAclDeleteCmd(client.NewAlpaconAPIClient)
 
-func init() {
-	aclDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+func newAclDeleteCmd(newClient clientFactory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:        "delete ACL_ID",
+		Aliases:    []string{"rm"},
+		Short:      "Delete a command ACL rule",
+		Deprecated: "use 'alpacon token acl command delete' instead",
+		Hidden:     true,
+		Args:       cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return runCommandAclDelete(cmd, args, newClient)
+		}),
+	}
+	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	return cmd
 }

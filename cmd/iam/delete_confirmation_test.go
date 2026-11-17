@@ -5,31 +5,34 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// Serial: it runs package-level commands, sets HOME and OutputFormat, and fills memberDeleteRequest.
+// Serial: it runs package-level commands and sets HOME and OutputFormat.
 func TestDeleteCommands_StopForConfirmationBeforeAnyRequest(t *testing.T) {
 	t.Setenv("HOME", t.TempDir()) // a regression that skips the check must not reach a real login
-	saved, savedFormat := memberDeleteRequest, utils.OutputFormat
-	t.Cleanup(func() { memberDeleteRequest, utils.OutputFormat = saved, savedFormat })
+	savedFormat := utils.OutputFormat
+	t.Cleanup(func() { utils.OutputFormat = savedFormat })
 	utils.OutputFormat = utils.OutputFormatJSON
-	memberDeleteRequest.Group, memberDeleteRequest.User = "my-group", "alice"
 	tests := []struct {
-		name string
-		cmd  *cobra.Command
-		args []string
+		name  string
+		cmd   *cobra.Command
+		flags []string
+		args  []string
 	}{
 		{name: "group delete", cmd: groupDeleteCmd, args: []string{"my-group"}},
 		{name: "user delete", cmd: userDeleteCmd, args: []string{"alice"}},
-		{name: "member delete", cmd: memberDeleteCmd, args: nil},
+		{name: "member delete", cmd: newMemberDeleteCmd(cmdtest.NoClient), flags: []string{"--group", "my-group", "--user", "alice"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			require.NoError(t, tt.cmd.ParseFlags(tt.flags))
+
 			err := tt.cmd.RunE(tt.cmd, tt.args)
 
 			exitErr, ok := errors.AsType[*utils.ExitError](err)

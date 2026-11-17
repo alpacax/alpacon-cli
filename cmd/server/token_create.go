@@ -13,83 +13,85 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var tokenCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new server registration token",
-	Long: `Generates a new server registration token.
+var tokenCreateCmd = newTokenCreateCmd(client.NewAlpaconAPIClient)
+
+func newTokenCreateCmd(newClient clientFactory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Create a new server registration token",
+		Long: `Generates a new server registration token.
 The token key is displayed once at creation time and cannot be retrieved again.`,
-	Example: `
+		Example: `
     alpacon server token create --name k8s-nodes --groups infra --expires-in-days 365
     alpacon server token create  # interactive mode`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		name, _ := cmd.Flags().GetString("name")
-		groups, _ := cmd.Flags().GetStringSlice("groups")
-		expiresInDays, _ := cmd.Flags().GetInt("expires-in-days")
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			name, _ := cmd.Flags().GetString("name")
+			groups, _ := cmd.Flags().GetStringSlice("groups")
+			expiresInDays, _ := cmd.Flags().GetInt("expires-in-days")
 
-		if expiresInDays < 0 {
-			return utils.NewUsageExitError("--expires-in-days must be 0 (the workspace maximum) or a positive number, got %d.", expiresInDays)
-		}
-
-		interactive := name == ""
-
-		if name == "" {
-			var err error
-			if name, err = utils.ReadRequiredInput("Token name: "); err != nil {
-				return err
+			if expiresInDays < 0 {
+				return utils.NewUsageExitError("--expires-in-days must be 0 (the workspace maximum) or a positive number, got %d.", expiresInDays)
 			}
-		}
-		if interactive && len(groups) == 0 {
-			input, err := utils.ReadInput("Allowed group names or UUIDs (comma-separated, optional): ")
+
+			interactive := name == ""
+
+			if name == "" {
+				var err error
+				if name, err = utils.ReadRequiredInput("Token name: "); err != nil {
+					return err
+				}
+			}
+			if interactive && len(groups) == 0 {
+				input, err := utils.ReadInput("Allowed group names or UUIDs (comma-separated, optional): ")
+				if err != nil {
+					return err
+				}
+				groups = utils.SplitAndTrim(input, ",")
+			}
+
+			alpaconClient, err := newClient()
 			if err != nil {
-				return err
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
-			groups = utils.SplitAndTrim(input, ",")
-		}
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		groupIDs, err := resolveGroupIDs(alpaconClient, groups)
-		if err != nil {
-			return utils.NewExitError("Failed to resolve groups: %s.", err)
-		}
-
-		req := serverAPI.RegistrationTokenRequest{
-			Name:          name,
-			AllowedGroups: groupIDs,
-		}
-		if expiresInDays > 0 {
-			req.ExpiresAt = utils.TimeFormat(expiresInDays)
-		}
-
-		resp, err := serverAPI.CreateRegistrationToken(alpaconClient, req)
-		if err != nil {
-			return utils.NewExitError("Failed to create registration token: %s.", err)
-		}
-
-		if utils.OutputFormat == utils.OutputFormatJSON {
-			data, err := json.Marshal(resp)
+			groupIDs, err := resolveGroupIDs(alpaconClient, groups)
 			if err != nil {
-				return utils.NewExitError("Failed to marshal response: %s.", err)
+				return utils.NewExitError("Failed to resolve groups: %s.", err)
 			}
-			return utils.PrintJson(data)
-		}
 
-		utils.CliSuccess("Registration token created: %s", resp.Name)
-		warnTokenKey("Save this key now—it will not be shown again", resp.Key)
-		if resp.ExpiresAt != nil {
-			utils.CliInfo("Token expires at: %s", *resp.ExpiresAt)
-		}
-		return nil
-	}),
-}
+			req := serverAPI.RegistrationTokenRequest{
+				Name:          name,
+				AllowedGroups: groupIDs,
+			}
+			if expiresInDays > 0 {
+				req.ExpiresAt = utils.TimeFormat(expiresInDays)
+			}
 
-func init() {
-	tokenCreateCmd.Flags().StringP("name", "n", "", "A name to identify the token.")
-	tokenCreateCmd.Flags().StringSliceP("groups", "g", []string{}, "Group names or UUIDs to assign on registration (comma-separated).")
-	tokenCreateCmd.Flags().Int("expires-in-days", 0, "Number of days until the token expires (0 = the workspace maximum lifetime; a longer one is refused).")
+			resp, err := serverAPI.CreateRegistrationToken(alpaconClient, req)
+			if err != nil {
+				return utils.NewExitError("Failed to create registration token: %s.", err)
+			}
+
+			if utils.OutputFormat == utils.OutputFormatJSON {
+				data, err := json.Marshal(resp)
+				if err != nil {
+					return utils.NewExitError("Failed to marshal response: %s.", err)
+				}
+				return utils.PrintJson(data)
+			}
+
+			utils.CliSuccess("Registration token created: %s", resp.Name)
+			warnTokenKey("Save this key now—it will not be shown again", resp.Key)
+			if resp.ExpiresAt != nil {
+				utils.CliInfo("Token expires at: %s", *resp.ExpiresAt)
+			}
+			return nil
+		}),
+	}
+	cmd.Flags().StringP("name", "n", "", "A name to identify the token.")
+	cmd.Flags().StringSliceP("groups", "g", []string{}, "Group names or UUIDs to assign on registration (comma-separated).")
+	cmd.Flags().Int("expires-in-days", 0, "Number of days until the token expires (0 = the workspace maximum lifetime; a longer one is refused).")
+	return cmd
 }
 
 // resolveGroupIDs converts group names or UUIDs to UUIDs, resolving names through

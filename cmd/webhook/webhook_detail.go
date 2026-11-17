@@ -7,37 +7,41 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var webhookDetailCmd = &cobra.Command{
-	Use:     "describe WEBHOOK",
-	Aliases: []string{"desc"},
-	Short:   "Show details of a webhook",
-	Long: `
+var webhookDetailCmd = newWebhookDetailCmd(client.NewAlpaconAPIClient)
+
+func newWebhookDetailCmd(newClient clientFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:     "describe WEBHOOK",
+		Aliases: []string{"desc"},
+		Short:   "Show details of a webhook",
+		Long: `
 	The describe command fetches and displays detailed information about a specific webhook,
 	including its URL, SSL verification setting, and enabled status.
 	`,
-	Example: `
+		Example: `
 	alpacon webhook describe my-webhook
 	alpacon webhook desc my-webhook
 	`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		webhookName := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			webhookName := args[0]
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		webhookID, err := webhook.GetWebhookIDByName(alpaconClient, webhookName)
-		if err != nil {
-			return utils.NewExitError("Failed to find the webhook: %s.", err)
-		}
+			webhookID, err := webhook.GetWebhookIDByName(alpaconClient, webhookName)
+			if err != nil {
+				return utils.NewExitError("Failed to find the webhook: %s.", err)
+			}
 
-		webhookDetail, err := webhook.GetWebhookDetail(alpaconClient, webhookID)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve the webhook details: %s.", err)
-		}
+			webhookDetail, err := webhook.GetWebhookDetail(alpaconClient, webhookID)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the webhook details: %s.", err)
+			}
 
-		return utils.PrintJson(webhookDetail)
-	}),
+			return utils.PrintJson(webhookDetail)
+		}),
+	}
 }

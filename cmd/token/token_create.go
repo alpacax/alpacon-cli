@@ -7,67 +7,68 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var tokenCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new API token",
-	Long: `
+var tokenCreateCmd = newTokenCreateCmd(client.NewAlpaconAPIClient)
+
+func newTokenCreateCmd(newClient clientFactory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Create a new API token",
+		Long: `
 	Generates a new API token for accessing the server.
 	This command allows you to create a token by specifying options such as token name, expiration, and scopes.
 	Personal API tokens cannot run commands or transfer files. Use service tokens for automation that runs commands or transfers files.
 	`,
-	Example: `
+		Example: `
 	alpacon token create
 	alpacon token create --name ci-token --scopes "server:read"
 	alpacon token create --name audit-token --scopes "server:read,role_audit_log:read"
 	`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		name, _ := cmd.Flags().GetString("name")
-		limit, _ := cmd.Flags().GetBool("limit")
-		expiresAt, _ := cmd.Flags().GetInt("expiration-in-days")
-		scopesStr, _ := cmd.Flags().GetString("scopes")
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			name, _ := cmd.Flags().GetString("name")
+			limit, _ := cmd.Flags().GetBool("limit")
+			expiresAt, _ := cmd.Flags().GetInt("expiration-in-days")
+			scopesStr, _ := cmd.Flags().GetString("scopes")
 
-		var tokenRequest auth.APITokenRequest
-		var err error
+			var tokenRequest auth.APITokenRequest
+			var err error
 
-		if name == "" {
-			if tokenRequest, err = promptForToken(); err != nil {
-				return err
+			if name == "" {
+				if tokenRequest, err = promptForToken(); err != nil {
+					return err
+				}
+			} else {
+				tokenRequest = auth.APITokenRequest{Name: name}
+
+				if limit && expiresAt > 0 {
+					tokenRequest.ExpiresAt = utils.TimeFormat(expiresAt)
+				}
+
+				tokenRequest.Scopes = utils.SplitAndTrim(scopesStr, ",")
 			}
-		} else {
-			tokenRequest = auth.APITokenRequest{Name: name}
 
-			if limit && expiresAt > 0 {
-				tokenRequest.ExpiresAt = utils.TimeFormat(expiresAt)
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
 
-			tokenRequest.Scopes = utils.SplitAndTrim(scopesStr, ",")
-		}
+			token, err := auth.CreateAPIToken(alpaconClient, tokenRequest)
+			if err != nil {
+				return utils.NewExitError("Failed to create API token %s.", err)
+			}
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		token, err := auth.CreateAPIToken(alpaconClient, tokenRequest)
-		if err != nil {
-			return utils.NewExitError("Failed to create API token %s.", err)
-		}
-
-		utils.CliSuccess("API token created: %s", token)
-		utils.CliWarning("This token cannot be retrieved again after you exit.")
-		return nil
-	}),
-}
-
-func init() {
-	var name string
-	var limit bool
+			utils.CliSuccess("API token created: %s", token)
+			utils.CliWarning("This token cannot be retrieved again after you exit.")
+			return nil
+		}),
+	}
 	var expiresAt int
-
-	tokenCreateCmd.Flags().StringVarP(&name, "name", "n", "", "A name to remember the token easily.")
-	tokenCreateCmd.Flags().BoolVarP(&limit, "limit", "l", true, "Set to true to apply usage limits.")
-	tokenCreateCmd.Flags().IntVar(&expiresAt, "expiration-in-days", 0, "Days until the token expires (0 = the workspace's maximum token lifetime).")
-	tokenCreateCmd.Flags().String("scopes", "", `Comma-separated list of scopes (e.g. "server:read,role_audit_log:read"). Omit to get the scopes your roles allow.`)
+	var limit bool
+	var name string
+	cmd.Flags().StringVarP(&name, "name", "n", "", "A name to remember the token easily.")
+	cmd.Flags().BoolVarP(&limit, "limit", "l", true, "Set to true to apply usage limits.")
+	cmd.Flags().IntVar(&expiresAt, "expiration-in-days", 0, "Days until the token expires (0 = the workspace's maximum token lifetime).")
+	cmd.Flags().String("scopes", "", `Comma-separated list of scopes (e.g. "server:read,role_audit_log:read"). Omit to get the scopes your roles allow.`)
+	return cmd
 }
 
 func promptForToken() (auth.APITokenRequest, error) {

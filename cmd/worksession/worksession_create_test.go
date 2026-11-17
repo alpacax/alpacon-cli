@@ -635,16 +635,13 @@ func TestWorkSessionCreateWaitPrintsAdvisories(t *testing.T) {
 	defer ts.Close()
 
 	setupWorkSessionCommandConfig(t, ts.URL)
-	resetCreateCommandState(t)
-	purpose = "incident"
-	createScopes = []string{"command", "websh"}
-	createServers = []string{"prod"}
-	expiresAt = "2026-06-01T12:00:00Z"
-	wait = true
+	clearWorkSessionAgentEnvironment(t)
+	cmd := newWorkSessionCreateCmd(client.NewAlpaconAPIClient)
+	require.NoError(t, cmd.ParseFlags([]string{"--purpose", "incident", "--scope", "command,websh", "--server", "prod", "--expires-at", "2026-06-01T12:00:00Z", "--wait"}))
 
 	var runErr error
 	_, stderr := testutil.CaptureOutput(t, func() {
-		runErr = workSessionCreateCmd.RunE(workSessionCreateCmd, nil)
+		runErr = cmd.RunE(cmd, nil)
 	})
 	require.NoError(t, runErr)
 
@@ -673,15 +670,13 @@ func TestWorkSessionCreateAutoApprovedPrintsAdvisories(t *testing.T) {
 	defer ts.Close()
 
 	setupWorkSessionCommandConfig(t, ts.URL)
-	resetCreateCommandState(t)
-	purpose = "incident"
-	createScopes = []string{"command", "websh"}
-	createServers = []string{"prod"}
-	expiresAt = "2026-06-01T12:00:00Z"
+	clearWorkSessionAgentEnvironment(t)
+	cmd := newWorkSessionCreateCmd(client.NewAlpaconAPIClient)
+	require.NoError(t, cmd.ParseFlags([]string{"--purpose", "incident", "--scope", "command,websh", "--server", "prod", "--expires-at", "2026-06-01T12:00:00Z"}))
 
 	var runErr error
 	_, stderr := testutil.CaptureOutput(t, func() {
-		runErr = workSessionCreateCmd.RunE(workSessionCreateCmd, nil)
+		runErr = cmd.RunE(cmd, nil)
 	})
 	require.NoError(t, runErr)
 
@@ -712,16 +707,13 @@ func TestWorkSessionCreateWaitJSONOutputIncludesAdjustments(t *testing.T) {
 
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
-	resetCreateCommandState(t)
-	purpose = "incident"
-	createScopes = []string{"command", "websh"}
-	createServers = []string{"prod"}
-	expiresAt = "2026-06-01T12:00:00Z"
-	wait = true
+	clearWorkSessionAgentEnvironment(t)
+	cmd := newWorkSessionCreateCmd(client.NewAlpaconAPIClient)
+	require.NoError(t, cmd.ParseFlags([]string{"--purpose", "incident", "--scope", "command,websh", "--server", "prod", "--expires-at", "2026-06-01T12:00:00Z", "--wait"}))
 
 	var runErr error
 	stdout, _ := testutil.CaptureOutput(t, func() {
-		runErr = workSessionCreateCmd.RunE(workSessionCreateCmd, nil)
+		runErr = cmd.RunE(cmd, nil)
 	})
 	require.NoError(t, runErr)
 

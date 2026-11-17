@@ -31,17 +31,17 @@ const (
 // default. Add a region here when it launches.
 var knownCloudRegions = []string{"us1", "ap1"}
 
-var (
-	insecure      bool
-	noBrowser     bool
-	workspaceFlag string
-	regionFlag    string
-)
+var loginCmd = newLoginCmd(client.NewAlpaconAPIClient)
 
-var loginCmd = &cobra.Command{
-	Use:   "login [HOST]",
-	Short: "Log in to Alpacon",
-	Long: `Log in to Alpacon.
+func newLoginCmd(newClient clientFactory) *cobra.Command {
+	var (
+		insecure, noBrowser       bool
+		workspaceFlag, regionFlag string
+	)
+	cmd := &cobra.Command{
+		Use:   "login [HOST]",
+		Short: "Log in to Alpacon",
+		Long: `Log in to Alpacon.
 
 Browser authentication is the default interactive flow. The CLI opens the
 browser automatically and waits for completion. Use -t with an explicit
@@ -58,7 +58,7 @@ headless environment (SSH, containers) where no browser is available.
 Re-login: in an interactive shell, 'alpacon login' without arguments prompts
 with the saved target as the default. Non-interactive login requires a HOST or
 --workspace/--region.`,
-	Example: `  # Alpacon Cloud login (interactive)
+		Example: `  # Alpacon Cloud login (interactive)
   alpacon login
 
   # Alpacon Cloud login with an explicit target
@@ -85,122 +85,120 @@ with the saved target as the default. Non-interactive login requires a HOST or
 
   # Alpacon Cloud via direct URL with an API token (deprecated; prefer --workspace/--region)
   alpacon login myworkspace.us1.alpacon.io -t <api-token>`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		workspaceURL, workspaceName, baseDomain, ok, err := resolveLoginTarget(args, workspaceFlag, regionFlag)
-		if err != nil {
-			return utils.NewUsageExitError("%s", err.Error())
-		}
-
-		if !ok {
-			if err := validateInteractiveLoginTargetPrompt(utils.IsInteractiveShell()); err != nil {
+		Args: cobra.MaximumNArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			workspaceURL, workspaceName, baseDomain, ok, err := resolveLoginTarget(args, workspaceFlag, regionFlag)
+			if err != nil {
 				return utils.NewUsageExitError("%s", err.Error())
 			}
-			cfg, _ := config.LoadConfig()
-			workspaceURL, workspaceName, baseDomain, err = promptForLoginTarget(cfg)
+
+			if !ok {
+				if err := validateInteractiveLoginTargetPrompt(utils.IsInteractiveShell()); err != nil {
+					return utils.NewUsageExitError("%s", err.Error())
+				}
+				cfg, _ := config.LoadConfig()
+				workspaceURL, workspaceName, baseDomain, err = promptForLoginTarget(cfg)
+				if err != nil {
+					return utils.NewExitError("%s", err.Error())
+				}
+			}
+
+			httpClient := httpclient.New(insecure)
+
+			envInfo, err := auth0.FetchAuthEnv(workspaceURL, httpClient)
 			if err != nil {
-				return utils.NewExitError("%s", err.Error())
+				if isWorkspaceNotFound(err) {
+					return utils.NewExitError("Workspace not found. Please check your workspace name and region")
+				}
+				return utils.NewExitError("Workspace '%s' is unreachable or returned an error: %v", workspaceURL, err)
 			}
-		}
 
-		httpClient := httpclient.New(insecure)
+			username, _ := cmd.Flags().GetString("username")
+			password, _ := cmd.Flags().GetString("password")
+			token, _ := cmd.Flags().GetString("token")
 
-		envInfo, err := auth0.FetchAuthEnv(workspaceURL, httpClient)
-		if err != nil {
-			if isWorkspaceNotFound(err) {
-				return utils.NewExitError("Workspace not found. Please check your workspace name and region")
+			utils.CliInfo("Logging in to %s", workspaceURL)
+
+			if envInfo.Auth0.Method == "auth0" && token == "" {
+				deviceCode, err := auth0.RequestDeviceCode(workspaceName, httpClient, envInfo)
+				if err != nil {
+					return utils.NewExitError("Device code request failed. %v", err)
+				}
+
+				promptURI := printDeviceCodePrompt(os.Stderr, deviceCode.VerificationURIComplete, deviceCode.UserCode)
+				if !noBrowser {
+					utils.OpenBrowser(promptURI)
+				}
+
+				tokenRes, err := auth0.PollForToken(deviceCode, envInfo)
+				if err != nil {
+					return utils.NewExitError("%s", err.Error())
+				}
+
+				err = config.CreateConfig(workspaceURL, workspaceName, "", "", tokenRes.AccessToken, tokenRes.RefreshToken, baseDomain, tokenRes.ExpiresIn, insecure)
+				if err != nil {
+					return utils.NewExitError("Failed to save config: %v", err)
+				}
+
+			} else {
+				if (username == "" || password == "") && token == "" {
+					if username, password, err = promptForCredentials(username, password); err != nil {
+						return err
+					}
+				}
+
+				loginRequest := &auth.LoginRequest{
+					WorkspaceURL:  workspaceURL,
+					Username:      username,
+					Password:      password,
+					WorkspaceName: workspaceName,
+					BaseDomain:    baseDomain,
+				}
+
+				err = auth.LoginAndSaveCredentials(loginRequest, token, insecure)
+				if err != nil {
+					if token == "" && utils.HTTPStatusCode(err) == http.StatusNotFound {
+						return utils.NewExitError("Login endpoint not found. This workspace may not support username/password login")
+					}
+					return utils.NewExitError("%s", loginFailureMessage(err))
+				}
+
 			}
-			return utils.NewExitError("Workspace '%s' is unreachable or returned an error: %v", workspaceURL, err)
-		}
 
-		username, _ := cmd.Flags().GetString("username")
-		password, _ := cmd.Flags().GetString("password")
-		token, _ := cmd.Flags().GetString("token")
+			persistWorkspaceEnv(workspaceURL, envInfo)
 
-		utils.CliInfo("Logging in to %s", workspaceURL)
-
-		if envInfo.Auth0.Method == "auth0" && token == "" {
-			deviceCode, err := auth0.RequestDeviceCode(workspaceName, httpClient, envInfo)
+			ac, err := newClient()
 			if err != nil {
-				return utils.NewExitError("Device code request failed. %v", err)
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
-
-			promptURI := printDeviceCodePrompt(os.Stderr, deviceCode.VerificationURIComplete, deviceCode.UserCode)
-			if !noBrowser {
-				utils.OpenBrowser(promptURI)
-			}
-
-			tokenRes, err := auth0.PollForToken(deviceCode, envInfo)
-			if err != nil {
-				return utils.NewExitError("%s", err.Error())
-			}
-
-			err = config.CreateConfig(workspaceURL, workspaceName, "", "", tokenRes.AccessToken, tokenRes.RefreshToken, baseDomain, tokenRes.ExpiresIn, insecure)
-			if err != nil {
-				return utils.NewExitError("Failed to save config: %v", err)
-			}
-
-		} else {
-			if (username == "" || password == "") && token == "" {
-				if username, password, err = promptForCredentials(username, password); err != nil {
+			who, whoErr := auth.GetWhoami(ac)
+			switch classifyWhoamiVerification(whoErr) {
+			case whoamiVerified:
+				if who.PrincipalType == auth.PrincipalTypeApplication && who.Application != nil {
+					utils.CliInfo("Authenticated as application '%s'.", who.Application.Name)
+				}
+			case whoamiFallback:
+				// Old server without whoami: fall back to legacy prefix-based verification.
+				if err := verifyLoginLegacy(ac, token); err != nil {
 					return err
 				}
+			default:
+				return utils.NewExitError("%s", utils.Reword(whoErr, whoamiFailureMessage(whoErr)))
 			}
 
-			loginRequest := &auth.LoginRequest{
-				WorkspaceURL:  workspaceURL,
-				Username:      username,
-				Password:      password,
-				WorkspaceName: workspaceName,
-				BaseDomain:    baseDomain,
-			}
-
-			err = auth.LoginAndSaveCredentials(loginRequest, token, insecure)
-			if err != nil {
-				if token == "" && utils.HTTPStatusCode(err) == http.StatusNotFound {
-					return utils.NewExitError("Login endpoint not found. This workspace may not support username/password login")
-				}
-				return utils.NewExitError("%s", loginFailureMessage(err))
-			}
-
-		}
-
-		persistWorkspaceEnv(workspaceURL, envInfo)
-
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-		who, whoErr := auth.GetWhoami(ac)
-		switch classifyWhoamiVerification(whoErr) {
-		case whoamiVerified:
-			if who.PrincipalType == auth.PrincipalTypeApplication && who.Application != nil {
-				utils.CliInfo("Authenticated as application '%s'.", who.Application.Name)
-			}
-		case whoamiFallback:
-			// Old server without whoami: fall back to legacy prefix-based verification.
-			if err := verifyLoginLegacy(ac, token); err != nil {
-				return err
-			}
-		default:
-			return utils.NewExitError("%s", utils.Reword(whoErr, whoamiFailureMessage(whoErr)))
-		}
-
-		utils.CliSuccess("Login succeeded!")
-		return nil
-	}),
-}
-
-func init() {
+			utils.CliSuccess("Login succeeded!")
+			return nil
+		}),
+	}
 	var username, password, token string
-
-	loginCmd.Flags().StringVarP(&username, "username", "u", "", "Username for login")
-	loginCmd.Flags().StringVarP(&password, "password", "p", "", "Password for login")
-	loginCmd.Flags().StringVarP(&token, "token", "t", "", "API token for login")
-	loginCmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification")
-	loginCmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Do not open the browser automatically")
-	loginCmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace name for Alpacon Cloud login")
-	loginCmd.Flags().StringVar(&regionFlag, "region", "", "Region for Alpacon Cloud login (e.g., us1, ap1)")
+	cmd.Flags().StringVarP(&username, "username", "u", "", "Username for login")
+	cmd.Flags().StringVarP(&password, "password", "p", "", "Password for login")
+	cmd.Flags().StringVarP(&token, "token", "t", "", "API token for login")
+	cmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification")
+	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Do not open the browser automatically")
+	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace name for Alpacon Cloud login")
+	cmd.Flags().StringVar(&regionFlag, "region", "", "Region for Alpacon Cloud login (e.g., us1, ap1)")
+	return cmd
 }
 
 // persistWorkspaceEnv records the schema name, which stays fixed when the URL slug is renamed, and

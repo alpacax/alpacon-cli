@@ -93,7 +93,7 @@ func TestWaitAndWatch_RefuseWhatTheyCannotRun(t *testing.T) {
 				return nil, errors.New("no client")
 			}
 			cmd := newCommands[tc.command](newClient)
-			cmd.SetArgs(tc.args)
+			cmd.SetArgs(append([]string{}, tc.args...)) // never nil, or Cobra reads os.Args[1:]
 			var stdout, stderr bytes.Buffer
 			cmd.SetOut(&stdout)
 			cmd.SetErr(&stderr)

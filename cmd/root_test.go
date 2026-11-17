@@ -191,7 +191,7 @@ func newExitTestTree(hooks exitHookErrors, out io.Writer) *cobra.Command {
 	_ = required.MarkFlagRequired("name")
 	root.AddCommand(required)
 	root.InitDefaultCompletionCmd()
-	markHookErrors(root)
+	utils.MarkHookErrors(root)
 	return root
 }
 
@@ -235,7 +235,7 @@ func TestMarkHookErrorsTellsAHookErrorFromCobrasOwn(t *testing.T) {
 			err := root.Execute()
 
 			require.Error(t, err)
-			assert.Equal(t, tt.wantHook, errors.As(err, new(hookError)))
+			assert.Equal(t, tt.wantHook, utils.IsHookError(err))
 			assert.Equal(t, tt.wantUsage, utils.IsUsageError(err))
 		})
 	}
@@ -255,7 +255,7 @@ func TestMarkHookErrorsTreatsACompletionWriteFailureAsAHookFailure(t *testing.T)
 	err := root.Execute()
 
 	require.ErrorIs(t, err, errWrite)
-	require.ErrorAs(t, err, new(hookError))
+	require.True(t, utils.IsHookError(err), "%v", err)
 	assert.False(t, utils.IsUsageError(err), "a write failure is not the command line's fault: %v", err)
 }
 

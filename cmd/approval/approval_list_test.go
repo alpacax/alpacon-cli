@@ -9,6 +9,8 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	approvalapi "github.com/alpacax/alpacon-cli/api/approval"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -116,6 +118,63 @@ func TestListRequestsEndpoint(t *testing.T) {
 			assert.Equal(t, []string{tc.wantPath}, gotPaths)
 			require.Len(t, list, 1)
 			assert.Equal(t, "apr-1", list[0].ID)
+		})
+	}
+}
+
+// Serial: it captures stdout and sets utils.OutputFormat.
+func TestApprovalListCommand(t *testing.T) {
+	const listBody = `{"count": 1, "results": [{"id": "550e8400-e29b-41d4-a716-446655440000", "request_type": "sudo", "request_data": "systemctl restart nginx", "status": "pending", "requested_by": {"name": "alice"}, "added_at": "2026-11-01T09:00:00Z"}]}`
+	tests := []struct {
+		name      string
+		args      []string
+		wantRoute string
+	}{
+		{name: "requests you can decide", args: nil, wantRoute: "GET /api/approvals/approvals/"},
+		{name: "requests you submitted", args: []string{"--my"}, wantRoute: "GET /api/approvals/approvals/-/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+				"GET /api/approvals/approvals/":   {Status: http.StatusOK, Body: listBody},
+				"GET /api/approvals/approvals/-/": {Status: http.StatusOK, Body: listBody},
+			})
+
+			stdout, stderr, code := cmdtest.RunJSON(t, newApprovalListCmd(ts.Factory()), tt.args...)
+
+			assert.Equal(t, 0, code, stderr)
+			assert.Equal(t, 1, ts.Hits(tt.wantRoute))
+			assert.Contains(t, stdout, `"550e8400-e29b-41d4-a716-446655440000"`)
+			assert.Contains(t, stdout, `"systemctl restart nginx"`)
+		})
+	}
+}
+
+func TestApprovalListCommandFails(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		args     []string
+		status   int
+		wantCode int
+		want     string
+		wantHits int
+	}{
+		{name: "unknown status", args: []string{"--status", "open"}, wantCode: utils.ExitCodeUsageError, want: "invalid --status \"open\""},
+		{name: "server error", status: http.StatusInternalServerError, wantCode: utils.ExitCodeGeneralError, want: "Failed to list approval requests", wantHits: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+				"GET /api/approvals/approvals/": {Status: tt.status, Body: `{"detail": "unavailable"}`},
+			})
+
+			failure, code := cmdtest.Run(newApprovalListCmd(ts.Factory()), tt.args...)
+
+			assert.Equal(t, tt.wantCode, code)
+			assert.Contains(t, failure, tt.want)
+			assert.Equal(t, tt.wantHits, ts.Hits("GET /api/approvals/approvals/"))
 		})
 	}
 }

@@ -7,36 +7,40 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var groupDetailCmd = &cobra.Command{
-	Use:     "describe GROUP",
-	Aliases: []string{"desc"},
-	Short:   "Show details of a group",
-	Long: `
+var groupDetailCmd = newGroupDetailCmd(client.NewAlpaconAPIClient)
+
+func newGroupDetailCmd(newClient clientFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:     "describe GROUP",
+		Aliases: []string{"desc"},
+		Short:   "Show details of a group",
+		Long: `
 	The describe command fetches and displays detailed information about a specific group, 
 	including its description, member names and other relevant attributes. 
 	`,
-	Example: `
+		Example: `
 	alpacon group describe developers
 	alpacon group desc developers
 	`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		groupName := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			groupName := args[0]
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		groupId, err := iam.GetGroupIDByName(alpaconClient, groupName)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve the group details: %s. Please check if the groupname is correct and try again.", err)
-		}
-		groupDetail, err := iam.GetGroupDetail(alpaconClient, groupId)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve the group details: %s.", err)
-		}
+			groupId, err := iam.GetGroupIDByName(alpaconClient, groupName)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the group details: %s. Please check if the groupname is correct and try again.", err)
+			}
+			groupDetail, err := iam.GetGroupDetail(alpaconClient, groupId)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the group details: %s.", err)
+			}
 
-		return utils.PrintJson(groupDetail)
-	}),
+			return utils.PrintJson(groupDetail)
+		}),
+	}
 }

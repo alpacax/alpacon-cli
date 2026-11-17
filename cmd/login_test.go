@@ -14,6 +14,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -1123,4 +1124,38 @@ func TestPromptForCredentialsReturnsTypedPassword(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "alice", username)
 	assert.Equal(t, "pw", password)
+}
+
+// Serial: it sets HOME and captures stdout and stderr.
+func TestLoginVerifiesTheLoginThroughTheFactory(t *testing.T) {
+	tests := []struct {
+		name        string
+		noClient    bool
+		wantCode    int
+		wantStderr  string
+		wantWhoamis int
+	}{
+		{name: "verified", wantStderr: "Login succeeded!", wantWhoamis: 1},
+		{name: "client cannot be built", noClient: true, wantCode: utils.ExitCodeGeneralError, wantStderr: "Connection to Alpacon API failed: not logged in"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(homeEnvVar(), t.TempDir())
+			ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+				"GET /api/auth/env/":    {Status: http.StatusOK, Body: `{"auth0": {"method": "legacy"}}`},
+				"GET /api/status/":      {Status: http.StatusOK, Body: `{}`},
+				"GET /api/auth/whoami/": {Status: http.StatusOK, Body: `{"principal_type": "user"}`},
+			})
+			newClient := ts.Factory()
+			if tt.noClient {
+				newClient = cmdtest.NoClient
+			}
+
+			_, stderr, code := cmdtest.RunCaptured(t, newLoginCmd(newClient), ts.URL, "-t", "api-token")
+
+			assert.Equal(t, tt.wantCode, code, stderr)
+			assert.Contains(t, stderr, tt.wantStderr)
+			assert.Equal(t, tt.wantWhoamis, ts.Hits("GET /api/auth/whoami/"))
+		})
+	}
 }
