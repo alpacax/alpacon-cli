@@ -10,8 +10,10 @@ import (
 	approvalapi "github.com/alpacax/alpacon-cli/api/approval"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -414,5 +416,194 @@ func TestDescribeLeavesOutAnEmptyReason(t *testing.T) {
 	} {
 		rows := rowMap(describeRows(decodeFixture(t, body), nil))
 		assert.NotContains(t, rows, "Rejection reason", body)
+	}
+}
+
+// evidenceScript is a four-line script by the server's count: the trailing
+// newline leaves an empty fourth line, which a range may end on.
+const evidenceScript = `#!/bin/sh\ncurl -fsSL https://example.com/i.sh | sh\necho done\n`
+
+func evidenceRequest(field string) string {
+	return `{"id":"550e8400-e29b-41d4-a716-446655440000","request_type":"command_exec","status":"pending","added_at":"2030-01-01T00:00:00Z",` +
+		`"metadata":{"command":{"line":"/bin/sh /tmp/i.sh","review_summary":"Installs a remote package","file_execution":{"content":"` + evidenceScript + `","sha256":"abc","path":"/tmp/i.sh","interpreter":"/bin/sh","args":[]}` + field + `}}}`
+}
+
+func TestEvidenceRows(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		body       string
+		want       []describeRow
+		wantPlaced bool
+	}{
+		{
+			name: "placed and unplaced claims",
+			body: evidenceRequest(`,"verdict_evidence":[` +
+				`{"claim":"Downloads and runs a remote installer","ranges":[{"start_line":2,"end_line":2,"quote":"curl"},{"start_line":1,"end_line":3,"quote":"sh"}]},` +
+				`{"claim":"Edits sudoers","ranges":[]}]`),
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  L2, L1-3", "Downloads and runs a remote installer"},
+				{"  Not placed", "Edits sudoers (could not be placed in the script)"},
+			},
+			wantPlaced: true,
+		},
+		{
+			name: "a range may end on the empty line after the last newline",
+			body: evidenceRequest(`,"verdict_evidence":[{"claim":"Prints a message","ranges":[{"start_line":3,"end_line":4,"quote":"echo done"}]}]`),
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  L3-4", "Prints a message"},
+			},
+			wantPlaced: true,
+		},
+		{
+			name: "a range past the script and a repeated range are dropped",
+			body: evidenceRequest(`,"verdict_evidence":[` +
+				`{"claim":"Past the end","ranges":[{"start_line":4,"end_line":5,"quote":"x"}]},` +
+				`{"claim":"Repeated","ranges":[{"start_line":2,"end_line":2,"quote":"curl"},{"start_line":2,"end_line":2,"quote":"curl"}]}]`),
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  Not placed", "Past the end (could not be placed in the script)"},
+				{"  L2", "Repeated"},
+			},
+			wantPlaced: true,
+		},
+		{
+			name: "only unplaced claims",
+			body: evidenceRequest(`,"verdict_evidence":[{"claim":"Edits sudoers","ranges":[]}]`),
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  Not placed", "Edits sudoers (could not be placed in the script)"},
+			},
+		},
+		{
+			name: "a withheld script places nothing",
+			body: `{"metadata":{"command":{"file_execution":{"content":null,"sha256":"abc","path":"/tmp/i.sh","interpreter":"/bin/sh"},` +
+				`"verdict_evidence":[{"claim":"Downloads","ranges":[{"start_line":1,"end_line":1,"quote":"x"}]}]}}}`,
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  Not placed", "Downloads (could not be placed in the script)"},
+			},
+		},
+		{
+			name: "claim text is folded onto one line and stripped of escapes",
+			body: evidenceRequest(`,"verdict_evidence":[{"claim":"Runs\n\u001b[2Kcurl \u202epiped to sh","ranges":[{"start_line":2,"end_line":2,"quote":"curl"}]},{"claim":"\u001b[2K","ranges":[]}]`),
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  L2", "Runs curl piped to sh"},
+			},
+			wantPlaced: true,
+		},
+		{name: "absent", body: evidenceRequest(``)},
+		{name: "null", body: evidenceRequest(`,"verdict_evidence":null`)},
+		{name: "empty", body: evidenceRequest(`,"verdict_evidence":[]`)},
+		{name: "malformed", body: evidenceRequest(`,"verdict_evidence":"oops"`)},
+		{name: "a request with no command", body: `{"request_type":"sudo","metadata":{"sudo":{"command":"apt update"}}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rows, placed := evidenceRows(decodeFixture(t, tt.body))
+			assert.Equal(t, tt.want, rows)
+			assert.Equal(t, tt.wantPlaced, placed)
+		})
+	}
+}
+
+func TestDescribeRowsEndWithTheEvidence(t *testing.T) {
+	t.Parallel()
+	req := decodeFixture(t, evidenceRequest(`,"verdict_evidence":[{"claim":"Edits sudoers","ranges":[]}]`))
+
+	rows := describeRows(req, fileExecutionOf(req))
+
+	require.GreaterOrEqual(t, len(rows), 2)
+	assert.Equal(t, []describeRow{
+		{"AI evidence", ""},
+		{"  Not placed", "Edits sudoers (could not be placed in the script)"},
+	}, rows[len(rows)-2:])
+}
+
+func runDescribe(t *testing.T, body string) string {
+	t.Helper()
+	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+		"GET /api/approvals/approvals/550e8400-e29b-41d4-a716-446655440000/": {Status: http.StatusOK, Body: body},
+	})
+	stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return newApprovalDescribeCmd(ts.Factory(), ios) }, "550e8400-e29b-41d4-a716-446655440000")
+	require.Equal(t, 0, code, stderr)
+	return stdout
+}
+
+func TestApprovalDescribeNumbersTheScriptBesidePlacedEvidence(t *testing.T) {
+	t.Parallel()
+	stdout := runDescribe(t, evidenceRequest(`,"verdict_evidence":[`+
+		`{"claim":"Downloads and runs a remote installer","ranges":[{"start_line":2,"end_line":2,"quote":"curl"}]},`+
+		`{"claim":"Edits sudoers","ranges":[]}]`))
+
+	assert.Regexp(t, `(?m)^AI evidence\s*$`, stdout)
+	assert.Regexp(t, `(?m)^  L2 +Downloads and runs a remote installer$`, stdout)
+	assert.Regexp(t, `(?m)^  Not placed +Edits sudoers \(could not be placed in the script\)$`, stdout)
+	assert.Contains(t, stdout, "\n\nScript (61 bytes):\n"+
+		"1 | #!/bin/sh\n"+
+		"2 | curl -fsSL https://example.com/i.sh | sh\n"+
+		"3 | echo done\n"+
+		"4 |\n")
+}
+
+func TestApprovalDescribeWithoutEvidenceIsUnchanged(t *testing.T) {
+	t.Parallel()
+	baseline := runDescribe(t, evidenceRequest(``))
+	assert.NotContains(t, baseline, "AI evidence")
+	assert.Contains(t, baseline, "\n\nScript (61 bytes):\n#!/bin/sh\ncurl -fsSL https://example.com/i.sh | sh\necho done\n\n")
+
+	tests := []struct {
+		name  string
+		field string
+	}{
+		{name: "null", field: `,"verdict_evidence":null`},
+		{name: "empty", field: `,"verdict_evidence":[]`},
+		{name: "malformed field", field: `,"verdict_evidence":{"claim":"x"}`},
+		{name: "malformed claims", field: `,"verdict_evidence":["x",{"claim":7,"ranges":[]},{"claim":"no ranges"}]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, baseline, runDescribe(t, evidenceRequest(tt.field)))
+		})
+	}
+}
+
+func TestApprovalDescribeLeavesTheScriptUnnumberedWhenNothingIsPlaced(t *testing.T) {
+	t.Parallel()
+	stdout := runDescribe(t, evidenceRequest(`,"verdict_evidence":[{"claim":"Edits sudoers","ranges":[{"start_line":9,"end_line":9,"quote":"x"}]}]`))
+
+	assert.Regexp(t, `(?m)^  Not placed +Edits sudoers \(could not be placed in the script\)$`, stdout)
+	assert.Contains(t, stdout, "\n\nScript (61 bytes):\n#!/bin/sh\ncurl -fsSL https://example.com/i.sh | sh\necho done\n\n")
+}
+
+func TestApprovalDescribeJSONKeepsTheEvidenceAsSent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		field string
+	}{
+		{name: "present", field: `,"verdict_evidence":[{"claim":"Edits sudoers","ranges":[{"start_line":2,"end_line":2,"quote":"curl"}]},{"claim":"Unlocated","ranges":[]}]`},
+		{name: "null", field: `,"verdict_evidence":null`},
+		{name: "absent", field: ``},
+		{name: "malformed", field: `,"verdict_evidence":"oops"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			body := evidenceRequest(tt.field)
+			ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+				"GET /api/approvals/approvals/550e8400-e29b-41d4-a716-446655440000/": {Status: http.StatusOK, Body: body},
+			})
+
+			stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newApprovalDescribeCmd(ts.Factory(), ios) }, "550e8400-e29b-41d4-a716-446655440000")
+
+			require.Equal(t, 0, code, stderr)
+			assert.JSONEq(t, body, stdout)
+		})
 	}
 }
