@@ -230,11 +230,12 @@ type EventDetails struct {
 	Username    string              `json:"username"`
 	Groupname   string              `json:"groupname"`
 	WorkSession *CommandWorkSession `json:"work_session"`
-	// WorkSessionPaused marks the denial or hold that paused its work session;
-	// PausedWorkSessionID is the session it names. Both are absent otherwise
-	// and on an older server.
-	WorkSessionPaused   bool   `json:"work_session_paused"`
-	PausedWorkSessionID string `json:"work_session_id"`
+	// WorkSessionPaused marks the denial or hold that paused its work session.
+	// FlatWorkSessionID is the flat work_session_id the server sends beside
+	// it. Both are absent otherwise and on an older server. Read the session
+	// through WorkSessionID, never from either session field directly.
+	WorkSessionPaused bool   `json:"work_session_paused"`
+	FlatWorkSessionID string `json:"work_session_id"`
 }
 
 // CommandWorkSession is the work session a command detail names.
@@ -466,11 +467,14 @@ func (e *PendingApprovalError) ErrorFields() map[string]any {
 	}
 	return fields
 }
+
+// WorkSessionID is the one reader of the work session a detail names: the
+// nested work_session, else the flat work_session_id of a pause trigger.
 func (d EventDetails) WorkSessionID() string {
 	if d.WorkSession != nil && d.WorkSession.ID != "" {
 		return d.WorkSession.ID
 	}
-	return d.PausedWorkSessionID
+	return d.FlatWorkSessionID
 }
 
 func (e *RemoteCommandError) ErrorFields() map[string]any {
