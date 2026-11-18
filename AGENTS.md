@@ -85,6 +85,7 @@ PSScriptAnalyzerSettings.psd1  # Lint rules for the installer
 
 ### Key patterns
 
+- **Approval scripts**: `fileExecutionScript` returns the rendered script and whether sanitization removed content. `approval describe` uses that result for its warning so the displayed script and warning share one sanitization pass; CRLF normalization alone does not trigger a warning.
 - **Command registration**: one call to `newRootCmd(newClient, ios)` in `cmd/root.go` builds the whole tree: every group constructor (`server.NewServerCmd(newClient, ios)`) builds its children and adds them itself, so there is no `init()` and no package-level command variable under `cmd/`, and a test builds its own tree. `cmd.Execute()` builds the tree with `client.NewAlpaconAPIClient` and `utils.Stdio` and only then applies the kube gate, `rejectUnknownSubcommands`, `MarkHookErrors` and `keepWithOwnParser` to it. A group takes the client factory only when a command under it needs one; `acl` takes only the streams, since it reaches the workspace through its own seams
 - **API layer**: Command packages call domain functions in `api/` for HTTP requests; `cmd/agent/`, for example, uses `api/server/`
 - **SSH-like syntax**: `websh`, `exec`, `cp` support `user@host` syntax via `utils.ParseSSHTarget()`

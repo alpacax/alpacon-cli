@@ -56,17 +56,14 @@ json to print the full raw response.`,
 			evidence, placed := evidenceRows(req)
 			rows := append(describeRows(req, fe), evidence...)
 			var script string
-			var hasScript, scriptAltered bool
+			var scriptAltered bool
 			if fe != nil {
-				script, hasScript = fileExecutionScript(fe, placed)
-				if fe.Content != nil {
-					_, scriptAltered = sanitizeScript(*fe.Content)
-				}
+				script, scriptAltered = fileExecutionScript(fe, placed)
 			}
 			if err := ios.PrintTable(rows); err != nil {
 				return err
 			}
-			if hasScript {
+			if fe != nil {
 				_, _ = fmt.Fprintln(ios.Out)
 				if scriptAltered {
 					// The warning stays on Out beside the script it is about, and
@@ -209,9 +206,9 @@ func fileExecutionRows(fe *approvalapi.FileExecution) []describeRow {
 // count it.
 func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (string, bool) {
 	if fe.Content == nil {
-		return "Script: not included in this response; the SHA-256 above identifies the file.", true
+		return "Script: not included in this response; the SHA-256 above identifies the file.", false
 	}
-	body, _ := sanitizeScript(*fe.Content)
+	body, altered := sanitizeScript(*fe.Content)
 	if numbered {
 		lines := strings.Split(body, "\n")
 		width := len(strconv.Itoa(len(lines)))
@@ -224,7 +221,7 @@ func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (string, 
 		}
 		body = strings.Join(lines, "\n")
 	}
-	return fmt.Sprintf("Script (%d bytes):\n%s", len(*fe.Content), body), true
+	return fmt.Sprintf("Script (%d bytes):\n%s", len(*fe.Content), body), altered
 }
 
 // sanitizeScript keeps tabs, since they are part of the script the request
