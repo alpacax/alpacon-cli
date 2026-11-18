@@ -296,7 +296,7 @@ func Format(kind Kind, f Fields, folded int) (title, body string) {
 		if session != "" {
 			body += " " + session
 		}
-		body += " is paused after a critical denial. The owner or an approver can resume or end it."
+		body += " is paused after a critical denial. Open the web console for the available recovery actions."
 	default:
 		return "", ""
 	}

@@ -391,3 +391,62 @@ func TestResponseSignalAccount(t *testing.T) {
 		})
 	}
 }
+
+func TestSignalPauseOutcomes(t *testing.T) {
+	old := deliverLocalSignal
+	t.Cleanup(func() { deliverLocalSignal = old })
+	trigger := map[string]any{"work_session_paused": true, "work_session_id": "ses-2"}
+	for _, tc := range []struct {
+		name    string
+		err     error
+		command []localsignal.Kind
+		sink    []localsignal.Kind
+	}{
+		{"superseded by pause", &signalRefusalStub{code: "superseded_by_pause", payload: map[string]any{"work_session_id": "ses-2"}}, nil, []localsignal.Kind{localsignal.Paused}},
+		{"triggering denial keeps its outcome", &signalRefusalStub{code: "refused", gate: "risk", payload: trigger}, []localsignal.Kind{localsignal.Denied}, []localsignal.Kind{localsignal.Paused}},
+		{"triggering hold", &signalRefusalStub{code: "approval_pending", status: http.StatusAccepted, payload: trigger}, nil, []localsignal.Kind{localsignal.Paused}},
+		{"marker false", &signalRefusalStub{code: "refused", gate: "risk", payload: map[string]any{"work_session_paused": false}}, []localsignal.Kind{localsignal.Denied}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, path := range []struct {
+				signal func(error)
+				want   []localsignal.Kind
+			}{{SignalRefusal, tc.command}, {SignalPaused, tc.sink}} {
+				var kinds []localsignal.Kind
+				deliverLocalSignal = func(kind localsignal.Kind, fields localsignal.Fields) {
+					kinds = append(kinds, kind)
+					assert.Equal(t, "ses-2", fields.Session)
+				}
+				path.signal(WithSignalFields(tc.err, localsignal.Fields{Session: "ses-2"}))
+				assert.Equal(t, path.want, kinds)
+			}
+		})
+	}
+}
+
+// TestSignalApprovalPendingReportsTriggeredPause pins the hold that paused its
+// work session: a held command exits silently, so the pending announcement is
+// the only place its pause can be reported.
+func TestSignalApprovalPendingReportsTriggeredPause(t *testing.T) {
+	old := deliverLocalSignal
+	t.Cleanup(func() { deliverLocalSignal = old })
+	for _, tc := range []struct {
+		name    string
+		payload map[string]any
+		want    []localsignal.Kind
+	}{
+		{"triggering hold", map[string]any{"work_session_paused": true, "work_session_id": "ses-2"}, []localsignal.Kind{localsignal.ApprovalPending, localsignal.Paused}},
+		{"ordinary hold", map[string]any{"work_session_id": "ses-2"}, []localsignal.Kind{localsignal.ApprovalPending}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var kinds []localsignal.Kind
+			deliverLocalSignal = func(kind localsignal.Kind, fields localsignal.Fields) {
+				kinds = append(kinds, kind)
+				assert.Equal(t, "ses-2", fields.Session)
+			}
+			err := fmt.Errorf("held: %w", &signalRefusalStub{code: "approval_pending", status: http.StatusAccepted, payload: tc.payload})
+			SignalApprovalPending(err, localsignal.Fields{Argv0: "sudo"})
+			assert.Equal(t, tc.want, kinds)
+		})
+	}
+}

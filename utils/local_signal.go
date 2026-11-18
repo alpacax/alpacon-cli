@@ -20,6 +20,8 @@ const (
 	ApprovalExpired     = "approval_expired"
 	ApprovalCancelled   = "approval_cancelled"
 	ApprovalRuleChanged = "approval_rule_changed"
+	SessionPaused       = "session_paused"
+	SupersededByPause   = "superseded_by_pause"
 )
 
 // The command layer supplies config access without making utils import config.
@@ -103,6 +105,13 @@ func SignalApprovalPending(err error, fields localsignal.Fields) {
 	fields = responseSignalFields(err, fields)
 	fields.Command = true
 	EmitLocalSignal(localsignal.ApprovalPending, fields)
+	// A held command exits without passing an error sink, so its pause is reported here.
+	for e := range errorChain(err) {
+		if pauseTriggered(e) {
+			EmitLocalSignal(localsignal.Paused, localsignal.Fields{Session: fields.Session, ConsoleURL: fields.ConsoleURL, Origin: fields.Origin})
+			return
+		}
+	}
 }
 
 func EmitLocalSignal(kind localsignal.Kind, fields localsignal.Fields, sources ...SignalOriginSource) {
@@ -158,7 +167,7 @@ func signalRefusal(err error, command bool) {
 			code = carrier.ErrorCode()
 		}
 		kind := localsignal.Denied
-		if code == "session_paused" {
+		if IsPauseCode(code) || (!command && pauseTriggered(e)) {
 			if command {
 				return
 			}
@@ -238,6 +247,22 @@ func commandDenial(code, gate string) bool {
 		gate = "work_session"
 	}
 	return slices.Contains(strings.Split(commandDenialGates, ","), gate)
+}
+
+// IsPauseCode reports a refusal or closure caused by a paused work session.
+func IsPauseCode(code string) bool {
+	return code == SessionPaused || code == SupersededByPause
+}
+
+// pauseTriggered reports the response whose own denial or hold paused its
+// work session; that response keeps its outcome and also reports the pause.
+func pauseTriggered(e error) bool {
+	carrier, ok := e.(interface{ ErrorFields() map[string]any })
+	if !ok {
+		return false
+	}
+	paused, _ := carrier.ErrorFields()["work_session_paused"].(bool)
+	return paused
 }
 
 // IsApprovalLapse reports an approval that ended without a denial.

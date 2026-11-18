@@ -108,6 +108,8 @@ type PendingApprovalError struct {
 	// ApprovalLane is the server's approval_lane: who decides the open request.
 	// Empty on an older server.
 	ApprovalLane string
+	// WorkSessionPaused says this hold paused its work session.
+	WorkSessionPaused bool
 }
 
 // ApprovalLaneAssignee is the approval_lane of a held command whose
@@ -228,6 +230,11 @@ type EventDetails struct {
 	Username    string              `json:"username"`
 	Groupname   string              `json:"groupname"`
 	WorkSession *CommandWorkSession `json:"work_session"`
+	// WorkSessionPaused marks the denial or hold that paused its work session;
+	// PausedWorkSessionID is the session it names. Both are absent otherwise
+	// and on an older server.
+	WorkSessionPaused   bool   `json:"work_session_paused"`
+	PausedWorkSessionID string `json:"work_session_id"`
 }
 
 // CommandWorkSession is the work session a command detail names.
@@ -440,7 +447,7 @@ func (e *CommandRejectedError) RejectedCommand() bool {
 }
 func (e *CommandRejectedError) ErrorGate() string { return e.Gate }
 func (e *PendingApprovalError) ErrorFields() map[string]any {
-	if e.ConsoleURL == "" && e.WorkSessionID == "" {
+	if e.ConsoleURL == "" && e.WorkSessionID == "" && !e.WorkSessionPaused {
 		return nil
 	}
 	fields := make(map[string]any)
@@ -450,13 +457,16 @@ func (e *PendingApprovalError) ErrorFields() map[string]any {
 	if e.WorkSessionID != "" {
 		fields["work_session_id"] = e.WorkSessionID
 	}
+	if e.WorkSessionPaused {
+		fields["work_session_paused"] = true
+	}
 	return fields
 }
 func (d EventDetails) WorkSessionID() string {
-	if d.WorkSession != nil {
+	if d.WorkSession != nil && d.WorkSession.ID != "" {
 		return d.WorkSession.ID
 	}
-	return ""
+	return d.PausedWorkSessionID
 }
 
 func (e *RemoteCommandError) ErrorFields() map[string]any {

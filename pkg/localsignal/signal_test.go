@@ -60,9 +60,9 @@ func TestFormat(t *testing.T) {
 		{"denied", Denied, f, "Alpacon: command denied", "sudo on my-server as alice was refused by the risk gate and did not run. Session ses-1."},
 		{"pending command", ApprovalPending, f, "Alpacon: approval pending", "sudo on my-server as alice is waiting for approval. Session ses-1. Open the approval or wait for an approver."},
 		{"pending session", ApprovalPending, Fields{Session: "ses-1"}, "Alpacon: approval pending", "Work Session ses-1 is waiting for approval. Open the approval or wait for an approver."},
-		{"paused", Paused, f, "Alpacon: session paused", "Work Session ses-1 is paused after a critical denial. The owner or an approver can resume or end it."},
+		{"paused", Paused, f, "Alpacon: session paused", "Work Session ses-1 is paused after a critical denial. Open the web console for the available recovery actions."},
 		{"unknown fields", Denied, Fields{}, "Alpacon: command denied", "Command was refused and did not run."},
-		{"unknown session", Paused, Fields{}, "Alpacon: session paused", "Work Session is paused after a critical denial. The owner or an approver can resume or end it."},
+		{"unknown session", Paused, Fields{}, "Alpacon: session paused", "Work Session is paused after a critical denial. Open the web console for the available recovery actions."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -550,7 +550,7 @@ func TestSignalTextBounds(t *testing.T) {
 	t.Parallel()
 	for _, session := range []string{"a b", "https://example.com", strings.Repeat("a", 65), "ses-1\u200b"} {
 		_, body := Format(Paused, Fields{Session: session}, 0)
-		assert.Equal(t, "Work Session is paused after a critical denial. The owner or an approver can resume or end it.", body)
+		assert.Equal(t, "Work Session is paused after a critical denial. Open the web console for the available recovery actions.", body)
 	}
 	_, body := Format(Denied, Fields{Server: "https://example.com", Account: "http://example.com"}, 0)
 	assert.Equal(t, "Command was refused and did not run.", body)
