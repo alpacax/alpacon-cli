@@ -42,6 +42,8 @@ const fileExecutionFixture = `{
   }
 }`
 
+const scriptAlteredWarning = "control characters from the server were removed from the text below."
+
 func decodeFixture(t *testing.T, body string) *approvalapi.ApprovalRequest {
 	t.Helper()
 	var req approvalapi.ApprovalRequest
@@ -686,6 +688,8 @@ func TestSanitizeScript(t *testing.T) {
 		{name: "tabs", content: "\techo\tdone\n", want: "\techo\tdone\n"},
 		{name: "crlf line endings", content: "echo a\r\necho b\r\n", want: "echo a\necho b\n"},
 		{name: "escape sequence", content: "echo \x1b[31mred\x1b[0m\n", want: "echo red\n", wantAltered: true},
+		{name: "escape sequence on a crlf line", content: "echo \x1b[31mred\r\n", want: "echo red\n", wantAltered: true},
+		{name: "escape next to a tab", content: "\x1b\t[31m\n", want: "\t[31m\n", wantAltered: true},
 		{name: "lone carriage return", content: "echo a\recho b\n", want: "echo aecho b\n", wantAltered: true},
 		{name: "format character", content: "echo a\u202eb\n", want: "echo ab\n", wantAltered: true},
 	}
@@ -699,7 +703,6 @@ func TestSanitizeScript(t *testing.T) {
 	}
 }
 
-// scriptRequest is a file execution approval request whose script is content.
 func scriptRequest(t *testing.T, content string) string {
 	t.Helper()
 	encoded, err := json.Marshal(content)
@@ -718,8 +721,6 @@ func runDescribeStreams(t *testing.T, body string) (stdout, stderr string) {
 	require.Equal(t, 0, code, stderr)
 	return stdout, stderr
 }
-
-const scriptAlteredWarning = "control characters from the server were removed from the text below."
 
 func TestApprovalDescribeWarnsAboveAnAlteredScript(t *testing.T) {
 	t.Parallel()
@@ -749,4 +750,20 @@ func TestApprovalDescribeDoesNotWarnAboutACleanScript(t *testing.T) {
 			assert.NotContains(t, stderr, scriptAlteredWarning)
 		})
 	}
+}
+
+func TestApprovalDescribePrintsTheWarningWithoutColor(t *testing.T) {
+	t.Parallel()
+	content := "echo \x1b[31mred\x1b[0m\n"
+	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+		"GET /api/approvals/approvals/550e8400-e29b-41d4-a716-446655440000/": {Status: http.StatusOK, Body: scriptRequest(t, content)},
+	})
+	stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
+		ios.ColorEnabled = true
+		return newApprovalDescribeCmd(ts.Factory(), ios)
+	}, "550e8400-e29b-41d4-a716-446655440000")
+	require.Equal(t, 0, code, stderr)
+
+	assert.Contains(t, stdout, fmt.Sprintf("\n\nWarning: %s\nScript (%d bytes):\n", scriptAlteredWarning, len(content)))
+	assert.NotContains(t, stdout, "\x1b")
 }

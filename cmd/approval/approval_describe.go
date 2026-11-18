@@ -28,10 +28,8 @@ the command or sudo detail, its risk assessment, the work session and the
 requested changes. For a file execution, the AI evidence rows list each claim
 behind the AI's verdict beside the script lines it rests on (L3, L40-41); a
 claim marked Not placed could not be located in the script. When at least one
-claim is placed, the script below is printed with line numbers. Control
-characters other than tabs are removed from the script before it is printed,
-and a warning above it says when that changed the text. Use --output json to
-print the full raw response.`,
+claim is placed, the script below is printed with line numbers. Use --output
+json to print the full raw response.`,
 		Args: cobra.ExactArgs(1),
 		Example: `  alpacon approval describe 550e8400-e29b-41d4-a716-446655440000
   alpacon approval desc 550e8400-e29b-41d4-a716-446655440000`,
@@ -71,7 +69,11 @@ print the full raw response.`,
 			if hasScript {
 				_, _ = fmt.Fprintln(ios.Out)
 				if scriptAltered {
-					ios.WarnTerminalTextAltered(ios.Out, "")
+					// The warning stays on Out beside the script it is about, and
+					// ColorEnabled follows ErrOut, so it is written without color.
+					plain := *ios
+					plain.ColorEnabled = false
+					plain.WarnTerminalTextAltered(ios.Out, "")
 				}
 				_, _ = fmt.Fprintln(ios.Out, script)
 			}
@@ -227,9 +229,8 @@ func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (string, 
 
 // sanitizeScript keeps tabs, since they are part of the script the request
 // runs, and still removes escape sequences and other control characters so
-// the terminal does not act on them. altered reports any removal, so the
-// approver is told the text shown differs from the file; CRLF is folded
-// before the comparison, so DOS line endings alone do not count.
+// the terminal does not act on them. altered reports a removal other than
+// folding CRLF into LF, so DOS line endings alone do not count.
 func sanitizeScript(content string) (clean string, altered bool) {
 	normalized := strings.ReplaceAll(content, "\r\n", "\n")
 	clean = utils.SanitizeTerminalBlockKeepingTabs(normalized)
