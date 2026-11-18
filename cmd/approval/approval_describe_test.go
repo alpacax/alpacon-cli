@@ -71,7 +71,7 @@ func TestFileExecutionRows(t *testing.T) {
 	assert.Equal(t, "14", m["Reuse days if approved"])
 	assert.NotContains(t, m, "Run as group")
 
-	script, ok := fileExecutionScript(fe)
+	script, ok := fileExecutionScript(fe, false)
 	require.True(t, ok)
 	assert.Contains(t, script, "echo hello")
 }
@@ -89,7 +89,7 @@ func TestFileExecutionScriptWithheld(t *testing.T) {
 	t.Parallel()
 	fe := fileExecutionOf(decodeFixture(t, `{"metadata":{"command":{"file_execution":{"content":null,"sha256":"h","path":"/p","interpreter":"/bin/sh"}}}}`))
 	require.NotNil(t, fe)
-	script, ok := fileExecutionScript(fe)
+	script, ok := fileExecutionScript(fe, false)
 	require.True(t, ok)
 	assert.Contains(t, script, "not included")
 	assert.Contains(t, script, "SHA-256")
@@ -103,14 +103,36 @@ func TestFileExecutionStripsEscapes(t *testing.T) {
 		assert.NotContains(t, r.Value, "\x1b")
 		assert.NotContains(t, r.Value, "\u202e")
 	}
-	script, _ := fileExecutionScript(fe)
+	script, _ := fileExecutionScript(fe, false)
 	assert.NotContains(t, script, "\x1b")
 }
 
-func TestNumberedFileExecutionScriptStripsEscapes(t *testing.T) {
+func TestNumberedFileExecutionScript(t *testing.T) {
 	t.Parallel()
-	got := numberedFileExecutionScript("echo \x1b[2Kgone\necho \u009bred\nok \u202edenied")
-	assert.Equal(t, "Script (37 bytes):\n1 | echo gone\n2 | echo red\n3 | ok denied", got)
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "escapes are stripped without shifting a line",
+			content: "echo \x1b[2Kgone\necho \u009bred\nok \u202edenied",
+			want:    "Script (37 bytes):\n1 | echo gone\n2 | echo red\n3 | ok denied",
+		},
+		{
+			name:    "numbers are padded to the widest",
+			content: "a\nb\nc\nd\ne\nf\ng\nh\ni\nj",
+			want:    "Script (19 bytes):\n 1 | a\n 2 | b\n 3 | c\n 4 | d\n 5 | e\n 6 | f\n 7 | g\n 8 | h\n 9 | i\n10 | j",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			script, ok := fileExecutionScript(&approvalapi.FileExecution{Content: &tt.content}, true)
+			require.True(t, ok)
+			assert.Equal(t, tt.want, script)
+		})
+	}
 }
 
 func TestOtherRequestTypesHaveNoFileExecution(t *testing.T) {
@@ -476,6 +498,27 @@ func TestEvidenceRows(t *testing.T) {
 			wantPlaced: true,
 		},
 		{
+			name: "two claims may cite the same range",
+			body: evidenceRequest(`,"verdict_evidence":[` +
+				`{"claim":"Downloads an installer","ranges":[{"start_line":2,"end_line":2,"quote":"curl"}]},` +
+				`{"claim":"Pipes it to a shell","ranges":[{"start_line":2,"end_line":2,"quote":"| sh"}]}]`),
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  L2", "Downloads an installer"},
+				{"  L2", "Pipes it to a shell"},
+			},
+			wantPlaced: true,
+		},
+		{
+			name: "a range past the script drops alone and the claim stays placed",
+			body: evidenceRequest(`,"verdict_evidence":[{"claim":"Partly past the end","ranges":[{"start_line":2,"end_line":2,"quote":"curl"},{"start_line":4,"end_line":5,"quote":"x"}]}]`),
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  L2", "Partly past the end"},
+			},
+			wantPlaced: true,
+		},
+		{
 			name: "only unplaced claims",
 			body: evidenceRequest(`,"verdict_evidence":[{"claim":"Edits sudoers","ranges":[]}]`),
 			want: []describeRow{
@@ -517,17 +560,11 @@ func TestEvidenceRows(t *testing.T) {
 	}
 }
 
-func TestDescribeRowsEndWithTheEvidence(t *testing.T) {
+func TestApprovalDescribeEndsTheTableWithTheEvidence(t *testing.T) {
 	t.Parallel()
-	req := decodeFixture(t, evidenceRequest(`,"verdict_evidence":[{"claim":"Edits sudoers","ranges":[]}]`))
+	stdout := runDescribe(t, evidenceRequest(`,"verdict_evidence":[{"claim":"Edits sudoers","ranges":[]}]`))
 
-	rows := describeRows(req, fileExecutionOf(req))
-
-	require.GreaterOrEqual(t, len(rows), 2)
-	assert.Equal(t, []describeRow{
-		{"AI evidence", ""},
-		{"  Not placed", "Edits sudoers (could not be placed in the script)"},
-	}, rows[len(rows)-2:])
+	assert.Regexp(t, `(?m)^  SHA-256 +abc\nAI evidence *\n  Not placed +Edits sudoers \(could not be placed in the script\)\n\nScript \(61 bytes\):\n`, stdout)
 }
 
 func runDescribe(t *testing.T, body string) string {

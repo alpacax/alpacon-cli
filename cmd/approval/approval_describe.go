@@ -53,15 +53,12 @@ json to print the full raw response.`,
 			}
 
 			fe := fileExecutionOf(req)
-			rows := describeRows(req, fe)
+			evidence, placed := evidenceRows(req)
+			rows := append(describeRows(req, fe), evidence...)
 			var script string
 			var hasScript bool
 			if fe != nil {
-				script, hasScript = fileExecutionScript(fe)
-				// A placed claim implies the content: without it no range fits.
-				if _, placed := evidenceRows(req); placed {
-					script = numberedFileExecutionScript(*fe.Content)
-				}
+				script, hasScript = fileExecutionScript(fe, placed)
 			}
 			if err := ios.PrintTable(rows); err != nil {
 				return err
@@ -108,8 +105,7 @@ func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecutio
 	if fe != nil {
 		rows = append(rows, fileExecutionRows(fe)...)
 	}
-	evidence, _ := evidenceRows(req)
-	return append(rows, evidence...)
+	return rows
 }
 
 // evidenceRows are the "AI evidence" rows: each claim beside the script lines
@@ -197,31 +193,28 @@ func fileExecutionRows(fe *approvalapi.FileExecution) []describeRow {
 
 // fileExecutionScript renders the script the approver is asked to clear. When
 // the server omits the content, only the SHA-256 above identifies the file, and
-// the text says so instead of showing an empty script.
-func fileExecutionScript(fe *approvalapi.FileExecution) (string, bool) {
+// the text says so instead of showing an empty script. numbered prefixes each
+// line with its number, so the evidence line ranges can be found in it; the
+// empty line after a final newline is numbered too, since the server's ranges
+// count it.
+func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (string, bool) {
 	if fe.Content == nil {
 		return "Script: not included in this response; the SHA-256 above identifies the file.", true
 	}
 	body, _ := utils.SanitizeTerminalBlock(*fe.Content)
-	return fmt.Sprintf("Script (%d bytes):\n%s", len(*fe.Content), body), true
-}
-
-// numberedFileExecutionScript is the script with each line numbered, so the
-// evidence line ranges can be found in it. The empty line after a final
-// newline is numbered too, since the server's ranges count it.
-func numberedFileExecutionScript(content string) string {
-	body, _ := utils.SanitizeTerminalBlock(content)
-	lines := strings.Split(body, "\n")
-	width := len(strconv.Itoa(len(lines)))
-	var b strings.Builder
-	_, _ = fmt.Fprintf(&b, "Script (%d bytes):", len(content))
-	for i, line := range lines {
-		_, _ = fmt.Fprintf(&b, "\n%*d |", width, i+1)
-		if line != "" {
-			b.WriteString(" " + line)
+	if numbered {
+		lines := strings.Split(body, "\n")
+		width := len(strconv.Itoa(len(lines)))
+		for i, line := range lines {
+			numberedLine := fmt.Sprintf("%*d |", width, i+1)
+			if line != "" {
+				numberedLine += " " + line
+			}
+			lines[i] = numberedLine
 		}
+		body = strings.Join(lines, "\n")
 	}
-	return b.String()
+	return fmt.Sprintf("Script (%d bytes):\n%s", len(*fe.Content), body), true
 }
 
 func joinClean(items []string, sep string) string {
