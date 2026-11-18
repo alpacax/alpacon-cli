@@ -2,6 +2,7 @@ package approval
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,6 +41,8 @@ const fileExecutionFixture = `{
     }
   }
 }`
+
+const scriptAlteredWarning = "control characters from the server were removed from the text below."
 
 func decodeFixture(t *testing.T, body string) *approvalapi.ApprovalRequest {
 	t.Helper()
@@ -569,12 +572,23 @@ func TestApprovalDescribeEndsTheTableWithTheEvidence(t *testing.T) {
 
 func runDescribe(t *testing.T, body string) string {
 	t.Helper()
+	stdout, _ := runDescribeStreams(t, body, nil)
+	return stdout
+}
+
+func runDescribeStreams(t *testing.T, body string, adjust func(*utils.IOStreams)) (stdout, stderr string) {
+	t.Helper()
 	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
 		"GET /api/approvals/approvals/550e8400-e29b-41d4-a716-446655440000/": {Status: http.StatusOK, Body: body},
 	})
-	stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return newApprovalDescribeCmd(ts.Factory(), ios) }, "550e8400-e29b-41d4-a716-446655440000")
+	stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
+		if adjust != nil {
+			adjust(ios)
+		}
+		return newApprovalDescribeCmd(ts.Factory(), ios)
+	}, "550e8400-e29b-41d4-a716-446655440000")
 	require.Equal(t, 0, code, stderr)
-	return stdout
+	return stdout, stderr
 }
 
 func TestApprovalDescribeNumbersTheScriptBesidePlacedEvidence(t *testing.T) {
@@ -649,4 +663,92 @@ func TestApprovalDescribeJSONKeepsTheEvidenceAsSent(t *testing.T) {
 			assert.JSONEq(t, body, stdout)
 		})
 	}
+}
+
+func TestFileExecutionScriptKeepsTabs(t *testing.T) {
+	t.Parallel()
+	content := "#!/bin/sh\nif true; then\n\techo\tdone\nfi\n"
+	header := fmt.Sprintf("Script (%d bytes):\n", len(content))
+	tests := []struct {
+		name     string
+		numbered bool
+		want     string
+	}{
+		{name: "unnumbered", want: header + content},
+		{name: "numbered", numbered: true, want: header + "1 | #!/bin/sh\n2 | if true; then\n3 | \techo\tdone\n4 | fi\n5 |"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			script, ok := fileExecutionScript(&approvalapi.FileExecution{Content: &content}, tt.numbered)
+			require.True(t, ok)
+			assert.Equal(t, tt.want, script)
+		})
+	}
+}
+
+func TestSanitizeScript(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		content     string
+		want        string
+		wantAltered bool
+	}{
+		{name: "clean", content: "echo done\n", want: "echo done\n"},
+		{name: "tabs", content: "\techo\tdone\n", want: "\techo\tdone\n"},
+		{name: "crlf line endings", content: "echo a\r\necho b\r\n", want: "echo a\necho b\n"},
+		{name: "escape sequence", content: "echo \x1b[31mred\x1b[0m\n", want: "echo red\n", wantAltered: true},
+		{name: "escape sequence on a crlf line", content: "echo \x1b[31mred\r\n", want: "echo red\n", wantAltered: true},
+		{name: "escape next to a tab", content: "\x1b\t[31m\n", want: "\t[31m\n", wantAltered: true},
+		{name: "lone carriage return", content: "echo a\recho b\n", want: "echo aecho b\n", wantAltered: true},
+		{name: "format character", content: "echo a\u202eb\n", want: "echo ab\n", wantAltered: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			clean, altered := sanitizeScript(tt.content)
+			assert.Equal(t, tt.want, clean)
+			assert.Equal(t, tt.wantAltered, altered)
+		})
+	}
+}
+
+func scriptRequest(t *testing.T, content string) string {
+	t.Helper()
+	encoded, err := json.Marshal(content)
+	require.NoError(t, err)
+	return `{"id":"550e8400-e29b-41d4-a716-446655440000","request_type":"command_exec","status":"pending",` +
+		`"metadata":{"command":{"line":"/bin/sh /tmp/i.sh","file_execution":{"content":` + string(encoded) +
+		`,"sha256":"abc","path":"/tmp/i.sh","interpreter":"/bin/sh","args":[]}}}}`
+}
+
+func TestApprovalDescribeDoesNotWarnAboutACleanScript(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "tabs", content: "if true; then\n\techo\tdone\nfi\n", want: "if true; then\n\techo\tdone\nfi\n"},
+		{name: "crlf line endings", content: "echo a\r\necho b\r\n", want: "echo a\necho b\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			stdout, stderr := runDescribeStreams(t, scriptRequest(t, tt.content), nil)
+			assert.Contains(t, stdout, fmt.Sprintf("\n\nScript (%d bytes):\n%s\n", len(tt.content), tt.want))
+			assert.NotContains(t, stdout, scriptAlteredWarning)
+			assert.NotContains(t, stderr, scriptAlteredWarning)
+		})
+	}
+}
+
+func TestApprovalDescribePrintsTheWarningWithoutColor(t *testing.T) {
+	t.Parallel()
+	content := "echo \x1b[31mred\x1b[0m\n"
+	stdout, _ := runDescribeStreams(t, scriptRequest(t, content), func(ios *utils.IOStreams) { ios.ColorEnabled = true })
+
+	assert.Contains(t, stdout, fmt.Sprintf("\n\nWarning: %s\nScript (%d bytes):\necho red\n\n", scriptAlteredWarning, len(content)))
+	assert.NotContains(t, stdout, "\x1b")
 }
