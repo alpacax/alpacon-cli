@@ -28,8 +28,10 @@ the command or sudo detail, its risk assessment, the work session and the
 requested changes. For a file execution, the AI evidence rows list each claim
 behind the AI's verdict beside the script lines it rests on (L3, L40-41); a
 claim marked Not placed could not be located in the script. When at least one
-claim is placed, the script below is printed with line numbers. Use --output
-json to print the full raw response.`,
+claim is placed, the script below is printed with line numbers. Control
+characters other than tabs are removed from the script before it is printed,
+and a warning above it says when that changed the text. Use --output json to
+print the full raw response.`,
 		Args: cobra.ExactArgs(1),
 		Example: `  alpacon approval describe 550e8400-e29b-41d4-a716-446655440000
   alpacon approval desc 550e8400-e29b-41d4-a716-446655440000`,
@@ -56,15 +58,21 @@ json to print the full raw response.`,
 			evidence, placed := evidenceRows(req)
 			rows := append(describeRows(req, fe), evidence...)
 			var script string
-			var hasScript bool
+			var hasScript, scriptAltered bool
 			if fe != nil {
 				script, hasScript = fileExecutionScript(fe, placed)
+				if fe.Content != nil {
+					_, scriptAltered = sanitizeScript(*fe.Content)
+				}
 			}
 			if err := ios.PrintTable(rows); err != nil {
 				return err
 			}
 			if hasScript {
 				_, _ = fmt.Fprintln(ios.Out)
+				if scriptAltered {
+					ios.WarnTerminalTextAltered(ios.Out, "")
+				}
 				_, _ = fmt.Fprintln(ios.Out, script)
 			}
 			return nil
@@ -201,7 +209,7 @@ func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (string, 
 	if fe.Content == nil {
 		return "Script: not included in this response; the SHA-256 above identifies the file.", true
 	}
-	body, _ := utils.SanitizeTerminalBlock(*fe.Content)
+	body, _ := sanitizeScript(*fe.Content)
 	if numbered {
 		lines := strings.Split(body, "\n")
 		width := len(strconv.Itoa(len(lines)))
@@ -215,6 +223,17 @@ func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (string, 
 		body = strings.Join(lines, "\n")
 	}
 	return fmt.Sprintf("Script (%d bytes):\n%s", len(*fe.Content), body), true
+}
+
+// sanitizeScript keeps tabs, since they are part of the script the request
+// runs, and still removes escape sequences and other control characters so
+// the terminal does not act on them. altered reports any removal, so the
+// approver is told the text shown differs from the file; CRLF is folded
+// before the comparison, so DOS line endings alone do not count.
+func sanitizeScript(content string) (clean string, altered bool) {
+	normalized := strings.ReplaceAll(content, "\r\n", "\n")
+	clean = utils.SanitizeTerminalBlockKeepingTabs(normalized)
+	return clean, clean != normalized
 }
 
 func joinClean(items []string, sep string) string {
