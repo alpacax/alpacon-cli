@@ -167,7 +167,7 @@ func signalRefusal(err error, command bool) {
 			code = carrier.ErrorCode()
 		}
 		kind := localsignal.Denied
-		if IsPauseCode(code) || (!command && pauseTriggered(e)) {
+		if isPauseCode(code) || (!command && pauseTriggered(e)) {
 			if command {
 				return
 			}
@@ -249,20 +249,16 @@ func commandDenial(code, gate string) bool {
 	return slices.Contains(strings.Split(commandDenialGates, ","), gate)
 }
 
-// IsPauseCode reports a refusal or closure caused by a paused work session.
-func IsPauseCode(code string) bool {
+// isPauseCode reports a refusal or closure caused by a paused work session.
+func isPauseCode(code string) bool {
 	return code == SessionPaused || code == SupersededByPause
 }
 
 // pauseTriggered reports the response whose own denial or hold paused its
 // work session; that response keeps its outcome and also reports the pause.
 func pauseTriggered(e error) bool {
-	carrier, ok := e.(interface{ ErrorFields() map[string]any })
-	if !ok {
-		return false
-	}
-	paused, _ := carrier.ErrorFields()["work_session_paused"].(bool)
-	return paused
+	carrier, ok := e.(interface{ TriggeredPause() bool })
+	return ok && carrier.TriggeredPause()
 }
 
 // IsApprovalLapse reports an approval that ended without a denial.

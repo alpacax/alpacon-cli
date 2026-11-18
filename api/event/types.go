@@ -446,6 +446,10 @@ func (e *CommandRejectedError) RejectedCommand() bool {
 	return !utils.IsApprovalLapse(e.ErrorCode())
 }
 func (e *CommandRejectedError) ErrorGate() string { return e.Gate }
+
+// TriggeredPause reports that this hold paused its work session.
+func (e *PendingApprovalError) TriggeredPause() bool { return e.WorkSessionPaused }
+
 func (e *PendingApprovalError) ErrorFields() map[string]any {
 	if e.ConsoleURL == "" && e.WorkSessionID == "" && !e.WorkSessionPaused {
 		return nil

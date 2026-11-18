@@ -267,6 +267,9 @@ func (e *CommandRejectedError) NextActions() []utils.NextAction {
 	return []utils.NextAction{e.text().next}
 }
 
+// TriggeredPause reports that this denial paused its work session.
+func (e *CommandRejectedError) TriggeredPause() bool { return e.WorkSessionPaused }
+
 // ErrorFields keeps command context and the refusal fields the server sent.
 // Denied results can hold the only recorded reason; reported fields preserve nulls.
 func (e *CommandRejectedError) ErrorFields() map[string]any {
