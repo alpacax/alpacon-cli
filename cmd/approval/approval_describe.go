@@ -3,6 +3,7 @@ package approval
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	approvalapi "github.com/alpacax/alpacon-cli/api/approval"
@@ -24,7 +25,11 @@ func newApprovalDescribeCmd(newClient clientFactory, ios *utils.IOStreams) *cobr
 
 The table shows the decision context the server sends for the request type:
 the command or sudo detail, its risk assessment, the work session and the
-requested changes. Use --output json to print the full raw response.`,
+requested changes. For a file execution, the AI evidence rows list each claim
+behind the AI's verdict beside the script lines it rests on (L3, L40-41); a
+claim marked Not placed could not be located in the script. When at least one
+claim is placed, the script below is printed with line numbers. Use --output
+json to print the full raw response.`,
 		Args: cobra.ExactArgs(1),
 		Example: `  alpacon approval describe 550e8400-e29b-41d4-a716-446655440000
   alpacon approval desc 550e8400-e29b-41d4-a716-446655440000`,
@@ -48,11 +53,12 @@ requested changes. Use --output json to print the full raw response.`,
 			}
 
 			fe := fileExecutionOf(req)
-			rows := describeRows(req, fe)
+			evidence, placed := evidenceRows(req)
+			rows := append(describeRows(req, fe), evidence...)
 			var script string
 			var hasScript bool
 			if fe != nil {
-				script, hasScript = fileExecutionScript(fe)
+				script, hasScript = fileExecutionScript(fe, placed)
 			}
 			if err := ios.PrintTable(rows); err != nil {
 				return err
@@ -102,6 +108,52 @@ func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecutio
 	return rows
 }
 
+// evidenceRows are the "AI evidence" rows: each claim beside the script lines
+// it rests on. As in the console, a range the script does not have and a
+// repeated one are left out, and a claim left with none reads as not placed.
+// placed reports whether any claim kept a range.
+func evidenceRows(req *approvalapi.ApprovalRequest) (rows []describeRow, placed bool) {
+	if req.Metadata == nil || req.Metadata.Command == nil {
+		return nil, false
+	}
+	c := req.Metadata.Command
+	// Counted as the server counts the lines its ranges point at. The server
+	// sends no evidence with a withheld script, so a zero count is only a guard.
+	lineCount := 0
+	if fe := c.FileExecution; fe != nil && fe.Content != nil {
+		lineCount = strings.Count(*fe.Content, "\n") + 1
+	}
+	for _, ev := range c.VerdictEvidence {
+		claim := utils.SanitizeTerminalOneLine(ev.Claim)
+		if claim == "" {
+			continue
+		}
+		var spans []string
+		seen := map[approvalapi.EvidenceRange]bool{}
+		for _, r := range ev.Ranges {
+			if r.EndLine > lineCount || seen[r] {
+				continue
+			}
+			seen[r] = true
+			span := fmt.Sprintf("L%d", r.StartLine)
+			if r.EndLine > r.StartLine {
+				span += fmt.Sprintf("-%d", r.EndLine)
+			}
+			spans = append(spans, span)
+		}
+		if len(spans) == 0 {
+			rows = append(rows, describeRow{"  Not placed", claim + " (could not be placed in the script)"})
+			continue
+		}
+		placed = true
+		rows = append(rows, describeRow{"  " + strings.Join(spans, ", "), claim})
+	}
+	if len(rows) > 0 {
+		rows = slices.Insert(rows, 0, describeRow{"AI evidence", ""})
+	}
+	return rows, placed
+}
+
 func fileExecutionOf(req *approvalapi.ApprovalRequest) *approvalapi.FileExecution {
 	if req.Metadata == nil || req.Metadata.Command == nil {
 		return nil
@@ -141,12 +193,27 @@ func fileExecutionRows(fe *approvalapi.FileExecution) []describeRow {
 
 // fileExecutionScript renders the script the approver is asked to clear. When
 // the server omits the content, only the SHA-256 above identifies the file, and
-// the text says so instead of showing an empty script.
-func fileExecutionScript(fe *approvalapi.FileExecution) (string, bool) {
+// the text says so instead of showing an empty script. numbered prefixes each
+// line with its number, so the evidence line ranges can be found in it; the
+// empty line after a final newline is numbered too, since the server's ranges
+// count it.
+func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (string, bool) {
 	if fe.Content == nil {
 		return "Script: not included in this response; the SHA-256 above identifies the file.", true
 	}
 	body, _ := utils.SanitizeTerminalBlock(*fe.Content)
+	if numbered {
+		lines := strings.Split(body, "\n")
+		width := len(strconv.Itoa(len(lines)))
+		for i, line := range lines {
+			numberedLine := fmt.Sprintf("%*d |", width, i+1)
+			if line != "" {
+				numberedLine += " " + line
+			}
+			lines[i] = numberedLine
+		}
+		body = strings.Join(lines, "\n")
+	}
 	return fmt.Sprintf("Script (%d bytes):\n%s", len(*fe.Content), body), true
 }
 

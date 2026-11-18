@@ -49,6 +49,8 @@ type CommandDetail struct {
 	Tier2Reasoning string         `json:"tier2_reasoning"`
 	Factors        []RiskFactor   `json:"factors"`
 	FileExecution  *FileExecution `json:"file_execution"`
+	// VerdictEvidence is absent on a server that predates it.
+	VerdictEvidence VerdictEvidence `json:"verdict_evidence"`
 }
 
 type RiskFactor struct {
