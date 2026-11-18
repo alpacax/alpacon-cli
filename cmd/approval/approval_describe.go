@@ -55,17 +55,13 @@ json to print the full raw response.`,
 			fe := fileExecutionOf(req)
 			evidence, placed := evidenceRows(req)
 			rows := append(describeRows(req, fe), evidence...)
-			var script string
-			var scriptAltered bool
-			if fe != nil {
-				script, scriptAltered = fileExecutionScript(fe, placed)
-			}
 			if err := ios.PrintTable(rows); err != nil {
 				return err
 			}
 			if fe != nil {
+				script, altered := fileExecutionScript(fe, placed)
 				_, _ = fmt.Fprintln(ios.Out)
-				if scriptAltered {
+				if altered {
 					// The warning stays on Out beside the script it is about, and
 					// ColorEnabled follows ErrOut, so it is written without color.
 					plain := *ios
@@ -198,13 +194,10 @@ func fileExecutionRows(fe *approvalapi.FileExecution) []describeRow {
 	return rows
 }
 
-// fileExecutionScript renders the script the approver is asked to clear. When
-// the server omits the content, only the SHA-256 above identifies the file, and
-// the text says so instead of showing an empty script. numbered prefixes each
-// line with its number, so the evidence line ranges can be found in it; the
-// empty line after a final newline is numbered too, since the server's ranges
-// count it.
-func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (string, bool) {
+// fileExecutionScript includes a trailing empty line when numbering, matching
+// the server's evidence ranges. altered reports removals beyond CRLF
+// normalization and is false for withheld content.
+func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (script string, altered bool) {
 	if fe.Content == nil {
 		return "Script: not included in this response; the SHA-256 above identifies the file.", false
 	}

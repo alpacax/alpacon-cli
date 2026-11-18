@@ -726,6 +726,19 @@ func scriptRequest(t *testing.T, content string) string {
 		`,"sha256":"abc","path":"/tmp/i.sh","interpreter":"/bin/sh","args":[]}}}}`
 }
 
+func TestApprovalDescribeNamesAWithheldScriptWithoutWarning(t *testing.T) {
+	t.Parallel()
+	body := `{"id":"550e8400-e29b-41d4-a716-446655440000","request_type":"command_exec","status":"pending",` +
+		`"metadata":{"command":{"line":"/bin/sh /tmp/i.sh","file_execution":{"content":null,` +
+		`"sha256":"abc","path":"/tmp/i.sh","interpreter":"/bin/sh","args":[]}}}}`
+
+	stdout, stderr := runDescribeStreams(t, body, nil)
+
+	assert.Contains(t, stdout, "\n\nScript: not included in this response; the SHA-256 above identifies the file.\n")
+	assert.NotContains(t, stdout, scriptAlteredWarning)
+	assert.NotContains(t, stderr, scriptAlteredWarning)
+}
+
 func TestApprovalDescribeDoesNotWarnAboutACleanScript(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
