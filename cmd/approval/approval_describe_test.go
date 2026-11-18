@@ -572,12 +572,23 @@ func TestApprovalDescribeEndsTheTableWithTheEvidence(t *testing.T) {
 
 func runDescribe(t *testing.T, body string) string {
 	t.Helper()
+	stdout, _ := runDescribeStreams(t, body, nil)
+	return stdout
+}
+
+func runDescribeStreams(t *testing.T, body string, adjust func(*utils.IOStreams)) (stdout, stderr string) {
+	t.Helper()
 	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
 		"GET /api/approvals/approvals/550e8400-e29b-41d4-a716-446655440000/": {Status: http.StatusOK, Body: body},
 	})
-	stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return newApprovalDescribeCmd(ts.Factory(), ios) }, "550e8400-e29b-41d4-a716-446655440000")
+	stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
+		if adjust != nil {
+			adjust(ios)
+		}
+		return newApprovalDescribeCmd(ts.Factory(), ios)
+	}, "550e8400-e29b-41d4-a716-446655440000")
 	require.Equal(t, 0, code, stderr)
-	return stdout
+	return stdout, stderr
 }
 
 func TestApprovalDescribeNumbersTheScriptBesidePlacedEvidence(t *testing.T) {
@@ -712,16 +723,6 @@ func scriptRequest(t *testing.T, content string) string {
 		`,"sha256":"abc","path":"/tmp/i.sh","interpreter":"/bin/sh","args":[]}}}}`
 }
 
-func runDescribeStreams(t *testing.T, body string) (stdout, stderr string) {
-	t.Helper()
-	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
-		"GET /api/approvals/approvals/550e8400-e29b-41d4-a716-446655440000/": {Status: http.StatusOK, Body: body},
-	})
-	stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return newApprovalDescribeCmd(ts.Factory(), ios) }, "550e8400-e29b-41d4-a716-446655440000")
-	require.Equal(t, 0, code, stderr)
-	return stdout, stderr
-}
-
 func TestApprovalDescribeDoesNotWarnAboutACleanScript(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -735,7 +736,7 @@ func TestApprovalDescribeDoesNotWarnAboutACleanScript(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			stdout, stderr := runDescribeStreams(t, scriptRequest(t, tt.content))
+			stdout, stderr := runDescribeStreams(t, scriptRequest(t, tt.content), nil)
 			assert.Contains(t, stdout, fmt.Sprintf("\n\nScript (%d bytes):\n%s\n", len(tt.content), tt.want))
 			assert.NotContains(t, stdout, scriptAlteredWarning)
 			assert.NotContains(t, stderr, scriptAlteredWarning)
@@ -746,14 +747,7 @@ func TestApprovalDescribeDoesNotWarnAboutACleanScript(t *testing.T) {
 func TestApprovalDescribePrintsTheWarningWithoutColor(t *testing.T) {
 	t.Parallel()
 	content := "echo \x1b[31mred\x1b[0m\n"
-	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
-		"GET /api/approvals/approvals/550e8400-e29b-41d4-a716-446655440000/": {Status: http.StatusOK, Body: scriptRequest(t, content)},
-	})
-	stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
-		ios.ColorEnabled = true
-		return newApprovalDescribeCmd(ts.Factory(), ios)
-	}, "550e8400-e29b-41d4-a716-446655440000")
-	require.Equal(t, 0, code, stderr)
+	stdout, _ := runDescribeStreams(t, scriptRequest(t, content), func(ios *utils.IOStreams) { ios.ColorEnabled = true })
 
 	assert.Contains(t, stdout, fmt.Sprintf("\n\nWarning: %s\nScript (%d bytes):\necho red\n\n", scriptAlteredWarning, len(content)))
 	assert.NotContains(t, stdout, "\x1b")
