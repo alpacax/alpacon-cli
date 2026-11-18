@@ -722,15 +722,6 @@ func runDescribeStreams(t *testing.T, body string) (stdout, stderr string) {
 	return stdout, stderr
 }
 
-func TestApprovalDescribeWarnsAboveAnAlteredScript(t *testing.T) {
-	t.Parallel()
-	content := "echo \x1b[31mred\x1b[0m\n"
-	stdout, _ := runDescribeStreams(t, scriptRequest(t, content))
-
-	assert.Contains(t, stdout, fmt.Sprintf("\n\nWarning: %s\nScript (%d bytes):\necho red\n\n", scriptAlteredWarning, len(content)))
-	assert.NotContains(t, stdout, "\x1b[31m")
-}
-
 func TestApprovalDescribeDoesNotWarnAboutACleanScript(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -764,6 +755,6 @@ func TestApprovalDescribePrintsTheWarningWithoutColor(t *testing.T) {
 	}, "550e8400-e29b-41d4-a716-446655440000")
 	require.Equal(t, 0, code, stderr)
 
-	assert.Contains(t, stdout, fmt.Sprintf("\n\nWarning: %s\nScript (%d bytes):\n", scriptAlteredWarning, len(content)))
+	assert.Contains(t, stdout, fmt.Sprintf("\n\nWarning: %s\nScript (%d bytes):\necho red\n\n", scriptAlteredWarning, len(content)))
 	assert.NotContains(t, stdout, "\x1b")
 }

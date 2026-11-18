@@ -228,9 +228,10 @@ func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (string, 
 }
 
 // sanitizeScript keeps tabs, since they are part of the script the request
-// runs, and still removes escape sequences and other control characters so
-// the terminal does not act on them. altered reports a removal other than
-// folding CRLF into LF, so DOS line endings alone do not count.
+// runs, and still removes escape sequences, control characters and Unicode
+// format characters so the terminal does not act on them. altered reports a
+// removal other than folding CRLF into LF, so DOS line endings alone do not
+// count.
 func sanitizeScript(content string) (clean string, altered bool) {
 	normalized := strings.ReplaceAll(content, "\r\n", "\n")
 	clean = utils.SanitizeTerminalBlockKeepingTabs(normalized)
