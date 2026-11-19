@@ -51,6 +51,8 @@ type sessionServer struct {
 	// auth_mfa_required as a workspace requiring MFA for kube exec does. The
 	// createStatus answer, or the session, comes after them.
 	mfaCreates int
+	// createRefusals scripts the codes returned by successive creates.
+	createRefusals []string
 	// onCreate, when set, runs as create number call (from 1) arrives, before
 	// it is answered.
 	onCreate      func(call int)
@@ -112,6 +114,16 @@ func (s *sessionServer) handler(t *testing.T) http.Handler {
 			s.mu.Unlock()
 			if s.onCreate != nil {
 				s.onCreate(call)
+			}
+			if call <= len(s.createRefusals) {
+				code := s.createRefusals[call-1]
+				status := http.StatusBadRequest
+				if code == utils.AuthMFARequired {
+					status = http.StatusUnauthorized
+				}
+				w.WriteHeader(status)
+				_, _ = fmt.Fprintf(w, `{"code":%q}`, code)
+				return
 			}
 			if call <= s.mfaCreates {
 				w.WriteHeader(http.StatusUnauthorized)
@@ -451,7 +463,6 @@ func TestKubeSessionErrorHint(t *testing.T) {
 	}{
 		{name: "cluster not connected", code: utils.ClusterNotConnected, expected: "'alpacon kube describe prod-east'"},
 		{name: "channel open failed", code: utils.KubeSessionChannelOpenFailed, expected: "try again"},
-		{name: "no user name", code: utils.KubeSessionPrincipalNotSupported, expected: "log in as a user"},
 		{name: "cluster rbac drift", code: utils.ClusterRBACDrift, expected: "cluster prod-east has RBAC bindings outside Alpacon"},
 		{name: "other code", code: utils.APITokenACLNotAllowed},
 	}

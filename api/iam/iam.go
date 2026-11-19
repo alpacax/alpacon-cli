@@ -426,11 +426,7 @@ func diffEditedUser(original []byte, edited any) (*UserEdit, error) {
 }
 
 func GetCurrentUser(ac *client.AlpaconClient) (*CurrentUserResponse, error) {
-	meURL, err := utils.BuildURL(userURL, "-", nil)
-	if err != nil {
-		return nil, err
-	}
-	responseBody, err := ac.SendGetRequest(meURL)
+	responseBody, err := getCurrentUserRaw(ac)
 	if err != nil {
 		return nil, err
 	}
@@ -442,6 +438,30 @@ func GetCurrentUser(ac *client.AlpaconClient) (*CurrentUserResponse, error) {
 	}
 
 	return &user, nil
+}
+
+// CurrentUsernameUnset reports whether the caller's account explicitly has a
+// null username. An empty string is already set, and a missing field gives no answer.
+func CurrentUsernameUnset(ac *client.AlpaconClient) (bool, error) {
+	body, err := getCurrentUserRaw(ac)
+	if err != nil {
+		return false, err
+	}
+	var user struct {
+		Username json.RawMessage `json:"username"`
+	}
+	if err := json.Unmarshal(body, &user); err != nil {
+		return false, err
+	}
+	return string(user.Username) == "null", nil
+}
+
+func getCurrentUserRaw(ac *client.AlpaconClient) ([]byte, error) {
+	meURL, err := utils.BuildURL(userURL, "-", nil)
+	if err != nil {
+		return nil, err
+	}
+	return ac.SendGetRequest(meURL)
 }
 
 func GetUserMemberships(ac *client.AlpaconClient, userID string) ([]GroupMembership, error) {
