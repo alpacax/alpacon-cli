@@ -530,9 +530,9 @@ func OpenSharedTerminal(ac *client.AlpaconClient, sessionResponse SessionRespons
 func openInteractiveTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse, reconnect *reconnector) error {
 	var header http.Header
 	if reconnect != nil {
-		header = ac.SetWebsocketHeaderWithCapabilities(client.CapabilityWebsocketReconnect, client.CapabilityIdleWarning)
+		header = ac.SetWebsocketHeaderWithCapabilities(client.CapabilityWebsocketReconnect, client.CapabilityIdleWarning, client.CapabilityRefusalFrame)
 	} else {
-		header = ac.SetWebsocketHeaderWithCapabilities(client.CapabilityIdleWarning)
+		header = ac.SetWebsocketHeaderWithCapabilities(client.CapabilityIdleWarning, client.CapabilityRefusalFrame)
 	}
 
 	wsClient := newWebsocketClient(header)
@@ -698,7 +698,9 @@ func enterRawMode() (func(), error) {
 }
 
 func (c *connection) readFromServer() {
-	originSeen, legacy, warned := false, false, false
+	// refused holds back the paused notice for a run of refused keystrokes,
+	// until output arrives in between.
+	originSeen, legacy, warned, refused := false, false, false, false
 	for {
 		kind, message, err := c.ws.ReadMessage()
 		if err != nil {
@@ -715,6 +717,19 @@ func (c *connection) readFromServer() {
 				ClosesAt  json.RawMessage `json:"closes_at"`
 			}
 			if json.Unmarshal(message, &origin) != nil {
+				continue
+			}
+			if origin.Type == "refusal" {
+				body, ok := utils.PausedRefusalNotice(message)
+				if !ok || refused {
+					continue
+				}
+				refused = true
+				notice := c.notice
+				if notice == nil {
+					notice = os.Stderr
+				}
+				_, _ = fmt.Fprintf(notice, "[%s]\r\n", body)
 				continue
 			}
 			if origin.Type == "idle_warning" {
@@ -754,6 +769,7 @@ func (c *connection) readFromServer() {
 				warned = true
 			}
 		case websocket.BinaryMessage:
+			refused = false
 			if originSeen {
 				c.replay.offset += uint64(len(message))
 			} else {

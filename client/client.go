@@ -41,6 +41,10 @@ const (
 	// CapabilityIdleWarning says the client handles idle warnings without printing raw frames.
 	CapabilityIdleWarning = "idle-warning"
 
+	// CapabilityRefusalFrame says the client reads a refusal sent as a text frame
+	// apart from terminal output or tunnel data, so the server may send one.
+	CapabilityRefusalFrame = "refusal-frame"
+
 	// serverGateTokenScope is the "gate" of a token-scope refusal, the only gate whose "missing" is
 	// a scope string rather than a permission or role.
 	serverGateTokenScope = "token_scope"
