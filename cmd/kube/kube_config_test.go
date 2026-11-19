@@ -18,9 +18,11 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/kubeconfig"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
@@ -38,6 +40,7 @@ type sessionServer struct {
 	lookupStatus int // 0 answers the lookup with prod-east
 	createStatus int // 0 answers 201 with the session below
 	createCode   string
+	createHint   string
 	proxyURL     string
 	token        string
 	closeStatus  int // 0 answers 200
@@ -117,7 +120,7 @@ func (s *sessionServer) handler(t *testing.T) http.Handler {
 			}
 			if s.createStatus != 0 {
 				w.WriteHeader(s.createStatus)
-				_, _ = fmt.Fprintf(w, `{"code":%q}`, s.createCode)
+				_, _ = fmt.Fprintf(w, `{"code":%q,"hint":%q}`, s.createCode, s.createHint)
 				return
 			}
 			warning := ""
@@ -490,6 +493,45 @@ func TestKubeSessionErrorHint_DefersToTheServerHint(t *testing.T) {
 
 	plain := hintedKubeError{code: utils.ClusterNotConnected}
 	assert.Contains(t, kubeSessionErrorHint(plain, "prod-east"), "is not connected")
+}
+
+func TestKubeConfigRBACDriftRefusal(t *testing.T) {
+	t.Parallel()
+	const bindingNotice = "The cluster's agent logs an external_grant line for each such binding so the cluster admin can find them there."
+	// The server refuses with 400 and no hint. The client keeps a hint only on
+	// a 402/403/405/429, so the hint case answers 403 to reach that rule.
+	tests := []struct {
+		name   string
+		status int
+		hint   string
+	}{
+		{name: "CLI guidance", status: http.StatusBadRequest},
+		{name: "server guidance", status: http.StatusForbidden, hint: "Contact a cluster admin to review the bindings."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := newSessionServer()
+			srv.createStatus, srv.createCode, srv.createHint = tt.status, utils.ClusterRBACDrift, tt.hint
+			ac := srv.start(t)
+			path := filepath.Join(t.TempDir(), "config")
+
+			stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
+				return NewKubeCmd(func() (*client.AlpaconClient, error) { return ac, nil }, ios)
+			}, "config", "prod-east", "--kubeconfig", path)
+
+			assert.Equal(t, utils.ExitCodeGeneralError, code, stderr)
+			assert.Empty(t, stdout)
+			if tt.hint == "" {
+				assert.Contains(t, stderr, "cluster prod-east has RBAC bindings outside Alpacon")
+				assert.Contains(t, stderr, bindingNotice)
+			} else {
+				assert.Contains(t, stderr, tt.hint)
+				assert.NotContains(t, stderr, "cluster prod-east has RBAC bindings outside Alpacon")
+				assert.NotContains(t, stderr, "external_grant")
+			}
+		})
+	}
 }
 
 func TestCheckProxyURL(t *testing.T) {

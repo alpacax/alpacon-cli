@@ -371,7 +371,7 @@ func kubeSessionErrorHint(err error, clusterName string) string {
 	case utils.KubeSessionPrincipalNotSupported:
 		return "this account has no user name a kube session can act as; log in as a user"
 	case utils.ClusterRBACDrift:
-		return fmt.Sprintf("cluster %s has RBAC bindings outside Alpacon that grant sessions more than Alpacon does, and the workspace policy refuses new sessions on it until a cluster admin removes them", clusterName)
+		return fmt.Sprintf("cluster %s has RBAC bindings outside Alpacon that grant sessions more than Alpacon does, and the workspace policy refuses new sessions on it until a cluster admin removes them. The cluster's agent logs an external_grant line for each such binding so the cluster admin can find them there", clusterName)
 	}
 	return ""
 }
