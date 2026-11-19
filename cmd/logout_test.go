@@ -13,6 +13,7 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -95,11 +96,10 @@ func TestRunLogout_RemovesCredentialsWhenTheSessionIsUnusable(t *testing.T) {
 				mu.Unlock()
 				http.Error(w, `{"detail":"boom"}`, http.StatusInternalServerError)
 			}))
+			t.Cleanup(ts.Close)
 			workspaceURL := ts.URL
 			if tt.unreachable {
-				ts.Close()
-			} else {
-				t.Cleanup(ts.Close)
+				workspaceURL = testutil.NewDroppingServer(t).URL
 			}
 
 			home := t.TempDir()

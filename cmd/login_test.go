@@ -1073,9 +1073,7 @@ func TestIsWorkspaceNotFound_DecidesOnTheStatusNotTheText(t *testing.T) {
 	t.Parallel()
 	notFound := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(notFound.Close)
-	closed := httptest.NewServer(http.NotFoundHandler())
-	unreachable := closed.URL + "/team404"
-	closed.Close()
+	unreachable := testutil.NewDroppingServer(t).URL + "/team404"
 	tests := []struct {
 		name string
 		url  string
