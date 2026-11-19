@@ -93,14 +93,24 @@ func TestOpenKubeConfigUsernameRecovery(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config")
 			srv := &usernameServer{sessionServer: newSessionServer(), account: tt.account}
 			srv.createRefusals = tt.refusals
-			ac := srv.startInMemory(t)
-			ac.HTTPClient = testutil.HandlerClient(srv.handler(t))
+			ac := &client.AlpaconClient{
+				HTTPClient:    testutil.HandlerClient(srv.handler(t)),
+				BaseURL:       testutil.StubBaseURL,
+				WorkspaceName: "my-workspace",
+			}
 			interrupted := false
 			var prompts int32
 			oldPrompt := handleKubeUsernameRequired
 			t.Cleanup(func() { handleKubeUsernameRequired = oldPrompt })
-			handleKubeUsernameRequired = func(ac *client.AlpaconClient) (*iam.SetUsernameResponse, error) {
+			handleKubeUsernameRequired = func(ac *client.AlpaconClient, stopped func() bool) (*iam.SetUsernameResponse, error) {
 				prompts++
+				// The prompt must see the command's interrupt, or a name typed after
+				// a first Ctrl+C would still be sent.
+				if assert.NotNil(t, stopped) {
+					interrupted = true
+					assert.True(t, stopped())
+					interrupted = false
+				}
 				assert.NoFileExists(t, path+".lock")
 				result, err := iam.SetUsername(ac, "alice")
 				interrupted = tt.interrupt

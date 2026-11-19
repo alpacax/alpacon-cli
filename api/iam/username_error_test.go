@@ -1,9 +1,14 @@
 package iam
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -124,4 +129,47 @@ func TestUsernameFailure(t *testing.T) {
 		require.Error(t, stop)
 		assert.Equal(t, hint, utils.RefusalHint(stop))
 	})
+}
+
+func TestPromptUsername_StopsBeforeSendingANameReadAfterTheStop(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		stopped   func() bool
+		wantErr   error
+		wantPosts int32
+	}{
+		{name: "running", stopped: func() bool { return false }, wantPosts: 1},
+		{name: "no stop check", wantPosts: 1},
+		{name: "stopped", stopped: func() bool { return true }, wantErr: ErrUsernameSetupStopped},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var posts atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != usernameURL {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				posts.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"username":"alice"}`)
+			}))
+			t.Cleanup(ts.Close)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			response, err := promptUsername(ac, func() (string, error) { return "alice", nil }, tt.stopped)
+
+			assert.Equal(t, tt.wantPosts, posts.Load())
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+				assert.Nil(t, response)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, "alice", response.Username)
+		})
+	}
 }
