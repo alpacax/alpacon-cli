@@ -13,7 +13,11 @@ func newKubeListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Comman
 		Short:   "List Kubernetes clusters",
 		Long: `List the Kubernetes clusters registered in the workspace, with each
 cluster's provider, Kubernetes version, node count, and whether its agent is
-connected. A version or node count the agent has not reported yet is blank.`,
+connected. A version or node count the agent has not reported yet is blank.
+
+RBAC drift is degraded if the last check found bindings outside Alpacon that
+grant permissions beyond its baseline, clear if it found none, or unverified
+if there is no usable recent check. A blank means the server does not report it.`,
 		Example: `  alpacon kube ls
   alpacon k8s ls --output json`,
 		Args: cobra.NoArgs,

@@ -23,6 +23,10 @@ func newKubeDescribeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Co
 		Long: `Show the details of one cluster: provider, versions, node count,
 connectivity, groups, and tags.
 
+RBAC drift is degraded if the last check found bindings outside Alpacon that
+grant permissions beyond its baseline, clear if it found none, or unverified
+if there is no usable recent check. A blank means the server does not report it.
+
 Use --output json to see the full raw response, with group IDs in place of
 names and status and tags as the server stores them.`,
 		Example: `  alpacon kube describe prod-cluster
@@ -73,6 +77,7 @@ func describeRows(cluster *kubernetes.ClusterDetail, groupNames []string, zone *
 		{"Connected", strconv.FormatBool(cluster.IsConnected)},
 		{"Enabled", strconv.FormatBool(cluster.Enabled)},
 		{"Status", formatJSONValue(cluster.Status)},
+		{"RBAC drift", kubernetes.Optional[string]{Value: cluster.RBACDrift}.String()},
 		{"Groups", strings.Join(groupNames, ", ")},
 		{"Tags", formatTags(cluster.Tags)},
 		{"Last connectivity", formatTime(cluster.LastConnectivity, zone)},

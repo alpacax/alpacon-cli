@@ -44,6 +44,7 @@ var (
 
 type fakeServer struct {
 	clusters    []namedCluster
+	detail      string
 	failGroups  bool
 	groupCalls  atomic.Int32
 	detailCalls atomic.Int32
@@ -66,7 +67,11 @@ func (f *fakeServer) handler(t *testing.T) http.Handler {
 				len(matched), strings.Join(matched, ","))
 		case "/api/kubernetes/clusters/c-prod/":
 			f.detailCalls.Add(1)
-			_, _ = w.Write([]byte(prodCluster))
+			detail := f.detail
+			if detail == "" {
+				detail = prodCluster
+			}
+			_, _ = w.Write([]byte(detail))
 		case "/api/iam/groups/":
 			f.groupCalls.Add(1)
 			if f.failGroups {
@@ -95,37 +100,50 @@ func withOutputFormat(t *testing.T, format string) {
 	t.Cleanup(func() { utils.OutputFormat = old })
 }
 
-func TestKubeListPrintsTable(t *testing.T) {
-	t.Parallel()
-	f := &fakeServer{clusters: []namedCluster{prod, fresh}}
-	ts := httptest.NewServer(f.handler(t))
-	defer ts.Close()
-	stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
-		return NewKubeCmd(apiClientTo(ts), ios)
-	}, "ls")
-
-	require.Equal(t, 0, code, stderr)
-
-	assert.Regexp(t, `NAME\s+PROVIDER\s+KUBE VERSION\s+NODES\s+CONNECTED\s+ENABLED\s+AGENT VERSION`, stdout)
-	assert.Regexp(t, `prod-east\s+eks\s+v1\.31\.2\s+3\s+true\s+true\s+0\.1\.0`, stdout)
-	assert.Regexp(t, `fresh\s+unknown\s+false\s+true`, stdout)
+func clusterWithRBACDrift(state string) namedCluster {
+	if state == "" {
+		return prod
+	}
+	return namedCluster{name: prod.name, body: fmt.Sprintf(`%s,"rbac_drift":%q}`, strings.TrimSuffix(prod.body, "}"), state)}
 }
 
-func TestKubeListJSON(t *testing.T) {
+func TestKubeListRBACDrift(t *testing.T) {
 	t.Parallel()
-	f := &fakeServer{clusters: []namedCluster{prod, fresh}}
-	ts := httptest.NewServer(f.handler(t))
-	defer ts.Close()
-	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command {
-		return NewKubeCmd(apiClientTo(ts), ios)
-	}, "ls")
+	tests := []struct {
+		name  string
+		state string
+		json  string
+	}{
+		{name: "unverified", state: "unverified", json: `"unverified"`},
+		{name: "clear", state: "clear", json: `"clear"`},
+		{name: "degraded", state: "degraded", json: `"degraded"`},
+		{name: "missing", json: "null"},
+		{name: "future value", state: "new-state", json: `"new-state"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeServer{clusters: []namedCluster{clusterWithRBACDrift(tt.state), fresh}}
+			ts := httptest.NewServer(f.handler(t))
+			defer ts.Close()
+			build := func(ios *utils.IOStreams) *cobra.Command {
+				return NewKubeCmd(apiClientTo(ts), ios)
+			}
 
-	require.Equal(t, 0, code, stderr)
+			stdout, stderr, code := cmdtest.RunCaptured(build, "ls")
+			require.Equal(t, 0, code, stderr)
+			assert.Regexp(t, `NAME\s+PROVIDER\s+KUBE VERSION\s+NODES\s+CONNECTED\s+ENABLED\s+RBAC DRIFT\s+AGENT VERSION`, stdout)
+			assert.Regexp(t, `(?m)^prod-east +eks +v1\.31\.2 +3 +true +true +`+tt.state+` *0\.1\.0$`, stdout)
+			assert.Regexp(t, `fresh\s+unknown\s+false\s+true`, stdout)
 
-	assert.JSONEq(t, `[
-		{"name":"prod-east","provider":"eks","kube_version":"v1.31.2","node_count":3,"connected":true,"enabled":true,"agent_version":"0.1.0"},
-		{"name":"fresh","provider":"unknown","kube_version":null,"node_count":null,"connected":false,"enabled":true,"agent_version":""}
-	]`, stdout)
+			stdout, stderr, code = cmdtest.RunJSON(build, "ls")
+			require.Equal(t, 0, code, stderr)
+			assert.JSONEq(t, fmt.Sprintf(`[
+				{"name":"prod-east","provider":"eks","kube_version":"v1.31.2","node_count":3,"connected":true,"enabled":true,"rbac_drift":%s,"agent_version":"0.1.0"},
+				{"name":"fresh","provider":"unknown","kube_version":null,"node_count":null,"connected":false,"enabled":true,"rbac_drift":null,"agent_version":""}
+			]`, tt.json), stdout)
+		})
+	}
 }
 
 func TestKubeListEmptyJSON(t *testing.T) {
@@ -163,9 +181,34 @@ func TestKubeDescribePrintsRows(t *testing.T) {
 	assert.Equal(t, int32(1), f.groupCalls.Load())
 }
 
+func TestKubeDescribeRBACDrift(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ name, state string }{
+		{name: "unverified", state: "unverified"},
+		{name: "clear", state: "clear"},
+		{name: "degraded", state: "degraded"},
+		{name: "missing"},
+		{name: "future value", state: "new-state"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeServer{clusters: []namedCluster{prod}, detail: clusterWithRBACDrift(tt.state).body}
+			ts := httptest.NewServer(f.handler(t))
+			defer ts.Close()
+			stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
+				return NewKubeCmd(apiClientTo(ts), ios)
+			}, "describe", "prod-east")
+			require.Equal(t, 0, code, stderr)
+			assert.Regexp(t, `(?m)^RBAC drift +`+tt.state+`$`, stdout)
+		})
+	}
+}
+
 func TestKubeDescribeJSONIsRawBody(t *testing.T) {
 	t.Parallel()
-	f := &fakeServer{clusters: []namedCluster{prod}}
+	detail := clusterWithRBACDrift("degraded").body
+	f := &fakeServer{clusters: []namedCluster{prod}, detail: detail}
 	ts := httptest.NewServer(f.handler(t))
 	defer ts.Close()
 	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command {
@@ -174,7 +217,7 @@ func TestKubeDescribeJSONIsRawBody(t *testing.T) {
 
 	require.Equal(t, 0, code, stderr)
 
-	assert.JSONEq(t, prodCluster, stdout)
+	assert.JSONEq(t, detail, stdout)
 	assert.Equal(t, int32(1), f.detailCalls.Load())
 	assert.Equal(t, int32(0), f.groupCalls.Load(), "the raw response keeps group IDs, so no name lookup is needed")
 }

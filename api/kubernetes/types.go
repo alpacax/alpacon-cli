@@ -24,6 +24,7 @@ type ClusterDetail struct {
 	Groups           []string        `json:"groups"`
 	Tags             json.RawMessage `json:"tags"`
 	IsConnected      bool            `json:"is_connected"`
+	RBACDrift        *string         `json:"rbac_drift"`
 	LastConnectivity *time.Time      `json:"last_connectivity"`
 	LastSyncedAt     *time.Time      `json:"last_synced_at"`
 	AddedAt          time.Time       `json:"added_at"`
@@ -41,6 +42,7 @@ type ClusterAttributes struct {
 	NodeCount    Optional[int]    `json:"node_count" table:"Nodes"`
 	Connected    bool             `json:"connected"`
 	Enabled      bool             `json:"enabled"`
+	RBACDrift    Optional[string] `json:"rbac_drift" table:"RBAC drift"`
 	AgentVersion string           `json:"agent_version" table:"Agent Version"`
 }
 
