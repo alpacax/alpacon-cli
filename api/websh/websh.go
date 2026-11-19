@@ -769,7 +769,9 @@ func (c *connection) readFromServer() {
 				warned = true
 			}
 		case websocket.BinaryMessage:
-			refused = false
+			if len(message) > 0 {
+				refused = false
+			}
 			if originSeen {
 				c.replay.offset += uint64(len(message))
 			} else {

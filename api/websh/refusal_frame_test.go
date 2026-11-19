@@ -26,6 +26,15 @@ func TestReadFromServer_PausedRefusalPrintsOneNoticePerRun(t *testing.T) {
 	assert.Equal(t, pausedNotice+pausedNotice, stderr)
 }
 
+func TestReadFromServer_EmptyBinaryFrameKeepsPausedNoticeSuppressed(t *testing.T) {
+	refusal := replayFrame{websocket.TextMessage, pausedRefusalFrame}
+
+	_, stdout, stderr := readIdleFrames(t, refusal, replayFrame{websocket.BinaryMessage, ""}, refusal)
+
+	assert.Empty(t, stdout)
+	assert.Equal(t, pausedNotice, stderr)
+}
+
 // Another refusal code is not a pause, and its hint is never printed.
 func TestReadFromServer_IgnoresAnotherRefusal(t *testing.T) {
 	_, stdout, stderr := readIdleFrames(t, replayFrame{websocket.TextMessage, `{"type":"refusal","code":"other","hint":"untrusted server text"}`})
