@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,7 @@ import (
 type usernameServer struct {
 	*sessionServer
 	account       string
+	setRefusal    string // when set, POST /api/iam/username/ answers 400 with this code
 	accountReads  atomic.Int32
 	usernamePosts atomic.Int32
 }
@@ -46,6 +48,11 @@ func (s *usernameServer) handler(t *testing.T) http.Handler {
 			body, err := io.ReadAll(r.Body)
 			assert.NoError(t, err)
 			assert.JSONEq(t, `{"username":"alice"}`, string(body))
+			if s.setRefusal != "" {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = fmt.Fprintf(w, `{"code":%q}`, s.setRefusal)
+				return
+			}
 			_, _ = io.WriteString(w, `{"username":"alice"}`)
 		default:
 			sessions.ServeHTTP(w, r)
@@ -66,7 +73,10 @@ func TestOpenKubeConfigUsernameRecovery(t *testing.T) {
 		creates     int
 		mfaLinks    int
 		interrupt   bool
+		setRefusal  string
 		wantRefusal string
+		// wantCode is the --output json error_code; empty means wantRefusal.
+		wantCode string
 	}{
 		{name: "username required", refusals: []string{utils.UsernameRequired}, prompts: 1, creates: 2},
 		{name: "older server with null username", refusals: []string{utils.KubeSessionPrincipalNotSupported},
@@ -85,13 +95,16 @@ func TestOpenKubeConfigUsernameRecovery(t *testing.T) {
 			prompts: 1, creates: 3, mfaLinks: 1},
 		{name: "username refused again", refusals: []string{utils.UsernameRequired, utils.UsernameRequired},
 			prompts: 1, creates: 2, wantRefusal: utils.UsernameRequired},
+		{name: "username setup refused on an older server", refusals: []string{utils.KubeSessionPrincipalNotSupported},
+			account: `{"username":null}`, reads: 1, prompts: 1, creates: 1, setRefusal: "approval_superuser_approve_required",
+			wantRefusal: utils.KubeSessionPrincipalNotSupported, wantCode: "approval_superuser_approve_required"},
 		{name: "interrupt during username setup", refusals: []string{utils.UsernameRequired},
 			prompts: 1, creates: 1, interrupt: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config")
-			srv := &usernameServer{sessionServer: newSessionServer(), account: tt.account}
+			srv := &usernameServer{sessionServer: newSessionServer(), account: tt.account, setRefusal: tt.setRefusal}
 			srv.createRefusals = tt.refusals
 			ac := &client.AlpaconClient{
 				HTTPClient:    testutil.HandlerClient(srv.handler(t)),
@@ -128,7 +141,12 @@ func TestOpenKubeConfigUsernameRecovery(t *testing.T) {
 				case tt.wantRefusal != "":
 					require.Error(t, err)
 					assert.Equal(t, tt.wantRefusal, utils.StructuredErrorCode(err))
-					if tt.wantRefusal == utils.KubeSessionPrincipalNotSupported {
+					wantCode := tt.wantCode
+					if wantCode == "" {
+						wantCode = tt.wantRefusal
+					}
+					assert.Equal(t, wantCode, utils.ClassifyError(kubeConfigError(err, "prod-east", "")))
+					if tt.wantRefusal == utils.KubeSessionPrincipalNotSupported && tt.setRefusal == "" {
 						message := kubeConfigError(err, "prod-east", "").Error()
 						assert.Contains(t, message, "this account's IAM username cannot be used as a kube session's identity")
 						assert.Contains(t, message, "be at most 150 characters")
@@ -166,10 +184,23 @@ func TestKubeUsernameRequiredNonInteractive(t *testing.T) {
 		_ = in.Close()
 	})
 
-	for _, command := range []string{"config", "login"} {
-		t.Run(command, func(t *testing.T) {
-			srv := &usernameServer{sessionServer: newSessionServer()}
-			srv.createRefusals = []string{utils.UsernameRequired}
+	tests := []struct {
+		name    string
+		command string
+		refusal string
+		account string
+		reads   int32
+	}{
+		{name: "config", command: "config", refusal: utils.UsernameRequired},
+		{name: "login", command: "login", refusal: utils.UsernameRequired},
+		// An older server sends this code for an account with no username.
+		{name: "config on an older server", command: "config", refusal: utils.KubeSessionPrincipalNotSupported, account: `{"username":null}`, reads: 1},
+		{name: "login on an older server", command: "login", refusal: utils.KubeSessionPrincipalNotSupported, account: `{"username":null}`, reads: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := &usernameServer{sessionServer: newSessionServer(), account: tt.account}
+			srv.createRefusals = []string{tt.refusal}
 			ts := httptest.NewServer(srv.handler(t))
 			defer ts.Close()
 			t.Setenv("HOME", t.TempDir())
@@ -180,14 +211,14 @@ func TestKubeUsernameRequiredNonInteractive(t *testing.T) {
 
 			stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command {
 				return NewKubeCmd(func() (*client.AlpaconClient, error) { return ac, nil }, ios)
-			}, command, "prod-east", "--work-session", testSessionID, "--kubeconfig", path)
+			}, tt.command, "prod-east", "--work-session", testSessionID, "--kubeconfig", path)
 
 			assert.Equal(t, utils.ExitCodeGeneralError, code, stderr)
 			assert.Empty(t, stdout)
 			assert.Contains(t, stderr, `"error_code":"user_username_required"`)
 			assert.Contains(t, stderr, "alpacon username set <name>")
 			assert.Equal(t, 1, srv.creates())
-			assert.Zero(t, srv.accountReads.Load())
+			assert.Equal(t, tt.reads, srv.accountReads.Load())
 			assert.Zero(t, srv.usernamePosts.Load())
 			assert.NoFileExists(t, path)
 		})

@@ -349,7 +349,10 @@ func kubeSessionError(err error, clusterName, workSessionID, operation string) e
 	var createErr *sessionCreateError
 	if errors.As(err, &createErr) {
 		if createErr.usernameErr != nil {
-			return fail(errors.Join(createErr.err, createErr.usernameErr), "Failed to open a kube session: %s.", createErr.usernameErr)
+			// The setup's own refusal names the code when it carries one; otherwise the account
+			// has no username, which an older server answers kube_session_principal_not_supported.
+			cause := errors.Join(createErr.usernameErr, usernameUnsetError{}, createErr.err)
+			return fail(cause, "Failed to open a kube session: %s.", createErr.usernameErr)
 		}
 		if gateErr := utils.WorkSessionExitError(createErr.err, utils.OperationKube, clusterName, config.ResolveAuthMethod(), workSessionID); gateErr != nil {
 			return gateErr
@@ -361,6 +364,14 @@ func kubeSessionError(err error, clusterName, workSessionID, operation string) e
 	}
 	return fail(err, "The kubeconfig was not written: %s.", err)
 }
+
+// usernameUnsetError gives a failed username setup the error_code
+// user_username_required, whichever code the open was refused with.
+type usernameUnsetError struct{}
+
+func (usernameUnsetError) Error() string       { return "the account has no username" }
+func (usernameUnsetError) ErrorCode() string   { return utils.UsernameRequired }
+func (usernameUnsetError) ErrorSource() string { return "" }
 
 // kubeSessionErrorHint says what to do about a refusal the server names with
 // a kube-session code, or returns "" for any other error.
