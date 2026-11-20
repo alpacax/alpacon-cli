@@ -609,6 +609,9 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 			if stillPending.WorkSessionID == "" {
 				stillPending.WorkSessionID = pendingErr.WorkSessionID
 			}
+			if stillPending.WorkSessionStatus == "" {
+				stillPending.WorkSessionStatus = pendingErr.WorkSessionStatus
+			}
 			if stillPending.ConsoleURL == "" {
 				stillPending.ConsoleURL = pendingErr.ConsoleURL
 			}
@@ -840,9 +843,7 @@ func pendingApprovalFailure(ios *utils.IOStreams, stderr io.Writer, err error, p
 				"Confirm or reject it in the Alpacon web console through the console link. " +
 				"It runs automatically once confirmed; pass --wait (or --wait-approval DURATION for a longer wait) to block until then."
 		}
-		if pendingErr.WorkSessionPaused {
-			message = pausedApprovalMessage(pendingErr.AssigneeConfirms())
-		}
+		message = withSessionResumeGuidance(message, pendingErr)
 		ios.PrintPendingApprovalWithError(
 			message,
 			"", // the command detail carries no approval request id
@@ -880,13 +881,21 @@ func pendingApprovalFailure(ios *utils.IOStreams, stderr io.Writer, err error, p
 	return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 }
 
-func pausedApprovalMessage(assignee bool) string {
-	message := "Approval required—this command is held for human approval in the Alpacon web console. "
-	if assignee {
-		message = "Confirmation required—this command is held for your own confirmation as the session's assignee, not for an approver. "
+func withSessionResumeGuidance(message string, pending *event.PendingApprovalError) string {
+	status := pending.WorkSessionStatus
+	if status != "paused" && (status != "" || !pending.WorkSessionPaused) {
+		return message
 	}
-	return message + "The work session is paused. Approval or confirmation alone will not run this command; " +
-		"an authorized person must also use Resume in the Alpacon web console."
+	lead := "Approval required—this command is held for human approval in the Alpacon web console. "
+	if pending.AssigneeConfirms() {
+		lead = "Confirmation required—this command is held for your own confirmation as the session's assignee, not for an approver. "
+	}
+	if status == "paused" {
+		return lead + "The work session is paused. Approval or confirmation alone will not run this command; " +
+			"an authorized person must also use Resume in the Alpacon web console."
+	}
+	return lead + "Approval or confirmation alone will not run this command while the work session is paused. " +
+		"If it is still paused, an authorized person must use Resume in the Alpacon web console."
 }
 
 // RunCommandWithRetry executes a remote command with MFA/username-required error

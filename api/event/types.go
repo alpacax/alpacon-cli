@@ -95,10 +95,11 @@ func (e *CommandPollError) Unwrap() error { return e.Err }
 // console before it runs. CommandID identifies the parked job so a --wait caller can
 // poll it; re-submitting would create a duplicate command and approval request.
 type PendingApprovalError struct {
-	Username      string
-	ConsoleURL    string
-	WorkSessionID string
-	CommandID     string
+	Username          string
+	ConsoleURL        string
+	WorkSessionID     string
+	WorkSessionStatus string
+	CommandID         string
 	// FileSuggestion is the server's proposal to run the held command as a
 	// verified file instead; nil when the server made none.
 	FileSuggestion *FileExecutionSuggestion
@@ -240,7 +241,8 @@ type EventDetails struct {
 
 // CommandWorkSession is the work session a command detail names.
 type CommandWorkSession struct {
-	ID string `json:"id"`
+	ID     string `json:"id"`
+	Status string `json:"status,omitempty"`
 }
 
 type CommandRequest struct {
@@ -451,6 +453,9 @@ func (e *CommandRejectedError) ErrorGate() string { return e.Gate }
 // TriggeredPause reports that this hold paused its work session.
 func (e *PendingApprovalError) TriggeredPause() bool { return e.WorkSessionPaused }
 
+// CurrentWorkSessionStatus reports the latest known state, separate from the pause trigger.
+func (e *PendingApprovalError) CurrentWorkSessionStatus() string { return e.WorkSessionStatus }
+
 func (e *PendingApprovalError) ErrorFields() map[string]any {
 	if e.ConsoleURL == "" && e.WorkSessionID == "" && !e.WorkSessionPaused {
 		return nil
@@ -475,6 +480,14 @@ func (d EventDetails) WorkSessionID() string {
 		return d.WorkSession.ID
 	}
 	return d.FlatWorkSessionID
+}
+
+// WorkSessionStatus reads the current session status, empty when the server sends none.
+func (d EventDetails) WorkSessionStatus() string {
+	if d.WorkSession != nil {
+		return d.WorkSession.Status
+	}
+	return ""
 }
 
 func (e *RemoteCommandError) ErrorFields() map[string]any {

@@ -214,6 +214,64 @@ func TestPausedApprovalOutputKeepsPauseAndResumeGuidance(t *testing.T) {
 	}
 }
 
+func TestResumedApprovalKeepsTriggerWithoutResumeGuidance(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		logs bool
+		wait bool
+	}{
+		{name: "exec"},
+		{name: "logs", logs: true},
+		{name: "wait", wait: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := newHeldCommandServer(t, `,"work_session_paused":true,"work_session_id":"550e8400-e29b-41d4-a716-446655440000","work_session":{"id":"550e8400-e29b-41d4-a716-446655440000","status":"active"}`)
+			var stdout string
+			var code int
+			if tc.logs {
+				stdout, _, code = runExecLogsHelper(t, ts.URL, utils.OutputFormatJSON, assigneeJobID)
+			} else {
+				args := []string{"--output", "json"}
+				if tc.wait {
+					args = append(args, "--wait-approval", "1ms")
+				}
+				stdout, _, code = runExecHelper(t, ts.URL, append(args, "prod", "--", "sudo", "reboot")...)
+			}
+			assert.Equal(t, utils.ExitCodePendingApproval, code)
+			var got struct {
+				Status string         `json:"status"`
+				Server map[string]any `json:"server"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+			assert.Equal(t, utils.PendingApprovalStatus, got.Status)
+			assert.Equal(t, true, got.Server["work_session_paused"])
+			assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", got.Server["work_session_id"])
+			assert.NotContains(t, stdout, "Resume")
+			assert.NotContains(t, stdout, "The work session is paused")
+			assert.Contains(t, stdout, "runs automatically once approved")
+		})
+	}
+}
+
+func TestCurrentPauseGuidanceDoesNotRequireATrigger(t *testing.T) {
+	for _, name := range []string{"exec", "logs"} {
+		t.Run(name, func(t *testing.T) {
+			ts := newHeldCommandServer(t, `,"work_session":{"id":"550e8400-e29b-41d4-a716-446655440000","status":"paused"}`)
+			var stdout string
+			var code int
+			if name == "logs" {
+				stdout, _, code = runExecLogsHelper(t, ts.URL, utils.OutputFormatJSON, assigneeJobID)
+			} else {
+				stdout, _, code = runExecHelper(t, ts.URL, "--output", "json", "prod", "--", "sudo", "reboot")
+			}
+			assert.Equal(t, utils.ExitCodePendingApproval, code)
+			assert.Contains(t, stdout, "Resume")
+			assert.NotContains(t, stdout, `"work_session_paused"`)
+			assert.NotContains(t, stdout, "runs automatically once approved")
+		})
+	}
+}
+
 func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
 	ts := newApprovalDenialServer(denialLine("SUDO_APPROVAL_REQUIRED"))
 	defer ts.Close()

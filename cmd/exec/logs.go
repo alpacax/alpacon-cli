@@ -81,11 +81,10 @@ Run the command again later to check for completion.`,
 				pending := &event.PendingApprovalError{
 					WorkSessionPaused: details.WorkSessionPaused,
 					WorkSessionID:     details.WorkSessionID(),
+					WorkSessionStatus: details.WorkSessionStatus(),
 					ConsoleURL:        details.ConsoleURL,
 				}
-				if pending.WorkSessionPaused {
-					message = pausedApprovalMessage(assignee)
-				}
+				message = withSessionResumeGuidance(message, pending)
 				ios.PrintPendingApprovalWithError(
 					message,
 					requestID,

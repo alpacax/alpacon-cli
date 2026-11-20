@@ -1,6 +1,7 @@
 package event
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +19,8 @@ import (
 )
 
 const (
-	getEventURL = "/api/events/commands/"
+	getEventURL            = "/api/events/commands/"
+	approvalRefreshTimeout = time.Second
 
 	// Base tick utils.NextPollTick widens, for the poll behind a stream that may
 	// have lost the fin.
@@ -348,7 +350,11 @@ func GetCommandByID(ac *client.AlpaconClient, cmdID string) (EventDetails, error
 }
 
 func getCommandByPathID(ac *client.AlpaconClient, pathID api.PathID) (EventDetails, error) {
-	responseBody, err := ac.SendGetRequest(api.IDURL(getEventURL, pathID, "", nil))
+	return getCommandByPathIDWithContext(context.Background(), ac, pathID)
+}
+
+func getCommandByPathIDWithContext(ctx context.Context, ac *client.AlpaconClient, pathID api.PathID) (EventDetails, error) {
+	responseBody, err := ac.SendGetRequestWithContext(ctx, api.IDURL(getEventURL, pathID, "", nil))
 	if err != nil {
 		return EventDetails{}, err
 	}
@@ -833,7 +839,7 @@ func errorFromDetails(id api.PathID, d EventDetails) error {
 		return &AwaitingPurposeError{CommandID: id.String(), ExpiresAt: d.PurposeExpiresAt}
 	}
 	if IsAwaitingApprovalStatus(d.Status) {
-		return &PendingApprovalError{Username: d.Username, CommandID: id.String(), FileSuggestion: d.FileExecutionSuggestion, ScriptBodySuggestion: d.ScriptBodySuggestion, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID(), ApprovalLane: d.ApprovalLane, WorkSessionPaused: d.WorkSessionPaused}
+		return pendingApprovalFromDetails(id, d)
 	}
 	if d.IsRejected() {
 		rejected := d.Rejection()
@@ -914,13 +920,19 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID api.PathID, out io
 
 func pendingApprovalAfterTimeout(ac *client.AlpaconClient, cmdID api.PathID, details EventDetails, timeout error) error {
 	known := details.Status != ""
+	ctx, cancel := context.WithTimeout(context.Background(), approvalRefreshTimeout)
+	defer cancel()
 	// Refresh the metadata even when the wait ended before its first poll.
-	if refreshed, err := getCommandByPathID(ac, cmdID); err == nil {
+	if refreshed, err := getCommandByPathIDWithContext(ctx, ac, cmdID); err == nil {
 		details, known = refreshed, true
 	}
 	if known && !IsAwaitingApprovalStatus(details.Status) {
 		return commandPollError(cmdID, timeout)
 	}
+	return pendingApprovalFromDetails(cmdID, details)
+}
+
+func pendingApprovalFromDetails(cmdID api.PathID, details EventDetails) *PendingApprovalError {
 	return &PendingApprovalError{
 		CommandID:            cmdID.String(),
 		Username:             details.Username,
@@ -928,6 +940,7 @@ func pendingApprovalAfterTimeout(ac *client.AlpaconClient, cmdID api.PathID, det
 		ScriptBodySuggestion: details.ScriptBodySuggestion,
 		ConsoleURL:           details.ConsoleURL,
 		WorkSessionID:        details.WorkSessionID(),
+		WorkSessionStatus:    details.WorkSessionStatus(),
 		ApprovalLane:         details.ApprovalLane,
 		WorkSessionPaused:    details.WorkSessionPaused,
 	}
