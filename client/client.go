@@ -1552,6 +1552,10 @@ func codeSentence(code string) (sentence string, known bool) {
 		return "The server refused the command's environment: names must use letters, digits and underscores, values must be strings of at most 4096 characters, and at most 64 variables are allowed.", true
 	case utils.ApplicationSystemUserNotFound:
 		return "the service token's application cannot run as that account on that server—run as an account bound to the application or as its own account, and check that it is provisioned there", true
+	case "home_purge_removed":
+		return "Deleting a home directory is no longer supported. Delete the user, optionally archiving the home directory.", true
+	case "system_home_conflict":
+		return "The home directory belongs to a different UID. Ask a server administrator to resolve its ownership before retrying.", true
 	case utils.APINotFound:
 		return "the requested resource was not found", true
 	case utils.APIRateLimited:

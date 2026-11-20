@@ -1063,6 +1063,19 @@ func TestRunExecWithApprovalWait_StatusHoldAfterApprovalWarnsWithoutReentering(t
 		"a held job needs no re-run, and the pending text that follows says so")
 }
 
+func TestRemoteCommandOutcomeHomeDirectoryConflict(t *testing.T) {
+	t.Parallel()
+
+	ios, _, _ := utils.TestIOStreams()
+	stderrLine, exitCode := remoteCommandOutcome(ios, &event.RemoteCommandError{
+		ExitCode:   1,
+		ErrorPhase: "system_home_conflict",
+	})
+	assert.Equal(t, 1, exitCode)
+	assert.Equal(t, "Error: [system_home_conflict] the account could not be created because its home directory already belongs to another account\n"+
+		"Hint: Ask a server administrator to archive or clean up that directory.\n", stderrLine)
+}
+
 func TestRemoteCommandOutcomeFilePhaseHint(t *testing.T) {
 	t.Parallel()
 
