@@ -18,6 +18,7 @@ var phaseDescriptions = map[string]string{
 	"agent_timeout":                   "agent acknowledged the command but did not return a result in time",
 	"remote_command_exceeded_timeout": "remote command exceeded its execution timeout",
 	"client_timeout":                  "CLI gave up waiting for the server to report a result",
+	"system_home_conflict":            "the account could not be created because its home directory already belongs to another account",
 
 	// File lane: the agent refused to run a file execution request.
 	"file_hash_mismatch":    "the file changed after it was verified, so the agent refused to run it",
@@ -38,9 +39,10 @@ const (
 	genericFilePhaseHint        = "Run `alpacon exec --file` again; if it keeps failing, update the CLI and contact your workspace admin."
 )
 
-// phaseHints gives the next step for a file lane phase. Other phases have no
-// hint.
+// phaseHints gives the next step for phases with actionable guidance.
 var phaseHints = map[string]string{
+	"system_home_conflict": "Ask a server administrator to archive or clean up that directory.",
+
 	"file_hash_mismatch":    "The file changed after it was verified. Run `alpacon exec --file` again so it is verified again, adding `--from-server` to submit the copy now on the server; a standing approval only covers the unchanged file.",
 	"file_payload_invalid":  "Run `alpacon exec --file` again. If it keeps failing, update the CLI and the agent on the server.",
 	"file_open_failed":      "Check that the file exists on the server, is a regular file, and is readable by the agent, then run `alpacon exec --file` again. To write it from a local copy in the same run, use `alpacon exec --upload --file PATH --file-from LOCAL_PATH SERVER`, adding `--overwrite` to replace what is at PATH.",
