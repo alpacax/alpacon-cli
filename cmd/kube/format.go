@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+// rbacDriftHelp says what the RBAC drift column of 'kube ls' and row of
+// 'kube describe' mean.
+const rbacDriftHelp = `RBAC drift is degraded if the last check found bindings outside Alpacon that
+grant permissions beyond its baseline, clear if it found none, or unverified
+if there is no usable recent check. A blank means the server does not report it.`
+
 // formatJSONValue renders a free-form JSON field on one line; null or absent is blank.
 func formatJSONValue(raw json.RawMessage) string {
 	trimmed := bytes.TrimSpace(raw)

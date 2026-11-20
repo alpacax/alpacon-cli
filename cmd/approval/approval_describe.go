@@ -55,20 +55,13 @@ json to print the full raw response.`,
 			fe := fileExecutionOf(req)
 			evidence, placed := evidenceRows(req)
 			rows := append(describeRows(req, fe), evidence...)
-			var script string
-			var hasScript, scriptAltered bool
-			if fe != nil {
-				script, hasScript = fileExecutionScript(fe, placed)
-				if fe.Content != nil {
-					_, scriptAltered = sanitizeScript(*fe.Content)
-				}
-			}
 			if err := ios.PrintTable(rows); err != nil {
 				return err
 			}
-			if hasScript {
+			if fe != nil {
+				script, altered := fileExecutionScript(fe, placed)
 				_, _ = fmt.Fprintln(ios.Out)
-				if scriptAltered {
+				if altered {
 					// The warning stays on Out beside the script it is about, and
 					// ColorEnabled follows ErrOut, so it is written without color.
 					plain := *ios
@@ -201,17 +194,15 @@ func fileExecutionRows(fe *approvalapi.FileExecution) []describeRow {
 	return rows
 }
 
-// fileExecutionScript renders the script the approver is asked to clear. When
-// the server omits the content, only the SHA-256 above identifies the file, and
-// the text says so instead of showing an empty script. numbered prefixes each
-// line with its number, so the evidence line ranges can be found in it; the
-// empty line after a final newline is numbered too, since the server's ranges
-// count it.
-func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (string, bool) {
+// fileExecutionScript renders the script for approval. numbered prefixes line
+// numbers, including the final empty line, so evidence ranges can be found.
+// altered reports removals beyond CRLF normalization and is false for withheld
+// content.
+func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (script string, altered bool) {
 	if fe.Content == nil {
-		return "Script: not included in this response; the SHA-256 above identifies the file.", true
+		return "Script: not included in this response; the SHA-256 above identifies the file.", false
 	}
-	body, _ := sanitizeScript(*fe.Content)
+	body, altered := sanitizeScript(*fe.Content)
 	if numbered {
 		lines := strings.Split(body, "\n")
 		width := len(strconv.Itoa(len(lines)))
@@ -224,7 +215,7 @@ func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (string, 
 		}
 		body = strings.Join(lines, "\n")
 	}
-	return fmt.Sprintf("Script (%d bytes):\n%s", len(*fe.Content), body), true
+	return fmt.Sprintf("Script (%d bytes):\n%s", len(*fe.Content), body), altered
 }
 
 // sanitizeScript keeps tabs, since they are part of the script the request

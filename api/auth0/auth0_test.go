@@ -872,9 +872,7 @@ func TestFetchAuthEnv_ErrorCarriesTheStatus(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(unavailable.Close)
-	closed := httptest.NewServer(http.NotFoundHandler())
-	unreachable := closed.URL + "/team404"
-	closed.Close()
+	unreachable := testutil.NewDroppingServer(t).URL + "/team404"
 	tests := []struct {
 		name       string
 		url        string

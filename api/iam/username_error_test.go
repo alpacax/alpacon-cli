@@ -1,9 +1,16 @@
 package iam
 
 import (
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -124,4 +131,92 @@ func TestUsernameFailure(t *testing.T) {
 		require.Error(t, stop)
 		assert.Equal(t, hint, utils.RefusalHint(stop))
 	})
+}
+
+func TestPromptUsername_EndsOnceStopped(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		// lines are what successive reads return.
+		lines []string
+		// stopAtRead stops the caller during that read (from 1); 0 never stops.
+		stopAtRead int
+		// stopAtStart stops the caller before the prompt asks at all.
+		stopAtStart bool
+		// noStopCheck passes no stop function, as HandleUsernameRequired does.
+		noStopCheck bool
+		// firstRefusal makes the first POST answer 400 with this code.
+		firstRefusal string
+		// stopOnRefusal stops the caller when that refusal is answered.
+		stopOnRefusal bool
+		wantErr       error
+		wantReads     int
+		wantPosts     int32
+	}{
+		{name: "running", lines: []string{"alice"}, wantReads: 1, wantPosts: 1},
+		{name: "no stop check", lines: []string{"alice"}, noStopCheck: true, wantReads: 1, wantPosts: 1},
+		{name: "empty line asks again", lines: []string{"", "alice"}, wantReads: 2, wantPosts: 1},
+		{name: "stopped before the prompt", lines: []string{"alice"}, stopAtStart: true, wantErr: ErrUsernameSetupStopped},
+		{name: "stopped during the read", lines: []string{"alice"}, stopAtRead: 1, wantErr: ErrUsernameSetupStopped, wantReads: 1},
+		{name: "empty line after a stop", lines: []string{""}, stopAtRead: 1, wantErr: ErrUsernameSetupStopped, wantReads: 1},
+		{name: "stopped after a retryable refusal", lines: []string{"alice", "bob"}, firstRefusal: codeUsernameInUse,
+			stopOnRefusal: true, wantErr: ErrUsernameSetupStopped, wantReads: 1, wantPosts: 1},
+		{name: "retryable refusal asks again", lines: []string{"alice", "bob"}, firstRefusal: codeUsernameInUse,
+			wantReads: 2, wantPosts: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var stopped atomic.Bool
+			stopped.Store(tt.stopAtStart)
+			var posts atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != usernameURL {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if posts.Add(1) == 1 && tt.firstRefusal != "" {
+					if tt.stopOnRefusal {
+						stopped.Store(true)
+					}
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = fmt.Fprintf(w, `{"code":%q}`, tt.firstRefusal)
+					return
+				}
+				_, _ = io.WriteString(w, `{"username":"alice"}`)
+			}))
+			t.Cleanup(ts.Close)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			reads := 0
+			read := func() (string, error) {
+				reads++
+				if reads == tt.stopAtRead {
+					stopped.Store(true)
+				}
+				if reads > len(tt.lines) {
+					t.Errorf("read %d past the scripted lines", reads)
+					return "", errors.New("no more input")
+				}
+				return tt.lines[reads-1], nil
+			}
+			stop := stopped.Load
+			if tt.noStopCheck {
+				stop = nil
+			}
+
+			response, err := promptUsername(ac, read, stop)
+
+			assert.Equal(t, tt.wantReads, reads)
+			assert.Equal(t, tt.wantPosts, posts.Load())
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+				assert.Nil(t, response)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, "alice", response.Username)
+		})
+	}
 }

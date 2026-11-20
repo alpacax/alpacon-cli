@@ -67,6 +67,7 @@ func toAttributes(cluster ClusterDetail) ClusterAttributes {
 		NodeCount:    Optional[int]{Value: cluster.NodeCount},
 		Connected:    cluster.IsConnected,
 		Enabled:      cluster.Enabled,
+		RBACDrift:    Optional[string]{Value: cluster.RBACDrift},
 		AgentVersion: cluster.AgentVersion,
 	}
 }

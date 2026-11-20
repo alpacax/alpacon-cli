@@ -74,8 +74,8 @@ func TestFileExecutionRows(t *testing.T) {
 	assert.Equal(t, "14", m["Reuse days if approved"])
 	assert.NotContains(t, m, "Run as group")
 
-	script, ok := fileExecutionScript(fe, false)
-	require.True(t, ok)
+	script, altered := fileExecutionScript(fe, false)
+	assert.False(t, altered, "clean script must not be marked altered")
 	assert.Contains(t, script, "echo hello")
 }
 
@@ -92,8 +92,8 @@ func TestFileExecutionScriptWithheld(t *testing.T) {
 	t.Parallel()
 	fe := fileExecutionOf(decodeFixture(t, `{"metadata":{"command":{"file_execution":{"content":null,"sha256":"h","path":"/p","interpreter":"/bin/sh"}}}}`))
 	require.NotNil(t, fe)
-	script, ok := fileExecutionScript(fe, false)
-	require.True(t, ok)
+	script, altered := fileExecutionScript(fe, false)
+	assert.False(t, altered, "withheld script must not be marked altered")
 	assert.Contains(t, script, "not included")
 	assert.Contains(t, script, "SHA-256")
 }
@@ -106,21 +106,24 @@ func TestFileExecutionStripsEscapes(t *testing.T) {
 		assert.NotContains(t, r.Value, "\x1b")
 		assert.NotContains(t, r.Value, "\u202e")
 	}
-	script, _ := fileExecutionScript(fe, false)
+	script, altered := fileExecutionScript(fe, false)
+	assert.True(t, altered, "stripped escapes must mark the script altered")
 	assert.NotContains(t, script, "\x1b")
 }
 
 func TestNumberedFileExecutionScript(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		content string
-		want    string
+		name        string
+		content     string
+		want        string
+		wantAltered bool
 	}{
 		{
-			name:    "escapes are stripped without shifting a line",
-			content: "echo \x1b[2Kgone\necho \u009bred\nok \u202edenied",
-			want:    "Script (37 bytes):\n1 | echo gone\n2 | echo red\n3 | ok denied",
+			name:        "escapes are stripped without shifting a line",
+			content:     "echo \x1b[2Kgone\necho \u009bred\nok \u202edenied",
+			want:        "Script (37 bytes):\n1 | echo gone\n2 | echo red\n3 | ok denied",
+			wantAltered: true,
 		},
 		{
 			name:    "numbers are padded to the widest",
@@ -131,8 +134,8 @@ func TestNumberedFileExecutionScript(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			script, ok := fileExecutionScript(&approvalapi.FileExecution{Content: &tt.content}, true)
-			require.True(t, ok)
+			script, altered := fileExecutionScript(&approvalapi.FileExecution{Content: &tt.content}, true)
+			assert.Equal(t, tt.wantAltered, altered)
 			assert.Equal(t, tt.want, script)
 		})
 	}
@@ -680,8 +683,8 @@ func TestFileExecutionScriptKeepsTabs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			script, ok := fileExecutionScript(&approvalapi.FileExecution{Content: &content}, tt.numbered)
-			require.True(t, ok)
+			script, altered := fileExecutionScript(&approvalapi.FileExecution{Content: &content}, tt.numbered)
+			assert.False(t, altered, "tabs must not mark the script altered")
 			assert.Equal(t, tt.want, script)
 		})
 	}
@@ -721,6 +724,19 @@ func scriptRequest(t *testing.T, content string) string {
 	return `{"id":"550e8400-e29b-41d4-a716-446655440000","request_type":"command_exec","status":"pending",` +
 		`"metadata":{"command":{"line":"/bin/sh /tmp/i.sh","file_execution":{"content":` + string(encoded) +
 		`,"sha256":"abc","path":"/tmp/i.sh","interpreter":"/bin/sh","args":[]}}}}`
+}
+
+func TestApprovalDescribeNamesAWithheldScriptWithoutWarning(t *testing.T) {
+	t.Parallel()
+	body := `{"id":"550e8400-e29b-41d4-a716-446655440000","request_type":"command_exec","status":"pending",` +
+		`"metadata":{"command":{"line":"/bin/sh /tmp/i.sh","file_execution":{"content":null,` +
+		`"sha256":"abc","path":"/tmp/i.sh","interpreter":"/bin/sh","args":[]}}}}`
+
+	stdout, stderr := runDescribeStreams(t, body, nil)
+
+	assert.Contains(t, stdout, "\n\nScript: not included in this response; the SHA-256 above identifies the file.\n")
+	assert.NotContains(t, stdout, scriptAlteredWarning)
+	assert.NotContains(t, stderr, scriptAlteredWarning)
 }
 
 func TestApprovalDescribeDoesNotWarnAboutACleanScript(t *testing.T) {

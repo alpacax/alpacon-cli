@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
@@ -50,8 +51,10 @@ out of the kubeconfig.
 
 When the workspace requires MFA for Kubernetes exec and the WorkSession has
 the kube_exec scope, the command prints an MFA link, waits up to 3 minutes for
-you to finish it in the browser, and then opens the session. The kubeconfig is
-not locked while it waits.
+you to finish it in the browser, and then opens the session. When your account
+has no username yet, it asks for one, sets it, and then opens the session; a
+non-interactive run exits 1 and names 'alpacon username set <name>'. The
+kubeconfig is not locked while it waits.
 
 The kubeconfig file is the one 'kubectl config' itself writes: --kubeconfig,
 else the first existing file in KUBECONFIG (the last one listed when none
@@ -100,13 +103,17 @@ type kubeConfigResult struct {
 }
 
 // clusterLookupError and sessionCreateError mark the two requests whose
-// failures the command answers in its own way.
+// failures the command answers in its own way. usernameErr is set when the
+// username setup a refusal asked for failed; that failure is what is reported.
 type clusterLookupError struct{ err error }
 
 func (e *clusterLookupError) Error() string { return e.err.Error() }
 func (e *clusterLookupError) Unwrap() error { return e.err }
 
-type sessionCreateError struct{ err error }
+type sessionCreateError struct {
+	err         error
+	usernameErr error
+}
 
 func (e *sessionCreateError) Error() string { return e.err.Error() }
 func (e *sessionCreateError) Unwrap() error { return e.err }
@@ -179,7 +186,7 @@ func holdKubeconfig(ios *utils.IOStreams, path string, quit func(msg string)) (*
 	if err != nil {
 		return nil, err
 	}
-	interrupt := watchInterrupt(ios, "Interrupted; stopping once the kube session is closed. Press Ctrl+C again to quit now.", func() {
+	interrupt := watchInterrupt(ios, "Interrupted. Stopping when it is safe to do so. Press Ctrl+C again to quit now.", func() {
 		hold.close()
 		quit(interruptedMessage)
 	})
@@ -202,12 +209,12 @@ const relockTimeout = 5 * time.Second
 
 const relockTick = 100 * time.Millisecond
 
-// kubeconfigHold is kubectl's write lock on one kubeconfig. The MFA wait of a
-// session open lets go of it, so kubectl is not locked out of the file while
-// the user is in the browser, and takes it again, rereading the file, once
-// the session is open. Its methods are safe to call from the Ctrl+C watcher
-// and the command at once; the command takes the editor it writes through
-// once, with take.
+// kubeconfigHold is kubectl's write lock on one kubeconfig. A session open
+// lets go of it for the MFA wait and the username prompt, so kubectl is not
+// locked out of the file while the user answers, and takes it again,
+// rereading the file, once the session is open. Its methods are safe to call
+// from the Ctrl+C watcher and the command at once; the command takes the
+// editor it writes through once, with take.
 type kubeconfigHold struct {
 	path string
 
@@ -335,14 +342,24 @@ func kubeConfigError(err error, clusterName, workSessionID string) error {
 	return kubeSessionError(err, clusterName, workSessionID, "")
 }
 
-// kubeSessionError is openKubeSession's failure, an envelope under operation: a gate refusal exits 3, a
-// refusal the server names gets its hint, and anything else says the kubeconfig was not written.
+// kubeSessionError is openKubeSession's failure, an envelope under operation: a failed username setup
+// says why, a gate refusal exits 3, a refusal the server names gets its hint, and anything else says
+// the kubeconfig was not written.
 func kubeSessionError(err error, clusterName, workSessionID, operation string) error {
 	fail := func(err error, format string, args ...any) error {
 		return utils.NewEnvelopeExitError(operation, err, format, args...)
 	}
 	var createErr *sessionCreateError
 	if errors.As(err, &createErr) {
+		if createErr.usernameErr != nil {
+			// The setup's own refusal names the code when it carries one; otherwise the account
+			// has no username, which an older server answers kube_session_principal_not_supported.
+			cause := errors.Join(createErr.usernameErr, createErr.err)
+			if utils.StructuredErrorCode(createErr.usernameErr) == "" {
+				cause = errors.Join(usernameUnsetError{}, createErr.usernameErr, createErr.err)
+			}
+			return fail(cause, "Failed to open a kube session: %s.", createErr.usernameErr)
+		}
 		if gateErr := utils.WorkSessionExitError(createErr.err, utils.OperationKube, clusterName, config.ResolveAuthMethod(), workSessionID); gateErr != nil {
 			return gateErr
 		}
@@ -353,6 +370,14 @@ func kubeSessionError(err error, clusterName, workSessionID, operation string) e
 	}
 	return fail(err, "The kubeconfig was not written: %s.", err)
 }
+
+// usernameUnsetError gives a failed username setup the error_code
+// user_username_required, whichever code the open was refused with.
+type usernameUnsetError struct{}
+
+func (usernameUnsetError) Error() string       { return "the account has no username" }
+func (usernameUnsetError) ErrorCode() string   { return utils.UsernameRequired }
+func (usernameUnsetError) ErrorSource() string { return "" }
 
 // kubeSessionErrorHint says what to do about a refusal the server names with
 // a kube-session code, or returns "" for any other error.
@@ -369,9 +394,9 @@ func kubeSessionErrorHint(err error, clusterName string) string {
 	case utils.KubeSessionChannelOpenFailed:
 		return "the cluster's agent did not accept the session, so it was closed; try again"
 	case utils.KubeSessionPrincipalNotSupported:
-		return "this account has no user name a kube session can act as; log in as a user"
+		return "this account's username cannot be used as a kube session's identity: it is unset, or it is one the server refuses, such as a name starting with 'system:'"
 	case utils.ClusterRBACDrift:
-		return fmt.Sprintf("cluster %s has RBAC bindings outside Alpacon that grant sessions more than Alpacon does, and the workspace policy refuses new sessions on it until a cluster admin removes them", clusterName)
+		return fmt.Sprintf("cluster %s has RBAC bindings outside Alpacon that grant sessions more than Alpacon does, and the workspace policy refuses new sessions on it until a cluster admin removes them. The cluster's agent logs an external_grant line for each such binding so the cluster admin can find them there", clusterName)
 	}
 	return ""
 }
@@ -436,16 +461,14 @@ func openKubeSession(ac *client.AlpaconClient, hold *kubeconfigHold, opts kubeCo
 		return fmt.Errorf("%w; the kube session was closed, so run the command again", reason)
 	}
 
-	// Only a lock let go for the MFA step-up is opened again here, so any
+	// Only a lock let go for MFA or username setup is opened again here, so any
 	// error but errHoldClosed comes from taking it back.
 	editor, err := hold.take(relockTimeout)
 	if err != nil {
 		if errors.Is(err, errHoldClosed) {
 			return nil, discard(errInterrupted)
 		}
-		// The MFA stays credited to this client for the workspace's window,
-		// so the run the message asks for opens without it.
-		return nil, discard(fmt.Errorf("MFA went through, but the kubeconfig could not be opened again: %w", err))
+		return nil, discard(fmt.Errorf("the kubeconfig could not be opened again: %w", err))
 	}
 
 	if opts.isInterrupted() {
@@ -504,46 +527,88 @@ func openKubeSession(ac *client.AlpaconClient, hold *kubeconfigHold, opts kubeCo
 	}, nil
 }
 
+// handleKubeUsernameRequired is a test seam; a test that replaces it stays serial.
+var handleKubeUsernameRequired = iam.HandleUsernameRequiredUnless
+
 // createKubeSession opens the session, running the MFA step-up and the wait
-// for it when the workspace asks for MFA to open a session that may exec into
-// pods. The link names no server, since a kube session has a cluster. The
-// kubeconfig lock is let go for the step-up and the wait, and the caller's
-// take opens it again. Whatever ends the wait, a refusal is returned as a
-// sessionCreateError and a first Ctrl+C as errInterrupted.
+// for it, and the username prompt once, in whichever order the server asks.
+// The MFA link names no server, since a kube session has a cluster. The
+// kubeconfig lock is let go for both, and the caller's take opens it again.
+// A refusal is returned as a sessionCreateError and a first Ctrl+C as
+// errInterrupted.
 func createKubeSession(ac *client.AlpaconClient, hold *kubeconfigHold, opts kubeConfigOptions, req kubernetes.KubeSessionCreateRequest) (*kubernetes.KubeSessionResponse, error) {
-	session, err := kubernetes.CreateSession(ac, req)
-	if err == nil {
-		return session, nil
-	}
-	callbacks := mfa.WorkspaceErrorCallbacks(ac, func() error {
+	var session *kubernetes.KubeSessionResponse
+	// refusalCode is read off the create's own tagged error, not off what
+	// HandleCommonErrors returns, which can carry the MFA link lookup's code.
+	var refusalCode string
+	create := func() error {
+		refusalCode = ""
 		// Untagged, so the wait ends here instead of opening a session the
 		// interrupt would only close again.
 		if opts.isInterrupted() {
 			return errInterrupted
 		}
-		created, err := kubernetes.CreateSession(ac, req)
-		if err == nil {
-			session = created
+		var err error
+		session, err = kubernetes.CreateSession(ac, req)
+		if utils.IsSubmissionError(err) {
+			refusalCode = utils.StructuredErrorCode(err)
 		}
 		return err
-	})
-	// A first Ctrl+C during the refused create stops here, before a link is
-	// fetched and a browser opened for a wait that would end anyway.
-	if utils.StructuredErrorCode(err) == utils.AuthMFARequired && opts.isInterrupted() {
-		return nil, errInterrupted
 	}
+	callbacks := mfa.WorkspaceErrorCallbacks(ac, create)
 	stepUp := callbacks.OnMFARequired
 	callbacks.OnMFARequired = func(serverName string) error {
+		// A first Ctrl+C stops here, before a link is fetched and a browser
+		// opened for a wait that would end anyway.
+		if opts.isInterrupted() {
+			return errInterrupted
+		}
 		hold.letGo()
 		return stepUp(serverName)
 	}
-	if err = utils.HandleCommonErrors(err, "", callbacks); err != nil {
+	open := func() error {
+		return utils.HandleCommonErrors(create(), "", callbacks)
+	}
+
+	err := open()
+	// The MFA wait ends as soon as a create returns a username refusal.
+	if err != nil && needsUsername(ac, refusalCode) {
+		if opts.isInterrupted() {
+			return nil, errInterrupted
+		}
+		hold.letGo()
+		_, usernameErr := handleKubeUsernameRequired(ac, opts.isInterrupted)
+		if opts.isInterrupted() {
+			return nil, errInterrupted
+		}
+		if usernameErr != nil {
+			return nil, &sessionCreateError{err: err, usernameErr: usernameErr}
+		}
+		err = open()
+	}
+	if err != nil {
 		if errors.Is(err, errInterrupted) {
 			return nil, errInterrupted
 		}
 		return nil, &sessionCreateError{err: err}
 	}
 	return session, nil
+}
+
+// needsUsername reports whether a session open refused with code asks for a
+// username the account can still set. An older server answers a null
+// username with kube_session_principal_not_supported, the code it also gives
+// a name it refuses, so the account is read once to tell the two apart; a
+// failed read keeps the refusal.
+func needsUsername(ac *client.AlpaconClient, code string) bool {
+	switch code {
+	case utils.UsernameRequired:
+		return true
+	case utils.KubeSessionPrincipalNotSupported:
+		unset, err := iam.CurrentUsernameUnset(ac)
+		return err == nil && unset
+	}
+	return false
 }
 
 // checkProxyURL reports whether proxyURL is plain http, and refuses one that
