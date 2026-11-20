@@ -15,13 +15,14 @@ func TestUserDeleteArchiveHome(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		flags     []string
-		wantQuery string
+		name        string
+		flags       []string
+		wantQuery   string
+		wantWarning bool
 	}{
 		{name: "omitted"},
 		{name: "explicit false", flags: []string{"--archive-home=false"}},
-		{name: "accepted by a server that ignores the query", flags: []string{"--archive-home"}, wantQuery: "archive_home=true"},
+		{name: "accepted by a server that ignores the query", flags: []string{"--archive-home"}, wantQuery: "archive_home=true", wantWarning: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -31,6 +32,12 @@ func TestUserDeleteArchiveHome(t *testing.T) {
 			_, stderr, code := cmdtest.RunCaptured(build, append([]string{"alice", "-y"}, tt.flags...)...)
 			assert.Equal(t, 0, code, stderr)
 			assert.Contains(t, stderr, "User deleted: alice")
+			const warning = "Home archiving was requested. Verify the move on the affected servers before reusing the username."
+			if tt.wantWarning {
+				assert.Contains(t, stderr, warning)
+			} else {
+				assert.NotContains(t, stderr, warning)
+			}
 		})
 	}
 }
@@ -38,14 +45,22 @@ func TestUserDeleteArchiveHome(t *testing.T) {
 func TestUserDeleteCodedErrors(t *testing.T) {
 	t.Parallel()
 
-	for _, errorCode := range []string{"home_purge_removed", "system_home_conflict"} {
-		t.Run(errorCode, func(t *testing.T) {
+	tests := []struct {
+		errorCode string
+		guidance  string
+	}{
+		{"home_purge_removed", "Delete the user, optionally archiving the home directory."},
+		{"system_home_conflict", "Ask a server administrator to resolve its ownership before retrying."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.errorCode, func(t *testing.T) {
 			t.Parallel()
 
-			build := userDeleteTestCommand(t, "archive_home=true", http.StatusBadRequest, `{"code":"`+errorCode+`"}`)
+			build := userDeleteTestCommand(t, "archive_home=true", http.StatusBadRequest, `{"code":"`+tt.errorCode+`"}`)
 			_, stderr, code := cmdtest.RunJSON(build, "alice", "-y", "--archive-home")
 			assert.Equal(t, utils.ExitCodeGeneralError, code)
-			assert.Contains(t, stderr, `"error_code":"`+errorCode+`"`)
+			assert.Contains(t, stderr, `"error_code":"`+tt.errorCode+`"`)
+			assert.Contains(t, stderr, tt.guidance)
 		})
 	}
 }
