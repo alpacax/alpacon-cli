@@ -77,6 +77,9 @@ func TestSudoWarningCommandOutput(t *testing.T) {
 						SudoPolicies []map[string]json.RawMessage `json:"sudo_policies"`
 					}
 					assert.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+					if r.Method == http.MethodPost && assert.Len(t, request.SudoPolicies, 1) {
+						assert.JSONEq(t, `["python3 *"]`, string(request.SudoPolicies[0]["commands"]))
+					}
 					for _, policy := range request.SudoPolicies {
 						assert.NotContains(t, policy, "broad_patterns")
 					}
