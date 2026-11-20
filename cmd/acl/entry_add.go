@@ -16,7 +16,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newEntryAddCmd(ios *utils.IOStreams) *cobra.Command {
+func newEntryAddCmd(deps *ledgerDeps, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add",
 		Short: "Pre-approve a command for a service token",
@@ -52,7 +52,7 @@ listed and can be revoked.`,
 
   alpacon acl entry add --file entries.json`,
 		Args: cobra.NoArgs,
-		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error { return runEntryAdd(ios, cmd, args) }),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error { return runEntryAdd(deps, ios, cmd, args) }),
 	}
 	cmd.Flags().String("token", "", "Service token the entry pre-approves the command for (name or ID)")
 	cmd.Flags().StringP("command", "c", "", "Command pattern to pre-approve (supports * wildcard)")
@@ -65,7 +65,7 @@ listed and can be revoked.`,
 	return cmd
 }
 
-func runEntryAdd(ios *utils.IOStreams, cmd *cobra.Command, args []string) error {
+func runEntryAdd(deps *ledgerDeps, ios *utils.IOStreams, cmd *cobra.Command, args []string) error {
 	file, _ := cmd.Flags().GetString("file")
 
 	var drafts []entryDraft
@@ -78,18 +78,18 @@ func runEntryAdd(ios *utils.IOStreams, cmd *cobra.Command, args []string) error 
 		if err != nil {
 			return utils.NewExitError("Failed to read %s: %s.", file, err)
 		}
-		if drafts, err = parseEntryFile(data); err != nil {
+		if drafts, err = parseEntryFile(data, deps.now()); err != nil {
 			return utils.NewExitError("Failed to read %s: %s.", file, err)
 		}
 	} else {
 		var err error
-		flagged, err = entryFromFlags(cmd)
+		flagged, err = entryFromFlags(cmd, deps.now())
 		if err != nil {
 			return err
 		}
 	}
 
-	session, err := newLedgerSessionWithCheck(ios, func(s *ledgerSession) error {
+	session, err := deps.newLedgerSessionWithCheck(ios, func(s *ledgerSession) error {
 		if flagged != nil {
 			request, err := flagged.resolve(s)
 			if err != nil {
@@ -142,7 +142,7 @@ type flagEntry struct {
 }
 
 // entryFromFlags reads the one entry the flags describe and refuses malformed values before a signer request.
-func entryFromFlags(cmd *cobra.Command) (*flagEntry, error) {
+func entryFromFlags(cmd *cobra.Command, now time.Time) (*flagEntry, error) {
 	tokenRef, _ := cmd.Flags().GetString("token")
 	command, _ := cmd.Flags().GetString("command")
 	username, _ := cmd.Flags().GetString("username")
@@ -157,7 +157,7 @@ func entryFromFlags(cmd *cobra.Command) (*flagEntry, error) {
 			return nil, utils.NewUsageExitError("--%s is required (or pass --file).", required.flag)
 		}
 	}
-	if err := validateExpiry(expiresAt); err != nil {
+	if err := validateExpiry(expiresAt, now); err != nil {
 		return nil, utils.NewUsageExitError("%s", err)
 	}
 	if err := validateServerRefs(cmd.Flags().Changed("server"), serverRefs); err != nil {
@@ -249,9 +249,9 @@ func (s *ledgerSession) bindApplicationAccounts(entries []entryDraft, fileMode b
 	return nil
 }
 
-// validateExpiry refuses an unreadable time and one not in the future, which
+// validateExpiry refuses an unreadable time and one not after now, which
 // would issue an entry that never matches.
-func validateExpiry(expiresAt string) error {
+func validateExpiry(expiresAt string, now time.Time) error {
 	if expiresAt == "" {
 		return nil
 	}
@@ -259,7 +259,7 @@ func validateExpiry(expiresAt string) error {
 	if err != nil {
 		return fmt.Errorf("--expires-at must be an RFC 3339 time such as 2027-01-15T10:00:00Z, not %q", expiresAt)
 	}
-	if !parsed.After(now()) {
+	if !parsed.After(now) {
 		return fmt.Errorf("--expires-at %s is not in the future", expiresAt)
 	}
 	return nil
@@ -280,7 +280,7 @@ type fileEntry struct {
 
 // validate refuses what the flags would refuse. server_ids is required, so
 // covering every server is written as [] on purpose, never by omission.
-func (item *fileEntry) validate() error {
+func (item *fileEntry) validate(now time.Time) error {
 	item.PrincipalID = strings.TrimSpace(item.PrincipalID)
 	item.CommandPattern = strings.TrimSpace(item.CommandPattern)
 	switch {
@@ -298,12 +298,12 @@ func (item *fileEntry) validate() error {
 			return errEmptyServerScope
 		}
 	}
-	return validateExpiry(item.ExpiresAt)
+	return validateExpiry(item.ExpiresAt, now)
 }
 
 // parseEntryFile reads an --file batch. Unknown fields are refused, so a
 // misspelled one is not silently dropped and the entry issued wider than meant.
-func parseEntryFile(data []byte) ([]entryDraft, error) {
+func parseEntryFile(data []byte, now time.Time) ([]entryDraft, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 
@@ -322,7 +322,7 @@ func parseEntryFile(data []byte) ([]entryDraft, error) {
 
 	entries := make([]entryDraft, 0, len(items))
 	for i, item := range items {
-		if err := item.validate(); err != nil {
+		if err := item.validate(now); err != nil {
 			return nil, fmt.Errorf("entry %d: %w", i, err)
 		}
 		username, err := parseAccountField(item.Username, i, "username")

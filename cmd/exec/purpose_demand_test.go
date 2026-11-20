@@ -158,17 +158,19 @@ func TestExecLogsAwaitingPurposeExits7(t *testing.T) {
 // demand window and spend the command's single chance on a wait, though the answer was this
 // caller's to give.
 func TestRunExecWithApprovalWait_DoesNotWaitOnAPurposeDemand(t *testing.T) {
+	// Serial: the zero wait counts the local signal's wait for its state-file lock, which a
+	// parallel neighbour's signal holds.
 	synctest.Test(t, func(t *testing.T) {
-		_ = stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+		deps, _ := approvalWaitDeps(10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 		demand := &event.AwaitingPurposeError{CommandID: "cmd-1"}
 		calls := 0
-		runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+		deps.runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 			calls++
 			return demand
 		}
 
 		start := time.Now()
-		err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+		err := deps.runExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
 
 		require.ErrorIs(t, err, demand)
 		assert.Equal(t, 1, calls, "a purpose demand must not be retried inside the wait loop")

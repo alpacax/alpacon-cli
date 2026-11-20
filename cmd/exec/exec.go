@@ -26,6 +26,11 @@ import (
 type clientFactory = func() (*client.AlpaconClient, error)
 
 func NewExecCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return newExecCmd(newExecDeps(), newClient, ios)
+}
+
+// newExecCmd is NewExecCmd on the dependencies deps holds.
+func newExecCmd(deps *execDeps, newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "exec [flags] [USER@]SERVER [--] [COMMAND...]", // [flags] stays first: words after SERVER go to the remote command
 		Short: "Execute a command on a remote server",
@@ -273,7 +278,7 @@ This is client guidance; personal-token enforcement depends on the server versio
 				return utils.NewUsageExitError("You must specify a command to execute, or a script with --file.")
 			}
 
-			return RemoteExec(ios, newClient, ios.Out, ios.ErrOut, parsed)
+			return deps.remoteExec(ios, newClient, ios.Out, ios.ErrOut, parsed)
 		}),
 	}
 	cmd.AddCommand(newListCommand(newClient, ios), newLogsCommand(newClient, ios), newPurposeCommand(newClient, ios))
@@ -283,6 +288,11 @@ This is client guidance; personal-token enforcement depends on the server versio
 // RemoteExec is the shared post-parse execution path for exec and websh command mode, returning
 // the failure as a utils.ExitError. Requires Server, Command or File, and the parsed --output applied.
 func RemoteExec(ios *utils.IOStreams, newClient clientFactory, stdout, stderr io.Writer, parsed RemoteExecArgs) error {
+	return newExecDeps().remoteExec(ios, newClient, stdout, stderr, parsed)
+}
+
+// remoteExec is RemoteExec on the dependencies d holds.
+func (d *execDeps) remoteExec(ios *utils.IOStreams, newClient clientFactory, stdout, stderr io.Writer, parsed RemoteExecArgs) error {
 	// A local script is read before any network call, so a missing or oversized file fails here;
 	// a --from-server script is read once the client exists.
 	var file *event.FileExecution
@@ -377,9 +387,9 @@ func RemoteExec(ios *utils.IOStreams, newClient clientFactory, stdout, stderr io
 	}
 
 	if file != nil {
-		err = RunFileExecWithApprovalWait(ios, alpaconClient, parsed.Server, *file, parsed.Username, parsed.Groupname, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
+		err = d.runFileExecWithApprovalWait(ios, alpaconClient, parsed.Server, *file, parsed.Username, parsed.Groupname, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
 	} else {
-		err = RunExecWithApprovalWait(ios, alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
+		err = d.runExecWithApprovalWait(ios, alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
 	}
 	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
 		return exitErr // the MFA failure carries the lookup's error, which the classifiers below would read as a refusal

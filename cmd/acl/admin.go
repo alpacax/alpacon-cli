@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newAdminCmd(ios *utils.IOStreams) *cobra.Command {
+func newAdminCmd(deps *ledgerDeps, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "admin",
 		Short: "Manage Command ACL admins",
@@ -21,14 +21,14 @@ revoke the last one, so grant another admin first.`,
 		},
 	}
 	cmd.AddCommand(
-		newAdminListCmd(ios),
-		newAdminGrantCmd(ios),
-		newAdminRevokeCmd(ios),
+		newAdminListCmd(deps, ios),
+		newAdminGrantCmd(deps, ios),
+		newAdminRevokeCmd(deps, ios),
 	)
 	return cmd
 }
 
-func newAdminListCmd(ios *utils.IOStreams) *cobra.Command {
+func newAdminListCmd(deps *ledgerDeps, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -36,7 +36,7 @@ func newAdminListCmd(ios *utils.IOStreams) *cobra.Command {
 		Example: `  alpacon acl admin ls`,
 		Args:    cobra.NoArgs,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			session, err := openLedger(ios)
+			session, err := deps.openLedger(ios)
 			if err != nil {
 				return err
 			}
@@ -49,7 +49,7 @@ func newAdminListCmd(ios *utils.IOStreams) *cobra.Command {
 	}
 }
 
-func newAdminGrantCmd(ios *utils.IOStreams) *cobra.Command {
+func newAdminGrantCmd(deps *ledgerDeps, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "grant SUBJECT",
 		Short: "Grant the Command ACL admin role",
@@ -64,7 +64,7 @@ machine identity cannot hold it.`,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 			email, _ := cmd.Flags().GetString("email")
 
-			session, err := openLedger(ios)
+			session, err := deps.openLedger(ios)
 			if err != nil {
 				return err
 			}
@@ -80,7 +80,7 @@ machine identity cannot hold it.`,
 	return cmd
 }
 
-func newAdminRevokeCmd(ios *utils.IOStreams) *cobra.Command {
+func newAdminRevokeCmd(deps *ledgerDeps, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "revoke ADMIN",
 		Short: "Revoke the Command ACL admin role",
@@ -95,7 +95,7 @@ leave nobody able to manage the workspace's pre-approved commands.`,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 			yes, _ := cmd.Flags().GetBool("yes")
 
-			session, err := openLedger(ios)
+			session, err := deps.openLedger(ios)
 			if err != nil {
 				return err
 			}

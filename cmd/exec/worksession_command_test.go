@@ -75,6 +75,12 @@ func TestExecCommandWorkSessionGateExits3WithJSONDiagnostic(t *testing.T) {
 // stay serial. An empty outputFormat leaves the one the command line chooses.
 func runInProcess(t *testing.T, workspaceURL, sub, outputFormat string, args []string) (stdout, stderr string, exitCode int) {
 	t.Helper()
+	return runInProcessOn(t, newExecDeps(), workspaceURL, sub, outputFormat, args)
+}
+
+// runInProcessOn is runInProcess on the dependencies deps holds.
+func runInProcessOn(t *testing.T, deps *execDeps, workspaceURL, sub, outputFormat string, args []string) (stdout, stderr string, exitCode int) {
+	t.Helper()
 	home := t.TempDir()
 	writeExecCommandTestConfig(t, home, workspaceURL)
 	t.Setenv("HOME", home)
@@ -87,7 +93,7 @@ func runInProcess(t *testing.T, workspaceURL, sub, outputFormat string, args []s
 	}
 	event.CommandPollTick = 10 * time.Millisecond
 
-	root := NewExecCmd(testClientFactory(workspaceURL), utils.Stdio)
+	root := newExecCmd(deps, testClientFactory(workspaceURL), utils.Stdio)
 	var err error
 	stdout, stderr = testutil.CaptureOutput(t, func() {
 		if sub == "" {

@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newEntryRemoveCmd(ios *utils.IOStreams) *cobra.Command {
+func newEntryRemoveCmd(deps *ledgerDeps, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "remove ENTRY_ID...",
 		Aliases: []string{"rm"},
@@ -40,7 +40,7 @@ trail; to stop an entry for a while instead, disable it.`,
 				}
 			}
 
-			session, err := openLedger(ios)
+			session, err := deps.openLedger(ios)
 			if err != nil {
 				return err
 			}
@@ -67,7 +67,7 @@ trail; to stop an entry for a while instead, disable it.`,
 	return cmd
 }
 
-func newEntryDisableCmd(ios *utils.IOStreams) *cobra.Command {
+func newEntryDisableCmd(deps *ledgerDeps, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "disable ENTRY_ID",
 		Short: "Stop a pre-approved command matching",
@@ -76,29 +76,29 @@ in the ledger and 'alpacon acl entry enable' turns it back on.`,
 		Example: `  alpacon acl entry disable 550e8400-e29b-41d4-a716-446655440000`,
 		Args:    cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return setEntryEnabled(ios, args[0], false)
+			return setEntryEnabled(deps, ios, args[0], false)
 		}),
 	}
 }
 
-func newEntryEnableCmd(ios *utils.IOStreams) *cobra.Command {
+func newEntryEnableCmd(deps *ledgerDeps, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "enable ENTRY_ID",
 		Short:   "Let a disabled pre-approved command match again",
 		Example: `  alpacon acl entry enable 550e8400-e29b-41d4-a716-446655440000`,
 		Args:    cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return setEntryEnabled(ios, args[0], true)
+			return setEntryEnabled(deps, ios, args[0], true)
 		}),
 	}
 }
 
-func setEntryEnabled(ios *utils.IOStreams, entryID string, enabled bool) error {
+func setEntryEnabled(deps *ledgerDeps, ios *utils.IOStreams, entryID string, enabled bool) error {
 	if err := requireEntryIDs([]string{entryID}); err != nil {
 		return err
 	}
 
-	session, err := openLedger(ios)
+	session, err := deps.openLedger(ios)
 	if err != nil {
 		return err
 	}
