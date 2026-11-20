@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
@@ -43,17 +45,60 @@ func TestDialTunnelAdvertisesRefusalFrames(t *testing.T) {
 // A paused refusal frame on the tunnel signals the paused session; any other
 // text frame signals nothing.
 func TestTunnelRefusalSignalsAPausedSession(t *testing.T) {
-	var got []localsignal.Fields
+	got := make(chan localsignal.Fields, 2)
 	original := emitPaused
-	emitPaused = func(fields localsignal.Fields, _ *client.AlpaconClient) { got = append(got, fields) }
+	emitPaused = func(fields localsignal.Fields, _ *client.AlpaconClient) { got <- fields }
 	t.Cleanup(func() { emitPaused = original })
 	handle := tunnelRefusalHandler(&client.AlpaconClient{})
 
 	handle([]byte(`{"type":"refusal","code":"session_paused","work_session_id":"11111111-1111-4111-8111-111111111111","console_url":"https://alpacon.io/acme/work-sessions/11111111-1111-4111-8111-111111111111"}`))
 	handle([]byte(`{"type":"refusal","code":"other"}`))
 
-	assert.Equal(t, []localsignal.Fields{{
+	assert.Equal(t, localsignal.Fields{
 		Session:    "11111111-1111-4111-8111-111111111111",
 		ConsoleURL: "https://alpacon.io/acme/work-sessions/11111111-1111-4111-8111-111111111111",
-	}}, got)
+	}, <-got)
+	assert.Empty(t, got)
+}
+
+func TestTunnelRefusalCoalescesWhileNotificationIsBusy(t *testing.T) {
+	original := emitPaused
+	t.Cleanup(func() { emitPaused = original })
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		release := make(chan struct{})
+		emitPaused = func(_ localsignal.Fields, _ *client.AlpaconClient) {
+			calls.Add(1)
+			<-release
+		}
+		handle := tunnelRefusalHandler(&client.AlpaconClient{})
+		frame := []byte(`{"type":"refusal","code":"session_paused","work_session_id":"11111111-1111-4111-8111-111111111111"}`)
+		read := make(chan struct{})
+		go func() {
+			for range 1000 {
+				handle(frame)
+			}
+			close(read)
+		}()
+		synctest.Wait()
+		select {
+		case <-read:
+		default:
+			t.Error("notification blocked the tunnel reader")
+		}
+		assert.EqualValues(t, 1, calls.Load())
+		time.Sleep(2 * time.Minute)
+		go handle(frame)
+		synctest.Wait()
+		assert.EqualValues(t, 1, calls.Load())
+		close(release)
+		synctest.Wait()
+		assert.EqualValues(t, 1, calls.Load())
+		handle(frame)
+		synctest.Wait()
+		assert.EqualValues(t, 2, calls.Load())
+		handle(frame)
+		synctest.Wait()
+		assert.EqualValues(t, 2, calls.Load())
+	})
 }

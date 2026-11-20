@@ -457,6 +457,24 @@ func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
 	assert.Equal(t, "completed", resp.Status)
 }
 
+func TestApprovalTimeoutDoesNotReportAnotherStatusAsPending(t *testing.T) {
+	for _, status := range []string{"running", "completed", "rejected"} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"id":"cmd-uuid","status":%q}`, status)
+			}))
+			t.Cleanup(ts.Close)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			err := runCommandFallbackWithin(ac, testPathID(t, "cmd-uuid"), io.Discard, time.Millisecond, time.Millisecond, true, errors.New("stream unavailable"))
+			var pending *PendingApprovalError
+			assert.Error(t, err)
+			assert.NotErrorAs(t, err, &pending)
+		})
+	}
+}
+
 func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

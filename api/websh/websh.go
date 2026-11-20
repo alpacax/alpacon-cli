@@ -720,8 +720,11 @@ func (c *connection) readFromServer() {
 				continue
 			}
 			if origin.Type == "refusal" {
+				if refused {
+					continue
+				}
 				body, ok := utils.PausedRefusalNotice(message)
-				if !ok || refused {
+				if !ok {
 					continue
 				}
 				refused = true
