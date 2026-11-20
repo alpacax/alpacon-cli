@@ -2,8 +2,8 @@ package worksession
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
@@ -12,28 +12,33 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workSessionCurrentCmd = &cobra.Command{
-	Use:     "current",
-	Short:   "Show the active work-session in this workspace",
-	Example: `  alpacon work-session current`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		// Checked before any client exists so an unset 'current' neither logs in nor refreshes a token.
-		if uuid, err := config.GetActiveWorkSession(); err != nil {
-			return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
-		} else if uuid == "" {
-			printNoActiveSession()
+func newWorkSessionCurrentCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:     "current",
+		Short:   "Show the active work-session in this workspace",
+		Example: `  alpacon work-session current`,
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			// Checked before any client exists so an unset 'current' neither logs in nor refreshes a token.
+			if uuid, err := config.GetActiveWorkSession(); err != nil {
+				return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
+			} else if uuid == "" {
+				printNoActiveSession(ios)
+				return nil
+			}
+			ac, err := newClient()
+			if err != nil {
+				err = fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
+				return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
+			}
+			if err := printCurrent(ios, ac); err != nil {
+				if exitErr, ok := errors.AsType[*utils.ExitError](err); ok { // PrintJson's failure names no operation
+					return exitErr
+				}
+				return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
+			}
 			return nil
-		}
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			err = fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
-			return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
-		}
-		if err := printCurrent(ac); err != nil {
-			return utils.NewEnvelopeExitError(opCurrent, err, "%s", err)
-		}
-		return nil
-	}),
+		}),
+	}
 }
 
 // RunCurrent returns the active work-session UUID and its server-side details.
@@ -54,30 +59,30 @@ func RunCurrent(ac *client.AlpaconClient) (string, *wsapi.WorkSession, error) {
 }
 
 // printCurrent re-reads under ac's pinned workspace: another shell may have switched since the first check.
-func printCurrent(ac *client.AlpaconClient) error {
+func printCurrent(ios *utils.IOStreams, ac *client.AlpaconClient) error {
 	uuid, err := config.GetActiveWorkSessionFor(ac.WorkspaceName)
 	if err != nil {
 		return err
 	}
 	if uuid == "" {
-		printNoActiveSession()
+		printNoActiveSession(ios)
 		return nil
 	}
-	if utils.OutputFormat == utils.OutputFormatJSON {
-		return WriteCurrentRaw(ac, uuid)
+	if ios.IsJSON() {
+		return WriteCurrentRaw(ios, ac, uuid)
 	}
-	return WriteCurrentTable(ac, uuid)
+	return WriteCurrentTable(ios, ac, uuid)
 }
 
-func printNoActiveSession() {
-	if utils.OutputFormat == utils.OutputFormatJSON {
-		_, _ = fmt.Fprintln(os.Stdout, "null")
+func printNoActiveSession(ios *utils.IOStreams) {
+	if ios.IsJSON() {
+		_, _ = fmt.Fprintln(ios.Out, "null")
 		return
 	}
-	utils.CliInfo("No active work-session.")
+	ios.Info("No active work-session.")
 }
 
-func WriteCurrentRaw(ac *client.AlpaconClient, uuid string) error {
+func WriteCurrentRaw(ios *utils.IOStreams, ac *client.AlpaconClient, uuid string) error {
 	body, err := wsapi.GetWorkSessionRaw(ac, uuid)
 	if err != nil {
 		return staleActiveSessionError(uuid, err)
@@ -86,29 +91,27 @@ func WriteCurrentRaw(ac *client.AlpaconClient, uuid string) error {
 		Status string `json:"status"`
 	}
 	if json.Unmarshal(body, &session) == nil {
-		warnIfEnded(uuid, session.Status)
+		warnIfEnded(ios, uuid, session.Status)
 	}
-	utils.PrintJson(body)
-	return nil
+	return ios.PrintJson(body)
 }
 
 // WriteCurrentTable projects the session through ProjectAttributes so the columns match
 // 'work-session ls', and marks it as 'ls' does.
-func WriteCurrentTable(ac *client.AlpaconClient, uuid string) error {
+func WriteCurrentTable(ios *utils.IOStreams, ac *client.AlpaconClient, uuid string) error {
 	ws, err := wsapi.GetWorkSession(ac, uuid)
 	if err != nil {
 		return staleActiveSessionError(uuid, err)
 	}
 	rows := []wsapi.WorkSessionAttributes{wsapi.ProjectAttributes(ws)}
 	MarkActive(rows, uuid)
-	warnIfEnded(uuid, ws.Status)
-	utils.PrintTable(rows)
-	return nil
+	warnIfEnded(ios, uuid, ws.Status)
+	return ios.PrintTable(rows)
 }
 
-func warnIfEnded(uuid, status string) {
+func warnIfEnded(ios *utils.IOStreams, uuid, status string) {
 	if wsapi.IsEndedStatus(status) {
-		utils.CliWarning("Active work-session %s has ended (%s). Run 'alpacon work-session use --unset' to clear it.", uuid, status)
+		ios.Warning("Active work-session %s has ended (%s). Run 'alpacon work-session use --unset' to clear it.", uuid, status)
 	}
 }
 

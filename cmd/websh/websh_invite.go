@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newInviteCommand(newClient clientFactory) *cobra.Command {
+func newInviteCommand(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "invite SESSION_ID",
 		Short: "Invite users to a Websh session by email",
@@ -35,7 +35,7 @@ An invitation email will be sent to each specified address.`,
 				return utils.NewExitError("Failed to invite users to websh session: %s.", utils.InteractiveOnly(err, "invite users to a Websh session"))
 			}
 
-			utils.CliSuccess("Invitations have been successfully sent to invitees.")
+			ios.Success("Invitations have been successfully sent to invitees.")
 			return nil
 		}),
 	}

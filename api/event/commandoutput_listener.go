@@ -43,6 +43,10 @@ type CommandOutputListener struct {
 	err        error
 	chunks     chan ChunkEvent
 	finished   chan struct{}
+	// finAtRisk closes once the fin may never arrive: the connection dropped after
+	// the command was targeted, or the fin subscription did not go in.
+	finAtRisk     chan struct{}
+	finAtRiskOnce sync.Once
 }
 
 // commandOutputEnvelope is the WS message format emitted by the server. One
@@ -63,13 +67,15 @@ type commandOutputEnvelope struct {
 // command is submitted only once the WebSocket is connected.
 func NewCommandOutputListener(ac *client.AlpaconClient) *CommandOutputListener {
 	l := &CommandOutputListener{
-		ac:       ac,
-		chunks:   make(chan ChunkEvent, commandOutputChunkBuffer),
-		finished: make(chan struct{}, 1),
+		ac:        ac,
+		chunks:    make(chan ChunkEvent, commandOutputChunkBuffer),
+		finished:  make(chan struct{}, 1),
+		finAtRisk: make(chan struct{}),
 	}
 	l.wsListener = newProvisionedWSListener(ac, l.provisionSession, commandOutputConnectTimeout)
 	l.handleFrame = l.handleMessage
 	l.onConnected = l.subscribe
+	l.onDisconnected = l.handleDisconnect
 	return l
 }
 
@@ -142,8 +148,8 @@ func (l *CommandOutputListener) subscribe() error {
 
 	// Chunks carry no end marker, so without this the exit waits for the poll to
 	// notice. Best effort: on failure that poll stays the only terminal signal.
-	if serverID != "" {
-		_ = SubscribeEvent(l.ctx, l.ac, channelID, EventTypeCommandFin, serverID)
+	if serverID == "" || SubscribeEvent(l.ctx, l.ac, channelID, EventTypeCommandFin, serverID) != nil {
+		l.markFinAtRisk()
 	}
 
 	if err := l.halted(); err != nil {
@@ -179,6 +185,9 @@ func (l *CommandOutputListener) Chunks() <-chan ChunkEvent { return l.chunks }
 // never say: they carry no end marker.
 func (l *CommandOutputListener) Finished() <-chan struct{} { return l.finished }
 
+// FinAtRisk closes once Finished may never fire for the targeted command.
+func (l *CommandOutputListener) FinAtRisk() <-chan struct{} { return l.finAtRisk }
+
 // handleMessage parses one WS frame and routes it: a chunk onto chunks, a fin onto
 // finished. Non-matching frames (other event types, another command's id, parse
 // failure) are silently dropped.
@@ -210,6 +219,21 @@ func (l *CommandOutputListener) handleMessage(raw []byte) {
 		default:
 		}
 	}
+}
+
+// handleDisconnect marks the fin at risk once a command is targeted; a drop before
+// that loses nothing, since the next connect subscribes afresh.
+func (l *CommandOutputListener) handleDisconnect() {
+	l.cmdMu.Lock()
+	targeted := l.commandID != ""
+	l.cmdMu.Unlock()
+	if targeted {
+		l.markFinAtRisk()
+	}
+}
+
+func (l *CommandOutputListener) markFinAtRisk() {
+	l.finAtRiskOnce.Do(func() { close(l.finAtRisk) })
 }
 
 func (l *CommandOutputListener) setTargets(commandID, serverID string) {

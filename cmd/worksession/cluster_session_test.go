@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -158,15 +159,13 @@ func TestWorkSessionCreateClusterSendsOnlyTheCluster(t *testing.T) {
 	srv := &clusterCreateServer{status: "active"}
 	ts := srv.start(t)
 	setupWorkSessionCommandConfig(t, ts.URL)
-	resetCreateCommandState(t)
-	purpose = "debug api pods"
-	createScopes = []string{"kube", "kube_exec"}
-	createCluster = "prod-east"
-	expiresIn = "1h"
+	clearWorkSessionAgentEnvironment(t)
+	cmd := newWorkSessionCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
+	require.NoError(t, cmd.ParseFlags([]string{"--purpose", "debug api pods", "--scope", "kube,kube_exec", "--cluster", "prod-east", "--expires-in", "1h"}))
 
 	var runErr error
 	_, stderr := testutil.CaptureOutput(t, func() {
-		runErr = workSessionCreateCmd.RunE(workSessionCreateCmd, nil)
+		runErr = cmd.RunE(cmd, nil)
 	})
 	require.NoError(t, runErr)
 

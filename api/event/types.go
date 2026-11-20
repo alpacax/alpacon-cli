@@ -102,6 +102,9 @@ type PendingApprovalError struct {
 	// FileSuggestion is the server's proposal to run the held command as a
 	// verified file instead; nil when the server made none.
 	FileSuggestion *FileExecutionSuggestion
+	// ScriptBodySuggestion says the held line carries a script body the file
+	// lane could take instead; nil when the server sent none.
+	ScriptBodySuggestion *ScriptBodySuggestion
 	// ApprovalLane is the server's approval_lane: who decides the open request.
 	// Empty on an older server.
 	ApprovalLane string
@@ -132,6 +135,15 @@ type FileExecutionSuggestion struct {
 	Args            []string `json:"args"`
 }
 
+// ScriptBodySuggestion is the server's signal that a held command line carries
+// a script body (a multi-line inline program, a heredoc, or an encoded body
+// decoded into an interpreter) that could run as a verified file instead.
+// Signal names what the server detected; the server proposes no path or
+// interpreter.
+type ScriptBodySuggestion struct {
+	Signal string `json:"signal"`
+}
+
 // AwaitingPurposeError is returned when the server parked a command at the
 // "awaiting_purpose" status: instead of queuing it for a human, the gate asks the
 // requester what the command is for. Nobody has been notified, so the answer is the
@@ -146,16 +158,19 @@ type AwaitingPurposeError struct {
 }
 
 type EventAttributes struct {
-	Server                string           `json:"server"`
-	Shell                 string           `json:"shell"`
-	Command               string           `json:"command"`
-	Result                string           `json:"result"`
-	Status                string           `json:"status" table:"-"`
-	StatusCell            string           `json:"-" table:"Status"`
-	Operator              string           `json:"operator"`
-	RequestedAt           string           `json:"requested_at" table:"Requested At"`
-	ApprovedFileExecution *json.RawMessage `json:"approved_file_execution,omitempty" table:"-"`
-	DenialCode            types.SentString `json:"denial_code,omitzero" table:"-"`
+	ID                    string              `json:"id" table:"-"`
+	Server                string              `json:"server"`
+	Shell                 string              `json:"shell"`
+	Command               string              `json:"command"`
+	Result                utils.TruncatedText `json:"result"`
+	Status                string              `json:"status" table:"-"`
+	StatusCell            string              `json:"-" table:"Status"`
+	ExitCode              *int                `json:"exit_code" table:"-"`
+	ErrorPhase            *string             `json:"error_phase" table:"-"`
+	Operator              string              `json:"operator"`
+	RequestedAt           utils.Timestamp     `json:"requested_at" table:"Requested At"`
+	ApprovedFileExecution *json.RawMessage    `json:"approved_file_execution,omitempty" table:"-"`
+	DenialCode            types.SentString    `json:"denial_code,omitzero" table:"-"`
 	CommandRejection      `table:"-"`
 }
 
@@ -194,6 +209,9 @@ type EventDetails struct {
 	// FileExecutionSuggestion is set on a held command line the server reads as
 	// a script on the target; absent otherwise and on older servers.
 	FileExecutionSuggestion *FileExecutionSuggestion `json:"file_execution_suggestion"`
+	// ScriptBodySuggestion is set on a held command line that carries a script
+	// body the file lane could take; absent otherwise and on older servers.
+	ScriptBodySuggestion *ScriptBodySuggestion `json:"script_body_suggestion"`
 	// ApprovalLane names who decides the open approval holding the command:
 	// "assignee" is the session's assignee, any other lane an approver. Null
 	// unless the command awaits approval, and absent on an older server.

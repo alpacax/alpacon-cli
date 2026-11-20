@@ -3,10 +3,10 @@ package approval
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	approvalapi "github.com/alpacax/alpacon-cli/api/approval"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -16,51 +16,63 @@ type describeRow struct {
 	Value string `table:"Value"`
 }
 
-var approvalDescribeCmd = &cobra.Command{
-	Use:     "describe REQUEST_ID",
-	Aliases: []string{"desc"},
-	Short:   "Show details of an approval request",
-	Long: `Show an approval request.
+func newApprovalDescribeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:     "describe REQUEST_ID",
+		Aliases: []string{"desc"},
+		Short:   "Show details of an approval request",
+		Long: `Show an approval request.
 
 The table shows the decision context the server sends for the request type:
 the command or sudo detail, its risk assessment, the work session and the
-requested changes. Use --output json to print the full raw response.`,
-	Args: cobra.ExactArgs(1),
-	Example: `  alpacon approval describe 550e8400-e29b-41d4-a716-446655440000
+requested changes. For a file execution, the AI evidence rows list each claim
+behind the AI's verdict beside the script lines it rests on (L3, L40-41); a
+claim marked Not placed could not be located in the script. When at least one
+claim is placed, the script below is printed with line numbers. Use --output
+json to print the full raw response.`,
+		Args: cobra.ExactArgs(1),
+		Example: `  alpacon approval describe 550e8400-e29b-41d4-a716-446655440000
   alpacon approval desc 550e8400-e29b-41d4-a716-446655440000`,
-	Run: func(cmd *cobra.Command, args []string) {
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		if utils.OutputFormat == utils.OutputFormatJSON {
-			body, err := approvalapi.GetApprovalRequestRaw(ac, args[0])
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			ac, err := newClient()
 			if err != nil {
-				utils.CliErrorWithExit("Failed to retrieve approval request: %s.", err)
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
-			utils.PrintJson(body)
-			return
-		}
 
-		req, err := approvalapi.GetApprovalRequest(ac, args[0])
-		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve approval request: %s.", err)
-		}
+			if ios.IsJSON() {
+				body, err := approvalapi.GetApprovalRequestRaw(ac, args[0])
+				if err != nil {
+					return utils.NewExitError("Failed to retrieve approval request: %s.", err)
+				}
+				return ios.PrintJson(body)
+			}
 
-		fe := fileExecutionOf(req)
-		rows := describeRows(req, fe)
-		var script string
-		var hasScript bool
-		if fe != nil {
-			script, hasScript = fileExecutionScript(fe)
-		}
-		utils.PrintTable(rows)
-		if hasScript {
-			fmt.Println()
-			fmt.Println(script)
-		}
-	},
+			req, err := approvalapi.GetApprovalRequest(ac, args[0])
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve approval request: %s.", err)
+			}
+
+			fe := fileExecutionOf(req)
+			evidence, placed := evidenceRows(req)
+			rows := append(describeRows(req, fe), evidence...)
+			if err := ios.PrintTable(rows); err != nil {
+				return err
+			}
+			if fe != nil {
+				script, altered := fileExecutionScript(fe, placed)
+				_, _ = fmt.Fprintln(ios.Out)
+				if altered {
+					// The warning stays on Out beside the script it is about, and
+					// ColorEnabled follows ErrOut, so it is written without color.
+					plain := *ios
+					plain.ColorEnabled = false
+					plain.WarnTerminalTextAltered(ios.Out, "")
+				}
+				_, _ = fmt.Fprintln(ios.Out, script)
+			}
+			return nil
+		}),
+	}
 }
 
 func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecution) []describeRow {
@@ -97,6 +109,52 @@ func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecutio
 		rows = append(rows, fileExecutionRows(fe)...)
 	}
 	return rows
+}
+
+// evidenceRows are the "AI evidence" rows: each claim beside the script lines
+// it rests on. As in the console, a range the script does not have and a
+// repeated one are left out, and a claim left with none reads as not placed.
+// placed reports whether any claim kept a range.
+func evidenceRows(req *approvalapi.ApprovalRequest) (rows []describeRow, placed bool) {
+	if req.Metadata == nil || req.Metadata.Command == nil {
+		return nil, false
+	}
+	c := req.Metadata.Command
+	// Counted as the server counts the lines its ranges point at. The server
+	// sends no evidence with a withheld script, so a zero count is only a guard.
+	lineCount := 0
+	if fe := c.FileExecution; fe != nil && fe.Content != nil {
+		lineCount = strings.Count(*fe.Content, "\n") + 1
+	}
+	for _, ev := range c.VerdictEvidence {
+		claim := utils.SanitizeTerminalOneLine(ev.Claim)
+		if claim == "" {
+			continue
+		}
+		var spans []string
+		seen := map[approvalapi.EvidenceRange]bool{}
+		for _, r := range ev.Ranges {
+			if r.EndLine > lineCount || seen[r] {
+				continue
+			}
+			seen[r] = true
+			span := fmt.Sprintf("L%d", r.StartLine)
+			if r.EndLine > r.StartLine {
+				span += fmt.Sprintf("-%d", r.EndLine)
+			}
+			spans = append(spans, span)
+		}
+		if len(spans) == 0 {
+			rows = append(rows, describeRow{"  Not placed", claim + " (could not be placed in the script)"})
+			continue
+		}
+		placed = true
+		rows = append(rows, describeRow{"  " + strings.Join(spans, ", "), claim})
+	}
+	if len(rows) > 0 {
+		rows = slices.Insert(rows, 0, describeRow{"AI evidence", ""})
+	}
+	return rows, placed
 }
 
 func fileExecutionOf(req *approvalapi.ApprovalRequest) *approvalapi.FileExecution {
@@ -136,15 +194,39 @@ func fileExecutionRows(fe *approvalapi.FileExecution) []describeRow {
 	return rows
 }
 
-// fileExecutionScript renders the script the approver is asked to clear. When
-// the server omits the content, only the SHA-256 above identifies the file, and
-// the text says so instead of showing an empty script.
-func fileExecutionScript(fe *approvalapi.FileExecution) (string, bool) {
+// fileExecutionScript renders the script for approval. numbered prefixes line
+// numbers, including the final empty line, so evidence ranges can be found.
+// altered reports removals beyond CRLF normalization and is false for withheld
+// content.
+func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (script string, altered bool) {
 	if fe.Content == nil {
-		return "Script: not included in this response; the SHA-256 above identifies the file.", true
+		return "Script: not included in this response; the SHA-256 above identifies the file.", false
 	}
-	body, _ := utils.SanitizeTerminalBlock(*fe.Content)
-	return fmt.Sprintf("Script (%d bytes):\n%s", len(*fe.Content), body), true
+	body, altered := sanitizeScript(*fe.Content)
+	if numbered {
+		lines := strings.Split(body, "\n")
+		width := len(strconv.Itoa(len(lines)))
+		for i, line := range lines {
+			numberedLine := fmt.Sprintf("%*d |", width, i+1)
+			if line != "" {
+				numberedLine += " " + line
+			}
+			lines[i] = numberedLine
+		}
+		body = strings.Join(lines, "\n")
+	}
+	return fmt.Sprintf("Script (%d bytes):\n%s", len(*fe.Content), body), altered
+}
+
+// sanitizeScript keeps tabs, since they are part of the script the request
+// runs, and still removes escape sequences, control characters and Unicode
+// format characters so the terminal does not act on them. altered reports a
+// removal other than folding CRLF into LF, so DOS line endings alone do not
+// count.
+func sanitizeScript(content string) (clean string, altered bool) {
+	normalized := strings.ReplaceAll(content, "\r\n", "\n")
+	clean = utils.SanitizeTerminalBlockKeepingTabs(normalized)
+	return clean, clean != normalized
 }
 
 func joinClean(items []string, sep string) string {
@@ -222,11 +304,14 @@ func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 		add("  Title", ch.Title)
 		add("  Description", ch.Description)
 		add("  Scopes", joinClean(ch.Scopes, ", "))
-		servers := make([]string, len(ch.Servers))
-		for i, sv := range ch.Servers {
-			servers[i] = sv.Name
+		servers := make([]string, 0, len(ch.Servers))
+		for _, sv := range ch.Servers {
+			if name := utils.SanitizeTerminalText(sv.Name); name != "" {
+				servers = append(servers, name)
+			}
 		}
-		add("  Servers", joinClean(servers, ", "))
+		// The count keeps the row when every requested server is one the caller does not reach.
+		add("  Servers", utils.JoinReached(servers, ch.ServersHidden, "server"))
 		policies := make([]string, len(ch.SudoPolicies))
 		for i, p := range ch.SudoPolicies {
 			policies[i] = joinClean(p.Commands, ", ")

@@ -24,7 +24,6 @@ import (
 )
 
 var (
-	ApiCmd           = newCommand(client.NewAlpaconAPIClient)
 	isStdoutTerminal = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
 )
 
@@ -88,7 +87,7 @@ func (f *fieldFlag) Set(value string) error {
 	return nil
 }
 
-func newCommand(newAPIClient func() (*client.AlpaconClient, error)) *cobra.Command {
+func NewApiCmd(newAPIClient func() (*client.AlpaconClient, error)) *cobra.Command {
 	var opts options
 	cmd := &cobra.Command{
 		Use:   "api ENDPOINT",
@@ -114,6 +113,9 @@ func newCommand(newAPIClient func() (*client.AlpaconClient, error)) *cobra.Comma
 			}
 			code, err = runAPI(ac, opts, request, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if err != nil {
+				if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+					return exitErr
+				}
 				if statusErr, ok := err.(*httpStatusError); ok {
 					if _, writeErr := fmt.Fprintf(cmd.ErrOrStderr(), "HTTP %d\n", statusErr.status); writeErr != nil {
 						return utils.NewExitErrorWithCode(utils.ExitCodeGeneralError, "%s", writeErr)
@@ -264,6 +266,9 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 			return nil
 		}
 		handleErr := utils.HandleCommonErrors(utils.MarkSubmission(mfaRequiredError{}), "", mfa.WorkspaceErrorCallbacks(ac, retry))
+		if exitErr, ok := errors.AsType[*utils.ExitError](handleErr); ok {
+			return exitErr.Code, exitErr
+		}
 		if _, err := stderr.Write(lastAttempt.Bytes()); err != nil {
 			return utils.ExitCodeGeneralError, err
 		}

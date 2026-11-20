@@ -39,6 +39,16 @@ var ErrBlankName = api.ErrBlankName
 // ErrNotFound is re-exported for the same reason: ResolveRole's miss, told from a failed request.
 var ErrNotFound = api.ErrNotFound
 
+// Reach and its values are re-exported so a caller of GetRoleHistory need not import api.
+type Reach = api.Reach
+
+const (
+	ReachOrg   = api.ReachOrg
+	ReachBound = api.ReachBound
+	ReachSelf  = api.ReachSelf
+	ReachNone  = api.ReachNone
+)
+
 // GetRoleCatalog sends auto_assigned when set, asking the server which roles it counts as assigned
 // on its own; false is not a list of what the caller may grant. Which roles count differs by
 // Alpacon release and the response carries no such field, so only the server can tell.
@@ -109,12 +119,14 @@ func GetRoleHolders(ac *client.AlpaconClient, roleID string) ([]UserRoleResponse
 	return api.FetchAllPages[UserRoleResponse](ac, userRolesURL, map[string]string{"role": roleID})
 }
 
-func GetRoleHistory(ac *client.AlpaconClient, userID string, limit int) ([]RoleAuditLogResponse, error) {
+// GetRoleHistory returns the rows whose subject is the user, and the reach the server read them
+// at. The filter keeps only that user's rows; the reach decides which of them come back.
+func GetRoleHistory(ac *client.AlpaconClient, userID string, limit int) ([]RoleAuditLogResponse, Reach, error) {
 	params := map[string]string{"user": userID}
 
 	// The newest rows come first, tie-broken by id so a paged walk cannot repeat or skip one,
 	// and any ordering parameter would be dropped.
-	return api.FetchPagesUpTo[RoleAuditLogResponse](ac, roleAuditLogsURL, params, limit)
+	return api.FetchPagesUpToWithReach[RoleAuditLogResponse](ac, roleAuditLogsURL, params, limit)
 }
 
 // FindWorkspaceBinding returns the user's workspace-wide binding of roleID. The server refuses a
@@ -236,17 +248,63 @@ func AuditAttributesFrom(entries []RoleAuditLogResponse, zone *time.Location) []
 			changedBy = entry.ChangedBy.Label
 		}
 
+		erased := entry.Context.Erased
 		result = append(result, RoleAuditAttributes{
-			Action:    entry.Action,
-			Role:      entry.RoleName,
-			Scope:     tierLabel(entry.Scope),
-			ChangedBy: changedBy,
-			Reason:    entry.Reason,
-			At:        timestampIn(entry.AddedAt, zone),
+			Action:        entry.Action,
+			Role:          entry.RoleName,
+			Scope:         tierLabel(entry.Scope),
+			Target:        targetCell(entry.Context.ScopeContentType, entry.Context.ScopeObjectID, entry.TargetsHidden),
+			TargetType:    entry.Context.ScopeContentType,
+			TargetID:      entry.Context.ScopeObjectID,
+			TargetsHidden: entry.TargetsHidden,
+			ChangedBy:     changedBy,
+			Reason:        entry.Reason,
+			Erased:        erased,
+			ReasonCell:    reasonCell(entry.Reason, entry.TargetsHidden, erased),
+			At:            timestampIn(entry.AddedAt, zone),
 		})
 	}
 
 	return result
+}
+
+// targetCell names a binding target as kind/id, the kind alone, or the kind and a hidden count;
+// unlike ScopeLabel's "type:42/id", the audit row carries the kind's label, not its numeric id.
+func targetCell(contentType, objectID *string, hidden int) string {
+	kind := ""
+	if contentType != nil {
+		kind = *contentType
+	}
+
+	if hidden > 0 {
+		count := fmt.Sprintf("(%d hidden)", hidden)
+		if kind == "" {
+			return count
+		}
+		return kind + " " + count
+	}
+	if objectID != nil && *objectID != "" {
+		if kind == "" {
+			return *objectID
+		}
+		return kind + "/" + *objectID
+	}
+	return kind
+}
+
+// reasonCell tells an empty reason the server blanked from one never given: a withheld target
+// takes its reason with it, and an erased row's reason is gone.
+func reasonCell(reason string, hidden int, erased bool) string {
+	switch {
+	case reason != "":
+		return reason
+	case hidden > 0:
+		return "(withheld)"
+	case erased:
+		return "(erased)"
+	default:
+		return ""
+	}
 }
 
 func GrantRole(ac *client.AlpaconClient, request BindingCreateRequest) error {
@@ -373,11 +431,11 @@ func PermissionPatternAttributesFrom(patterns *PermissionPatternsResponse) []Per
 
 // timestampIn blanks a missing timestamp: a zero time.Time formats as "0001-01-01 00:00",
 // which reads like a real grant date.
-func timestampIn(at time.Time, zone *time.Location) string {
+func timestampIn(at time.Time, zone *time.Location) utils.Timestamp {
 	if at.IsZero() {
-		return ""
+		return utils.NewTimestamp(at, "")
 	}
-	return at.In(zone).Format(timeLayout)
+	return utils.NewTimestamp(at, at.In(zone).Format(timeLayout))
 }
 
 // tierLabel names a scope tier for the sources that carry no id pair and so cannot use

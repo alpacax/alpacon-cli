@@ -2,43 +2,43 @@ package iam
 
 import (
 	"github.com/alpacax/alpacon-cli/api/iam"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var userDetailCmd = &cobra.Command{
-	Use:     "describe USER",
-	Aliases: []string{"desc"},
-	Short:   "Show details of a user",
-	Long: `
+func newUserDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:     "describe USER",
+		Aliases: []string{"desc"},
+		Short:   "Show details of a user",
+		Long: `
 	The describe command fetches and displays detailed information about a specific user, 
 	including its description, shell and other relevant attributes. 
 	`,
-	Example: `
+		Example: `
 	alpacon user describe john
 	alpacon user desc john
 	`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		userName := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			userName := args[0]
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		userId, err := iam.GetUserIDByName(alpaconClient, userName)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve the user details: %s. Please check if the username is correct and try again.", err)
-		}
+			userId, err := iam.GetUserIDByName(alpaconClient, userName)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the user details: %s. Please check if the username is correct and try again.", err)
+			}
 
-		userDetail, err := iam.GetUserDetail(alpaconClient, userId)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve the user details: %s.", err)
-		}
+			userDetail, err := iam.GetUserDetail(alpaconClient, userId)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the user details: %s.", err)
+			}
 
-		utils.PrintJson(userDetail)
-		return nil
-	}),
+			return ios.PrintJson(userDetail)
+		}),
+	}
 }

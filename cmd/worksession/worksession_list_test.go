@@ -6,6 +6,7 @@ import (
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -13,8 +14,8 @@ import (
 func TestMarkActive_DecoratesMatchingRow(t *testing.T) {
 	t.Parallel()
 	rows := []wsapi.WorkSessionAttributes{
-		{ID: "ses-1", Description: "alpha", Status: "active"},
-		{ID: "ses-2", Description: "beta", Status: "active"},
+		{ID: "ses-1", Description: utils.Truncate("alpha", 70), Status: "active"},
+		{ID: "ses-2", Description: utils.Truncate("beta", 70), Status: "active"},
 	}
 	MarkActive(rows, "ses-2")
 	assert.Empty(t, rows[0].Active)
@@ -35,8 +36,8 @@ func TestMarkActive_MatchesIDThatDiffersOnlyInCase(t *testing.T) {
 func TestMarkActive_EmptyActiveUUID_NoChange(t *testing.T) {
 	t.Parallel()
 	rows := []wsapi.WorkSessionAttributes{
-		{ID: "ses-1", Description: "alpha"},
-		{ID: "ses-2", Description: "beta"},
+		{ID: "ses-1", Description: utils.Truncate("alpha", 70)},
+		{ID: "ses-2", Description: utils.Truncate("beta", 70)},
 	}
 	MarkActive(rows, "")
 	assert.Empty(t, rows[0].Active)
@@ -46,7 +47,7 @@ func TestMarkActive_EmptyActiveUUID_NoChange(t *testing.T) {
 func TestMarkActive_NoMatch_NoChange(t *testing.T) {
 	t.Parallel()
 	rows := []wsapi.WorkSessionAttributes{
-		{ID: "ses-1", Description: "alpha"},
+		{ID: "ses-1", Description: utils.Truncate("alpha", 70)},
 	}
 	MarkActive(rows, "ses-other")
 	assert.Empty(t, rows[0].Active)

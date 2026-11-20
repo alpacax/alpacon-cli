@@ -2,7 +2,6 @@ package iam
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/server"
@@ -11,52 +10,54 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var groupCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new group",
-	Long: `
+func newGroupCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:   "create",
+		Short: "Create a new group",
+		Long: `
 	Create a new group in the Alpacon. 
 	This command allows you to add a new group by specifying required group information such as name, servers, and other relevant details.
 	`,
-	Example: ` 
+		Example: ` 
 	alpacon group create
 	`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		if err := alpaconClient.LoadCurrentUser(); err != nil {
-			return utils.NewExitError("Failed to load current user: %s", err)
-		}
+			if err := alpaconClient.LoadCurrentUser(); err != nil {
+				return utils.NewExitError("Failed to load current user: %s", err)
+			}
 
-		if alpaconClient.Privileges == "general" {
-			return utils.NewExitError("You do not have the permission to create groups.")
-		}
+			if alpaconClient.Privileges == "general" {
+				return utils.NewExitError("You do not have the permission to create groups.")
+			}
 
-		serverList, err := server.GetServerList(alpaconClient)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve the server list: %s", err)
-		}
+			serverList, err := server.GetServerList(alpaconClient)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the server list: %s", err)
+			}
 
-		groupRequest, err := promptForGroup(alpaconClient, serverList)
-		if err != nil {
-			return err
-		}
+			groupRequest, err := promptForGroup(ios, alpaconClient, serverList)
+			if err != nil {
+				return err
+			}
 
-		err = iam.CreateGroup(alpaconClient, groupRequest)
-		if err != nil {
-			return utils.NewExitError("Failed to create the new group: %s", err)
-		}
+			err = iam.CreateGroup(alpaconClient, groupRequest)
+			if err != nil {
+				return utils.NewExitError("Failed to create the new group: %s", err)
+			}
 
-		utils.CliSuccess("Group created: %s", groupRequest.Name)
-		return nil
-	}),
+			ios.Success("Group created: %s", groupRequest.Name)
+			return nil
+		}),
+	}
 }
 
-func promptForGroup(ac *client.AlpaconClient, serverList []server.ServerAttributes) (iam.GroupCreateRequest, error) {
+func promptForGroup(ios *utils.IOStreams, ac *client.AlpaconClient, serverList []server.ServerAttributes) (iam.GroupCreateRequest, error) {
 	var groupRequest iam.GroupCreateRequest
 	var err error
 
@@ -73,7 +74,7 @@ func promptForGroup(ac *client.AlpaconClient, serverList []server.ServerAttribut
 		return groupRequest, err
 	}
 
-	displayServers(serverList)
+	displayServers(ios, serverList)
 	servers, err := selectAndConvertServers(ac, serverList)
 	if err != nil {
 		return groupRequest, err
@@ -85,10 +86,10 @@ func promptForGroup(ac *client.AlpaconClient, serverList []server.ServerAttribut
 	return groupRequest, nil
 }
 
-func displayServers(serverList []server.ServerAttributes) {
-	fmt.Fprintln(os.Stderr, "Servers:")
+func displayServers(ios *utils.IOStreams, serverList []server.ServerAttributes) {
+	_, _ = fmt.Fprintln(ios.ErrOut, "Servers:")
 	for i, server := range serverList {
-		fmt.Fprintf(os.Stderr, "[%d] %s\n", i+1, server.Name)
+		fmt.Fprintf(ios.ErrOut, "[%d] %s\n", i+1, server.Name)
 	}
 }
 

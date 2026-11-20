@@ -132,9 +132,7 @@ func symlinkTargetGrantsOtherAccounts(path string) bool {
 // inode state, so one fstat covers them all. The stats inside the chmod
 // callback and the read-back below are the ones that need their own look.
 func restrictOpenFileMode(file *os.File, info os.FileInfo, allowed os.FileMode, chmod func(os.FileMode) error) error {
-	// Defense in depth: every caller returns on GOOS first, but a chmod on Windows would flip the
-	// read-only attribute instead of narrowing anything.
-	if runtime.GOOS == "windows" {
+	if !utils.HasUnixModes() { // defense in depth: every caller returns on Windows first
 		return nil
 	}
 	perm := info.Mode().Perm() & allowed
@@ -279,7 +277,7 @@ func openNarrowedConfigFile(path string) (*os.File, error) {
 }
 
 func restrictConfigDirectoryMode(path string) error {
-	if runtime.GOOS == "windows" {
+	if !utils.HasUnixModes() {
 		return nil
 	}
 	dir, err := openToNarrow(path)

@@ -83,12 +83,12 @@ func currentSessionClient(t *testing.T, status string) *client.AlpaconClient {
 }
 
 func TestWriteCurrentTable_MarksARunningSessionQuietly(t *testing.T) {
+	t.Parallel()
 	ac := currentSessionClient(t, "active")
 
-	var err error
-	stdout, stderr := testutil.CaptureOutput(t, func() {
-		err = WriteCurrentTable(ac, "ses-abc")
-	})
+	ios, out, errOut := utils.TestIOStreams()
+	err := WriteCurrentTable(ios, ac, "ses-abc")
+	stdout, stderr := out.String(), errOut.String()
 
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "*")
@@ -96,12 +96,12 @@ func TestWriteCurrentTable_MarksARunningSessionQuietly(t *testing.T) {
 }
 
 func TestWriteCurrentTable_WarnsAndLeavesAnEndedSessionUnmarked(t *testing.T) {
+	t.Parallel()
 	ac := currentSessionClient(t, "completed")
 
-	var err error
-	stdout, stderr := testutil.CaptureOutput(t, func() {
-		err = WriteCurrentTable(ac, "ses-abc")
-	})
+	ios, out, errOut := utils.TestIOStreams()
+	err := WriteCurrentTable(ios, ac, "ses-abc")
+	stdout, stderr := out.String(), errOut.String()
 
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "ses-abc")
@@ -110,12 +110,12 @@ func TestWriteCurrentTable_WarnsAndLeavesAnEndedSessionUnmarked(t *testing.T) {
 }
 
 func TestWriteCurrentRaw_WarnsOnAnEndedSessionAndKeepsTheBody(t *testing.T) {
+	t.Parallel()
 	ac := currentSessionClient(t, "completed")
 
-	var err error
-	stdout, stderr := testutil.CaptureOutput(t, func() {
-		err = WriteCurrentRaw(ac, "ses-abc")
-	})
+	ios, out, errOut := utils.TestIOStreams()
+	err := WriteCurrentRaw(ios, ac, "ses-abc")
+	stdout, stderr := out.String(), errOut.String()
 
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"id":"ses-abc","status":"completed"}`, stdout)
@@ -154,14 +154,11 @@ func TestPrintCurrent_UsesClientWorkspaceWhenConfigSwitchedAfterClientBuilt(t *t
 	defer ts.Close()
 	ac := newTestClient(ts)
 	switchConfigToWorkspace(t, "other", "ses-other")
-	saved := utils.OutputFormat
-	t.Cleanup(func() { utils.OutputFormat = saved })
-	utils.OutputFormat = utils.OutputFormatJSON
+	ios, out, _ := utils.TestIOStreams()
+	require.NoError(t, ios.SetOutputFormat(utils.OutputFormatJSON))
 
-	var err error
-	stdout, _ := testutil.CaptureOutput(t, func() {
-		err = printCurrent(ac)
-	})
+	err := printCurrent(ios, ac)
+	stdout := out.String()
 
 	require.NoError(t, err)
 	assert.Equal(t, "/api/work-sessions/sessions/ses-a/", requested)
@@ -172,14 +169,11 @@ func TestPrintCurrent_PrintsNullWhenTheClientsWorkspaceHasNoSession(t *testing.T
 	setupTmpConfig(t)
 	ac := &client.AlpaconClient{WorkspaceName: "ws"}
 	switchConfigToWorkspace(t, "other", "ses-other")
-	saved := utils.OutputFormat
-	t.Cleanup(func() { utils.OutputFormat = saved })
-	utils.OutputFormat = utils.OutputFormatJSON
+	ios, out, _ := utils.TestIOStreams()
+	require.NoError(t, ios.SetOutputFormat(utils.OutputFormatJSON))
 
-	var err error
-	stdout, _ := testutil.CaptureOutput(t, func() {
-		err = printCurrent(ac)
-	})
+	err := printCurrent(ios, ac)
+	stdout := out.String()
 
 	require.NoError(t, err)
 	assert.Equal(t, "null\n", stdout)
@@ -265,4 +259,16 @@ func TestWorkSessionCurrentCmd_StaleSessionFails(t *testing.T) {
 			assert.Contains(t, stderr, "alpacon work-session use --unset")
 		})
 	}
+}
+
+func TestWorkSessionCurrentCmd_NonJSONBodyFailsWithNoOperationInTheEnvelope(t *testing.T) {
+	ts := currentSessionServer(t, "ses-1", http.StatusOK, "<html>bad gateway</html>")
+	home := completeHomeWithActiveSessions(t, ts.URL, map[string]string{"test": "ses-1"})
+
+	stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, []string{"HOME=" + home},
+		utils.OutputFormatJSON, ts.URL, "current")
+
+	assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
+	assertCommandFailure(t, utils.OutputFormatJSON, "", stdout, stderr, utils.ExitCodeGeneralError,
+		utils.ErrorCodeCLI, "Parsing data: Expected a JSON format.")
 }

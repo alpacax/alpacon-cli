@@ -6,17 +6,22 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCsrCommandStructure(t *testing.T) {
-	assert.Equal(t, "csr", CsrCmd.Use)
-	assert.True(t, CsrCmd.HasSubCommands())
+	t.Parallel()
+	csrCmd := NewCsrCmd(cmdtest.NoClient, utils.Stdio)
+	assert.Equal(t, "csr", csrCmd.Use)
+	assert.True(t, csrCmd.HasSubCommands())
 }
 
 func TestCsrSubcommands(t *testing.T) {
+	t.Parallel()
+	csrCmd := NewCsrCmd(cmdtest.NoClient, utils.Stdio)
 	tests := []struct {
 		name    string
 		cmdName string
@@ -59,7 +64,7 @@ func TestCsrSubcommands(t *testing.T) {
 		},
 	}
 
-	subCmds := CsrCmd.Commands()
+	subCmds := csrCmd.Commands()
 	subCmdNames := make(map[string]bool)
 	for _, cmd := range subCmds {
 		subCmdNames[cmd.Name()] = true
@@ -69,7 +74,7 @@ func TestCsrSubcommands(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.True(t, subCmdNames[tt.cmdName], "subcommand %q should be registered", tt.cmdName)
 
-			cmd, _, err := CsrCmd.Find([]string{tt.cmdName})
+			cmd, _, err := csrCmd.Find([]string{tt.cmdName})
 			require.NoError(t, err)
 			assert.NotNil(t, cmd)
 
@@ -83,6 +88,8 @@ func TestCsrSubcommands(t *testing.T) {
 }
 
 func TestSubcommandAliases(t *testing.T) {
+	t.Parallel()
+	csrCmd := NewCsrCmd(cmdtest.NoClient, utils.Stdio)
 	tests := []struct {
 		name      string
 		alias     string
@@ -95,7 +102,7 @@ func TestSubcommandAliases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd, _, err := CsrCmd.Find([]string{tt.alias})
+			cmd, _, err := csrCmd.Find([]string{tt.alias})
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectCmd, cmd.Name())
 		})
@@ -103,7 +110,9 @@ func TestSubcommandAliases(t *testing.T) {
 }
 
 func TestListSubcommandFlags(t *testing.T) {
-	cmd, _, err := CsrCmd.Find([]string{"ls"})
+	t.Parallel()
+	csrCmd := NewCsrCmd(cmdtest.NoClient, utils.Stdio)
+	cmd, _, err := csrCmd.Find([]string{"ls"})
 	require.NoError(t, err)
 
 	statusFlag := cmd.Flags().Lookup("status")
@@ -112,7 +121,9 @@ func TestListSubcommandFlags(t *testing.T) {
 }
 
 func TestDownloadSubcommandFlags(t *testing.T) {
-	cmd, _, err := CsrCmd.Find([]string{"download-crt"})
+	t.Parallel()
+	csrCmd := NewCsrCmd(cmdtest.NoClient, utils.Stdio)
+	cmd, _, err := csrCmd.Find([]string{"download-crt"})
 	require.NoError(t, err)
 
 	outFlag := cmd.Flags().Lookup("out")
@@ -122,7 +133,9 @@ func TestDownloadSubcommandFlags(t *testing.T) {
 }
 
 func TestCreateSubcommandFlags(t *testing.T) {
-	cmd, _, err := CsrCmd.Find([]string{"create"})
+	t.Parallel()
+	csrCmd := NewCsrCmd(cmdtest.NoClient, utils.Stdio)
+	cmd, _, err := csrCmd.Find([]string{"create"})
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -197,7 +210,7 @@ func TestEnsureSecureConnection_HTTPS(t *testing.T) {
 		BaseURL:    "https://secure.example.com",
 	}
 
-	err := EnsureSecureConnection(ac)
+	err := EnsureSecureConnection(utils.Stdio, ac)
 
 	assert.NoError(t, err)
 }
@@ -212,7 +225,7 @@ func TestEnsureSecureConnection_RefusesHTTPWithoutTerminal(t *testing.T) {
 		BaseURL:    "http://plain.example.com",
 	}
 
-	err := EnsureSecureConnection(ac)
+	err := EnsureSecureConnection(utils.Stdio, ac)
 
 	var exitErr *utils.ExitError
 	require.ErrorAs(t, err, &exitErr)

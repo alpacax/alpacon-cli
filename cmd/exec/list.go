@@ -1,16 +1,12 @@
 package exec
 
 import (
-	"errors"
-	"os"
-
 	"github.com/alpacax/alpacon-cli/api/event"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-func newListCommand(newClient clientFactory) *cobra.Command {
+func newListCommand(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -23,37 +19,16 @@ and --user to filter by the requesting user.`,
   alpacon exec ls --tail 10
   alpacon exec ls --tail 10 --server my-server --user admin`,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, _ []string) error {
-			return listFromFlags(cmd, newClient)
+			return listFromFlags(ios, cmd, newClient)
 		}),
 	}
-	AddListFlags(cmd)
-	return cmd
-}
-
-// AddListFlags and RunListFromFlags are exported for the deprecated 'alpacon event', which
-// delegates here. Both live in this file so the flag names exist in exactly one place.
-func AddListFlags(cmd *cobra.Command) {
 	cmd.Flags().IntP("tail", "t", 25, "Number of command entries to show, newest first")
 	cmd.Flags().StringP("server", "s", "", "Filter by server name")
 	cmd.Flags().StringP("user", "u", "", "Filter by requesting user")
+	return cmd
 }
 
-// RunListFromFlags requires the flag set registered by AddListFlags. It prints the failure and
-// exits, for a command that has not moved to RunE yet.
-func RunListFromFlags(cmd *cobra.Command) {
-	err := listFromFlags(cmd, client.NewAlpaconAPIClient)
-	if err == nil {
-		return
-	}
-	exitErr, ok := errors.AsType[*utils.ExitError](err)
-	if !ok {
-		utils.CliErrorWithExit("%s", err)
-	}
-	utils.PrintExitError(exitErr)
-	os.Exit(exitErr.Code)
-}
-
-func listFromFlags(cmd *cobra.Command, newClient clientFactory) error {
+func listFromFlags(ios *utils.IOStreams, cmd *cobra.Command, newClient clientFactory) error {
 	tail, _ := cmd.Flags().GetInt("tail")
 	serverName, _ := cmd.Flags().GetString("server")
 	userName, _ := cmd.Flags().GetString("user")
@@ -71,6 +46,5 @@ func listFromFlags(cmd *cobra.Command, newClient clientFactory) error {
 		return utils.NewExitError("Failed to retrieve the commands: %s.", err)
 	}
 
-	utils.PrintTable(eventList)
-	return nil
+	return ios.PrintTable(eventList)
 }

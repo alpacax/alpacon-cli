@@ -18,7 +18,7 @@ func isLineTooLong(err error) bool {
 
 // lineTooLongGuidance words a length refusal and the file-lane command to run instead. Nothing is
 // written to the server on the user's behalf: an upload outlives a refusal and is not owner-only.
-func lineTooLongGuidance(parsed RemoteExecArgs) (message, hint string, action utils.NextAction) {
+func lineTooLongGuidance(ios *utils.IOStreams, parsed RemoteExecArgs) (message, hint string, action utils.NextAction) {
 	flags := runAsFlags(parsed)
 	if parsed.Purpose != "" {
 		flags = append(flags, "--purpose "+argvQuote(utils.SanitizeTerminalText(parsed.Purpose)))
@@ -41,7 +41,7 @@ func lineTooLongGuidance(parsed RemoteExecArgs) (message, hint string, action ut
 		message = "the server refused this command line for its length, and it cannot run as a verified file as it stands: " + reason
 		lead = "once that is fixed, save the command to a local file and run:"
 	}
-	return message, denialHintLine(lead + "\n  " + action.Command + "\n"), action
+	return message, denialHintLine(ios, lead+"\n  "+action.Command+"\n"), action
 }
 
 // fileLaneObstacle says what keeps the file lane from taking the command as it stands: --env,
@@ -55,7 +55,7 @@ func fileLaneObstacle(parsed RemoteExecArgs) string {
 }
 
 // lineTooLongFailure returns exit 1 with the length refusal and the file-lane command to run instead.
-func lineTooLongFailure(stderr io.Writer, err error, parsed RemoteExecArgs) error {
-	message, hint, action := lineTooLongGuidance(parsed)
-	return codedRefusalWithExit(stderr, utils.ExitCodeGeneralError, "command", err, message, hint, []utils.NextAction{action})
+func lineTooLongFailure(ios *utils.IOStreams, stderr io.Writer, err error, parsed RemoteExecArgs) error {
+	message, hint, action := lineTooLongGuidance(ios, parsed)
+	return codedRefusalWithExit(ios, stderr, utils.ExitCodeGeneralError, "command", err, message, hint, []utils.NextAction{action})
 }

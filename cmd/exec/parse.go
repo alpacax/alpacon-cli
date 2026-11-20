@@ -93,7 +93,7 @@ type RemoteExecArgs struct {
 //
 // With --file the words after the server are the script's arguments and must follow --, so a
 // command line is never mistaken for a verified file's arguments.
-func ParseRemoteExecArgs(args []string) RemoteExecArgs {
+func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 	var (
 		username, groupname, workSessionID, outputFormat, server string
 		purpose                                                  string
@@ -176,7 +176,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 				return fail("--output requires a value (table|json)")
 			}
 		case arg == "--env" || strings.HasPrefix(arg, "--env="):
-			if errMsg := ParseEnvArg(arg, env); errMsg != "" {
+			if errMsg := ParseEnvArg(ios, arg, env); errMsg != "" {
 				return fail(errMsg)
 			}
 		case arg == "--file" || strings.HasPrefix(arg, "--file="):
@@ -345,7 +345,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 
 // ParseEnvArg parses a --env token into env. A bare KEY reads the shell value,
 // warning and skipping if unset; malformed input returns an error message.
-func ParseEnvArg(arg string, env map[string]string) string {
+func ParseEnvArg(ios *utils.IOStreams, arg string, env map[string]string) string {
 	body, ok := strings.CutPrefix(arg, "--env=")
 	var key, value string
 	var hasValue bool
@@ -362,7 +362,7 @@ func ParseEnvArg(arg string, env map[string]string) string {
 	}
 	v, exists := os.LookupEnv(key)
 	if !exists {
-		utils.CliWarning("no environment variable found for key '%s'", key)
+		ios.Warning("no environment variable found for key '%s'", key)
 		return ""
 	}
 	env[key] = v

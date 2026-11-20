@@ -23,7 +23,7 @@ const (
 	shellOneLinerHint        = "(for shell-style one-liner, use: -- sh -c \"<command>\")"
 )
 
-func executeTunnelRunWithInvocation(ac *client.AlpaconClient, flags tunnelFlagValues, serverName string, localCommand []string) (int, error) {
+func executeTunnelRunWithInvocation(ios *utils.IOStreams, ac *client.AlpaconClient, flags tunnelFlagValues, serverName string, localCommand []string) (int, error) {
 	runtime, err := tunnelruntime.Start(flags.toStartOptions(ac, serverName))
 	if err != nil {
 		err = handleTunnelStartError(ac, flags, err, serverName, func() error {
@@ -42,8 +42,8 @@ func executeTunnelRunWithInvocation(ac *client.AlpaconClient, flags tunnelFlagVa
 		return 1, fmt.Errorf("failed to establish tunnel connection: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "[alpacon tunnel] CONNECTED %s -> %s\n", runtime.LocalAddress(), runtime.RemoteAddress())
-	fmt.Fprintln(os.Stderr, "[alpacon tunnel] (Ctrl+C: interrupt, Ctrl+C twice: force stop)")
+	fmt.Fprintf(ios.ErrOut, "[alpacon tunnel] CONNECTED %s -> %s\n", runtime.LocalAddress(), runtime.RemoteAddress())
+	_, _ = fmt.Fprintln(ios.ErrOut, "[alpacon tunnel] (Ctrl+C: interrupt, Ctrl+C twice: force stop)")
 
 	commandName := localCommand[0]
 	commandArgs := localCommand[1:]
@@ -57,7 +57,7 @@ func executeTunnelRunWithInvocation(ac *client.AlpaconClient, flags tunnelFlagVa
 		return 1, fmt.Errorf("failed to start local command %q: %w", commandName, err)
 	}
 
-	exitCode, runtimeErr := monitorLocalCommand(runtime, localCmd)
+	exitCode, runtimeErr := monitorLocalCommand(ios, runtime, localCmd)
 	if runtimeErr != nil {
 		return exitCode, runtimeErr
 	}
@@ -84,7 +84,7 @@ func extractRunInvocation(args []string, dashIndex int) (string, []string, error
 	return args[0], append([]string(nil), args[dashIndex:]...), nil
 }
 
-func monitorLocalCommand(runtime tunnelCommandRuntime, localCmd *exec.Cmd) (int, error) {
+func monitorLocalCommand(ios *utils.IOStreams, runtime tunnelCommandRuntime, localCmd *exec.Cmd) (int, error) {
 	waitCh := make(chan error, 1)
 	go func() {
 		waitCh <- localCmd.Wait()
@@ -113,13 +113,13 @@ func monitorLocalCommand(runtime tunnelCommandRuntime, localCmd *exec.Cmd) (int,
 
 			cause := runtime.Cause()
 			if cause == nil {
-				err := waitForProcessExit(waitCh, localCmd, remoteCloseGracePeriod)
+				err := waitForProcessExit(ios, waitCh, localCmd, remoteCloseGracePeriod)
 				return exitCodeFromProcessError(err), nil
 			}
 
-			utils.CliWarning("Tunnel closed: %s", cause)
-			signalProcess(localCmd, os.Interrupt)
-			err := waitForProcessExit(waitCh, localCmd, remoteCloseGracePeriod)
+			ios.Warning("Tunnel closed: %s", cause)
+			signalProcess(ios, localCmd, os.Interrupt)
+			err := waitForProcessExit(ios, waitCh, localCmd, remoteCloseGracePeriod)
 			exitCode := exitCodeFromProcessError(err)
 			if exitCode == 0 {
 				exitCode = 1
@@ -130,40 +130,40 @@ func monitorLocalCommand(runtime tunnelCommandRuntime, localCmd *exec.Cmd) (int,
 			interruptCount++
 			if interruptCount == 1 {
 				if sig == os.Interrupt {
-					utils.CliInfo("Interrupt received. Stopping local command... (Press Ctrl+C again to force stop)")
-					signalProcess(localCmd, os.Interrupt)
+					ios.Info("Interrupt received. Stopping local command... (Press Ctrl+C again to force stop)")
+					signalProcess(ios, localCmd, os.Interrupt)
 				} else {
-					utils.CliInfo("Termination signal received. Stopping local command...")
-					signalProcess(localCmd, sig)
+					ios.Info("Termination signal received. Stopping local command...")
+					signalProcess(ios, localCmd, sig)
 				}
 				graceTimer = time.After(localCommandGracePeriod)
 				continue
 			}
 
-			utils.CliWarning("Force stopping local command.")
-			killProcess(localCmd)
+			ios.Warning("Force stopping local command.")
+			killProcess(ios, localCmd)
 			runtime.Close(nil)
 			<-runtime.Done()
-			err := waitForProcessExit(waitCh, localCmd, remoteCloseGracePeriod)
+			err := waitForProcessExit(ios, waitCh, localCmd, remoteCloseGracePeriod)
 			return exitCodeFromProcessError(err), nil
 
 		case <-graceTimer:
-			utils.CliWarning("Grace period elapsed. Force stopping local command.")
-			killProcess(localCmd)
+			ios.Warning("Grace period elapsed. Force stopping local command.")
+			killProcess(ios, localCmd)
 			runtime.Close(nil)
 			<-runtime.Done()
-			err := waitForProcessExit(waitCh, localCmd, remoteCloseGracePeriod)
+			err := waitForProcessExit(ios, waitCh, localCmd, remoteCloseGracePeriod)
 			return exitCodeFromProcessError(err), nil
 		}
 	}
 }
 
-func waitForProcessExit(waitCh <-chan error, localCmd *exec.Cmd, timeout time.Duration) error {
+func waitForProcessExit(ios *utils.IOStreams, waitCh <-chan error, localCmd *exec.Cmd, timeout time.Duration) error {
 	select {
 	case err := <-waitCh:
 		return err
 	case <-time.After(timeout):
-		killProcess(localCmd)
+		killProcess(ios, localCmd)
 	}
 
 	select {
@@ -174,21 +174,21 @@ func waitForProcessExit(waitCh <-chan error, localCmd *exec.Cmd, timeout time.Du
 	}
 }
 
-func killProcess(localCmd *exec.Cmd) {
+func killProcess(ios *utils.IOStreams, localCmd *exec.Cmd) {
 	if localCmd == nil || localCmd.Process == nil {
 		return
 	}
 	if err := localCmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		utils.CliWarning("Failed to force stop local command: %s", err)
+		ios.Warning("Failed to force stop local command: %s", err)
 	}
 }
 
-func signalProcess(localCmd *exec.Cmd, sig os.Signal) {
+func signalProcess(ios *utils.IOStreams, localCmd *exec.Cmd, sig os.Signal) {
 	if localCmd == nil || localCmd.Process == nil {
 		return
 	}
 	if err := localCmd.Process.Signal(sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		utils.CliWarning("Failed to signal local command: %s", err)
+		ios.Warning("Failed to signal local command: %s", err)
 	}
 }
 

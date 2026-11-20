@@ -12,10 +12,11 @@ import (
 // selfUserPK is the alias the IAM user routes accept in place of a UUID to mean the caller.
 const selfUserPK = "-"
 
-var userRoleCmd = &cobra.Command{
-	Use:   "role",
-	Short: "Manage the workspace roles a user holds",
-	Long: `Grant and revoke the workspace RBAC roles a user holds.
+func newUserRoleCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "role",
+		Short: "Manage the workspace roles a user holds",
+		Long: `Grant and revoke the workspace RBAC roles a user holds.
 
 A role binding is immutable—the server has no update path, so changing a user's
 roles means revoking one binding and granting another. Bindings created here are
@@ -36,22 +37,32 @@ member's tier within a group (owner, manager, member), a different axis from a
 workspace RBAC role.
 
 Changing a role binding requires a workspace superuser and recent multi-factor
-authentication. On self-hosted workspaces an API token is accepted and skips the
-MFA step. On Alpacon Cloud workspaces an API token is refused on these commands,
-reads included, so run 'alpacon login' first.
+authentication. An API token is refused on these commands, reads included, so
+run 'alpacon login' first.
 
 'history' is the one exception. It reads the audit log, which sits outside the
 gate that refuses tokens elsewhere and asks instead for a token carrying the
-role_audit_log:read scope, on either deployment.`,
-	Example: `  alpacon user role ls john
+role_audit_log:read scope. How far it reaches depends on the reader, and it says
+so above its table.`,
+		Example: `  alpacon user role ls john
   alpacon user role catalog
   alpacon user role describe superuser
   alpacon user role grant john operator --reason "on-call rotation Q3"
   alpacon user role revoke john superuser --cascade
   alpacon user role history john`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return utils.RequireSubcommand(cmd)
-	},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return utils.RequireSubcommand(cmd)
+		},
+	}
+	cmd.AddCommand(
+		newUserRoleListCmd(newClient, ios),
+		newUserRoleCatalogCmd(newClient, ios),
+		newUserRoleDescribeCmd(newClient, ios),
+		newUserRoleGrantCmd(newClient, ios),
+		newUserRoleRevokeCmd(newClient, ios),
+		newUserRoleHistoryCmd(newClient, ios),
+	)
+	return cmd
 }
 
 // subject is who a command acts on. PK addresses the user in the path: "-", the server's self
@@ -62,15 +73,6 @@ type subject struct {
 	PK    string
 	ID    string
 	Label string
-}
-
-func init() {
-	userRoleCmd.AddCommand(userRoleListCmd)
-	userRoleCmd.AddCommand(userRoleCatalogCmd)
-	userRoleCmd.AddCommand(userRoleDescribeCmd)
-	userRoleCmd.AddCommand(userRoleGrantCmd)
-	userRoleCmd.AddCommand(userRoleRevokeCmd)
-	userRoleCmd.AddCommand(userRoleHistoryCmd)
 }
 
 func resolveSubject(ac *client.AlpaconClient, args []string) (subject, error) {
@@ -95,10 +97,8 @@ func resolveSubject(ac *client.AlpaconClient, args []string) (subject, error) {
 	return subject{PK: userID, ID: userID, Label: args[0]}, nil
 }
 
-// canonicalUUID dashes and lowercases what IsUUID also accepts un-dashed and in either
-// case. The audit log's user filter is an exact compare against the canonical form, so a
-// non-canonical value matches nothing and 'user role history' prints an empty table and
-// exits 0. The binding list's filter coerces the value itself.
+// canonicalUUID dashes and lowercases a UUID: the audit log's user filter compares exactly, so a
+// non-canonical value would match nothing and print an empty history.
 func canonicalUUID(id string) string {
 	hex := strings.ToLower(strings.ReplaceAll(id, "-", ""))
 	if len(hex) != 32 {

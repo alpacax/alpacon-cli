@@ -43,7 +43,7 @@ func handleSubmissionError(err error, serverName string, callbacks ErrorHandlerC
 		}
 
 		if err := callbacks.OnMFARequired(serverName); err != nil {
-			CliErrorWithExit("MFA authentication failed: %s", err)
+			return NewExitError("MFA authentication failed: %s", err)
 		}
 
 		if callbacks.RetryOperation == nil {

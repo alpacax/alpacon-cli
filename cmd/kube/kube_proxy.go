@@ -29,7 +29,7 @@ type kubeProxyFlagValues struct {
 	kubeconfig string
 }
 
-func newKubeProxyCmd() *cobra.Command {
+func newKubeProxyCmd(ios *utils.IOStreams) *cobra.Command {
 	var flags kubeProxyFlagValues
 	cmd := &cobra.Command{
 		Use:   "proxy CLUSTER",
@@ -49,7 +49,7 @@ Only one proxy per cluster and port runs at a time. Press Ctrl+C to stop it.`,
   alpacon kube proxy prod-east --port 18444`,
 		Args: cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			return runKubeProxy(args[0], flags)
+			return runKubeProxy(ios, args[0], flags)
 		}),
 	}
 	cmd.Flags().IntVar(&flags.port, "port", defaultKubeProxyPort, "local port to listen on")
@@ -57,7 +57,7 @@ Only one proxy per cluster and port runs at a time. Press Ctrl+C to stop it.`,
 	return cmd
 }
 
-func runKubeProxy(clusterName string, flags kubeProxyFlagValues) error {
+func runKubeProxy(ios *utils.IOStreams, clusterName string, flags kubeProxyFlagValues) error {
 	port := flags.port
 	if err := validatePort(port); err != nil {
 		return utils.NewUsageExitError("--port %s.", err)
@@ -103,9 +103,9 @@ func runKubeProxy(clusterName string, flags kubeProxyFlagValues) error {
 	go func() { served <- relay.Serve(listener) }()
 
 	if want := localProxyURL(port); proxyURL != want {
-		utils.CliWarning("Context %q does not send kubectl through this proxy. Run 'alpacon kube config %s --proxy-port %d' to point it here.", contextName, clusterName, port)
+		ios.Warning("Context %q does not send kubectl through this proxy. Run 'alpacon kube config %s --proxy-port %d' to point it here.", contextName, clusterName, port)
 	}
-	utils.CliInfo("Kube proxy for %s listening on 127.0.0.1:%d -> %s (Ctrl+C to exit)", clusterName, port, target)
+	ios.Info("Kube proxy for %s listening on 127.0.0.1:%d -> %s (Ctrl+C to exit)", clusterName, port, target)
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
@@ -115,7 +115,7 @@ func runKubeProxy(clusterName string, flags kubeProxyFlagValues) error {
 	case <-signals:
 		_ = relay.Close()
 		<-served
-		utils.CliInfo("Kube proxy stopped")
+		ios.Info("Kube proxy stopped")
 	case err := <-served:
 		_ = relay.Close()
 		if err != nil {

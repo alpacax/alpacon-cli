@@ -1,10 +1,13 @@
 package rbac
 
 import (
+	"bytes"
+	"encoding/json"
 	"strconv"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 type RoleResponse struct {
@@ -56,7 +59,59 @@ type RoleAuditLogResponse struct {
 	Scope       string          `json:"scope"`
 	ChangedBy   *AuditActor     `json:"changed_by"`
 	Reason      string          `json:"reason"`
-	AddedAt     time.Time       `json:"added_at"`
+	Context     AuditContext    `json:"context"`
+	// TargetsHidden counts the binding targets withheld from this reader, whose id is then left
+	// out of Context and whose Reason is sent empty; a server that predates it decodes as 0.
+	TargetsHidden int       `json:"targets_hidden"`
+	AddedAt       time.Time `json:"added_at"`
+}
+
+// AuditContext is the part of a row's context the CLI reads; the server may send more keys. It
+// decodes leniently, a key of another shape reading as absent, so one odd row cannot fail a page.
+type AuditContext struct {
+	// ScopeContentType names the binding target's kind as a dotted label, e.g. servers.server.
+	// It stays on a row whose target is withheld: it names a kind, not an object.
+	ScopeContentType *string
+	// ScopeObjectID is the target's id as sent; a number is kept as its text.
+	ScopeObjectID *string
+	// Erased marks a row whose personal data was erased, so an empty Reason is not one never
+	// given. Only a JSON true counts.
+	Erased bool
+}
+
+func (c *AuditContext) UnmarshalJSON(data []byte) error {
+	*c = AuditContext{}
+	var fields struct {
+		ScopeContentType json.RawMessage `json:"scope_content_type"`
+		ScopeObjectID    json.RawMessage `json:"scope_object_id"`
+		Erased           json.RawMessage `json:"erased"`
+	}
+	if json.Unmarshal(data, &fields) != nil {
+		return nil
+	}
+	c.ScopeContentType = looseString(fields.ScopeContentType)
+	c.ScopeObjectID = looseString(fields.ScopeObjectID)
+	c.Erased = bytes.Equal(bytes.TrimSpace(fields.Erased), []byte("true"))
+	return nil
+}
+
+// looseString reads a JSON string, or a number as its text; anything else, null included, is nil.
+func looseString(raw json.RawMessage) *string {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if decoder.Decode(&value) != nil {
+		return nil
+	}
+	switch v := value.(type) {
+	case string:
+		return &v
+	case json.Number:
+		text := v.String()
+		return &text
+	default:
+		return nil
+	}
 }
 
 type AuditPrincipal struct {
@@ -94,15 +149,15 @@ type RoleAttributes struct {
 }
 
 type UserRoleAttributes struct {
-	Role      string `json:"role"`
-	Scope     string `json:"scope"`
-	GrantedAt string `json:"granted_at" table:"Granted At"`
+	Role      string          `json:"role"`
+	Scope     string          `json:"scope"`
+	GrantedAt utils.Timestamp `json:"granted_at" table:"Granted At"`
 }
 
 type RoleHolderAttributes struct {
-	User      string `json:"user"`
-	Scope     string `json:"scope"`
-	GrantedAt string `json:"granted_at" table:"Granted At"`
+	User      string          `json:"user"`
+	Scope     string          `json:"scope"`
+	GrantedAt utils.Timestamp `json:"granted_at" table:"Granted At"`
 }
 
 type RoleScopeAttributes struct {
@@ -111,13 +166,22 @@ type RoleScopeAttributes struct {
 	ACL     string `json:"acl" table:"ACL"`
 }
 
+// RoleAuditAttributes keeps Target and ReasonCell for the table alone, which word a hidden target
+// or a withheld or erased reason; JSON carries the fields as sent, so an empty reason stays "" and
+// a withheld target_id stays null.
 type RoleAuditAttributes struct {
-	Action    string `json:"action"`
-	Role      string `json:"role"`
-	Scope     string `json:"scope"`
-	ChangedBy string `json:"changed_by" table:"Changed By"`
-	Reason    string `json:"reason"`
-	At        string `json:"at"`
+	Action        string          `json:"action"`
+	Role          string          `json:"role"`
+	Scope         string          `json:"scope"`
+	Target        string          `json:"-" table:"Target"`
+	TargetType    *string         `json:"target_type" table:"-"`
+	TargetID      *string         `json:"target_id" table:"-"`
+	TargetsHidden int             `json:"targets_hidden" table:"-"`
+	ChangedBy     string          `json:"changed_by" table:"Changed By"`
+	Reason        string          `json:"reason" table:"-"`
+	Erased        bool            `json:"erased" table:"-"`
+	ReasonCell    string          `json:"-" table:"Reason"`
+	At            utils.Timestamp `json:"at"`
 }
 
 // EffectivePermissionsResponse omits object-scoped bindings from Roles: their number grows with the

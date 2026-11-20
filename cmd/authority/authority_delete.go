@@ -4,16 +4,16 @@ import (
 	"fmt"
 
 	"github.com/alpacax/alpacon-cli/api/cert"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var authorityDeleteCmd = &cobra.Command{
-	Use:     "delete AUTHORITY",
-	Aliases: []string{"rm"},
-	Short:   "Delete a CA that has no certificate history",
-	Long: `
+func newAuthorityDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "delete AUTHORITY",
+		Aliases: []string{"rm"},
+		Short:   "Delete a CA that has no certificate history",
+		Long: `
 	This command removes a Certificate Authority (CA) that has never received a certificate sign request.
 	A CA that has received one cannot be deleted: the server refuses and keeps the CA along with
 	its sign requests, issued certificates and revoke requests.
@@ -23,40 +23,43 @@ var authorityDeleteCmd = &cobra.Command{
 	no new requests, while its records are kept.
 	Note that this action requires manual configuration adjustments to alpamon-cert-authority.
 	`,
-	Example: `
+		Example: `
 	alpacon authority delete "Root CA"
 	alpacon authority rm my-authority
 	alpacon authority delete my-authority -y
 	`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		authorityName := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			authorityName := args[0]
 
-		yes, _ := cmd.Flags().GetBool("yes")
-		if !yes {
-			if proceed, err := utils.Confirm("A CA that has received certificate requests cannot be deleted. Delete CA '%s'?", authorityName); err != nil || !proceed {
-				return err
+			yes, _ := cmd.Flags().GetBool("yes")
+			if !yes {
+				if proceed, err := utils.Confirm("A CA that has received certificate requests cannot be deleted. Delete CA '%s'?", authorityName); err != nil || !proceed {
+					return err
+				}
 			}
-		}
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		authorityID, err := cert.GetAuthorityIDByName(alpaconClient, authorityName)
-		if err != nil {
-			return utils.NewExitError("Failed to find authority: %s.", err)
-		}
+			authorityID, err := cert.GetAuthorityIDByName(alpaconClient, authorityName)
+			if err != nil {
+				return utils.NewExitError("Failed to find authority: %s.", err)
+			}
 
-		err = cert.DeleteCA(alpaconClient, authorityID)
-		if err != nil {
-			return utils.NewExitError("%s", utils.Reword(err, deleteCAErrorText(authorityName, err)))
-		}
+			err = cert.DeleteCA(alpaconClient, authorityID)
+			if err != nil {
+				return utils.NewExitError("%s", utils.Reword(err, deleteCAErrorText(authorityName, err)))
+			}
 
-		utils.CliSuccess("CA deleted: %s", authorityName)
-		return nil
-	}),
+			ios.Success("CA deleted: %s", authorityName)
+			return nil
+		}),
+	}
+	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	return cmd
 }
 
 func deleteCAErrorText(authorityName string, err error) string {
@@ -69,8 +72,4 @@ func deleteCAErrorText(authorityName string, err error) string {
 			"if it is still listed. This removes the server itself.", authorityName)
 	}
 	return fmt.Sprintf("Failed to delete the CA: %s.", err)
-}
-
-func init() {
-	authorityDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 }

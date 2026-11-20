@@ -2,38 +2,39 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/alpacax/alpacon-cli/pkg/selfupdate"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var versionCmd = &cobra.Command{
-	Use:   "version",
-	Short: "Display the current CLI version",
-	Long:  "Displays the current version of the CLI and checks if there is an available update.",
-	Run: func(cmd *cobra.Command, args []string) {
-		runVersion()
-	},
+func newVersionCmd(ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Display the current CLI version",
+		Long:  "Displays the current version of the CLI and checks if there is an available update.",
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			return runVersion(ios)
+		}),
+	}
 }
 
-func runVersion() {
-	if utils.OutputFormat == utils.OutputFormatJSON {
-		printVersionJSON()
-		return
+func runVersion(ios *utils.IOStreams) error {
+	if ios.IsJSON() {
+		return printVersionJSON(ios)
 	}
-	utils.CliInfo("Current version: %s", utils.Version)
+	ios.Info("Current version: %s", utils.Version)
 	release, err := selfupdate.LatestRelease(selfupdate.DefaultReleaseAPIURL)
 	if err != nil {
-		utils.CliWarning("Could not check for updates: %s", err)
-		return
+		ios.Warning("Could not check for updates: %s", err)
+		return nil
 	}
 	if selfupdate.IsOutdated(utils.Version, release.Version) {
-		utils.CliWarning("%s", upgradeNotice(utils.Version, release.Version, release.HTMLURL))
-		return
+		ios.Warning("%s", upgradeNotice(utils.Version, release.Version, release.HTMLURL))
+		return nil
 	}
-	utils.CliInfo("You are up to date!")
+	ios.Info("You are up to date!")
+	return nil
 }
 
 // A released build is sent to 'alpacon update' whoever owns it: asking which
@@ -65,12 +66,13 @@ func newVersionOutput(current string, release *selfupdate.Release) versionOutput
 }
 
 // Exits 0 even when the lookup fails; scripts branch on 'alpacon update --check'.
-func printVersionJSON() {
+func printVersionJSON(ios *utils.IOStreams) error {
 	release, err := selfupdate.LatestRelease(selfupdate.DefaultReleaseAPIURL)
 	if err != nil {
-		utils.CliWarning("Could not check for updates: %s", err)
+		ios.Warning("Could not check for updates: %s", err)
 	}
-	if err := utils.PrintJSONValue(os.Stdout, newVersionOutput(utils.Version, release)); err != nil {
-		utils.CliErrorWithExit("Failed to print the version: %s", err)
+	if err := utils.PrintJSONValue(ios.Out, newVersionOutput(utils.Version, release)); err != nil {
+		return utils.NewExitError("Failed to print the version: %s", err)
 	}
+	return nil
 }

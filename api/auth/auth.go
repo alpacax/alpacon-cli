@@ -111,7 +111,11 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 }
 
 func postLogin(httpClient *http.Client, workspaceURL string, reqBody []byte) (*http.Response, error) {
-	httpReq, err := http.NewRequest(http.MethodPost, utils.BuildURL(workspaceURL, loginURL, nil), bytes.NewBuffer(reqBody))
+	apiURL, err := utils.BuildURL(workspaceURL, loginURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewBuffer(reqBody))
 	if err != nil {
 		return nil, err
 	}
@@ -186,8 +190,8 @@ func GetAPITokenList(ac *client.AlpaconClient) ([]APITokenAttributes, error) {
 			ID:        token.ID,
 			Name:      token.Name,
 			Enabled:   token.Enabled,
-			UpdatedAt: utils.TimeUtils(token.UpdatedAt),
-			ExpiresAt: utils.TimeUtils(token.ExpiresAt),
+			UpdatedAt: utils.RelativeTime(token.UpdatedAt),
+			ExpiresAt: utils.RelativeTime(token.ExpiresAt),
 			Scopes:    strings.Join(token.Scopes, ", "),
 		})
 	}

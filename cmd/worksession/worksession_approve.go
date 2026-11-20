@@ -12,20 +12,22 @@ const approveRejectExcludedMessage = "Approvals must be done in the Alpacon cons
 	"The CLI is an execution and request surface only; approval and rejection happen out of band. " +
 	"Use 'alpacon work-session ls' to track a session's status."
 
-var workSessionApproveCmd = &cobra.Command{
-	Use:   "approve",
-	Short: "Approve a session (moved to the Alpacon console)",
-	Long: `Approving work sessions has moved to the Alpacon console (web).
+func newWorkSessionApproveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "approve",
+		Short: "Approve a session (moved to the Alpacon console)",
+		Long: `Approving work sessions has moved to the Alpacon console (web).
 
 The CLI is an execution and request surface only; a human approves or rejects
 out of band in the web console or Slack. The server rejects approve/reject from
 the CLI credential channel. Use 'alpacon work-session ls' to track status.`,
-	Args: cobra.ArbitraryArgs,
-	Example: `  # Approve in the Alpacon console (web), then track status here:
+		Args: cobra.ArbitraryArgs,
+		Example: `  # Approve in the Alpacon console (web), then track status here:
   alpacon work-session ls --status active`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		// Exit non-zero so a script that expected the approval to happen does not
-		// mistake this for success—the CLI must never pretend to approve.
-		return utils.NewExitError("%s", approveRejectExcludedMessage)
-	}),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			// Exit non-zero so a script that expected the approval to happen does not
+			// mistake this for success—the CLI must never pretend to approve.
+			return utils.NewExitError("%s", approveRejectExcludedMessage)
+		}),
+	}
 }

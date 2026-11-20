@@ -247,20 +247,18 @@ func TestGetRoleHistory_StopsAtTailAndSendsNoOrdering(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query = r.URL.Query()
 
-		response := api.ListResponse[RoleAuditLogResponse]{Count: 3, Current: 1, Next: 2, Last: 2}
-		response.Results = []RoleAuditLogResponse{
-			{ID: "a1", Action: "granted", RoleName: "admin", Scope: "global"},
-			{ID: "a2", Action: "revoked", RoleName: "admin", Scope: "global"},
-			{ID: "a3", Action: "granted", RoleName: "operator", Scope: "global"},
-		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
+		_, _ = w.Write([]byte(`{"count":3,"current":1,"next":2,"last":2,"reach":"bound","results":[
+			{"id":"a1","action":"granted","role_name":"admin","scope":"global"},
+			{"id":"a2","action":"revoked","role_name":"admin","scope":"global"},
+			{"id":"a3","action":"granted","role_name":"operator","scope":"global"}]}`))
 	}))
 	defer ts.Close()
 
-	entries, err := GetRoleHistory(newTestClient(ts), userID, 2)
+	entries, reach, err := GetRoleHistory(newTestClient(ts), userID, 2)
 	require.NoError(t, err)
 	assert.Len(t, entries, 2)
+	assert.Equal(t, Reach{Raw: json.RawMessage(`"bound"`), Value: ReachBound}, reach)
 
 	assert.Equal(t, userID, query.Get("user"))
 	assert.NotContains(t, query, "ordering")
@@ -279,6 +277,183 @@ func TestAuditAttributesFrom_ToleratesMissingActorAndRole(t *testing.T) {
 	assert.Equal(t, "admin", rows[0].Role)
 	assert.Equal(t, "Jane Doe", rows[1].ChangedBy)
 	assert.Equal(t, "rotated off", rows[1].Reason)
+}
+
+func TestRoleAuditLogResponse_DecodesTargetAndErasure(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		body       string
+		wantType   *string
+		wantID     *string
+		wantHidden int
+		wantErased bool
+	}{
+		{
+			name:     "an object target",
+			body:     `{"scope":"object","context":{"scope_content_type":"servers.server","scope_object_id":"550e8400-e29b-41d4-a716-446655440000"},"targets_hidden":0}`,
+			wantType: new("servers.server"),
+			wantID:   new("550e8400-e29b-41d4-a716-446655440000"),
+		},
+		{
+			name:       "a withheld target keeps its kind and loses its id",
+			body:       `{"scope":"object","context":{"scope_content_type":"servers.server"},"targets_hidden":1}`,
+			wantType:   new("servers.server"),
+			wantHidden: 1,
+		},
+		{
+			name: "a server that predates targets_hidden and context",
+			body: `{"scope":"global"}`,
+		},
+		{
+			name:       "an erased row",
+			body:       `{"scope":"global","context":{"erased":true}}`,
+			wantErased: true,
+		},
+		{
+			name: "erased false",
+			body: `{"scope":"global","context":{"erased":false}}`,
+		},
+		{
+			name: "erased null",
+			body: `{"scope":"global","context":{"erased":null}}`,
+		},
+		{
+			name: "erased as a value other than true",
+			body: `{"scope":"global","context":{"erased":"true"}}`,
+		},
+		{
+			name:     "a numeric object id is kept as its text",
+			body:     `{"scope":"object","context":{"scope_content_type":"servers.server","scope_object_id":42}}`,
+			wantType: new("servers.server"),
+			wantID:   new("42"),
+		},
+		{
+			name:     "a key of another shape reads as absent",
+			body:     `{"scope":"object","context":{"scope_content_type":"servers.server","scope_object_id":{"id":"x"}}}`,
+			wantType: new("servers.server"),
+		},
+		{
+			name: "a null object id",
+			body: `{"scope":"content_type","context":{"scope_object_id":null}}`,
+		},
+		{
+			name: "a context that is not an object",
+			body: `{"scope":"global","context":"servers.server"}`,
+		},
+		{
+			name: "a null context",
+			body: `{"scope":"global","context":null}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var entry RoleAuditLogResponse
+			require.NoError(t, json.Unmarshal([]byte(tt.body), &entry))
+
+			assert.Equal(t, tt.wantType, entry.Context.ScopeContentType)
+			assert.Equal(t, tt.wantID, entry.Context.ScopeObjectID)
+			assert.Equal(t, tt.wantHidden, entry.TargetsHidden)
+			assert.Equal(t, tt.wantErased, entry.Context.Erased)
+		})
+	}
+}
+
+func TestTargetCell(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		contentType *string
+		objectID    *string
+		hidden      int
+		want        string
+	}{
+		{name: "a workspace-wide binding names no target", want: ""},
+		{name: "a binding on every object of a kind", contentType: new("servers.server"), want: "servers.server"},
+		// Not ScopeLabel's type:42/id: the audit row carries the kind's label.
+		{name: "one object", contentType: new("servers.server"), objectID: new("550e8400-e29b-41d4-a716-446655440000"), want: "servers.server/550e8400-e29b-41d4-a716-446655440000"},
+		{name: "a withheld object shows its kind and the count", contentType: new("servers.server"), hidden: 1, want: "servers.server (1 hidden)"},
+		{name: "the count is printed as sent", contentType: new("iam.group"), hidden: 2, want: "iam.group (2 hidden)"},
+		{name: "a withheld object with no kind still says it is hidden", hidden: 1, want: "(1 hidden)"},
+		{name: "an id with no kind is shown alone", objectID: new("42"), want: "42"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, targetCell(tt.contentType, tt.objectID, tt.hidden))
+		})
+	}
+}
+
+func TestReasonCell(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		reason string
+		hidden int
+		erased bool
+		want   string
+	}{
+		{name: "a reason is shown as given", reason: "on-call", want: "on-call"},
+		{name: "a reason never given stays blank", want: ""},
+		{name: "a withheld target withholds its reason", hidden: 1, want: "(withheld)"},
+		{name: "an erased row says so", erased: true, want: "(erased)"},
+		{name: "a reason the server sent wins over the markers", reason: "rotated off", hidden: 1, erased: true, want: "rotated off"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, reasonCell(tt.reason, tt.hidden, tt.erased))
+		})
+	}
+}
+
+// JSON carries the fields as sent: the table's words for a withheld reason and target stay out.
+func TestAuditAttributesFrom_JSONKeepsAWithheldRowAsSent(t *testing.T) {
+	t.Parallel()
+	added := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	rows := AuditAttributesFrom([]RoleAuditLogResponse{{
+		Action: "granted", RoleName: "server:viewer", Scope: "object",
+		ChangedBy: &AuditActor{Label: "bob"}, Reason: "",
+		Context:       AuditContext{ScopeContentType: new("servers.server")},
+		TargetsHidden: 1, AddedAt: added,
+	}}, time.UTC)
+
+	require.Len(t, rows, 1)
+	assert.Equal(t, "servers.server (1 hidden)", rows[0].Target)
+	assert.Equal(t, "(withheld)", rows[0].ReasonCell)
+
+	body, err := json.Marshal(rows)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[{
+		"action":"granted","role":"server:viewer","scope":"object",
+		"target_type":"servers.server","target_id":null,"targets_hidden":1,
+		"changed_by":"bob","reason":"","erased":false,"at":"2026-11-10T09:00:00Z"
+	}]`, string(body))
+}
+
+func TestAuditAttributesFrom_CarriesAnErasedRow(t *testing.T) {
+	t.Parallel()
+	added := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	rows := AuditAttributesFrom([]RoleAuditLogResponse{{
+		Action: "granted", RoleName: "operator", Scope: "global", Reason: "",
+		Context: AuditContext{Erased: true}, AddedAt: added,
+	}}, time.UTC)
+
+	require.Len(t, rows, 1)
+	assert.Equal(t, "(erased)", rows[0].ReasonCell)
+
+	body, err := json.Marshal(rows)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[{
+		"action":"granted","role":"operator","scope":"workspace",
+		"target_type":null,"target_id":null,"targets_hidden":0,
+		"changed_by":"","reason":"","erased":true,"at":"2026-11-10T09:00:00Z"
+	}]`, string(body))
 }
 
 func TestFindWorkspaceBindingIgnoresObjectScopedRows(t *testing.T) {
@@ -546,21 +721,39 @@ func TestAttributesFrom_RenderTimesInTheGivenZone(t *testing.T) {
 
 	roles := BindingAttributesFrom(bindings, kst)
 	require.Len(t, roles, 2)
-	assert.Equal(t, rendered, roles[0].GrantedAt)
-	assert.Empty(t, roles[1].GrantedAt, "a missing added_at must not render as year 1")
+	assert.Equal(t, rendered, roles[0].GrantedAt.String())
+	assert.Empty(t, roles[1].GrantedAt.String(), "a missing added_at must not render as year 1")
 
 	holders := HolderAttributesFrom(bindings, nil, kst)
 	require.Len(t, holders, 2)
-	assert.Equal(t, rendered, holders[0].GrantedAt)
-	assert.Empty(t, holders[1].GrantedAt)
+	assert.Equal(t, rendered, holders[0].GrantedAt.String())
+	assert.Empty(t, holders[1].GrantedAt.String())
 
 	audit := AuditAttributesFrom([]RoleAuditLogResponse{
 		{Action: "granted", RoleName: "admin", AddedAt: granted},
 		{Action: "revoked", RoleName: "admin"},
 	}, kst)
 	require.Len(t, audit, 2)
-	assert.Equal(t, rendered, audit[0].At)
-	assert.Empty(t, audit[1].At)
+	assert.Equal(t, rendered, audit[0].At.String())
+	assert.Empty(t, audit[1].At.String())
+}
+
+func TestAttributesFrom_JSONKeepsUTCTimeAndNullForMissing(t *testing.T) {
+	t.Parallel()
+	kst := time.FixedZone("KST", 9*60*60)
+	granted := time.Date(2026, 3, 4, 3, 4, 5, 0, time.UTC)
+	bindings := []UserRoleResponse{
+		{Role: RoleNested{Name: "admin"}, AddedAt: granted.In(kst)},
+		{Role: RoleNested{Name: "operator"}},
+	}
+
+	body, err := json.Marshal(BindingAttributesFrom(bindings, kst))
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{"role":"admin","scope":"workspace","granted_at":"2026-03-04T03:04:05Z"},
+		{"role":"operator","scope":"workspace","granted_at":null}
+	]`, string(body))
 }
 
 // Both translations must match what ScopeLabel prints for the same tier, or one tier reads

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"reflect"
 	"strings"
 	"text/tabwriter"
@@ -24,12 +23,10 @@ const (
 var OutputFormat string
 
 // SetOutputFormat applies an --output value, refusing anything but table or json as a usage error.
-func SetOutputFormat(value string) error {
-	if value != OutputFormatTable && value != OutputFormatJSON {
-		return MarkUsageError(fmt.Errorf("invalid --output value %q (expected %q or %q)", value, OutputFormatTable, OutputFormatJSON))
-	}
-	OutputFormat = value
-	return nil
+func SetOutputFormat(value string) error { return Stdio.SetOutputFormat(value) }
+
+func invalidOutputFormat(value string) error {
+	return MarkUsageError(fmt.Errorf("invalid --output value %q (expected %q or %q)", value, OutputFormatTable, OutputFormatJSON))
 }
 
 // OutputFormatIn is the last --output value before any "--" in args, for a command line
@@ -172,7 +169,7 @@ func PrintJSONError[T any](w io.Writer, envelope JSONErrorEnvelope[T]) {
 		}, "")
 	}
 	line = append(line, '\n')
-	if w == os.Stderr {
+	if isProcessStderr(w) {
 		if stderrMidLine.Swap(false) || activeSpinners.Load() > 0 {
 			line = append([]byte{'\n'}, line...)
 		}
@@ -180,35 +177,41 @@ func PrintJSONError[T any](w io.Writer, envelope JSONErrorEnvelope[T]) {
 	_, _ = w.Write(line)
 }
 
-func PrintTable(slice any) {
-	s := reflect.ValueOf(slice)
+// PrintTable prints a slice of row structs as a table, or as JSON under --output json. It returns the
+// exit-1 failure when slice is not a slice or does not marshal.
+func PrintTable(slice any) error { return Stdio.PrintTable(slice) }
 
-	if s.Kind() != reflect.Slice {
-		CliErrorWithExit("Parsing data: Expected a list format.")
+// PrintTable prints a slice of row structs to s.Out as a table, or as JSON under --output json. It
+// returns the exit-1 failure when slice is not a slice or does not marshal.
+func (s *IOStreams) PrintTable(slice any) error {
+	v := reflect.ValueOf(slice)
+
+	if v.Kind() != reflect.Slice {
+		return NewExitError("Parsing data: Expected a list format.")
 	}
 
-	if OutputFormat == OutputFormatJSON {
-		if s.IsNil() || s.Len() == 0 {
-			_, _ = fmt.Fprintln(os.Stdout, "[]")
-			return
+	if s.IsJSON() {
+		if v.IsNil() || v.Len() == 0 {
+			_, _ = fmt.Fprintln(s.Out, "[]")
+			return nil
 		}
 		data, err := json.MarshalIndent(slice, "", "  ")
 		if err != nil {
-			CliErrorWithExit("Failed to marshal data to JSON: %s", err)
+			return NewExitError("Failed to marshal data to JSON: %s", err)
 		}
-		_, _ = fmt.Fprintln(os.Stdout, string(escapeJSONControls(data)))
-		return
+		_, _ = fmt.Fprintln(s.Out, string(escapeJSONControls(data)))
+		return nil
 	}
 
-	writer, cleanup := WriteToPager()
+	writer, cleanup := s.Pager()
 	defer cleanup()
 
 	tw := tabwriter.NewWriter(writer, 0, 0, 3, ' ', 0)
 
 	var fields []int
 	var headers []string
-	for i := range s.Type().Elem().NumField() {
-		field := s.Type().Elem().Field(i)
+	for i := range v.Type().Elem().NumField() {
+		field := v.Type().Elem().Field(i)
 		if field.Tag.Get("table") == "-" {
 			continue
 		}
@@ -221,73 +224,90 @@ func PrintTable(slice any) {
 	}
 	_, _ = fmt.Fprintln(tw, strings.Join(headers, "\t"))
 
-	for i := range s.Len() {
+	for i := range v.Len() {
 		row := make([]string, len(fields))
 		for j, field := range fields {
 			// API values are untrusted, so control sequences are stripped; newlines drop too, not
 			// becoming spaces as in cmd/event/render.go, so a cell cannot spill into a second row.
 			// --output json returns the value whole.
-			row[j] = SanitizeTerminalText(fmt.Sprintf("%v", s.Index(i).Field(field)))
+			row[j] = SanitizeTerminalText(fmt.Sprintf("%v", v.Index(i).Field(field)))
 		}
 		_, _ = fmt.Fprintln(tw, strings.Join(row, "\t"))
 	}
 
 	_ = tw.Flush()
+	return nil
 }
 
-// PartialTableWithExit prints rows to stdout, the reason to stderr, and exits with
-// ExitCodeGeneralError. It is not for a walk that collected nothing: that is an
-// ordinary failure for CliErrorWithExit.
-func PartialTableWithExit(rows any, msg string, args ...any) {
-	_ = PartialTableExitError(rows, msg, args...)
-	os.Exit(ExitCodeGeneralError)
-}
-
-// PartialTableExitError is PartialTableWithExit for a RunE command: it prints the same and returns
-// a silent ExitCodeGeneralError, since the warning is already the failure line.
+// PartialTableExitError prints the reason to stderr and rows to stdout, then returns a silent
+// ExitCodeGeneralError, since the warning is the failure line, or PrintTable's failure when rows do not print.
+// It does not check for empty rows: a caller with none to show returns an ordinary failure instead.
 func PartialTableExitError(rows any, msg string, args ...any) error {
-	CliWarning(msg, args...)
-	PrintTable(rows)
+	return Stdio.PartialTableExitError(rows, msg, args...)
+}
+
+// PartialTableExitError is the package-level PartialTableExitError on s.
+func (s *IOStreams) PartialTableExitError(rows any, msg string, args ...any) error {
+	s.Warning(msg, args...)
+	if err := s.PrintTable(rows); err != nil {
+		return err
+	}
 	return NewSilentExitError(ExitCodeGeneralError)
 }
 
-// PrintListOrExit prints a list a paginated read returned with err. On a nil err it
-// is PrintTable; otherwise it prints the rows as partial through PartialTableWithExit,
-// or fails with failMsg when there are none.
-func PrintListOrExit[T any](rows []T, err error, failMsg string) {
-	switch {
-	case err != nil && len(rows) > 0:
-		PartialTableWithExit(rows, "Showing only the %d entries read before the request failed: %s.", len(rows), err)
-	case err != nil:
-		CliErrorWithExit("%s: %s.", failMsg, err)
-	}
-	PrintTable(rows)
+// PrintList prints a list a paginated read returned with err. On a nil err it is PrintTable; otherwise
+// it prints the rows as partial through PartialTableExitError, or fails with failMsg when there are none.
+func PrintList[T any](rows []T, err error, failMsg string) error {
+	return PrintListTo(Stdio, rows, err, failMsg)
 }
 
-func PrintJson(body []byte) {
-	if OutputFormat == OutputFormatJSON {
+// PrintListTo is PrintList on s; a generic function, since Go methods take no type parameters.
+func PrintListTo[T any](s *IOStreams, rows []T, err error, failMsg string) error {
+	switch {
+	case err != nil && len(rows) > 0:
+		return s.PartialTableExitError(rows, "Showing only the %d entries read before the request failed: %s.", len(rows), err)
+	case err != nil:
+		return NewExitError("%s: %s.", failMsg, err)
+	}
+	return s.PrintTable(rows)
+}
+
+// PrintJson prints body to stdout as indented JSON, or returns the exit-1 failure when body is not JSON.
+func PrintJson(body []byte) error { return Stdio.PrintJson(body) }
+
+// PrintJson prints body to s.Out as indented JSON, or returns the exit-1 failure when body is not JSON.
+func (s *IOStreams) PrintJson(body []byte) error {
+	if s.IsJSON() {
 		var buf bytes.Buffer
 		if err := json.Indent(&buf, body, "", "  "); err != nil {
-			CliErrorWithExit("Parsing data: Expected a JSON format.")
+			return notJSONError()
 		}
-		_, _ = fmt.Fprintln(os.Stdout, string(escapeJSONControls(buf.Bytes())))
-		return
+		_, _ = fmt.Fprintln(s.Out, string(escapeJSONControls(buf.Bytes())))
+		return nil
 	}
 
 	var prettyJSON bytes.Buffer
 	err := json.Indent(&prettyJSON, body, "", "    ")
 	if err != nil {
-		CliErrorWithExit("Parsing data: Expected a JSON format.")
+		return notJSONError()
 	}
 
 	formattedJson := strings.ReplaceAll(string(escapeJSONControls(prettyJSON.Bytes())), "\\n", "\n")
 	formattedJson = strings.ReplaceAll(formattedJson, "\\t", "\t")
 
-	fmt.Println(formattedJson)
+	_, _ = fmt.Fprintln(s.Out, formattedJson)
+	return nil
 }
 
-func PrintHeader(header string) {
-	fmt.Fprintln(os.Stderr, Blue(header))
+func notJSONError() error {
+	return NewExitError("Parsing data: Expected a JSON format.")
+}
+
+func PrintHeader(header string) { Stdio.PrintHeader(header) }
+
+// PrintHeader writes header to s.ErrOut, above the data s.Out carries.
+func (s *IOStreams) PrintHeader(header string) {
+	_, _ = fmt.Fprintln(s.ErrOut, s.Blue(header))
 }
 
 // camelToWords converts PascalCase/camelCase to space-separated words.

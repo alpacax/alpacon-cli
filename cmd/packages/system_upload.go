@@ -2,37 +2,39 @@ package packages
 
 import (
 	"github.com/alpacax/alpacon-cli/api/packages"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var systemPackageUploadCmd = &cobra.Command{
-	Use:   "upload FILE",
-	Short: "Upload a system package to Alpacon",
-	Long: `
+func newSystemPackageUploadCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:   "upload FILE",
+		Short: "Upload a system package to Alpacon",
+		Long: `
 	The 'upload' command allows users to upload a system package to Alpacon.
 	This command is designed to facilitate the transfer of system packages to a remote server environment for further usage or distribution.
 	`,
-	Example: `
+		Example: `
 	alpacon package system upload osquery-5.10.2-1.linux.x86_64.rpm
 	alpacon package system upload /home/alpacon/osquery_5.8.2-1.linux_amd64.deb
 	`,
-	Args: cobra.ExactArgs(1),
+		Args: cobra.ExactArgs(1),
 
-	Run: func(cmd *cobra.Command, args []string) {
-		file := args[0]
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			file := args[0]
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		err = packages.UploadPackage(alpaconClient, file, "system")
-		if err != nil {
-			utils.CliErrorWithExit("Failed to upload the system package to Alpacon: %s.", err)
-		}
+			err = packages.UploadPackage(alpaconClient, file, "system")
+			if err != nil {
+				return utils.NewExitError("Failed to upload the system package to Alpacon: %s.", err)
+			}
 
-		utils.CliSuccess("Package uploaded: %s", file)
-	},
+			ios.Success("Package uploaded: %s", file)
+			return nil
+		}),
+	}
 }

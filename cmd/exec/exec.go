@@ -3,6 +3,7 @@ package exec
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -20,13 +21,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var ExecCmd = newCommand(client.NewAlpaconAPIClient)
-
 // clientFactory builds the client a command sends its requests with; a test hands in one for its
 // own server.
 type clientFactory = func() (*client.AlpaconClient, error)
 
-func newCommand(newClient clientFactory) *cobra.Command {
+func NewExecCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "exec [flags] [USER@]SERVER [--] [COMMAND...]", // [flags] stays first: words after SERVER go to the remote command
 		Short: "Execute a command on a remote server",
@@ -250,17 +249,17 @@ This is client guidance; personal-token enforcement depends on the server versio
 		// Cobra would otherwise consume remote command flags (e.g. -U, -d); Run parses flags itself.
 		DisableFlagParsing: true,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			parsed := ParseRemoteExecArgs(args)
+			parsed := ParseRemoteExecArgs(ios, args)
 
 			if parsed.ShowHelp {
 				_ = cmd.Help()
 				return nil
 			}
 			if parsed.Err != "" {
-				return utils.NewParseExitError(cmd, parsed.OutputFormat, parsed.Err)
+				return ios.NewParseExitError(cmd, parsed.OutputFormat, parsed.Err)
 			}
 			if parsed.OutputFormat != "" {
-				if err := utils.SetOutputFormat(parsed.OutputFormat); err != nil {
+				if err := ios.SetOutputFormat(parsed.OutputFormat); err != nil {
 					return utils.NewUsageExitError("%s", err)
 				}
 			}
@@ -274,16 +273,16 @@ This is client guidance; personal-token enforcement depends on the server versio
 				return utils.NewUsageExitError("You must specify a command to execute, or a script with --file.")
 			}
 
-			return RemoteExec(newClient, cmd.OutOrStdout(), cmd.ErrOrStderr(), parsed)
+			return RemoteExec(ios, newClient, ios.Out, ios.ErrOut, parsed)
 		}),
 	}
-	cmd.AddCommand(newListCommand(newClient), newLogsCommand(newClient), newPurposeCommand(newClient))
+	cmd.AddCommand(newListCommand(newClient, ios), newLogsCommand(newClient, ios), newPurposeCommand(newClient, ios))
 	return cmd
 }
 
 // RemoteExec is the shared post-parse execution path for exec and websh command mode, returning
 // the failure as a utils.ExitError. Requires Server, Command or File, and the parsed --output applied.
-func RemoteExec(newClient clientFactory, stdout, stderr io.Writer, parsed RemoteExecArgs) error {
+func RemoteExec(ios *utils.IOStreams, newClient clientFactory, stdout, stderr io.Writer, parsed RemoteExecArgs) error {
 	// A local script is read before any network call, so a missing or oversized file fails here;
 	// a --from-server script is read once the client exists.
 	var file *event.FileExecution
@@ -308,12 +307,12 @@ func RemoteExec(newClient clientFactory, stdout, stderr io.Writer, parsed Remote
 	}
 
 	if file != nil && parsed.File.Upload {
-		if err := uploadFile(stderr, alpaconClient, parsed, *file, workSessionID, authMethod); err != nil {
+		if err := uploadFile(ios, stderr, alpaconClient, parsed, *file, workSessionID, authMethod); err != nil {
 			return err
 		}
 	}
 	if parsed.File != nil && parsed.File.FromServer {
-		loaded, err := downloadFile(stderr, alpaconClient, parsed, workSessionID, authMethod)
+		loaded, err := downloadFile(ios, stderr, alpaconClient, parsed, workSessionID, authMethod)
 		if err != nil {
 			return err
 		}
@@ -337,32 +336,34 @@ func RemoteExec(newClient clientFactory, stdout, stderr io.Writer, parsed Remote
 			}))
 		}
 		if err != nil {
+			if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+				return exitErr
+			}
 			signalArgs := parsed
 			signalArgs.WorkSessionID = workSessionID
 			err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), alpaconClient)
 			utils.SignalRefusal(err)
 			if file == nil && isLineTooLong(err) {
-				return lineTooLongFailure(stderr, err, parsed)
+				return lineTooLongFailure(ios, stderr, err, parsed)
 			}
 			if failure := utils.WorkSessionExitError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID); failure != nil {
 				return failure
 			}
-			if failure := submitFailure(stderr, err, parsed, file != nil); failure != nil {
+			if failure := submitFailure(ios, stderr, err, parsed, file != nil); failure != nil {
 				return failure
 			}
 			return utils.NewExitError("failed to submit command on '%s': %s", parsed.Server, err)
 		}
-		if utils.OutputFormat == utils.OutputFormatJSON {
+		if ios.IsJSON() {
 			data, err := json.Marshal(map[string]string{"job_id": resp.ID})
 			if err != nil {
 				return utils.NewExitError("failed to marshal JSON: %s", err)
 			}
-			utils.PrintJson(data)
-		} else {
-			line1, line2 := detachResultLines(resp.ID)
-			_, _ = fmt.Fprintln(stdout, line1)
-			_, _ = fmt.Fprintln(stderr, line2)
+			return ios.PrintJson(data)
 		}
+		line1, line2 := detachResultLines(resp.ID)
+		_, _ = fmt.Fprintln(stdout, line1)
+		_, _ = fmt.Fprintln(stderr, line2)
 		return nil
 	}
 
@@ -370,34 +371,37 @@ func RemoteExec(newClient clientFactory, stdout, stderr io.Writer, parsed Remote
 	// streams live.
 	out := stdout
 	var buf *bytes.Buffer
-	if utils.OutputFormat == utils.OutputFormatJSON {
+	if ios.IsJSON() {
 		buf = &bytes.Buffer{}
 		out = buf
 	}
 
 	if file != nil {
-		err = RunFileExecWithApprovalWait(alpaconClient, parsed.Server, *file, parsed.Username, parsed.Groupname, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
+		err = RunFileExecWithApprovalWait(ios, alpaconClient, parsed.Server, *file, parsed.Username, parsed.Groupname, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
 	} else {
-		err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
+		err = RunExecWithApprovalWait(ios, alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
+	}
+	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+		return exitErr // the MFA failure carries the lookup's error, which the classifiers below would read as a refusal
 	}
 	if file == nil && isLineTooLong(err) {
-		return lineTooLongFailure(stderr, err, parsed)
+		return lineTooLongFailure(ios, stderr, err, parsed)
 	}
 	if failure := utils.WorkSessionExitError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID); failure != nil {
 		return failure
 	}
 	// A purpose demand has no approval request yet, so it is reported before the pending-approval
 	// path, which would name a queue the command is not in.
-	if failure := purposeDemandFailure(err); failure != nil {
+	if failure := purposeDemandFailure(ios, err); failure != nil {
 		return failure
 	}
 	// Before commandResultFailure, which would treat the pending denial as a plain failure.
-	if failure := pendingApprovalFailure(stderr, err, parsed); failure != nil {
+	if failure := pendingApprovalFailure(ios, stderr, err, parsed); failure != nil {
 		return failure
 	}
 	// The command never ran, so under --output json nothing reaches stdout: the
 	// buffer holds only the server's own wording of the refusal.
-	if failure := useFileExecutionFailure(stderr, err, parsed); failure != nil {
+	if failure := useFileExecutionFailure(ios, stderr, err, parsed); failure != nil {
 		return failure
 	}
 	if buf != nil {
@@ -405,23 +409,23 @@ func RemoteExec(newClient clientFactory, stdout, stderr io.Writer, parsed Remote
 	}
 	// A file-lane refusal names the server in its guidance, which
 	// commandResultFailure does not know; it answers only its own codes.
-	if failure := submitFailure(stderr, err, parsed, file != nil); failure != nil {
+	if failure := submitFailure(ios, stderr, err, parsed, file != nil); failure != nil {
 		return failure
 	}
-	return commandResultFailure(stderr, err, parsed.InvokedAs)
+	return commandResultFailure(ios, stderr, err, parsed.InvokedAs)
 }
 
 // submitFailure reports the refusals of a submission whose guidance needs the parsed command line,
 // and returns nil for any other error.
-func submitFailure(stderr io.Writer, err error, parsed RemoteExecArgs, fileLane bool) error {
-	if failure := fileExecFailure(stderr, err, parsed.Server); failure != nil {
+func submitFailure(ios *utils.IOStreams, stderr io.Writer, err error, parsed RemoteExecArgs, fileLane bool) error {
+	if failure := fileExecFailure(ios, stderr, err, parsed.Server); failure != nil {
 		return failure
 	}
-	if failure := execUserFailure(stderr, err, parsed); failure != nil {
+	if failure := execUserFailure(ios, stderr, err, parsed); failure != nil {
 		return failure
 	}
 	if fileLane {
-		return fileExecInlineCredentialFailure(stderr, err)
+		return fileExecInlineCredentialFailure(ios, stderr, err)
 	}
 	return nil
 }
@@ -481,6 +485,31 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 	return action
 }
 
+// heldNote ends a hint that offers a resubmission of a held command. The CLI
+// cannot cancel the held command, which runs if approved, so submitting the
+// resubmission as well would file a second approval request for the same work.
+const heldNote = "; the held command stays queued and runs if approved, so cancel it in the Alpacon console (Commands) before submitting this"
+
+// scriptBodyAction answers the server's script_body_suggestion: the held line
+// carries a script body, so the hint is to save that body to a local file and
+// run it as a verified file, whose content the reviewer reads. The command is a
+// template to fill in, never the held command rewritten. It answers false when
+// there is no suggestion or the command was already on the file lane.
+func scriptBodyAction(parsed RemoteExecArgs, s *event.ScriptBodySuggestion) (utils.NextAction, bool) {
+	if s == nil || parsed.File != nil {
+		return utils.NextAction{}, false
+	}
+	action := uploadScriptAction(runAsFlags(parsed), parsed.Server)
+	action.Description = "to have the reviewer read the script body, save it to a local file and run it as a verified file " +
+		"(for code that runs inside a container, put the container command and the program in that one script; see 'alpacon exec --help'), " +
+		"adding --overwrite to replace a file already at that path and " + interpreterNote
+	if len(parsed.Env) > 0 {
+		action.Description += ". --env values cannot ride the file lane, so the script must read them on the host"
+	}
+	action.Description += heldNote
+	return action, true
+}
+
 // fileSuggestionAction renders the server's file_execution_suggestion for a
 // held command line as the --file --from-server command that submits the same
 // script on the verified file lane, keeping the account, group and work
@@ -499,9 +528,6 @@ func fileSuggestionAction(parsed RemoteExecArgs, s *event.FileExecutionSuggestio
 	if slices.ContainsFunc(append([]string{s.Path, s.Interpreter}, s.Args...), hasControlChar) {
 		return utils.NextAction{}, false
 	}
-	// The CLI cannot cancel the held command, which runs if approved, so submitting this as well
-	// would file a second approval request for the same script.
-	const heldNote = "; the held command stays queued and runs if approved, so cancel it in the Alpacon console (Commands) before submitting this"
 	description := "to run the script as a verified file instead, whose content the reviewer reads and whose approval an unchanged re-run can reuse" + heldNote
 	interpreter := s.Interpreter
 	switch {

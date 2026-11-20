@@ -2,34 +2,35 @@ package packages
 
 import (
 	"github.com/alpacax/alpacon-cli/api/packages"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var systemPackageListCmd = &cobra.Command{
-	Use:     "ls",
-	Aliases: []string{"list"},
-	Short:   "List system packages",
-	Long: `
+func newSystemPackageListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List system packages",
+		Long: `
 	Display a detailed list of all system packages registered in Alpacon.
 	This command provides information such as name, version, platform and other relevant details.
 	`,
-	Example: `
+		Example: `
 	alpacon package system ls
 	alpacon package system list
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		packageList, err := packages.GetSystemPackageEntry(alpaconClient)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the system packages: %s.", err)
-		}
+			packageList, err := packages.GetSystemPackageEntry(alpaconClient)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the system packages: %s.", err)
+			}
 
-		utils.PrintTable(packageList)
-	},
+			return ios.PrintTable(packageList)
+		}),
+	}
 }

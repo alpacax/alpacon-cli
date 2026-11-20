@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -39,26 +38,27 @@ const (
 
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh", ScopeKube, ScopeKubeExec}
 
-var (
-	purpose          string
-	createScopes     []string
-	createServers    []string
-	createCluster    string
-	expiresIn        string
-	expiresAt        string
-	requesterType    string
-	wait             bool
-	waitApproval     string
-	useAfterCreate   bool
-	createSudo       []string
-	createSudoReason string
-	createAccount    string
-)
+func newWorkSessionCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	var (
+		purpose          string
+		createScopes     []string
+		createServers    []string
+		createCluster    string
+		expiresIn        string
+		expiresAt        string
+		requesterType    string
+		wait             bool
+		waitApproval     string
+		useAfterCreate   bool
+		createSudo       []string
+		createSudoReason string
+		createAccount    string
+	)
 
-var workSessionCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new work session",
-	Long: `Create a new work session.
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Create a new work session",
+		Long: `Create a new work session.
 
 The session purpose is what the assessor judges each command against. An agent
 should pass --purpose with each command, which skips the purpose demand entirely.
@@ -102,7 +102,7 @@ attach and port-forward into pods; it takes no other scope, no --account and no
 let 'alpacon kube login CLUSTER' create the session itself. An agent session
 cannot hold kube_exec, and a cluster session is never set as the active one, so
 --use is refused with --cluster.`,
-	Example: `  alpacon work-session create --scope command,websh --server web-01 --expires-in 2h --purpose "restart nginx on web-01 to clear 502s"
+		Example: `  alpacon work-session create --scope command,websh --server web-01 --expires-in 2h --purpose "restart nginx on web-01 to clear 502s"
   alpacon work-session create --scope command --server web-01,db-01 --expires-at 2027-01-15T10:00:00Z --purpose "deploy" --wait
   alpacon work-session create --scope command --server web-01 --expires-in 1h --purpose "hotfix" --use
   alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "deploy" --wait --use
@@ -119,306 +119,326 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
   # Kubernetes: target a cluster, then open it with 'kube login'
   alpacon work-session create --scope kube,kube_exec --cluster prod-east --expires-in 2h --purpose "debug crashlooping api pods" --wait
   alpacon kube login prod-east --work-session 550e8400-e29b-41d4-a716-446655440000`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		purpose = strings.TrimSpace(purpose)
-		if purpose == "" {
-			if !utils.IsInteractiveShell() {
-				return utils.NewUsageEnvelopeExitError(opCreate, "Non-interactive mode requires --purpose.")
-			}
-			var err error
-			if purpose, err = utils.ReadRequiredInput("Purpose: "); err != nil {
-				return err
-			}
-		}
-		clusterName := strings.TrimSpace(createCluster)
-		if cmd.Flags().Changed("cluster") && clusterName == "" {
-			return utils.NewUsageEnvelopeExitError(opCreate, "--cluster must name a cluster.")
-		}
-		if len(createScopes) == 0 {
-			if !utils.IsInteractiveShell() {
-				return utils.NewUsageEnvelopeExitError(opCreate, "Non-interactive mode requires --scope.")
-			}
-			scopePrompt := "Scopes (comma-separated, e.g. command,websh): "
-			if clusterName != "" {
-				scopePrompt = "Scopes (kube, or kube,kube_exec to also exec into pods): "
-			}
-			input, err := utils.ReadRequiredInput(scopePrompt)
-			if err != nil {
-				return err
-			}
-			createScopes = utils.SplitAndTrim(input, ",")
-		}
-		if clusterName == "" && len(createServers) == 0 {
-			if !utils.IsInteractiveShell() {
-				return utils.NewUsageEnvelopeExitError(opCreate, "Non-interactive mode requires --server.")
-			}
-			input, err := utils.ReadRequiredInput("Servers (comma-separated server names): ")
-			if err != nil {
-				return err
-			}
-			createServers = utils.SplitAndTrim(input, ",")
-		}
-
-		expiresAtVal, err := parseExpiryFlag(expiresIn, expiresAt)
-		if err != nil {
-			if expiresIn == "" && expiresAt == "" {
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			purpose = strings.TrimSpace(purpose)
+			if purpose == "" {
 				if !utils.IsInteractiveShell() {
-					return utils.NewUsageEnvelopeExitError(opCreate, "Non-interactive mode requires --expires-in or --expires-at.")
+					return utils.NewUsageEnvelopeExitError(opCreate, "Non-interactive mode requires --purpose.")
 				}
-				if expiresIn, err = utils.ReadRequiredInput("Expires in (e.g. 1h, 2h, 4h): "); err != nil {
+				var err error
+				if purpose, err = utils.ReadRequiredInput("Purpose: "); err != nil {
 					return err
 				}
-				expiresAtVal, err = parseExpiryFlag(expiresIn, "")
+			}
+			clusterName := strings.TrimSpace(createCluster)
+			if cmd.Flags().Changed("cluster") && clusterName == "" {
+				return utils.NewUsageEnvelopeExitError(opCreate, "--cluster must name a cluster.")
+			}
+			if len(createScopes) == 0 {
+				if !utils.IsInteractiveShell() {
+					return utils.NewUsageEnvelopeExitError(opCreate, "Non-interactive mode requires --scope.")
+				}
+				scopePrompt := "Scopes (comma-separated, e.g. command,websh): "
+				if clusterName != "" {
+					scopePrompt = "Scopes (kube, or kube,kube_exec to also exec into pods): "
+				}
+				input, err := utils.ReadRequiredInput(scopePrompt)
 				if err != nil {
+					return err
+				}
+				createScopes = utils.SplitAndTrim(input, ",")
+			}
+			if clusterName == "" && len(createServers) == 0 {
+				if !utils.IsInteractiveShell() {
+					return utils.NewUsageEnvelopeExitError(opCreate, "Non-interactive mode requires --server.")
+				}
+				input, err := utils.ReadRequiredInput("Servers (comma-separated server names): ")
+				if err != nil {
+					return err
+				}
+				createServers = utils.SplitAndTrim(input, ",")
+			}
+
+			expiresAtVal, err := parseExpiryFlag(expiresIn, expiresAt)
+			if err != nil {
+				if expiresIn == "" && expiresAt == "" {
+					if !utils.IsInteractiveShell() {
+						return utils.NewUsageEnvelopeExitError(opCreate, "Non-interactive mode requires --expires-in or --expires-at.")
+					}
+					if expiresIn, err = utils.ReadRequiredInput("Expires in (e.g. 1h, 2h, 4h): "); err != nil {
+						return err
+					}
+					expiresAtVal, err = parseExpiryFlag(expiresIn, "")
+					if err != nil {
+						return utils.NewUsageEnvelopeExitError(opCreate, "Invalid expiry: %s.", err)
+					}
+				} else {
 					return utils.NewUsageEnvelopeExitError(opCreate, "Invalid expiry: %s.", err)
 				}
+			}
+
+			if requesterType != "user" && requesterType != "agent" {
+				return utils.NewUsageEnvelopeExitError(opCreate, "Invalid --requester-type %q: must be \"user\" or \"agent\".", requesterType)
+			}
+			detected := aiagent.FromEnvironment()
+			sessionRequesterType, err := resolveRequesterType(requesterType, cmd.Flags().Changed("requester-type"), detected)
+			if err != nil {
+				return utils.NewUsageEnvelopeExitError(opCreate, "%s", err)
+			}
+			account, err := normalizeAccount(createAccount, cmd.Flags().Changed("account"))
+			if err != nil {
+				return utils.NewUsageEnvelopeExitError(opCreate, "%s", err)
+			}
+
+			waitTimeout, werr := resolveWaitTimeout(wait, waitApproval, cmd.Flags().Changed("wait-approval"))
+			if werr != nil {
+				return utils.NewUsageEnvelopeExitError(opCreate, "Invalid wait timeout: %s.", werr)
+			}
+			shouldWait := waitTimeout > 0
+
+			if useAfterCreate && sessionRequesterType == "agent" {
+				return utils.NewUsageEnvelopeExitError(opCreate, "--use cannot be combined with an agent session (agent sessions are not workspace-attachable; pass the session ID to each command with --work-session).%s", detectedAgentSuffix(detected))
+			}
+
+			var scopeList []string
+			for _, s := range createScopes {
+				if s = strings.TrimSpace(s); s != "" {
+					scopeList = append(scopeList, s)
+				}
+			}
+			// --sudo policies are session-authorized, the only way a non-interactive 'exec' can sudo.
+			// The server requires the 'sudo' scope for them, so add it.
+			sudoPolicies := buildSudoPolicies(createSudo, createSudoReason)
+			if len(sudoPolicies) > 0 && !slices.Contains(scopeList, "sudo") {
+				scopeList = append(scopeList, "sudo")
+			}
+
+			if len(scopeList) == 0 {
+				return utils.NewUsageEnvelopeExitError(opCreate, "--scope must contain at least one valid scope.")
+			}
+			if err := validateScopeEnum(scopeList); err != nil {
+				return utils.NewUsageEnvelopeExitError(opCreate, "Invalid --scope: %s", err)
+			}
+			if err := ValidateAgentScopes(sessionRequesterType, scopeList); err != nil {
+				return utils.NewUsageEnvelopeExitError(opCreate, "Invalid --scope: %s.%s", err, detectedAgentSuffix(detected))
+			}
+			if clusterName != "" && useAfterCreate {
+				// The active slot holds the session exec, websh, cp and tunnel run
+				// under, and a cluster session serves none of them.
+				return utils.NewUsageEnvelopeExitError(opCreate, "--use cannot be combined with --cluster; a cluster session serves only 'alpacon kube', so pass its ID to 'alpacon kube login %s --work-session SESSION_ID' instead.", clusterName)
+			}
+			if clusterName != "" {
+				flags := clusterSessionFlags{accountSet: cmd.Flags().Changed("account"), sudoSet: len(createSudo) > 0}
+				scopeList, err = validateClusterSession(scopeList, flags)
+				if err != nil {
+					return utils.NewUsageEnvelopeExitError(opCreate, "%s.", err)
+				}
+			} else if err := validateServerScopes(scopeList); err != nil {
+				return utils.NewUsageEnvelopeExitError(opCreate, "Invalid --scope: %s.", err)
+			}
+
+			ac, err := newClient()
+			if err != nil {
+				return utils.NewEnvelopeExitError(opCreate, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
+			// Check --use before the create, so it never leaves a session it cannot attach.
+			if useAfterCreate && ac.WorkspaceName == "" {
+				return utils.NewEnvelopeExitErrorWithCode(utils.ExitCodeGeneralError, opCreate, utils.ErrNotLoggedIn, "--use requires an active workspace. Run 'alpacon login' first.")
+			}
+
+			req := wsapi.WorkSessionCreateRequest{
+				Description:           purpose,
+				RequesterType:         sessionRequesterType,
+				Scopes:                scopeList,
+				ExpiresAt:             expiresAtVal,
+				SudoPolicies:          sudoPolicies,
+				TargetAccountUsername: account,
+			}
+			if clusterName != "" {
+				clusterID, err := kubernetes.GetClusterIDByName(ac, clusterName)
+				if err != nil {
+					if kubernetes.IsSurfaceOff(err) {
+						return utils.NewEnvelopeExitError(opCreate, err, "%s", kubernetes.SurfaceNotEnabledMessage)
+					}
+					return utils.NewEnvelopeExitError(opCreate, err, "Failed to find the cluster: %s.", err)
+				}
+				req.Clusters = []string{clusterID}
 			} else {
-				return utils.NewUsageEnvelopeExitError(opCreate, "Invalid expiry: %s.", err)
-			}
-		}
-
-		if requesterType != "user" && requesterType != "agent" {
-			return utils.NewUsageEnvelopeExitError(opCreate, "Invalid --requester-type %q: must be \"user\" or \"agent\".", requesterType)
-		}
-		detected := aiagent.FromEnvironment()
-		sessionRequesterType, err := resolveRequesterType(requesterType, cmd.Flags().Changed("requester-type"), detected)
-		if err != nil {
-			return utils.NewUsageEnvelopeExitError(opCreate, "%s", err)
-		}
-		account, err := normalizeAccount(createAccount, cmd.Flags().Changed("account"))
-		if err != nil {
-			return utils.NewUsageEnvelopeExitError(opCreate, "%s", err)
-		}
-
-		waitTimeout, werr := resolveWaitTimeout(wait, waitApproval, cmd.Flags().Changed("wait-approval"))
-		if werr != nil {
-			return utils.NewUsageEnvelopeExitError(opCreate, "Invalid wait timeout: %s.", werr)
-		}
-		shouldWait := waitTimeout > 0
-
-		if useAfterCreate && sessionRequesterType == "agent" {
-			return utils.NewUsageEnvelopeExitError(opCreate, "--use cannot be combined with an agent session (agent sessions are not workspace-attachable; pass the session ID to each command with --work-session).%s", detectedAgentSuffix(detected))
-		}
-
-		var scopeList []string
-		for _, s := range createScopes {
-			if s = strings.TrimSpace(s); s != "" {
-				scopeList = append(scopeList, s)
-			}
-		}
-		// --sudo policies are session-authorized, the only way a non-interactive 'exec' can sudo.
-		// The server requires the 'sudo' scope for them, so add it.
-		sudoPolicies := buildSudoPolicies(createSudo, createSudoReason)
-		if len(sudoPolicies) > 0 && !slices.Contains(scopeList, "sudo") {
-			scopeList = append(scopeList, "sudo")
-		}
-
-		if len(scopeList) == 0 {
-			return utils.NewUsageEnvelopeExitError(opCreate, "--scope must contain at least one valid scope.")
-		}
-		if err := validateScopeEnum(scopeList); err != nil {
-			return utils.NewUsageEnvelopeExitError(opCreate, "Invalid --scope: %s", err)
-		}
-		if err := ValidateAgentScopes(sessionRequesterType, scopeList); err != nil {
-			return utils.NewUsageEnvelopeExitError(opCreate, "Invalid --scope: %s.%s", err, detectedAgentSuffix(detected))
-		}
-		if clusterName != "" && useAfterCreate {
-			// The active slot holds the session exec, websh, cp and tunnel run
-			// under, and a cluster session serves none of them.
-			return utils.NewUsageEnvelopeExitError(opCreate, "--use cannot be combined with --cluster; a cluster session serves only 'alpacon kube', so pass its ID to 'alpacon kube login %s --work-session SESSION_ID' instead.", clusterName)
-		}
-		if clusterName != "" {
-			flags := clusterSessionFlags{accountSet: cmd.Flags().Changed("account"), sudoSet: len(createSudo) > 0}
-			scopeList, err = validateClusterSession(scopeList, flags)
-			if err != nil {
-				return utils.NewUsageEnvelopeExitError(opCreate, "%s.", err)
-			}
-		} else if err := validateServerScopes(scopeList); err != nil {
-			return utils.NewUsageEnvelopeExitError(opCreate, "Invalid --scope: %s.", err)
-		}
-
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewEnvelopeExitError(opCreate, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-		// Check --use before the create, so it never leaves a session it cannot attach.
-		if useAfterCreate && ac.WorkspaceName == "" {
-			return utils.NewEnvelopeExitErrorWithCode(utils.ExitCodeGeneralError, opCreate, utils.ErrNotLoggedIn, "--use requires an active workspace. Run 'alpacon login' first.")
-		}
-
-		req := wsapi.WorkSessionCreateRequest{
-			Description:           purpose,
-			RequesterType:         sessionRequesterType,
-			Scopes:                scopeList,
-			ExpiresAt:             expiresAtVal,
-			SudoPolicies:          sudoPolicies,
-			TargetAccountUsername: account,
-		}
-		if clusterName != "" {
-			clusterID, err := kubernetes.GetClusterIDByName(ac, clusterName)
-			if err != nil {
-				if kubernetes.IsSurfaceOff(err) {
-					return utils.NewEnvelopeExitError(opCreate, err, "%s", kubernetes.SurfaceNotEnabledMessage)
+				serverNames := utils.CompactStrings(createServers)
+				if len(serverNames) == 0 {
+					return utils.NewUsageEnvelopeExitError(opCreate, "--server must contain at least one valid server name.")
 				}
-				return utils.NewEnvelopeExitError(opCreate, err, "Failed to find the cluster: %s.", err)
+				serverIDs, err := server.ResolveServerNames(ac, serverNames)
+				if err != nil {
+					return utils.NewEnvelopeExitError(opCreate, err, "%s.", err)
+				}
+				req.Servers = serverIDs
 			}
-			req.Clusters = []string{clusterID}
-		} else {
-			serverNames := utils.CompactStrings(createServers)
-			if len(serverNames) == 0 {
-				return utils.NewUsageEnvelopeExitError(opCreate, "--server must contain at least one valid server name.")
-			}
-			serverIDs, err := server.ResolveServerNames(ac, serverNames)
+
+			session, err := wsapi.CreateWorkSession(ac, req)
 			if err != nil {
-				return utils.NewEnvelopeExitError(opCreate, err, "%s.", err)
+				if hint := TargetErrorHint(err); hint != "" {
+					return utils.NewEnvelopeExitError(opCreate, err, "Failed to create work session: %s.", hint)
+				}
+				return utils.NewEnvelopeExitError(opCreate, err, "Failed to create work session: %s.", err)
 			}
-			req.Servers = serverIDs
-		}
+			if len(sudoPolicies) > 0 {
+				warnBroadSudoPolicies(ios, session.SudoPolicies)
+				warnBroadSudoPolicies(ios, session.ProposedSudoPolicies)
+			}
+			approvalSignaled := session.Status == wsapi.StatusPending
+			if approvalSignaled {
+				utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: session.ID, ConsoleURL: session.ConsoleURL}, ac)
+			}
+			afterApproval := afterApprovalAction(sessionRequesterType, session.ID, account)
+			if clusterName != "" {
+				afterApproval = KubeLoginAction(clusterName, session.ID)
+			}
 
-		warnBroadSudoPolicies(req.SudoPolicies)
-		session, err := wsapi.CreateWorkSession(ac, req)
-		if err != nil {
-			if hint := TargetErrorHint(err); hint != "" {
-				return utils.NewEnvelopeExitError(opCreate, err, "Failed to create work session: %s.", hint)
+			if !ios.IsJSON() {
+				ios.Success("%s", createSuccessMessage(session))
 			}
-			return utils.NewEnvelopeExitError(opCreate, err, "Failed to create work session: %s.", err)
-		}
-		approvalSignaled := session.Status == wsapi.StatusPending
-		if approvalSignaled {
-			utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: session.ID, ConsoleURL: session.ConsoleURL}, ac)
-		}
-		afterApproval := afterApprovalAction(sessionRequesterType, session.ID, account)
-		if clusterName != "" {
-			afterApproval = KubeLoginAction(clusterName, session.ID)
-		}
 
-		if utils.OutputFormat != utils.OutputFormatJSON {
-			utils.CliSuccess("%s", createSuccessMessage(session))
-		}
+			// Cases that do not return fall through to the --wait handling below.
+			switch decideUseAction(session.Status, useAfterCreate) {
+			case useDecisionUseNow:
+				// Re-fetch so the serialized JSON matches the --wait --use path.
+				activeSession, err := RunUseSession(ac, session.ID)
+				if err != nil {
+					// Partial success (created, use failed)—nil omits the server error_code.
+					return utils.NewEnvelopeExitError(opCreate, nil, "Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
+				}
+				message := activeWorkSessionSetMessage("", activeSession.ID, activeSession.Description)
+				if ios.IsJSON() {
+					active := activeSession.ID
+					return printWorkSessionMutationJSON(ios, newWorkSessionMutationOutput(opCreate, createSuccessMessage(session)+". "+message, activeSession, &active))
+				}
+				ios.Success("%s", message)
+				PrintSessionAdvisories(ios, activeSession)
+				printCreateNext(ios, clusterName, activeSession)
+				return nil
+			case useDecisionSkipScheduled:
+				if !shouldWait {
+					if ios.IsJSON() {
+						return printWorkSessionMutationJSON(ios, newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
+					}
+					ios.Info("Session is scheduled to activate. Run 'alpacon work-session use %s' once active.", session.ID)
+					PrintSessionAdvisories(ios, session)
+					printCreateNext(ios, clusterName, session)
+					return nil
+				}
+			case useDecisionNeedsApproval:
+				if !shouldWait {
+					return pendingExitError(ios, session, afterApproval, fmt.Sprintf("--use requires the session to be active, and work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID), createUpdateNextActions(clusterName, session)...)
+				}
+			case useDecisionSettled:
+				if !shouldWait {
+					terminal := settledNegatively(session.Status, session.ID)
+					return terminalWaitExitError(ios, opCreate, terminal, terminal)
+				}
+			case useDecisionUnknownStatus:
+				if !shouldWait {
+					return utils.NewEnvelopeExitError(opCreate, nil, "--use requires the session to be active, but work session %s is %s.", session.ID, session.Status)
+				}
+			}
 
-		// Cases that do not return fall through to the --wait handling below.
-		switch decideUseAction(session.Status, useAfterCreate) {
-		case useDecisionUseNow:
-			// Re-fetch so the serialized JSON matches the --wait --use path.
-			activeSession, err := RunUseSession(ac, session.ID)
-			if err != nil {
-				// Partial success (created, use failed)—nil omits the server error_code.
-				return utils.NewEnvelopeExitError(opCreate, nil, "Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
-			}
-			message := activeWorkSessionSetMessage("", activeSession.ID, activeSession.Description)
-			if utils.OutputFormat == utils.OutputFormatJSON {
-				active := activeSession.ID
-				return printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, createSuccessMessage(session)+". "+message, activeSession, &active))
-			}
-			utils.CliSuccess("%s", message)
-			PrintSessionAdvisories(activeSession)
-			printCreateNext(clusterName, activeSession)
-			return nil
-		case useDecisionSkipScheduled:
 			if !shouldWait {
-				if utils.OutputFormat == utils.OutputFormatJSON {
-					return printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
+				// Pending is not success, so a machine consumer can branch on the exit code.
+				if session.Status == wsapi.StatusPending {
+					return pendingExitError(ios, session, afterApproval, fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID), createUpdateNextActions(clusterName, session)...)
 				}
-				utils.CliInfo("Session is scheduled to activate. Run 'alpacon work-session use %s' once active.", session.ID)
-				PrintSessionAdvisories(session)
-				printCreateNext(clusterName, session)
+				if ios.IsJSON() {
+					return printWorkSessionMutationJSON(ios, newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
+				}
+				PrintSessionAdvisories(ios, session)
+				printCreateNext(ios, clusterName, session)
 				return nil
 			}
-		case useDecisionNeedsApproval:
-			if !shouldWait {
-				return pendingExitError(session, afterApproval, fmt.Sprintf("--use requires the session to be active, and work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID), createUpdateNextActions(clusterName, session)...)
-			}
-		case useDecisionSettled:
-			if !shouldWait {
-				terminal := settledNegatively(session.Status, session.ID)
-				return terminalWaitExitError(opCreate, terminal, terminal)
-			}
-		case useDecisionUnknownStatus:
-			if !shouldWait {
-				return utils.NewEnvelopeExitError(opCreate, nil, "--use requires the session to be active, but work session %s is %s.", session.ID, session.Status)
-			}
-		}
 
-		if !shouldWait {
-			// Pending is not success, so a machine consumer can branch on the exit code.
-			if session.Status == wsapi.StatusPending {
-				return pendingExitError(session, afterApproval, fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID), createUpdateNextActions(clusterName, session)...)
+			// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
+			finalSession, err := waitForApproval(ios, ac, session.ID, useAfterCreate, ApprovalPollInterval, waitTimeout, approvalSignaled)
+			if err != nil {
+				return WaitExitError(ios, opCreate, session, afterApproval, err, createUpdateNextActions(clusterName, session)...)
 			}
-			if utils.OutputFormat == utils.OutputFormatJSON {
-				return printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
+
+			if !useAfterCreate {
+				message := fmt.Sprintf("Work session %s approved.", session.ID)
+				if ios.IsJSON() {
+					return printWorkSessionMutationJSON(ios, newWorkSessionMutationOutput(opCreate, message, finalSession, nil))
+				}
+				ios.Success("%s", message)
+				PrintSessionAdvisories(ios, finalSession)
+				printCreateNext(ios, clusterName, finalSession)
+				return nil
 			}
-			PrintSessionAdvisories(session)
-			printCreateNext(clusterName, session)
+
+			// WaitForApproval with untilActive has already seen the session active.
+			desc, err := RunUse(ac, session.ID)
+			if err != nil {
+				// Partial success (approved, use failed)—nil omits the server error_code.
+				return utils.NewEnvelopeExitError(opCreate, nil, "Work session %s approved but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
+			}
+			message := activeWorkSessionSetMessage(fmt.Sprintf("Work session %s approved. ", session.ID), session.ID, desc)
+			if ios.IsJSON() {
+				active := session.ID
+				return printWorkSessionMutationJSON(ios, newWorkSessionMutationOutput(opCreate, message, finalSession, &active))
+			}
+			ios.Success("%s", message)
+			PrintSessionAdvisories(ios, finalSession)
+			printCreateNext(ios, clusterName, finalSession)
 			return nil
-		}
-
-		// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
-		finalSession, err := waitForApproval(ac, session.ID, useAfterCreate, ApprovalPollInterval, waitTimeout, approvalSignaled)
-		if err != nil {
-			return WaitExitError(opCreate, session, afterApproval, err, createUpdateNextActions(clusterName, session)...)
-		}
-
-		if !useAfterCreate {
-			message := fmt.Sprintf("Work session %s approved.", session.ID)
-			if utils.OutputFormat == utils.OutputFormatJSON {
-				return printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, message, finalSession, nil))
-			}
-			utils.CliSuccess("%s", message)
-			PrintSessionAdvisories(finalSession)
-			printCreateNext(clusterName, finalSession)
-			return nil
-		}
-
-		// WaitForApproval with untilActive has already seen the session active.
-		desc, err := RunUse(ac, session.ID)
-		if err != nil {
-			// Partial success (approved, use failed)—nil omits the server error_code.
-			return utils.NewEnvelopeExitError(opCreate, nil, "Work session %s approved but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
-		}
-		message := activeWorkSessionSetMessage(fmt.Sprintf("Work session %s approved. ", session.ID), session.ID, desc)
-		if utils.OutputFormat == utils.OutputFormatJSON {
-			active := session.ID
-			return printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, message, finalSession, &active))
-		}
-		utils.CliSuccess("%s", message)
-		PrintSessionAdvisories(finalSession)
-		printCreateNext(clusterName, finalSession)
-		return nil
-	}),
+		}),
+	}
+	cmd.Flags().StringVar(&purpose, "purpose", "", "What you're doing and why; be specific. Markdown supported. (required in non-interactive mode)")
+	cmd.Flags().StringSliceVar(&createScopes, "scope", nil, "Scopes to request. Valid: command, editor, sudo, tunnel, webftp, websh, and kube, kube_exec with --cluster (repeatable; comma-separated values also accepted; websh and kube_exec are refused with --requester-type agent)")
+	cmd.Flags().StringSliceVar(&createServers, "server", nil, "Target server names (repeatable; comma-separated values also accepted)")
+	cmd.Flags().StringVar(&createCluster, "cluster", "", "Target Kubernetes cluster name, instead of --server (one cluster; scopes kube and kube_exec)")
+	cmd.Flags().StringVar(&expiresIn, "expires-in", "", "Session duration (e.g. 1h, 2h, 4h)")
+	cmd.Flags().StringVar(&expiresAt, "expires-at", "", "Absolute expiry time (RFC3339)")
+	cmd.Flags().StringVar(&requesterType, "requester-type", "user", "Requester type: 'user' (default) or 'agent'. A detected AI agent always gets 'agent'; set AI_AGENT=<name> for an agent the CLI does not detect")
+	cmd.Flags().BoolVar(&wait, "wait", false, "Poll until the session is approved, then exit (default timeout 5m; does not set as active; combine with --use to attach automatically)")
+	cmd.Flags().StringVar(&waitApproval, "wait-approval", "", "Like --wait with a custom wait timeout (e.g. 30m; default 5m). Implies --wait")
+	cmd.Flags().BoolVar(&useAfterCreate, "use", false, "Set the created session as the workspace's active session (requires status to reach 'active'; combine with --wait when approval is needed; refused with --requester-type agent)")
+	cmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns to run without interactive MFA (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed; literal commas inside a pattern are not supported — pass the flag again for each policy that needs them). Required for non-interactive sudo via 'exec' (e.g. AI agents). Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
+	cmd.Flags().StringVar(&createSudoReason, "sudo-reason", "", "Justification applied to the sudo policies created via --sudo")
+	cmd.Flags().StringVar(&createAccount, "account", "", "Account the work runs as on the servers (e.g. root); the approver sees it with the request. Pass the same account to later commands with -u <account> (e.g. exec -u root)")
+	cmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
+	cmd.MarkFlagsMutuallyExclusive("server", "cluster")
+	return cmd
 }
 
 // WaitExitError is a failed wait on session, as 'alpacon event wait' exits: 6 settled, 4 still open
 // (printed here, offering next), 1 for a polling failure, which the caller prints.
-func WaitExitError(operation string, session *wsapi.WorkSession, next utils.NextAction, err error, pendingNext ...utils.NextAction) error {
+func WaitExitError(ios *utils.IOStreams, operation string, session *wsapi.WorkSession, next utils.NextAction, err error, pendingNext ...utils.NextAction) error {
 	var terminal *terminalWaitError
 	if errors.As(err, &terminal) {
-		return terminalWaitExitError(operation, terminal, err)
+		return terminalWaitExitError(ios, operation, terminal, err)
 	}
 	var pending *pendingWaitError
 	if errors.As(err, &pending) {
 		// The refusal a timed-out wait ended on, if any, adds its hint.
-		return pendingExitError(session, next, fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err), append(utils.RefusalNextActions(err), pendingNext...)...)
+		return pendingExitError(ios, session, next, fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err), append(utils.RefusalNextActions(err), pendingNext...)...)
 	}
 	return utils.NewEnvelopeExitError(operation, err, "%s", err)
 }
 
 // pendingExitError prints the pending approval and returns exit 4.
-func pendingExitError(session *wsapi.WorkSession, next utils.NextAction, message string, extra ...utils.NextAction) error {
-	utils.PrintPendingApproval(message, session.ApprovalRequestID, next, extra...)
+func pendingExitError(ios *utils.IOStreams, session *wsapi.WorkSession, next utils.NextAction, message string, extra ...utils.NextAction) error {
+	ios.PrintPendingApproval(message, session.ApprovalRequestID, next, extra...)
 	return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 }
 
 // terminalWaitExitError prints the settled refusal and returns exit 6.
-func terminalWaitExitError(operation string, terminal *terminalWaitError, err error) error {
-	printTerminalWait(operation, terminal, err)
+func terminalWaitExitError(ios *utils.IOStreams, operation string, terminal *terminalWaitError, err error) error {
+	printTerminalWait(ios, operation, terminal, err)
 	return utils.NewSilentExitError(utils.ExitCodeNotApproved)
 }
 
-func printTerminalWait(operation string, terminal *terminalWaitError, err error) {
-	if utils.OutputFormat == utils.OutputFormatJSON {
-		printTerminalWaitErrorJSON(operation, terminal, err)
+func printTerminalWait(ios *utils.IOStreams, operation string, terminal *terminalWaitError, err error) {
+	if ios.IsJSON() {
+		printTerminalWaitErrorJSON(ios, operation, terminal, err)
 	} else {
-		printTerminalWaitError(terminal, err)
+		printTerminalWaitError(ios, terminal, err)
 	}
 }
 
@@ -482,9 +502,9 @@ type terminalWaitErrorCtx struct {
 	WorkSessionID string `json:"work_session_id,omitempty"`
 }
 
-func printTerminalWaitErrorJSON(operation string, terminal *terminalWaitError, err error) {
+func printTerminalWaitErrorJSON(ios *utils.IOStreams, operation string, terminal *terminalWaitError, err error) {
 	utils.SignalPaused(err)
-	utils.PrintJSONError(os.Stderr, utils.JSONErrorEnvelope[terminalWaitErrorCtx]{
+	utils.PrintJSONError(ios.ErrOut, utils.JSONErrorEnvelope[terminalWaitErrorCtx]{
 		OK:          false,
 		ExitCode:    utils.ExitCodeNotApproved,
 		ErrorCode:   utils.ErrorCodeNotApproved,
@@ -507,19 +527,19 @@ func terminalWaitNextActions(sessionID string) []utils.NextAction {
 
 // printTerminalWaitError writes the refusal and its follow-ups to stderr itself rather than through
 // CliError, which appends the report-a-bug pointer: a reviewer saying no is not a bug.
-func printTerminalWaitError(terminal *terminalWaitError, err error) {
+func printTerminalWaitError(ios *utils.IOStreams, terminal *terminalWaitError, err error) {
 	utils.SignalPaused(err)
 	var sb strings.Builder
 	// The message carries a server-issued session id, so it takes the sanitizer
 	// CliError would otherwise have applied on the way out.
 	message := utils.SanitizeTerminalBlockKeepingTabs(err.Error())
-	fmt.Fprintf(&sb, "%s: %s\n", utils.Red("Error"), message)
+	fmt.Fprintf(&sb, "%s: %s\n", ios.Red("Error"), message)
 	fmt.Fprintln(&sb)
 	fmt.Fprintln(&sb, "Next:")
 	for _, action := range terminalWaitNextActions(terminal.sessionID) {
 		fmt.Fprintf(&sb, "  %s\n", action.PlainText())
 	}
-	fmt.Fprint(os.Stderr, sb.String())
+	_, _ = fmt.Fprint(ios.ErrOut, sb.String())
 }
 
 // parseExpiryFlag validates the --expires-in / --expires-at mutual exclusion
@@ -650,13 +670,13 @@ func createUpdateNextActions(clusterName string, session *wsapi.WorkSession) []u
 	}}
 }
 
-func printCreateNext(clusterName string, session *wsapi.WorkSession) {
+func printCreateNext(ios *utils.IOStreams, clusterName string, session *wsapi.WorkSession) {
 	if clusterName != "" {
-		utils.CliInfo("Next: %s", KubeLoginAction(clusterName, session.ID).Command)
+		ios.Info("Next: %s", KubeLoginAction(clusterName, session.ID).Command)
 		return
 	}
 	for _, action := range createUpdateNextActions(clusterName, session) {
-		utils.CliInfo("Next:\n  %s", action.PlainText())
+		ios.Info("Next:\n  %s", action.PlainText())
 	}
 }
 
@@ -719,11 +739,11 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 // timeout under one interval still waits the full duration. A fatal 4xx ends the wait at once and
 // other transient failures end it at MaxConsecutivePollFailures; 429s are bounded by the throttle
 // budget and the deadline instead.
-func WaitForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration) (*wsapi.WorkSession, error) {
-	return waitForApproval(ac, id, untilActive, interval, timeout, false)
+func WaitForApproval(ios *utils.IOStreams, ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration) (*wsapi.WorkSession, error) {
+	return waitForApproval(ios, ac, id, untilActive, interval, timeout, false)
 }
 
-func waitForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration, signaled bool) (*wsapi.WorkSession, error) {
+func waitForApproval(ios *utils.IOStreams, ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration, signaled bool) (*wsapi.WorkSession, error) {
 	start := time.Now()
 	deadline := start.Add(timeout)
 	// lastRefusal is the refusal (a 429 in practice) the latest poll got, if it
@@ -771,10 +791,10 @@ func waitForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 			if failures >= utils.MaxConsecutivePollFailures {
 				// The session exists and is still pending, so exit on the pending contract like the
 				// timeout: exit 1 reads as retryable, and an agent would file a second session.
-				utils.CliWarning("Approval wait gave up after %d failed polls (%s); the work session is still pending.", failures, err)
+				ios.Warning("Approval wait gave up after %d failed polls (%s); the work session is still pending.", failures, err)
 				return nil, &pendingWaitError{message: fmt.Sprintf("gave up after %d failed polls", failures)}
 			}
-			utils.CliWarning("Poll failed (%s); still waiting.", err)
+			ios.Warning("Poll failed (%s); still waiting.", err)
 			if !pollSleep(deadline, utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err))) {
 				return nil, timedOut()
 			}
@@ -815,7 +835,7 @@ func waitForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 		// window moves with it, or an extended wait would read as one that outran it.
 		elapsed := time.Since(start)
 		window := elapsed + time.Until(deadline)
-		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, elapsed.Round(time.Second), window.Round(time.Second))
+		ios.Info("%s (%s elapsed of %s)", waitMsg, elapsed.Round(time.Second), window.Round(time.Second))
 		if !pollSleep(deadline, utils.NextPollTick(interval, elapsed)) {
 			return nil, timedOut()
 		}
@@ -835,22 +855,4 @@ func pollSleep(deadline time.Time, want time.Duration) bool {
 	}
 	time.Sleep(step)
 	return true
-}
-
-func init() {
-	workSessionCreateCmd.Flags().StringVar(&purpose, "purpose", "", "What you're doing and why; be specific. Markdown supported. (required in non-interactive mode)")
-	workSessionCreateCmd.Flags().StringSliceVar(&createScopes, "scope", nil, "Scopes to request. Valid: command, editor, sudo, tunnel, webftp, websh, and kube, kube_exec with --cluster (repeatable; comma-separated values also accepted; websh and kube_exec are refused with --requester-type agent)")
-	workSessionCreateCmd.Flags().StringSliceVar(&createServers, "server", nil, "Target server names (repeatable; comma-separated values also accepted)")
-	workSessionCreateCmd.Flags().StringVar(&createCluster, "cluster", "", "Target Kubernetes cluster name, instead of --server (one cluster; scopes kube and kube_exec)")
-	workSessionCreateCmd.Flags().StringVar(&expiresIn, "expires-in", "", "Session duration (e.g. 1h, 2h, 4h)")
-	workSessionCreateCmd.Flags().StringVar(&expiresAt, "expires-at", "", "Absolute expiry time (RFC3339)")
-	workSessionCreateCmd.Flags().StringVar(&requesterType, "requester-type", "user", "Requester type: 'user' (default) or 'agent'. A detected AI agent always gets 'agent'; set AI_AGENT=<name> for an agent the CLI does not detect")
-	workSessionCreateCmd.Flags().BoolVar(&wait, "wait", false, "Poll until the session is approved, then exit (default timeout 5m; does not set as active; combine with --use to attach automatically)")
-	workSessionCreateCmd.Flags().StringVar(&waitApproval, "wait-approval", "", "Like --wait with a custom wait timeout (e.g. 30m; default 5m). Implies --wait")
-	workSessionCreateCmd.Flags().BoolVar(&useAfterCreate, "use", false, "Set the created session as the workspace's active session (requires status to reach 'active'; combine with --wait when approval is needed; refused with --requester-type agent)")
-	workSessionCreateCmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns to run without interactive MFA (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed; literal commas inside a pattern are not supported — pass the flag again for each policy that needs them). Required for non-interactive sudo via 'exec' (e.g. AI agents). Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
-	workSessionCreateCmd.Flags().StringVar(&createSudoReason, "sudo-reason", "", "Justification applied to the sudo policies created via --sudo")
-	workSessionCreateCmd.Flags().StringVar(&createAccount, "account", "", "Account the work runs as on the servers (e.g. root); the approver sees it with the request. Pass the same account to later commands with -u <account> (e.g. exec -u root)")
-	workSessionCreateCmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
-	workSessionCreateCmd.MarkFlagsMutuallyExclusive("server", "cluster")
 }

@@ -94,7 +94,7 @@ func TestExecuteTunnelCommandRunModeReturnsErrorForInvalidRemotePort(t *testing.
 	flags := tunnelFlagValues{localPort: "5432", remotePort: "invalid"}
 
 	cmd, args := parseTunnelCommandArgs(t, []string{"prod-db", "--", "psql"})
-	exitCode, err := executeTunnelCommand(&client.AlpaconClient{}, flags, cmd, args, nil)
+	exitCode, err := executeTunnelCommand(utils.Stdio, &client.AlpaconClient{}, flags, cmd, args, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

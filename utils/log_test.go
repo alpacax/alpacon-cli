@@ -20,9 +20,9 @@ func captureStderr(t *testing.T, fn func()) string {
 // pinColor fixes the color switch for one test, whatever stderr happens to be.
 func pinColor(t *testing.T, enabled bool) {
 	t.Helper()
-	original := colorEnabled
-	colorEnabled = enabled
-	t.Cleanup(func() { colorEnabled = original })
+	original := Stdio.ColorEnabled
+	Stdio.ColorEnabled = enabled
+	t.Cleanup(func() { Stdio.ColorEnabled = original })
 }
 
 func TestDebugEnabled(t *testing.T) {

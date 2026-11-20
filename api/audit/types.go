@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 type AuditLogEntry struct {
@@ -20,12 +21,13 @@ type AuditLogEntry struct {
 }
 
 type AuditLogAttributes struct {
-	Username    string `json:"username"`
-	App         string `json:"app"`
-	Action      string `json:"action"`
-	Model       string `json:"model"`
-	StatusCode  int    `json:"status_code" table:"Status Code"`
-	IP          string `json:"ip" table:"IP"`
-	Description string `json:"description"`
-	AddedAt     string `json:"added_at" table:"Added At"`
+	ID          string              `json:"id" table:"-"`
+	Username    string              `json:"username"`
+	App         string              `json:"app"`
+	Action      string              `json:"action"`
+	Model       string              `json:"model"`
+	StatusCode  int                 `json:"status_code" table:"Status Code"`
+	IP          string              `json:"ip" table:"IP"`
+	Description utils.TruncatedText `json:"description"`
+	AddedAt     utils.Timestamp     `json:"added_at" table:"Added At"`
 }

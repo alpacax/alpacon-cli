@@ -2,7 +2,6 @@ package utils
 
 import (
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 
@@ -225,18 +224,6 @@ func TestBuildWorkSessionErrorEnvelope_RequiredKeepsPlaceholder(t *testing.T) {
 	envelope := buildWorkSessionErrorEnvelope(WorkSessionRequired, "command", "srv-1", "Browser login", "abc-123-uuid", "")
 
 	assert.Contains(t, nextActionCommands(envelope.NextActions), "alpacon work-session use <ID>")
-}
-
-func TestHandleWorkSessionError_NoOp(t *testing.T) {
-	t.Parallel()
-	// If HandleWorkSessionError exits on a non-WorkSession error, the test process dies.
-	err := errors.New("some unrelated error")
-	HandleWorkSessionError(err, "websh", "srv", "Browser login", "")
-}
-
-func TestHandleWorkSessionError_NilError(t *testing.T) {
-	t.Parallel()
-	HandleWorkSessionError(nil, "websh", "srv", "Browser login", "")
 }
 
 func kubeWorkSessionCases() []struct {

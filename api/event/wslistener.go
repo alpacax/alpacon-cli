@@ -31,7 +31,10 @@ type wsListener struct {
 	onConnected func() error
 	// A dial error reaches neither provision nor onConnected, so without this an outage
 	// at the transport level is silent.
-	onDialFailed     func(error)
+	onDialFailed func(error)
+	// A frame sent while the connection was down is never replayed, so a consumer
+	// that waits on one learns here that it may have been lost.
+	onDisconnected   func()
 	handleFrame      func(message []byte)
 	wsHeader         http.Header
 	handshakeTimeout time.Duration
@@ -222,6 +225,9 @@ func (w *wsListener) connectAndListen() bool {
 
 		_, message, readErr := conn.ReadMessage()
 		if readErr != nil {
+			if w.onDisconnected != nil && !w.stopping() {
+				w.onDisconnected()
+			}
 			return time.Since(subscribed) > w.stableLifetime
 		}
 

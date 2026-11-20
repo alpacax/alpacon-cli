@@ -43,6 +43,7 @@ type kubeLoginServer struct {
 	requesterType  string // requester_type the session list must filter on; default user
 	clusters       string // JSON array the cluster lookup answers; default prod-east
 	surfaceOff     bool   // the cluster lookup answers 404
+	rbacDrift      string // rbac_drift_warning of the created kube session as raw JSON; "" leaves it out
 
 	mu       sync.Mutex
 	requests []string
@@ -137,9 +138,13 @@ func (s *kubeLoginServer) start(t *testing.T) *httptest.Server {
 				_, _ = fmt.Fprintf(w, `{"code":%q}`, s.kubeCreateCode)
 				return
 			}
+			warning := ""
+			if s.rbacDrift != "" {
+				warning = `"rbac_drift_warning":` + s.rbacDrift + `,`
+			}
 			w.WriteHeader(http.StatusCreated)
-			_, _ = fmt.Fprintf(w, `{"id":"7c1e0000-0000-4000-8000-000000000003","cluster":%q,"channel_token":%q,
-				"token_expired_at":"2099-01-01T00:00:00Z","proxy_url":"https://ws.example.com/kube/%s"}`, loginClusterID, loginToken, loginClusterID)
+			_, _ = fmt.Fprintf(w, `{"id":"7c1e0000-0000-4000-8000-000000000003","cluster":%q,"channel_token":%q,%s
+				"token_expired_at":"2099-01-01T00:00:00Z","proxy_url":"https://ws.example.com/kube/%s"}`, loginClusterID, loginToken, warning, loginClusterID)
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/kubernetes/sessions/"):
 			closedAt := "null"
 			s.mu.Lock()
@@ -663,9 +668,75 @@ func TestKubeLoginJSONResult(t *testing.T) {
 		"proxy_url": "https://ws.example.com/kube/%s",
 		"token_expires_at": "2099-01-01T00:00:00Z",
 		"previous_context": "",
+		"rbac_drift_warning": null,
 		"work_session_created": true,
 		"scopes": ["kube"]
 	}`, path, loginClusterID, loginWSID, loginClusterID), stdout)
+}
+
+// A session that opened with an RBAC drift warning still logs in: the warning
+// is one stderr line, the exit code stays 0, and --output json carries the
+// server's object.
+func TestKubeLoginWarnsWhenTheSessionOpenedOnADriftedCluster(t *testing.T) {
+	t.Parallel()
+	const warning = `{"cluster_external_grants":0,"namespaced_external_grants":3,"incomplete":false,"checked_at":"2026-11-10T09:00:00Z","policy":"warn_namespaced"}`
+	const line = `Warning: Cluster "prod-east" has RBAC bindings made outside Alpacon that widen what this session's identity may do (external grants: 3 namespaced); the workspace policy allows the session anyway.`
+	for _, format := range []string{"table", "json"} {
+		t.Run(format, func(t *testing.T) {
+			t.Parallel()
+			srv := &kubeLoginServer{wsCreateStatus: "active", rbacDrift: warning}
+			ts := srv.start(t)
+			home := kubeLoginHome(t, ts.URL)
+
+			stdout, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--output", format,
+				"--kubeconfig", filepath.Join(t.TempDir(), "config"), "--purpose", "x", "--scope", "kube", "--duration", "1h")
+
+			require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+			assert.Equal(t, 1, strings.Count(stderr, "RBAC bindings"), "stderr: %s", stderr)
+			assert.Contains(t, stderr, line+"\n")
+			if format == "json" {
+				var result map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal([]byte(stdout), &result))
+				assert.JSONEq(t, warning, string(result["rbac_drift_warning"]))
+			}
+		})
+	}
+}
+
+// The refusal a stricter policy answers is an ordinary failure: exit 1 with a
+// sentence that says what is wrong, the server's code in the --output json
+// envelope, and no context written.
+func TestKubeLoginNamesTheRBACDriftRefusal(t *testing.T) {
+	t.Parallel()
+	for _, format := range []string{"table", "json"} {
+		t.Run(format, func(t *testing.T) {
+			t.Parallel()
+			srv := &kubeLoginServer{wsCreateStatus: "active", kubeCreateCode: "cluster_rbac_drift"}
+			ts := srv.start(t)
+			home := kubeLoginHome(t, ts.URL)
+			path := filepath.Join(t.TempDir(), "config")
+
+			_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--output", format,
+				"--kubeconfig", path, "--purpose", "x", "--scope", "kube", "--duration", "1h")
+
+			assert.Equal(t, 1, exitCode)
+			assert.NoFileExists(t, path)
+			assert.NotContains(t, stderr, "report on https://github.com")
+			if format == "table" {
+				assert.Contains(t, stderr, "Failed to open a kube session: cluster prod-east has RBAC bindings outside Alpacon that grant sessions more than Alpacon does, and the workspace policy refuses new sessions on it until a cluster admin removes them.")
+				return
+			}
+			var envelope struct {
+				ErrorCode string `json:"error_code"`
+				ExitCode  int    `json:"exit_code"`
+			}
+			lines := strings.Split(strings.TrimSpace(stderr), "\n")
+			// Info lines from the work session step come first; the envelope is last.
+			require.NoError(t, json.Unmarshal([]byte(lines[len(lines)-1]), &envelope), "stderr: %s", stderr)
+			assert.Equal(t, "cluster_rbac_drift", envelope.ErrorCode)
+			assert.Equal(t, 1, envelope.ExitCode)
+		})
+	}
 }
 
 func TestKubeLoginArgumentCountIsAUsageError(t *testing.T) {

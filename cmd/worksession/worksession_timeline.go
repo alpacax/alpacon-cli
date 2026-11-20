@@ -3,109 +3,108 @@ package worksession
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"sync"
 	"text/tabwriter"
+	"unicode/utf8"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
 // recordingJSON is one Websh terminal, numbered as `recording --index` counts them.
 type recordingJSON struct {
-	Index             int    `json:"index"`
-	WebshSessionID    string `json:"websh_session_id"`
-	Time              string `json:"time"`
-	Server            string `json:"server"`
-	RecordChunksTotal *int   `json:"record_chunks_total"`
-	Status            string `json:"status"`
+	Index             int             `json:"index"`
+	WebshSessionID    string          `json:"websh_session_id"`
+	Time              utils.Timestamp `json:"time"`
+	Server            string          `json:"server"`
+	RecordChunksTotal *int            `json:"record_chunks_total"`
+	Status            string          `json:"status"`
 }
 
-var noRecords bool
+func newWorkSessionTimelineCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	var noRecords bool
 
-var workSessionTimelineCmd = &cobra.Command{
-	Use:     "timeline SESSION_ID",
-	Aliases: []string{"tl"},
-	Short:   "Show the activity timeline for a work session",
-	Long: `Show the activity timeline for a work session.
+	cmd := &cobra.Command{
+		Use:     "timeline SESSION_ID",
+		Aliases: []string{"tl"},
+		Short:   "Show the activity timeline for a work session",
+		Long: `Show the activity timeline for a work session.
 
 Recordings are not embedded in the timeline. The recordings section lists each
 Websh terminal with the number of recording chunks it has ("unknown" when the
 server cannot count them) and the command that shows one:
 alpacon work-session recording SESSION_ID --index N. --no-records leaves the
 section out.`,
-	Args: cobra.ExactArgs(1),
-	Example: `  alpacon work-session timeline 550e8400-e29b-41d4-a716-446655440000
+		Args: cobra.ExactArgs(1),
+		Example: `  alpacon work-session timeline 550e8400-e29b-41d4-a716-446655440000
   alpacon work-session timeline 550e8400-e29b-41d4-a716-446655440000 --no-records
   alpacon work-session tl 550e8400-e29b-41d4-a716-446655440000 --output json
   alpacon work-session recording 550e8400-e29b-41d4-a716-446655440000 --index 2`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewEnvelopeExitError(opTimeline, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		id := args[0]
-
-		var (
-			items       []wsapi.TimelineItem
-			session     *wsapi.WorkSession
-			timelineErr error
-			wg          sync.WaitGroup
-		)
-		wg.Go(func() {
-			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id)
-		})
-		wg.Go(func() {
-			session, _ = wsapi.GetWorkSession(ac, id) // best-effort: server names degrade to IDs on failure
-		})
-		wg.Wait()
-
-		if timelineErr != nil {
-			return utils.NewEnvelopeExitError(opTimeline, timelineErr, "Failed to retrieve work session timeline: %s.", timelineErr)
-		}
-
-		serverMap := map[string]string{}
-		if session != nil {
-			for _, s := range session.Servers {
-				serverMap[s.ID] = s.Name
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			ac, err := newClient()
+			if err != nil {
+				return utils.NewEnvelopeExitError(opTimeline, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
-		}
 
-		rows := make([]wsapi.TimelineAttributes, 0, len(items))
-		var terminals []wsapi.TimelineItem
-		for i := range items {
-			// A server too old to know include_records sends the recordings
-			// anyway; they are not timeline rows.
-			if items[i].Type == "websh_record" {
-				continue
+			id := args[0]
+
+			var (
+				items       []wsapi.TimelineItem
+				session     *wsapi.WorkSession
+				timelineErr error
+				wg          sync.WaitGroup
+			)
+			wg.Go(func() {
+				items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id)
+			})
+			wg.Go(func() {
+				session, _ = wsapi.GetWorkSession(ac, id) // best-effort: server names degrade to IDs on failure
+			})
+			wg.Wait()
+
+			if timelineErr != nil {
+				return utils.NewEnvelopeExitError(opTimeline, timelineErr, "Failed to retrieve work session timeline: %s.", timelineErr)
 			}
-			if !noRecords && wsapi.IsTerminal(&items[i]) {
-				terminals = append(terminals, items[i])
+
+			serverMap := map[string]string{}
+			if session != nil {
+				for _, s := range session.Servers {
+					serverMap[s.ID] = s.Name
+				}
 			}
-			rows = append(rows, projectTimelineAttributes(&items[i], serverMap))
-		}
 
-		if utils.OutputFormat == utils.OutputFormatJSON {
-			return outputTimelineJSON(rows, terminals, id, serverMap)
-		}
+			rows := make([]wsapi.TimelineAttributes, 0, len(items))
+			var terminals []wsapi.TimelineItem
+			for i := range items {
+				// A server too old to know include_records sends the recordings
+				// anyway; they are not timeline rows.
+				if items[i].Type == "websh_record" {
+					continue
+				}
+				if !noRecords && wsapi.IsTerminal(&items[i]) {
+					terminals = append(terminals, items[i])
+				}
+				rows = append(rows, projectTimelineAttributes(&items[i], serverMap))
+			}
 
-		writer, cleanup := utils.WriteToPager()
-		defer cleanup()
-		printTimelineTableTo(writer, rows)
-		if len(terminals) > 0 {
-			printRecordingsSectionTo(writer, terminals, id, serverMap)
-		}
-		return nil
-	}),
-}
+			if ios.IsJSON() {
+				return outputTimelineJSON(ios, rows, terminals, id, serverMap)
+			}
 
-func init() {
-	workSessionTimelineCmd.Flags().BoolVar(&noRecords, "no-records", false,
+			writer, cleanup := ios.Pager()
+			defer cleanup()
+			printTimelineTableTo(writer, rows)
+			if len(terminals) > 0 {
+				printRecordingsSectionTo(writer, terminals, id, serverMap)
+			}
+			return nil
+		}),
+	}
+	cmd.Flags().BoolVar(&noRecords, "no-records", false,
 		"Hide the recordings section (an empty recordings list in JSON)")
+	return cmd
 }
 
 func recordingStatus(total *int) string {
@@ -125,11 +124,11 @@ func recordingCommand(sessionID string, index int) string {
 	return fmt.Sprintf("alpacon work-session recording %s --index %d", sessionID, index)
 }
 
-func resolveTimestamp(ts *string) string {
+func resolveTimestamp(ts *string) utils.Timestamp {
 	if ts == nil {
-		return ""
+		return utils.Timestamp{}
 	}
-	return formatTimestamp(*ts)
+	return utils.ParseLocalTimestamp(*ts)
 }
 
 func resolveServer(serverID *string, serverMap map[string]string) string {
@@ -150,11 +149,11 @@ func printTimelineTableTo(w io.Writer, rows []wsapi.TimelineAttributes) {
 	_, _ = fmt.Fprintln(tw, "TIME\tTYPE\tSERVER\tUSER\tDETAILS")
 	for _, row := range rows {
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
-			utils.SanitizeTerminalText(row.Time),
+			utils.SanitizeTerminalText(row.Time.String()),
 			utils.SanitizeTerminalText(row.Type),
 			utils.SanitizeTerminalText(row.Server),
 			utils.SanitizeTerminalText(row.User),
-			utils.SanitizeTerminalText(row.Details))
+			utils.SanitizeTerminalText(row.Details.String()))
 	}
 	_ = tw.Flush()
 }
@@ -170,7 +169,7 @@ func printRecordingsSectionTo(w io.Writer, terminals []wsapi.TimelineItem, sessi
 	for i := range terminals {
 		term := &terminals[i]
 		_, _ = fmt.Fprintf(w, "[%d]  %s  %s  %s\n", i+1,
-			utils.SanitizeTerminalText(resolveTimestamp(term.Timestamp)),
+			utils.SanitizeTerminalText(resolveTimestamp(term.Timestamp).String()),
 			utils.SanitizeTerminalText(resolveServer(term.ServerID, serverMap)),
 			recordingStatus(term.RecordChunksTotal))
 		if total := term.RecordChunksTotal; total == nil || *total != 0 {
@@ -179,7 +178,7 @@ func printRecordingsSectionTo(w io.Writer, terminals []wsapi.TimelineItem, sessi
 	}
 }
 
-func outputTimelineJSON(rows []wsapi.TimelineAttributes, terminals []wsapi.TimelineItem, sessionID string, serverMap map[string]string) error {
+func outputTimelineJSON(ios *utils.IOStreams, rows []wsapi.TimelineAttributes, terminals []wsapi.TimelineItem, sessionID string, serverMap map[string]string) error {
 	recEntries := make([]recordingJSON, len(terminals))
 	for i := range terminals {
 		term := &terminals[i]
@@ -198,7 +197,7 @@ func outputTimelineJSON(rows []wsapi.TimelineAttributes, terminals []wsapi.Timel
 	}
 	// Not a plain Marshal: the shared writer escapes the format and C1 runes that
 	// encoding/json leaves alone, and this output is read in a terminal too.
-	if err := utils.PrintJSONValue(os.Stdout, out); err != nil {
+	if err := utils.PrintJSONValue(ios.Out, out); err != nil {
 		return utils.NewEnvelopeExitError(opTimeline, err, "Failed to serialize timeline: %s.", err)
 	}
 	return nil
@@ -206,12 +205,14 @@ func outputTimelineJSON(rows []wsapi.TimelineAttributes, terminals []wsapi.Timel
 
 func projectTimelineAttributes(item *wsapi.TimelineItem, serverMap map[string]string) wsapi.TimelineAttributes {
 	return wsapi.TimelineAttributes{
-		Time:             resolveTimestamp(item.Timestamp),
-		Type:             formatType(item.Type),
-		Server:           resolveServer(item.ServerID, serverMap),
-		User:             item.Username,
-		Details:          formatDetails(item),
-		CommandRejection: item.CommandRejection,
+		ID:                item.ID,
+		Time:              resolveTimestamp(item.Timestamp),
+		Type:              formatType(item.Type),
+		Server:            resolveServer(item.ServerID, serverMap),
+		User:              item.Username,
+		Details:           formatDetails(item),
+		CommandRejection:  item.CommandRejection,
+		SudoRefusalReason: item.SudoRefusalReason,
 	}
 }
 
@@ -238,7 +239,8 @@ func formatType(t string) string {
 	}
 }
 
-func formatDetails(item *wsapi.TimelineItem) string {
+// formatDetails cuts only the command text in a table; JSON gets it whole.
+func formatDetails(item *wsapi.TimelineItem) utils.TruncatedText {
 	switch item.Type {
 	case "command":
 		status := "unknown"
@@ -246,6 +248,10 @@ func formatDetails(item *wsapi.TimelineItem) string {
 			status = item.Label()
 		} else if item.Denied {
 			status = "denied"
+		} else if item.SudoRefusalReason.Value != "" {
+			// The command was allowed to run but the host refused a sudo inside it,
+			// so its exit status alone would read as an ordinary failure.
+			status = "sudo denied: " + utils.SanitizeTerminalText(item.SudoRefusalReason.Value)
 		} else if item.Success != nil {
 			if *item.Success {
 				status = "ok"
@@ -253,41 +259,49 @@ func formatDetails(item *wsapi.TimelineItem) string {
 				status = "failed"
 			}
 		}
-		return fmt.Sprintf("[%s] %s", status, utils.TruncateString(utils.SanitizeTerminalText(item.Line), 60))
+		return truncatedAfter(fmt.Sprintf("[%s] ", status), utils.SanitizeTerminalText(item.Line), 60)
 
 	case "websh_session":
 		state := sessionState(item.ClosedAt)
 		if item.ClientType != "" {
-			return fmt.Sprintf("%s (client: %s)", state, item.ClientType)
+			return whole(fmt.Sprintf("%s (client: %s)", state, item.ClientType))
 		}
-		return state
+		return whole(state)
 
 	case "tunnel_session":
 		state := sessionState(item.ClosedAt)
 		if item.TargetPort != nil {
-			return fmt.Sprintf("port %d %s", *item.TargetPort, state)
+			return whole(fmt.Sprintf("port %d %s", *item.TargetPort, state))
 		}
-		return state
+		return whole(state)
 
 	case "ftp_session":
-		return sessionState(item.ClosedAt)
+		return whole(sessionState(item.ClosedAt))
 
 	case "file_upload":
-		return fmt.Sprintf("↑ %s (%s)", utils.SanitizeTerminalText(item.Name), formatSize(item.Size))
+		return whole(fmt.Sprintf("↑ %s (%s)", utils.SanitizeTerminalText(item.Name), formatSize(item.Size)))
 
 	case "file_download":
-		return fmt.Sprintf("↓ %s (%s)", utils.SanitizeTerminalText(item.Name), formatSize(item.Size))
+		return whole(fmt.Sprintf("↓ %s (%s)", utils.SanitizeTerminalText(item.Name), formatSize(item.Size)))
 
 	case "sudo_grant":
 		detail := fmt.Sprintf("%s: %s", item.GrantType, item.Status)
 		if item.Command != nil && *item.Command != "" {
-			detail += fmt.Sprintf(" — %s", utils.TruncateString(utils.SanitizeTerminalText(*item.Command), 40))
+			return truncatedAfter(detail+" — ", utils.SanitizeTerminalText(*item.Command), 40)
 		}
-		return detail
+		return whole(detail)
 
 	default:
-		return ""
+		return whole("")
 	}
+}
+
+func truncatedAfter(prefix, text string, width int) utils.TruncatedText {
+	return utils.Truncate(prefix+text, utf8.RuneCountInString(prefix)+width)
+}
+
+func whole(s string) utils.TruncatedText {
+	return utils.Truncate(s, utf8.RuneCountInString(s))
 }
 
 func sessionState(closedAt *string) string {

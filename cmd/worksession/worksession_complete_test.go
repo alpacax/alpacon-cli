@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type endSessionFunc func(ac *client.AlpaconClient, id string) (bool, error)
+type endSessionFunc func(ios *utils.IOStreams, ac *client.AlpaconClient, id string) (bool, error)
 
 var endSessionCommands = []struct {
 	name   string
@@ -50,7 +50,7 @@ func TestEndingTheActiveSessionClearsIt(t *testing.T) {
 			require.NoError(t, config.SetActiveWorkSession("ses-abc"))
 			ac := newTestClient(endSessionServer(t, "ses-abc", tc.action, http.StatusOK, `{}`))
 
-			cleared, err := tc.run(ac, "ses-abc")
+			cleared, err := tc.run(utils.Stdio, ac, "ses-abc")
 
 			require.NoError(t, err)
 			assert.True(t, cleared)
@@ -68,7 +68,7 @@ func TestEndingAnotherSessionKeepsTheActiveOne(t *testing.T) {
 			require.NoError(t, config.SetActiveWorkSession("ses-keep"))
 			ac := newTestClient(endSessionServer(t, "ses-other", tc.action, http.StatusOK, `{}`))
 
-			cleared, err := tc.run(ac, "ses-other")
+			cleared, err := tc.run(utils.Stdio, ac, "ses-other")
 
 			require.NoError(t, err)
 			assert.False(t, cleared)
@@ -86,7 +86,7 @@ func TestFailingToEndTheActiveSessionKeepsIt(t *testing.T) {
 			require.NoError(t, config.SetActiveWorkSession("ses-abc"))
 			ac := newTestClient(endSessionServer(t, "ses-abc", tc.action, http.StatusForbidden, `{}`))
 
-			cleared, err := tc.run(ac, "ses-abc")
+			cleared, err := tc.run(utils.Stdio, ac, "ses-abc")
 
 			require.Error(t, err)
 			assert.False(t, cleared)
@@ -107,9 +107,9 @@ func TestEndingTheActiveSessionWarnsWhenTheConfigCannotBeCleared(t *testing.T) {
 			ac := newTestClient(endSessionServer(t, "ses-abc", tc.action, http.StatusOK, `{}`))
 
 			var cleared bool
-			_, stderr := testutil.CaptureOutput(t, func() {
-				cleared, err = tc.run(ac, "ses-abc")
-			})
+			ios, _, errOut := utils.TestIOStreams()
+			cleared, err = tc.run(ios, ac, "ses-abc")
+			stderr := errOut.String()
 
 			require.NoError(t, err)
 			assert.False(t, cleared)

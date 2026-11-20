@@ -6,65 +6,69 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var entryCmd = &cobra.Command{
-	Use:   "entry",
-	Short: "Manage pre-approved command entries",
-	Long: `Manage the entries of the command pre-approval ledger. Each entry pre-approves
+func newEntryCmd(ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "entry",
+		Short: "Manage pre-approved command entries",
+		Long: `Manage the entries of the command pre-approval ledger. Each entry pre-approves
 one command pattern for one service token, run as one user, on a set of servers
 or on every server in the workspace.
 
 An entry is issued or revoked, never edited: every field says what it
 authorizes, so a change is a new entry. Disabling one stops it matching while
 keeping it in place.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return utils.RequireSubcommand(cmd)
-	},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return utils.RequireSubcommand(cmd)
+		},
+	}
+	cmd.AddCommand(
+		newEntryListCmd(ios),
+		newEntryAddCmd(ios),
+		newEntryRemoveCmd(ios),
+		newEntryDisableCmd(ios),
+		newEntryEnableCmd(ios),
+	)
+	return cmd
 }
 
-func init() {
-	entryCmd.AddCommand(entryListCmd)
-	entryCmd.AddCommand(entryAddCmd)
-	entryCmd.AddCommand(entryRemoveCmd)
-	entryCmd.AddCommand(entryDisableCmd)
-	entryCmd.AddCommand(entryEnableCmd)
-}
-
-var entryListCmd = &cobra.Command{
-	Use:     "ls",
-	Aliases: []string{"list"},
-	Short:   "List pre-approved commands",
-	Long: `List the workspace's active pre-approved commands, or one service token's
+func newEntryListCmd(ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List pre-approved commands",
+		Long: `List the workspace's active pre-approved commands, or one service token's
 with --token. Revoked entries are not listed. APPLIES is yes when the entry
 applies, no when it does not, and blank when the application account cannot be
 resolved.`,
-	Example: `  alpacon acl entry ls
+		Example: `  alpacon acl entry ls
   alpacon acl entry ls --token deploy-bot
   alpacon acl entry ls --output json`,
-	Args: cobra.NoArgs,
-	Run: func(cmd *cobra.Command, args []string) {
-		tokenRef, _ := cmd.Flags().GetString("token")
+		Args: cobra.NoArgs,
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			tokenRef, _ := cmd.Flags().GetString("token")
 
-		session := openLedger()
-		principalID := ""
-		if tokenRef != "" {
-			var err error
-			if principalID, err = session.listFilterID(tokenRef); err != nil {
-				utils.CliErrorWithExit("Failed to find service token %q: %s.", tokenRef, err)
+			session, err := openLedger(ios)
+			if err != nil {
+				return err
 			}
-		}
+			principalID := ""
+			if tokenRef != "" {
+				if principalID, err = session.listFilterID(tokenRef); err != nil {
+					return utils.NewExitError("Failed to find service token %q: %s.", tokenRef, err)
+				}
+			}
 
-		entries, err := acl.ListEntries(session.signer, session.workspaceID, principalID)
-		if err != nil {
-			session.fail("list pre-approved commands", err)
-		}
+			entries, err := acl.ListEntries(session.signer, session.workspaceID, principalID)
+			if err != nil {
+				return session.fail("list pre-approved commands", err)
+			}
 
-		tokenNames, serverNames, tokenAccounts := session.workspaceNames(entries)
-		utils.PrintTable(ledgerEntryAttributes(entries, tokenNames, serverNames, tokenAccounts))
-	},
-}
-
-func init() {
-	entryListCmd.Flags().String("token", "", "List only this service token's entries (name or ID)")
+			tokenNames, serverNames, tokenAccounts := session.workspaceNames(entries)
+			return ios.PrintTable(ledgerEntryAttributes(entries, tokenNames, serverNames, tokenAccounts))
+		}),
+	}
+	cmd.Flags().String("token", "", "List only this service token's entries (name or ID)")
+	return cmd
 }
 
 func ledgerEntryAttributes(entries []acl.EntryResponse, tokenNames, serverNames, tokenAccounts map[string]string) []acl.EntryAttributes {

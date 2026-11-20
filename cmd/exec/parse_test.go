@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -495,7 +496,7 @@ func TestParseRemoteExecArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ParseRemoteExecArgs(tt.args)
+			result := ParseRemoteExecArgs(utils.Stdio, tt.args)
 
 			assert.Equal(t, tt.expected.Username, result.Username, "Username")
 			assert.Equal(t, tt.expected.Groupname, result.Groupname, "Groupname")
@@ -520,7 +521,7 @@ func TestParseRemoteExecArgs_HelpFlag(t *testing.T) {
 	t.Parallel()
 	for _, flag := range []string{"-h", "--help"} {
 		t.Run(flag, func(t *testing.T) {
-			result := ParseRemoteExecArgs([]string{flag, "server", "ls"})
+			result := ParseRemoteExecArgs(utils.Stdio, []string{flag, "server", "ls"})
 			assert.True(t, result.ShowHelp, "ShowHelp should be true")
 			assert.Empty(t, result.Server, "help flag should return empty result")
 		})
@@ -529,7 +530,7 @@ func TestParseRemoteExecArgs_HelpFlag(t *testing.T) {
 
 func TestParseRemoteExecArgs_WorkSessionFlag(t *testing.T) {
 	t.Parallel()
-	parsed := ParseRemoteExecArgs([]string{"--work-session", "ses-abc", "my-server", "ls"})
+	parsed := ParseRemoteExecArgs(utils.Stdio, []string{"--work-session", "ses-abc", "my-server", "ls"})
 	assert.Equal(t, "ses-abc", parsed.WorkSessionID)
 	assert.Equal(t, "my-server", parsed.Server)
 	assert.Equal(t, "ls", parsed.Command)
@@ -537,7 +538,7 @@ func TestParseRemoteExecArgs_WorkSessionFlag(t *testing.T) {
 
 func TestParseRemoteExecArgs_WorkSessionEqualForm(t *testing.T) {
 	t.Parallel()
-	parsed := ParseRemoteExecArgs([]string{"--work-session=ses-abc", "my-server", "ls"})
+	parsed := ParseRemoteExecArgs(utils.Stdio, []string{"--work-session=ses-abc", "my-server", "ls"})
 	assert.Equal(t, "ses-abc", parsed.WorkSessionID)
 	assert.Equal(t, "my-server", parsed.Server)
 	assert.Equal(t, "ls", parsed.Command)
@@ -545,7 +546,7 @@ func TestParseRemoteExecArgs_WorkSessionEqualForm(t *testing.T) {
 
 func TestParseRemoteExecArgs_DoubleDashIgnoresWorkSession(t *testing.T) {
 	t.Parallel()
-	parsed := ParseRemoteExecArgs([]string{"my-server", "--", "ls", "--work-session", "fake"})
+	parsed := ParseRemoteExecArgs(utils.Stdio, []string{"my-server", "--", "ls", "--work-session", "fake"})
 	assert.Empty(t, parsed.WorkSessionID)
 	assert.Equal(t, "my-server", parsed.Server)
 	assert.Contains(t, parsed.Command, "--work-session")
@@ -612,7 +613,7 @@ func TestParseRemoteExecArgs_ShellQuoting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ParseRemoteExecArgs(tt.args)
+			result := ParseRemoteExecArgs(utils.Stdio, tt.args)
 			assert.Equal(t, tt.expectedServer, result.Server, "Server")
 			assert.Equal(t, tt.expectedUsername, result.Username, "Username")
 			assert.Equal(t, tt.expectedCommand, result.Command, "Command")
@@ -646,7 +647,7 @@ func TestParseRemoteExecArgs_OutputFlag(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ParseRemoteExecArgs(tt.args)
+			result := ParseRemoteExecArgs(utils.Stdio, tt.args)
 			assert.Equal(t, tt.expectedOutput, result.OutputFormat)
 			assert.Equal(t, tt.expectedServer, result.Server)
 			assert.Equal(t, tt.expectedCmd, result.Command)
@@ -656,13 +657,13 @@ func TestParseRemoteExecArgs_OutputFlag(t *testing.T) {
 
 func TestParseRemoteExecArgs_OutputFlagMissingValue(t *testing.T) {
 	t.Parallel()
-	result := ParseRemoteExecArgs([]string{"--output"})
+	result := ParseRemoteExecArgs(utils.Stdio, []string{"--output"})
 	assert.NotEmpty(t, result.Err)
 }
 
 func TestParseRemoteExecArgs_OutputFlagEmptyValue(t *testing.T) {
 	t.Parallel()
-	result := ParseRemoteExecArgs([]string{"--output="})
+	result := ParseRemoteExecArgs(utils.Stdio, []string{"--output="})
 	assert.NotEmpty(t, result.Err)
 }
 
@@ -707,7 +708,7 @@ func TestParseRemoteExecArgs_DetachFlag(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ParseRemoteExecArgs(tt.args)
+			result := ParseRemoteExecArgs(utils.Stdio, tt.args)
 			assert.Equal(t, tt.wantDetach, result.Detach, "Detach")
 			assert.Equal(t, tt.wantServer, result.Server, "Server")
 			assert.Equal(t, tt.wantCommand, result.Command, "Command")
@@ -811,7 +812,7 @@ func TestParseRemoteExecArgs_EnvFlag(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ParseRemoteExecArgs(tt.args)
+			result := ParseRemoteExecArgs(utils.Stdio, tt.args)
 			if tt.wantErr {
 				assert.NotEmpty(t, result.Err)
 				assert.Empty(t, result.Server)
@@ -833,7 +834,7 @@ func TestParseRemoteExecArgs_EnvFlag(t *testing.T) {
 
 func TestParseRemoteExecArgs_EnvErrorHidesSecret(t *testing.T) {
 	t.Parallel()
-	result := ParseRemoteExecArgs([]string{"--env=\"=hunter2\"", "server", "ls"})
+	result := ParseRemoteExecArgs(utils.Stdio, []string{"--env=\"=hunter2\"", "server", "ls"})
 	assert.NotEmpty(t, result.Err)
 	assert.NotContains(t, result.Err, "hunter2", "malformed --env error must not echo the value")
 }
@@ -841,7 +842,7 @@ func TestParseRemoteExecArgs_EnvErrorHidesSecret(t *testing.T) {
 func TestParseRemoteExecArgs_EnvPrefixIsExact(t *testing.T) {
 	t.Parallel()
 	// --env-file must not be swallowed by --env matching; it is an unknown flag.
-	result := ParseRemoteExecArgs([]string{"--env-file=secrets", "server", "ls"})
+	result := ParseRemoteExecArgs(utils.Stdio, []string{"--env-file=secrets", "server", "ls"})
 	assert.Contains(t, result.Err, "unknown flag")
 }
 
@@ -896,7 +897,7 @@ func TestParseRemoteExecArgs_Errors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ParseRemoteExecArgs(tt.args)
+			result := ParseRemoteExecArgs(utils.Stdio, tt.args)
 			assert.Equal(t, tt.expectedErr, result.Err)
 			assert.Empty(t, result.Server)
 		})
@@ -949,7 +950,7 @@ func TestParseRemoteExecArgsPurpose(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			parsed := ParseRemoteExecArgs(tc.args)
+			parsed := ParseRemoteExecArgs(utils.Stdio, tc.args)
 
 			if tc.wantErr != "" {
 				assert.Contains(t, parsed.Err, tc.wantErr)
@@ -978,7 +979,7 @@ func TestParseRemoteExecArgsRefusalCarriesTheOutputReadBeforeIt(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			parsed := ParseRemoteExecArgs(tt.args)
+			parsed := ParseRemoteExecArgs(utils.Stdio, tt.args)
 
 			assert.NotEmpty(t, parsed.Err)
 			assert.Equal(t, tt.want, parsed.OutputFormat)

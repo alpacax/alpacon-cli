@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newRecordsCommand(newClient clientFactory) *cobra.Command {
+func newRecordsCommand(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "records SESSION_ID",
 		Aliases: []string{"rec"},
@@ -41,7 +41,7 @@ Use --query to search records by command text (fuzzy match).`,
 
 			// JSON keeps records verbatim; table sanitizes so terminal control chars don't break the layout.
 			rows := records
-			if utils.OutputFormat != utils.OutputFormatJSON {
+			if !ios.IsJSON() {
 				rows = make([]websh.SessionRecord, len(records))
 				for i, r := range records {
 					rows[i] = websh.SessionRecord{
@@ -52,10 +52,9 @@ Use --query to search records by command text (fuzzy match).`,
 			}
 
 			if err != nil {
-				return utils.PartialTableExitError(rows, "Showing only the %d records read before the request failed: %s.", len(rows), err)
+				return ios.PartialTableExitError(rows, "Showing only the %d records read before the request failed: %s.", len(rows), err)
 			}
-			utils.PrintTable(rows)
-			return nil
+			return ios.PrintTable(rows)
 		}),
 	}
 	cmd.Flags().StringP("query", "q", "", "Search records by command text (fuzzy match)")

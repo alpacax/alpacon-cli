@@ -15,9 +15,7 @@ import (
 // Covers one provision + dial (watchHandshakeTimeout in api/event) plus the subscribe.
 const watchConnectTimeout = 15 * time.Second
 
-var watchCmd = newWatchCommand(client.NewAlpaconAPIClient)
-
-func newWatchCommand(newClient func() (*client.AlpaconClient, error)) *cobra.Command {
+func newWatchCommand(newClient func() (*client.AlpaconClient, error), ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "watch",
 		Short: "Stream events from the Alpacon event channel",
@@ -39,18 +37,14 @@ Run 'alpacon work-session ls' or the Alpacon console to find a target ID.`,
   alpacon event watch --type work_session --target 550e8400-e29b-41d4-a716-446655440000 --output json
   alpacon event watch --type notification`,
 		Args: cobra.NoArgs,
-		RunE: utils.WithExitError(func(cmd *cobra.Command, _ []string) error { return runWatch(cmd, newClient) }),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, _ []string) error { return runWatch(ios, cmd, newClient) }),
 	}
 	cmd.Flags().String("type", "", "Event type to subscribe to, e.g. work_session or notification (required)")
 	cmd.Flags().String("target", "", "Target resource ID; omit where the server allows a subscription without one")
 	return cmd
 }
 
-func init() {
-	EventCmd.AddCommand(watchCmd)
-}
-
-func runWatch(cmd *cobra.Command, newClient func() (*client.AlpaconClient, error)) error {
+func runWatch(ios *utils.IOStreams, cmd *cobra.Command, newClient func() (*client.AlpaconClient, error)) error {
 	eventType, _ := cmd.Flags().GetString("type")
 	target, _ := cmd.Flags().GetString("target")
 	target, err := validateEventTarget(target)
@@ -80,7 +74,7 @@ func runWatch(cmd *cobra.Command, newClient func() (*client.AlpaconClient, error
 		return utils.NewEnvelopeExitError(opWatch, nil, "Timed out connecting to the event channel after %s.", watchConnectTimeout)
 	}
 
-	utils.CliInfo("Watching %s events. Press Ctrl+C to stop.", strip(eventType))
+	ios.Info("Watching %s events. Press Ctrl+C to stop.", strip(eventType))
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -92,12 +86,12 @@ func runWatch(cmd *cobra.Command, newClient func() (*client.AlpaconClient, error
 		case <-sigChan:
 			return nil
 		case <-watcher.Reconnected():
-			utils.CliWarning("Reconnected to the event channel. Events published while disconnected were not delivered.")
+			ios.Warning("Reconnected to the event channel. Events published while disconnected were not delivered.")
 		case failErr := <-watcher.ReconnectFailed():
-			utils.CliWarning("Lost the event channel and still reconnecting: %s. No events are being delivered until it recovers.", utils.Reword(failErr, strip(failErr.Error())))
+			ios.Warning("Lost the event channel and still reconnecting: %s. No events are being delivered until it recovers.", utils.Reword(failErr, strip(failErr.Error())))
 		case frame := <-watcher.Frames():
-			if err := renderEvent(cmd.OutOrStdout(), frame, utils.OutputFormat, target, time.Now()); err != nil {
-				utils.CliWarning("%s.", err)
+			if err := renderEvent(ios.Out, frame, ios.OutputFormat(), target, time.Now()); err != nil {
+				ios.Warning("%s.", err)
 			}
 		}
 	}

@@ -2,42 +2,43 @@ package webhook
 
 import (
 	"github.com/alpacax/alpacon-cli/api/webhook"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var webhookDetailCmd = &cobra.Command{
-	Use:     "describe WEBHOOK",
-	Aliases: []string{"desc"},
-	Short:   "Show details of a webhook",
-	Long: `
+func newWebhookDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:     "describe WEBHOOK",
+		Aliases: []string{"desc"},
+		Short:   "Show details of a webhook",
+		Long: `
 	The describe command fetches and displays detailed information about a specific webhook,
 	including its URL, SSL verification setting, and enabled status.
 	`,
-	Example: `
+		Example: `
 	alpacon webhook describe my-webhook
 	alpacon webhook desc my-webhook
 	`,
-	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		webhookName := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			webhookName := args[0]
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		webhookID, err := webhook.GetWebhookIDByName(alpaconClient, webhookName)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to find the webhook: %s.", err)
-		}
+			webhookID, err := webhook.GetWebhookIDByName(alpaconClient, webhookName)
+			if err != nil {
+				return utils.NewExitError("Failed to find the webhook: %s.", err)
+			}
 
-		webhookDetail, err := webhook.GetWebhookDetail(alpaconClient, webhookID)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the webhook details: %s.", err)
-		}
+			webhookDetail, err := webhook.GetWebhookDetail(alpaconClient, webhookID)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the webhook details: %s.", err)
+			}
 
-		utils.PrintJson(webhookDetail)
-	},
+			return ios.PrintJson(webhookDetail)
+		}),
+	}
 }

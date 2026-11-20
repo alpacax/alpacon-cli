@@ -10,6 +10,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
@@ -122,16 +123,13 @@ func TestWorkSessionCreateCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
-	resetCreateCommandState(t)
-	purpose = "incident"
-	createScopes = []string{"command"}
-	createServers = []string{"prod"}
-	expiresAt = "2026-06-01T12:00:00Z"
-	requesterType = "user"
+	clearWorkSessionAgentEnvironment(t)
+	cmd := newWorkSessionCreateCmd(client.NewAlpaconAPIClient, utils.Stdio)
+	require.NoError(t, cmd.ParseFlags([]string{"--purpose", "incident", "--scope", "command", "--server", "prod", "--expires-at", "2026-06-01T12:00:00Z"}))
 
 	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		runErr = workSessionCreateCmd.RunE(workSessionCreateCmd, nil)
+		runErr = cmd.RunE(cmd, nil)
 	})
 	require.NoError(t, runErr)
 
@@ -165,19 +163,20 @@ func TestWorkSessionUseCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 			"id": "ses-active",
 			"description": "incident",
 			"status": "active",
-			"expires_at": "2026-06-01T12:00:00Z"
+			"expires_at": "2026-06-01T12:00:00Z",
+			"servers": [{"id": "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47", "name": "web-1"}],
+			"servers_hidden": 2
 		}`))
 	}))
 	defer ts.Close()
 
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
-	unsetActiveWorkSession = false
-	t.Cleanup(func() { unsetActiveWorkSession = false })
+	cmd := newWorkSessionUseCmd(client.NewAlpaconAPIClient, utils.Stdio)
 
 	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		runErr = workSessionUseCmd.RunE(workSessionUseCmd, []string{"ses-active"})
+		runErr = cmd.RunE(cmd, []string{"ses-active"})
 	})
 	require.NoError(t, runErr)
 
@@ -190,10 +189,13 @@ func TestWorkSessionUseCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 		Operation         string  `json:"operation"`
 		WorkSessionID     string  `json:"work_session_id"`
 		ActiveWorksession *string `json:"active_worksession"`
+		// use is a plain read, so a caller who does not manage the session can get a count.
+		WorkSession map[string]json.RawMessage `json:"work_session"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
 	assert.True(t, got.OK)
 	assert.Equal(t, "use", got.Operation)
+	assert.JSONEq(t, `2`, string(got.WorkSession["servers_hidden"]))
 	assert.Equal(t, "ses-active", got.WorkSessionID)
 	require.NotNil(t, got.ActiveWorksession)
 	assert.Equal(t, "ses-active", *got.ActiveWorksession)
@@ -207,12 +209,12 @@ func TestWorkSessionUnsetCommandJSONOutput_OperationIsUnset(t *testing.T) {
 	setupWorkSessionCommandConfig(t, "http://example.invalid")
 	withWorkSessionCommandJSONMode(t)
 	require.NoError(t, config.SetActiveWorkSession("ses-active"))
-	unsetActiveWorkSession = true
-	t.Cleanup(func() { unsetActiveWorkSession = false })
+	cmd := newWorkSessionUseCmd(client.NewAlpaconAPIClient, utils.Stdio)
+	require.NoError(t, cmd.ParseFlags([]string{"--unset"}))
 
 	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		runErr = workSessionUseCmd.RunE(workSessionUseCmd, nil)
+		runErr = cmd.RunE(cmd, nil)
 	})
 	require.NoError(t, runErr)
 
@@ -244,16 +246,12 @@ func TestWorkSessionExtendCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
-	extendExpiresIn = ""
-	extendExpiresAt = "2026-06-01T12:00:00Z"
-	t.Cleanup(func() {
-		extendExpiresIn = ""
-		extendExpiresAt = ""
-	})
+	cmd := newWorkSessionExtendCmd(client.NewAlpaconAPIClient, utils.Stdio)
+	require.NoError(t, cmd.ParseFlags([]string{"--expires-at", "2026-06-01T12:00:00Z"}))
 
 	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		runErr = workSessionExtendCmd.RunE(workSessionExtendCmd, []string{"ses-active"})
+		runErr = cmd.RunE(cmd, []string{"ses-active"})
 	})
 	require.NoError(t, runErr)
 
@@ -276,6 +274,7 @@ func TestWorkSessionExtendCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 }
 
 func TestWorkSessionCancelCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
+	workSessionCancelCmd := newWorkSessionCancelCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	var sawCancel bool
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -380,6 +379,26 @@ func TestFormatAdjustments(t *testing.T) {
 			},
 			"  scopes:  command → none\n  servers: web-01 → web-01",
 		},
+		{
+			"servers the caller does not reach",
+			&wsapi.Adjustments{Servers: &wsapi.ServerDiff{
+				Old:       []types.ServerSummary{{Name: "web-01"}},
+				New:       []types.ServerSummary{},
+				OldHidden: new(1),
+				NewHidden: new(1),
+			}},
+			"  servers: web-01 and 1 more → 1 server you cannot access",
+		},
+		{
+			"nothing hidden on an empty side",
+			&wsapi.Adjustments{Servers: &wsapi.ServerDiff{
+				Old:       []types.ServerSummary{{Name: "web-01"}},
+				New:       []types.ServerSummary{},
+				OldHidden: new(0),
+				NewHidden: new(0),
+			}},
+			"  servers: web-01 → none",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -483,39 +502,40 @@ func withWorkSessionCommandJSONMode(t *testing.T) {
 	t.Cleanup(func() { utils.OutputFormat = old })
 }
 
-func resetCreateCommandState(t *testing.T) {
+func clearWorkSessionAgentEnvironment(t *testing.T) {
 	t.Helper()
-	// create reads the environment for an AI agent; a run inside one must not
-	// turn these sessions into agent sessions.
 	for _, name := range aiagent.Variables() {
 		t.Setenv(name, "")
 	}
-	createAccount = ""
-	t.Cleanup(func() { createAccount = "" })
-	purpose = ""
-	createScopes = nil
-	createServers = nil
-	createCluster = ""
-	expiresIn = ""
-	expiresAt = ""
-	requesterType = "user"
-	wait = false
-	waitApproval = ""
-	useAfterCreate = false
-	createSudo = nil
-	createSudoReason = ""
-	t.Cleanup(func() {
-		purpose = ""
-		createScopes = nil
-		createServers = nil
-		createCluster = ""
-		expiresIn = ""
-		expiresAt = ""
-		requesterType = "user"
-		wait = false
-		waitApproval = ""
-		useAfterCreate = false
-		createSudo = nil
-		createSudoReason = ""
-	})
+}
+
+// The envelope's work_session is a typed re-marshal, so every count and the objects that carry
+// one must be declared on the type or they drop out.
+func TestWorkSessionMutationOutputKeepsHiddenCounts(t *testing.T) {
+	t.Parallel()
+	var session wsapi.WorkSession
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"id": "550e8400-e29b-41d4-a716-446655440000",
+		"status": "active",
+		"servers": [{"id": "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47", "name": "web-1"}],
+		"servers_hidden": 2,
+		"clusters": [],
+		"clusters_hidden": 0,
+		"pending_modification_request": {"id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8", "changes": {"servers": [], "servers_hidden": 1}, "added_at": "2026-11-07T09:30:45Z", "can_cancel": true},
+		"account_flag": {"code": "account_bound_to_other_person", "servers": [], "servers_hidden": 1}
+	}`), &session))
+
+	body, err := json.Marshal(newWorkSessionMutationOutput(opUpdate, "updated", &session, nil))
+	require.NoError(t, err)
+
+	var got struct {
+		WorkSession map[string]json.RawMessage `json:"work_session"`
+	}
+	require.NoError(t, json.Unmarshal(body, &got))
+	assert.JSONEq(t, `2`, string(got.WorkSession["servers_hidden"]))
+	assert.JSONEq(t, `0`, string(got.WorkSession["clusters_hidden"]))
+	assert.JSONEq(t, `{"id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8", "changes": {"servers": [], "servers_hidden": 1}, "added_at": "2026-11-07T09:30:45Z", "can_cancel": true}`,
+		string(got.WorkSession["pending_modification_request"]))
+	assert.JSONEq(t, `{"code": "account_bound_to_other_person", "servers": [], "servers_hidden": 1}`,
+		string(got.WorkSession["account_flag"]))
 }

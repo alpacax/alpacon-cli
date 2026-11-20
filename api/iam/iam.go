@@ -426,7 +426,7 @@ func diffEditedUser(original []byte, edited any) (*UserEdit, error) {
 }
 
 func GetCurrentUser(ac *client.AlpaconClient) (*CurrentUserResponse, error) {
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(userURL, "-", nil))
+	responseBody, err := getCurrentUserRaw(ac)
 	if err != nil {
 		return nil, err
 	}
@@ -438,6 +438,30 @@ func GetCurrentUser(ac *client.AlpaconClient) (*CurrentUserResponse, error) {
 	}
 
 	return &user, nil
+}
+
+// CurrentUsernameUnset reports whether the caller's account has a null
+// username. An empty string or a missing field reads as not unset.
+func CurrentUsernameUnset(ac *client.AlpaconClient) (bool, error) {
+	body, err := getCurrentUserRaw(ac)
+	if err != nil {
+		return false, err
+	}
+	var user struct {
+		Username json.RawMessage `json:"username"`
+	}
+	if err := json.Unmarshal(body, &user); err != nil {
+		return false, err
+	}
+	return string(user.Username) == "null", nil
+}
+
+func getCurrentUserRaw(ac *client.AlpaconClient) ([]byte, error) {
+	meURL, err := utils.BuildURL(userURL, "-", nil)
+	if err != nil {
+		return nil, err
+	}
+	return ac.SendGetRequest(meURL)
 }
 
 func GetUserMemberships(ac *client.AlpaconClient, userID string) ([]GroupMembership, error) {
@@ -461,7 +485,20 @@ func GetUserMemberships(ac *client.AlpaconClient, userID string) ([]GroupMembers
 	return groups, nil
 }
 
-func HandleUsernameRequired() (*SetUsernameResponse, error) {
+// ErrUsernameSetupStopped is HandleUsernameRequiredUnless's answer when the
+// caller was stopped while the prompt waited: the name read after that is
+// not sent.
+var ErrUsernameSetupStopped = errors.New("username setup stopped before the name was sent")
+
+func HandleUsernameRequired(ac *client.AlpaconClient) (*SetUsernameResponse, error) {
+	return HandleUsernameRequiredUnless(ac, nil)
+}
+
+// HandleUsernameRequiredUnless is HandleUsernameRequired for a caller whose
+// own Ctrl+C handler takes SIGINT, so the prompt keeps reading after it:
+// once stopped reports true, the prompt asks no more and sends nothing, and
+// the next line read, an empty one included, ends it.
+func HandleUsernameRequiredUnless(ac *client.AlpaconClient, stopped func() bool) (*SetUsernameResponse, error) {
 	if !utils.IsInteractiveShell() {
 		return nil, errors.New("username is not set for your account; run 'alpacon username set <name>' to set it (lowercase letters, digits, '-', '_'; must start with a letter)")
 	}
@@ -469,10 +506,32 @@ func HandleUsernameRequired() (*SetUsernameResponse, error) {
 	utils.CliInfo("Username is required for your account.")
 	utils.CliInfo("You can also set it anytime with 'alpacon username set <name>'.")
 
-	for {
-		username := utils.PromptForRequiredInput("Please enter your username: ")
+	return promptUsername(ac, func() (string, error) {
+		return utils.ReadInput("Please enter your username: ")
+	}, stopped)
+}
 
-		response, err := SetUsername(username)
+// promptUsername asks with read until a name is set. It checks stopped before
+// each read and after it, since the read blocks until the user presses Enter.
+func promptUsername(ac *client.AlpaconClient, read func() (string, error), stopped func() bool) (*SetUsernameResponse, error) {
+	isStopped := func() bool { return stopped != nil && stopped() }
+	for {
+		if isStopped() {
+			return nil, ErrUsernameSetupStopped
+		}
+		username, err := read()
+		if err != nil {
+			return nil, err
+		}
+		if isStopped() {
+			return nil, ErrUsernameSetupStopped
+		}
+		if username == "" {
+			utils.CliWarning("This field is required. Please enter a value.")
+			continue
+		}
+
+		response, err := SetUsername(ac, username)
 		if err == nil {
 			utils.CliSuccess(UsernameSetSuccessFmt, response.Username)
 			return response, nil
@@ -515,12 +574,7 @@ func usernameFailure(err error) (warning string, alreadySet bool, stop error) {
 	}
 }
 
-func SetUsername(username string) (*SetUsernameResponse, error) {
-	ac, err := client.NewAlpaconAPIClient()
-	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-	}
-
+func SetUsername(ac *client.AlpaconClient, username string) (*SetUsernameResponse, error) {
 	request := SetUsernameRequest{
 		Username: username,
 	}

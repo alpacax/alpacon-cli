@@ -7,6 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// clientFactory builds the API client a command talks to.
+type clientFactory = func() (*client.AlpaconClient, error)
+
 const approvalGuidance = "Approval and rejection happen in the Alpacon console (web) or Slack."
 
 // Operation identifiers carried in JSON outputs: success "operation" and error context.operation.
@@ -27,17 +30,12 @@ const (
 	opUse       = "use"
 )
 
-var (
-	statusFilter    string
-	requesterFilter string
-	userFilter      string
-)
-
-var WorkSessionCmd = &cobra.Command{
-	Use:     "work-session",
-	Aliases: []string{"session"},
-	Short:   "Create and manage work sessions",
-	Long: `Create, inspect, and manage work sessions.
+func NewWorkSessionCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "work-session",
+		Aliases: []string{"session"},
+		Short:   "Create and manage work sessions",
+		Long: `Create, inspect, and manage work sessions.
 
 Work sessions are approval-gated units that authorize access-path operations on Alpacon.
 
@@ -73,39 +71,40 @@ Error codes returned when a session check fails:
   work_session_not_usable         session is no longer usable
 
 Run 'alpacon whoami' to check your WorkSession requirement and active session.`,
-	Args: utils.RejectUnknownSubcommand(approvalGuidance),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return utils.RequireSubcommand(cmd, approvalGuidance)
-	},
-}
-
-func init() {
-	WorkSessionCmd.AddCommand(workSessionListCmd)
-	WorkSessionCmd.AddCommand(workSessionCreateCmd)
-	WorkSessionCmd.AddCommand(workSessionDescribeCmd)
-	WorkSessionCmd.AddCommand(workSessionActivateCmd)
-	WorkSessionCmd.AddCommand(workSessionCompleteCmd)
-	WorkSessionCmd.AddCommand(workSessionExtendCmd)
-	WorkSessionCmd.AddCommand(workSessionUpdateCmd)
-	WorkSessionCmd.AddCommand(workSessionUseCmd)
-	WorkSessionCmd.AddCommand(workSessionCurrentCmd)
-	WorkSessionCmd.AddCommand(workSessionTimelineCmd)
-	WorkSessionCmd.AddCommand(workSessionRecordingCmd)
-	WorkSessionCmd.AddCommand(workSessionApproveCmd)
-	WorkSessionCmd.AddCommand(workSessionRejectCmd)
-	WorkSessionCmd.AddCommand(workSessionRevokeCmd)
-	WorkSessionCmd.AddCommand(workSessionCancelCmd)
+		Args: utils.RejectUnknownSubcommand(approvalGuidance),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return utils.RequireSubcommand(cmd, approvalGuidance)
+		},
+	}
+	cmd.AddCommand(
+		newWorkSessionListCmd(newClient, ios),
+		newWorkSessionCreateCmd(newClient, ios),
+		newWorkSessionDescribeCmd(newClient, ios),
+		newWorkSessionActivateCmd(newClient, ios),
+		newWorkSessionCompleteCmd(newClient, ios),
+		newWorkSessionExtendCmd(newClient, ios),
+		newWorkSessionUpdateCmd(newClient, ios),
+		newWorkSessionUseCmd(newClient, ios),
+		newWorkSessionCurrentCmd(newClient, ios),
+		newWorkSessionTimelineCmd(newClient, ios),
+		newWorkSessionRecordingCmd(newClient, ios),
+		newWorkSessionApproveCmd(),
+		newWorkSessionRejectCmd(),
+		newWorkSessionRevokeCmd(newClient, ios),
+		newWorkSessionCancelCmd(newClient, ios),
+	)
+	return cmd
 }
 
 // endSession ends the session with end and, when it is the workspace's active one, clears it.
 // The error is the server's alone; a failed clear only warns. Reports whether it cleared.
-func endSession(ac *client.AlpaconClient, id string, end func(*client.AlpaconClient, string) error) (bool, error) {
+func endSession(ios *utils.IOStreams, ac *client.AlpaconClient, id string, end func(*client.AlpaconClient, string) error) (bool, error) {
 	if err := end(ac, id); err != nil {
 		return false, err
 	}
 	cleared, err := config.ClearActiveWorkSessionFor(ac.WorkspaceName, id)
 	if err != nil {
-		utils.CliWarning("Work session %s has ended but is still the active work-session: %s. Run 'alpacon work-session use --unset' to clear it.", id, err)
+		ios.Warning("Work session %s has ended but is still the active work-session: %s. Run 'alpacon work-session use --unset' to clear it.", id, err)
 	}
 	return cleared, nil
 }

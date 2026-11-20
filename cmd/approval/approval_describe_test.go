@@ -2,15 +2,19 @@ package approval
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	approvalapi "github.com/alpacax/alpacon-cli/api/approval"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -37,6 +41,8 @@ const fileExecutionFixture = `{
     }
   }
 }`
+
+const scriptAlteredWarning = "control characters from the server were removed from the text below."
 
 func decodeFixture(t *testing.T, body string) *approvalapi.ApprovalRequest {
 	t.Helper()
@@ -68,8 +74,8 @@ func TestFileExecutionRows(t *testing.T) {
 	assert.Equal(t, "14", m["Reuse days if approved"])
 	assert.NotContains(t, m, "Run as group")
 
-	script, ok := fileExecutionScript(fe)
-	require.True(t, ok)
+	script, altered := fileExecutionScript(fe, false)
+	assert.False(t, altered, "clean script must not be marked altered")
 	assert.Contains(t, script, "echo hello")
 }
 
@@ -86,8 +92,8 @@ func TestFileExecutionScriptWithheld(t *testing.T) {
 	t.Parallel()
 	fe := fileExecutionOf(decodeFixture(t, `{"metadata":{"command":{"file_execution":{"content":null,"sha256":"h","path":"/p","interpreter":"/bin/sh"}}}}`))
 	require.NotNil(t, fe)
-	script, ok := fileExecutionScript(fe)
-	require.True(t, ok)
+	script, altered := fileExecutionScript(fe, false)
+	assert.False(t, altered, "withheld script must not be marked altered")
 	assert.Contains(t, script, "not included")
 	assert.Contains(t, script, "SHA-256")
 }
@@ -100,8 +106,39 @@ func TestFileExecutionStripsEscapes(t *testing.T) {
 		assert.NotContains(t, r.Value, "\x1b")
 		assert.NotContains(t, r.Value, "\u202e")
 	}
-	script, _ := fileExecutionScript(fe)
+	script, altered := fileExecutionScript(fe, false)
+	assert.True(t, altered, "stripped escapes must mark the script altered")
 	assert.NotContains(t, script, "\x1b")
+}
+
+func TestNumberedFileExecutionScript(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		content     string
+		want        string
+		wantAltered bool
+	}{
+		{
+			name:        "escapes are stripped without shifting a line",
+			content:     "echo \x1b[2Kgone\necho \u009bred\nok \u202edenied",
+			want:        "Script (37 bytes):\n1 | echo gone\n2 | echo red\n3 | ok denied",
+			wantAltered: true,
+		},
+		{
+			name:    "numbers are padded to the widest",
+			content: "a\nb\nc\nd\ne\nf\ng\nh\ni\nj",
+			want:    "Script (19 bytes):\n 1 | a\n 2 | b\n 3 | c\n 4 | d\n 5 | e\n 6 | f\n 7 | g\n 8 | h\n 9 | i\n10 | j",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			script, altered := fileExecutionScript(&approvalapi.FileExecution{Content: &tt.content}, true)
+			assert.Equal(t, tt.wantAltered, altered)
+			assert.Equal(t, tt.want, script)
+		})
+	}
 }
 
 func TestOtherRequestTypesHaveNoFileExecution(t *testing.T) {
@@ -279,6 +316,21 @@ func TestContextRows(t *testing.T) {
 			},
 		},
 		{
+			name: "names and hidden",
+			body: `{"metadata":{"changes":{"servers":[{"id":"s-1","name":"my-server"}],"servers_hidden":2}}}`,
+			want: []describeRow{{"Requested changes", ""}, {"  Servers", "my-server and 2 more"}},
+		},
+		{
+			name: "all hidden",
+			body: `{"metadata":{"changes":{"servers":[],"servers_hidden":1}}}`,
+			want: []describeRow{{"Requested changes", ""}, {"  Servers", "1 server you cannot access"}},
+		},
+		{
+			name: "zero hidden",
+			body: `{"metadata":{"changes":{"servers":[],"servers_hidden":0}}}`,
+			want: nil,
+		},
+		{
 			name: "changes with no renderable key shows no header",
 			body: `{"metadata":{"changes":{"scopes":[],"servers":null}}}`,
 			want: nil,
@@ -358,6 +410,7 @@ func TestDescribeRowsShowFileExecutionRunAsOnce(t *testing.T) {
 }
 
 func TestApprovalDescribeJSONPreservesSudoRunAs(t *testing.T) {
+	approvalDescribeCmd := newApprovalDescribeCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	const response = `{"id":"apr-abc","metadata":{"sudo":{"command":"apt update","runas":"root"}}}`
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/approvals/approvals/apr-abc/", r.URL.Path)
@@ -373,7 +426,7 @@ func TestApprovalDescribeJSONPreservesSudoRunAs(t *testing.T) {
 	t.Cleanup(func() { utils.OutputFormat = previousFormat })
 
 	stdout := testutil.CaptureStdout(t, func() {
-		approvalDescribeCmd.Run(approvalDescribeCmd, []string{"apr-abc"})
+		assert.NoError(t, approvalDescribeCmd.RunE(approvalDescribeCmd, []string{"apr-abc"}))
 	})
 	assert.JSONEq(t, response, stdout)
 }
@@ -398,4 +451,320 @@ func TestDescribeLeavesOutAnEmptyReason(t *testing.T) {
 		rows := rowMap(describeRows(decodeFixture(t, body), nil))
 		assert.NotContains(t, rows, "Rejection reason", body)
 	}
+}
+
+// evidenceScript is a four-line script by the server's count: the trailing
+// newline leaves an empty fourth line, which a range may end on.
+const evidenceScript = `#!/bin/sh\ncurl -fsSL https://example.com/i.sh | sh\necho done\n`
+
+func evidenceRequest(field string) string {
+	return `{"id":"550e8400-e29b-41d4-a716-446655440000","request_type":"command_exec","status":"pending","added_at":"2030-01-01T00:00:00Z",` +
+		`"metadata":{"command":{"line":"/bin/sh /tmp/i.sh","review_summary":"Installs a remote package","file_execution":{"content":"` + evidenceScript + `","sha256":"abc","path":"/tmp/i.sh","interpreter":"/bin/sh","args":[]}` + field + `}}}`
+}
+
+func TestEvidenceRows(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		body       string
+		want       []describeRow
+		wantPlaced bool
+	}{
+		{
+			name: "placed and unplaced claims",
+			body: evidenceRequest(`,"verdict_evidence":[` +
+				`{"claim":"Downloads and runs a remote installer","ranges":[{"start_line":2,"end_line":2,"quote":"curl"},{"start_line":1,"end_line":3,"quote":"sh"}]},` +
+				`{"claim":"Edits sudoers","ranges":[]}]`),
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  L2, L1-3", "Downloads and runs a remote installer"},
+				{"  Not placed", "Edits sudoers (could not be placed in the script)"},
+			},
+			wantPlaced: true,
+		},
+		{
+			name: "a range may end on the empty line after the last newline",
+			body: evidenceRequest(`,"verdict_evidence":[{"claim":"Prints a message","ranges":[{"start_line":3,"end_line":4,"quote":"echo done"}]}]`),
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  L3-4", "Prints a message"},
+			},
+			wantPlaced: true,
+		},
+		{
+			name: "a range past the script and a repeated range are dropped",
+			body: evidenceRequest(`,"verdict_evidence":[` +
+				`{"claim":"Past the end","ranges":[{"start_line":4,"end_line":5,"quote":"x"}]},` +
+				`{"claim":"Repeated","ranges":[{"start_line":2,"end_line":2,"quote":"curl"},{"start_line":2,"end_line":2,"quote":"curl"}]}]`),
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  Not placed", "Past the end (could not be placed in the script)"},
+				{"  L2", "Repeated"},
+			},
+			wantPlaced: true,
+		},
+		{
+			name: "two claims may cite the same range",
+			body: evidenceRequest(`,"verdict_evidence":[` +
+				`{"claim":"Downloads an installer","ranges":[{"start_line":2,"end_line":2,"quote":"curl"}]},` +
+				`{"claim":"Pipes it to a shell","ranges":[{"start_line":2,"end_line":2,"quote":"| sh"}]}]`),
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  L2", "Downloads an installer"},
+				{"  L2", "Pipes it to a shell"},
+			},
+			wantPlaced: true,
+		},
+		{
+			name: "a range past the script drops alone and the claim stays placed",
+			body: evidenceRequest(`,"verdict_evidence":[{"claim":"Partly past the end","ranges":[{"start_line":2,"end_line":2,"quote":"curl"},{"start_line":4,"end_line":5,"quote":"x"}]}]`),
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  L2", "Partly past the end"},
+			},
+			wantPlaced: true,
+		},
+		{
+			name: "only unplaced claims",
+			body: evidenceRequest(`,"verdict_evidence":[{"claim":"Edits sudoers","ranges":[]}]`),
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  Not placed", "Edits sudoers (could not be placed in the script)"},
+			},
+		},
+		{
+			name: "a withheld script places nothing",
+			body: `{"metadata":{"command":{"file_execution":{"content":null,"sha256":"abc","path":"/tmp/i.sh","interpreter":"/bin/sh"},` +
+				`"verdict_evidence":[{"claim":"Downloads","ranges":[{"start_line":1,"end_line":1,"quote":"x"}]}]}}}`,
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  Not placed", "Downloads (could not be placed in the script)"},
+			},
+		},
+		{
+			name: "claim text is folded onto one line and stripped of escapes",
+			body: evidenceRequest(`,"verdict_evidence":[{"claim":"Runs\n\u001b[2Kcurl \u202epiped to sh","ranges":[{"start_line":2,"end_line":2,"quote":"curl"}]},{"claim":"\u001b[2K","ranges":[]}]`),
+			want: []describeRow{
+				{"AI evidence", ""},
+				{"  L2", "Runs curl piped to sh"},
+			},
+			wantPlaced: true,
+		},
+		{name: "absent", body: evidenceRequest(``)},
+		{name: "null", body: evidenceRequest(`,"verdict_evidence":null`)},
+		{name: "empty", body: evidenceRequest(`,"verdict_evidence":[]`)},
+		{name: "malformed", body: evidenceRequest(`,"verdict_evidence":"oops"`)},
+		{name: "a request with no command", body: `{"request_type":"sudo","metadata":{"sudo":{"command":"apt update"}}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rows, placed := evidenceRows(decodeFixture(t, tt.body))
+			assert.Equal(t, tt.want, rows)
+			assert.Equal(t, tt.wantPlaced, placed)
+		})
+	}
+}
+
+func TestApprovalDescribeEndsTheTableWithTheEvidence(t *testing.T) {
+	t.Parallel()
+	stdout := runDescribe(t, evidenceRequest(`,"verdict_evidence":[{"claim":"Edits sudoers","ranges":[]}]`))
+
+	assert.Regexp(t, `(?m)^  SHA-256 +abc\nAI evidence *\n  Not placed +Edits sudoers \(could not be placed in the script\)\n\nScript \(61 bytes\):\n`, stdout)
+}
+
+func runDescribe(t *testing.T, body string) string {
+	t.Helper()
+	stdout, _ := runDescribeStreams(t, body, nil)
+	return stdout
+}
+
+func runDescribeStreams(t *testing.T, body string, adjust func(*utils.IOStreams)) (stdout, stderr string) {
+	t.Helper()
+	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+		"GET /api/approvals/approvals/550e8400-e29b-41d4-a716-446655440000/": {Status: http.StatusOK, Body: body},
+	})
+	stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
+		if adjust != nil {
+			adjust(ios)
+		}
+		return newApprovalDescribeCmd(ts.Factory(), ios)
+	}, "550e8400-e29b-41d4-a716-446655440000")
+	require.Equal(t, 0, code, stderr)
+	return stdout, stderr
+}
+
+func TestApprovalDescribeNumbersTheScriptBesidePlacedEvidence(t *testing.T) {
+	t.Parallel()
+	stdout := runDescribe(t, evidenceRequest(`,"verdict_evidence":[`+
+		`{"claim":"Downloads and runs a remote installer","ranges":[{"start_line":2,"end_line":2,"quote":"curl"}]},`+
+		`{"claim":"Edits sudoers","ranges":[]}]`))
+
+	assert.Regexp(t, `(?m)^AI evidence\s*$`, stdout)
+	assert.Regexp(t, `(?m)^  L2 +Downloads and runs a remote installer$`, stdout)
+	assert.Regexp(t, `(?m)^  Not placed +Edits sudoers \(could not be placed in the script\)$`, stdout)
+	assert.Contains(t, stdout, "\n\nScript (61 bytes):\n"+
+		"1 | #!/bin/sh\n"+
+		"2 | curl -fsSL https://example.com/i.sh | sh\n"+
+		"3 | echo done\n"+
+		"4 |\n")
+}
+
+func TestApprovalDescribeWithoutEvidenceIsUnchanged(t *testing.T) {
+	t.Parallel()
+	baseline := runDescribe(t, evidenceRequest(``))
+	assert.NotContains(t, baseline, "AI evidence")
+	assert.Contains(t, baseline, "\n\nScript (61 bytes):\n#!/bin/sh\ncurl -fsSL https://example.com/i.sh | sh\necho done\n\n")
+
+	tests := []struct {
+		name  string
+		field string
+	}{
+		{name: "null", field: `,"verdict_evidence":null`},
+		{name: "empty", field: `,"verdict_evidence":[]`},
+		{name: "malformed field", field: `,"verdict_evidence":{"claim":"x"}`},
+		{name: "malformed claims", field: `,"verdict_evidence":["x",{"claim":7,"ranges":[]},{"claim":"no ranges"}]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, baseline, runDescribe(t, evidenceRequest(tt.field)))
+		})
+	}
+}
+
+func TestApprovalDescribeLeavesTheScriptUnnumberedWhenNothingIsPlaced(t *testing.T) {
+	t.Parallel()
+	stdout := runDescribe(t, evidenceRequest(`,"verdict_evidence":[{"claim":"Edits sudoers","ranges":[{"start_line":9,"end_line":9,"quote":"x"}]}]`))
+
+	assert.Regexp(t, `(?m)^  Not placed +Edits sudoers \(could not be placed in the script\)$`, stdout)
+	assert.Contains(t, stdout, "\n\nScript (61 bytes):\n#!/bin/sh\ncurl -fsSL https://example.com/i.sh | sh\necho done\n\n")
+}
+
+func TestApprovalDescribeJSONKeepsTheEvidenceAsSent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		field string
+	}{
+		{name: "present", field: `,"verdict_evidence":[{"claim":"Edits sudoers","ranges":[{"start_line":2,"end_line":2,"quote":"curl"}]},{"claim":"Unlocated","ranges":[]}]`},
+		{name: "null", field: `,"verdict_evidence":null`},
+		{name: "absent", field: ``},
+		{name: "malformed", field: `,"verdict_evidence":"oops"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			body := evidenceRequest(tt.field)
+			ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+				"GET /api/approvals/approvals/550e8400-e29b-41d4-a716-446655440000/": {Status: http.StatusOK, Body: body},
+			})
+
+			stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newApprovalDescribeCmd(ts.Factory(), ios) }, "550e8400-e29b-41d4-a716-446655440000")
+
+			require.Equal(t, 0, code, stderr)
+			assert.JSONEq(t, body, stdout)
+		})
+	}
+}
+
+func TestFileExecutionScriptKeepsTabs(t *testing.T) {
+	t.Parallel()
+	content := "#!/bin/sh\nif true; then\n\techo\tdone\nfi\n"
+	header := fmt.Sprintf("Script (%d bytes):\n", len(content))
+	tests := []struct {
+		name     string
+		numbered bool
+		want     string
+	}{
+		{name: "unnumbered", want: header + content},
+		{name: "numbered", numbered: true, want: header + "1 | #!/bin/sh\n2 | if true; then\n3 | \techo\tdone\n4 | fi\n5 |"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			script, altered := fileExecutionScript(&approvalapi.FileExecution{Content: &content}, tt.numbered)
+			assert.False(t, altered, "tabs must not mark the script altered")
+			assert.Equal(t, tt.want, script)
+		})
+	}
+}
+
+func TestSanitizeScript(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		content     string
+		want        string
+		wantAltered bool
+	}{
+		{name: "clean", content: "echo done\n", want: "echo done\n"},
+		{name: "tabs", content: "\techo\tdone\n", want: "\techo\tdone\n"},
+		{name: "crlf line endings", content: "echo a\r\necho b\r\n", want: "echo a\necho b\n"},
+		{name: "escape sequence", content: "echo \x1b[31mred\x1b[0m\n", want: "echo red\n", wantAltered: true},
+		{name: "escape sequence on a crlf line", content: "echo \x1b[31mred\r\n", want: "echo red\n", wantAltered: true},
+		{name: "escape next to a tab", content: "\x1b\t[31m\n", want: "\t[31m\n", wantAltered: true},
+		{name: "lone carriage return", content: "echo a\recho b\n", want: "echo aecho b\n", wantAltered: true},
+		{name: "format character", content: "echo a\u202eb\n", want: "echo ab\n", wantAltered: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			clean, altered := sanitizeScript(tt.content)
+			assert.Equal(t, tt.want, clean)
+			assert.Equal(t, tt.wantAltered, altered)
+		})
+	}
+}
+
+func scriptRequest(t *testing.T, content string) string {
+	t.Helper()
+	encoded, err := json.Marshal(content)
+	require.NoError(t, err)
+	return `{"id":"550e8400-e29b-41d4-a716-446655440000","request_type":"command_exec","status":"pending",` +
+		`"metadata":{"command":{"line":"/bin/sh /tmp/i.sh","file_execution":{"content":` + string(encoded) +
+		`,"sha256":"abc","path":"/tmp/i.sh","interpreter":"/bin/sh","args":[]}}}}`
+}
+
+func TestApprovalDescribeNamesAWithheldScriptWithoutWarning(t *testing.T) {
+	t.Parallel()
+	body := `{"id":"550e8400-e29b-41d4-a716-446655440000","request_type":"command_exec","status":"pending",` +
+		`"metadata":{"command":{"line":"/bin/sh /tmp/i.sh","file_execution":{"content":null,` +
+		`"sha256":"abc","path":"/tmp/i.sh","interpreter":"/bin/sh","args":[]}}}}`
+
+	stdout, stderr := runDescribeStreams(t, body, nil)
+
+	assert.Contains(t, stdout, "\n\nScript: not included in this response; the SHA-256 above identifies the file.\n")
+	assert.NotContains(t, stdout, scriptAlteredWarning)
+	assert.NotContains(t, stderr, scriptAlteredWarning)
+}
+
+func TestApprovalDescribeDoesNotWarnAboutACleanScript(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "tabs", content: "if true; then\n\techo\tdone\nfi\n", want: "if true; then\n\techo\tdone\nfi\n"},
+		{name: "crlf line endings", content: "echo a\r\necho b\r\n", want: "echo a\necho b\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			stdout, stderr := runDescribeStreams(t, scriptRequest(t, tt.content), nil)
+			assert.Contains(t, stdout, fmt.Sprintf("\n\nScript (%d bytes):\n%s\n", len(tt.content), tt.want))
+			assert.NotContains(t, stdout, scriptAlteredWarning)
+			assert.NotContains(t, stderr, scriptAlteredWarning)
+		})
+	}
+}
+
+func TestApprovalDescribePrintsTheWarningWithoutColor(t *testing.T) {
+	t.Parallel()
+	content := "echo \x1b[31mred\x1b[0m\n"
+	stdout, _ := runDescribeStreams(t, scriptRequest(t, content), func(ios *utils.IOStreams) { ios.ColorEnabled = true })
+
+	assert.Contains(t, stdout, fmt.Sprintf("\n\nWarning: %s\nScript (%d bytes):\necho red\n\n", scriptAlteredWarning, len(content)))
+	assert.NotContains(t, stdout, "\x1b")
 }

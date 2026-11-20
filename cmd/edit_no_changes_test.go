@@ -20,7 +20,6 @@ const modulePath = "github.com/alpacax/alpacon-cli"
 // Referenced so a rename breaks the build instead of leaving the walk nothing to match.
 var (
 	_ = utils.ProcessEditedData
-	_ = utils.ExitIfNoChanges
 	_ = utils.ReportNoChanges
 )
 
@@ -39,14 +38,15 @@ func TestEditorCommandsExitZeroWhenNothingChanged(t *testing.T) {
 			handled := false
 			guards := returningIfConds(body)
 			directCalls(body, func(call *ast.CallExpr) {
+				if sel, isSel := call.Fun.(*ast.SelectorExpr); isSel && sel.Sel.Name == "ReportNoChanges" && guards[call] {
+					handled = true // ios.ReportNoChanges, the IOStreams method
+				}
 				path, name, ok := calledFunc(call, imports)
 				switch {
 				case !ok:
 				case editors[path+"."+name]:
 					editorCall = call
 				case path != modulePath+"/utils":
-				case name == "ExitIfNoChanges":
-					handled = true
 				case name == "ReportNoChanges" && guards[call]: // its answer only helps when it ends the command
 					handled = true
 				}
@@ -55,7 +55,7 @@ func TestEditorCommandsExitZeroWhenNothingChanged(t *testing.T) {
 				return
 			}
 			checked++
-			assert.True(t, handled, "%s calls an editor function without utils.ExitIfNoChanges or an if utils.ReportNoChanges(err) { return nil } guard",
+			assert.True(t, handled, "%s calls an editor function without an if ios.ReportNoChanges(err) { return nil } guard",
 				file.fset.Position(editorCall.Pos()))
 		})
 	}

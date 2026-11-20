@@ -87,7 +87,7 @@ func runInProcess(t *testing.T, workspaceURL, sub, outputFormat string, args []s
 	}
 	event.CommandPollTick = 10 * time.Millisecond
 
-	root := newCommand(testClientFactory(workspaceURL))
+	root := NewExecCmd(testClientFactory(workspaceURL), utils.Stdio)
 	var err error
 	stdout, stderr = testutil.CaptureOutput(t, func() {
 		if sub == "" {

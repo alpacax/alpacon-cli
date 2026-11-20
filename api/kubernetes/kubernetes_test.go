@@ -406,6 +406,39 @@ func TestCreateSession_DecodesResponse(t *testing.T) {
 	assert.True(t, session.TokenExpiredAt.Equal(time.Date(2026, 10, 8, 3, 30, 0, 1000, time.UTC)), "token_expired_at: %v", session.TokenExpiredAt)
 }
 
+func TestCreateSession_KeepsTheRBACDriftWarning(t *testing.T) {
+	t.Parallel()
+	const warning = `{"cluster_external_grants":2,"namespaced_external_grants":1,"incomplete":false,"checked_at":"2026-11-10T09:00:00Z","policy":"warn"}`
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "field missing", body: sessionBody},
+		{name: "null", body: `{"id":"s-1","rbac_drift_warning":null}`, want: "null"},
+		{name: "object", body: `{"id":"s-1","rbac_drift_warning":` + warning + `}`, want: warning},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer ts.Close()
+
+			session, err := CreateSession(newTestClient(ts), KubeSessionCreateRequest{Cluster: "c-prod", ClientType: ClientTypeCLI})
+			require.NoError(t, err)
+			if tt.want == "" {
+				assert.Nil(t, session.RBACDriftWarning)
+				return
+			}
+			assert.JSONEq(t, tt.want, string(session.RBACDriftWarning))
+		})
+	}
+}
+
 func TestCreateSession_RefusesAnUnusableCreatedID(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -455,6 +488,36 @@ func TestCreateSession_KeepsErrorStatusAndCode(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, utils.HTTPStatusCode(err))
 	code, _ := utils.ParseErrorResponse(err)
 	assert.Equal(t, "permission_denied", code)
+	// A refused create may be sent again after MFA, so it carries the tag.
+	assert.True(t, utils.IsSubmissionError(err), "refused create must be tagged: %v", err)
+}
+
+// Once the server answered the create, the session may exist, so a failure to
+// read the answer must never be taken for a refusal an MFA wait sends again.
+func TestCreateSession_LeavesFailuresAfterTheAnswerUntagged(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "undecodable answer", body: `{"id":`},
+		{name: "unusable created ID", body: `{"id":"../escape"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer ts.Close()
+
+			_, err := CreateSession(newTestClient(ts), KubeSessionCreateRequest{Cluster: "c-prod", ClientType: ClientTypeCLI})
+			require.Error(t, err)
+			assert.False(t, utils.IsSubmissionError(err), "failure after the answer must be untagged: %v", err)
+		})
+	}
 }
 
 func TestCloseSession_PostsToClosePath(t *testing.T) {

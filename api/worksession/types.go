@@ -7,6 +7,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 const (
@@ -32,26 +33,56 @@ type WorkSession struct {
 	RequesterType string                `json:"requester_type"`
 	Scopes        []string              `json:"scopes"`
 	Servers       []types.ServerSummary `json:"servers"`
+	// ServersHidden and ClustersHidden count the targets left out of Servers and Clusters because
+	// the caller does not reach them; nil from a server older than Alpacon Server 2.48.0.
+	ServersHidden *int `json:"servers_hidden,omitempty"`
 	// Clusters is the one cluster a kube work session targets; a session
 	// targets either servers or a cluster, never both.
-	Clusters          []types.ClusterSummary `json:"clusters"`
-	CreatedBy         *types.UserSummary     `json:"created_by"`
-	AssignedUser      *types.UserSummary     `json:"assigned_user"`
-	ApprovalRequestID string                 `json:"approval_request_id"`
-	StartsAt          *time.Time             `json:"starts_at"`
-	ExpiresAt         time.Time              `json:"expires_at"`
-	StartedAt         *time.Time             `json:"started_at"`
-	CompletedAt       *time.Time             `json:"completed_at"`
-	AddedAt           time.Time              `json:"added_at"`
-	UpdatedAt         time.Time              `json:"updated_at"`
-	SudoPolicies      []SudoPolicyInline     `json:"sudo_policies"`
-	Adjustments       *Adjustments           `json:"adjustments"`
-	Recommendations   []Recommendation       `json:"recommendations"`
+	Clusters []types.ClusterSummary `json:"clusters"`
+	// ClustersHidden counts the clusters left out of Clusters, as ServersHidden does for servers.
+	ClustersHidden       *int               `json:"clusters_hidden,omitempty"`
+	CreatedBy            *types.UserSummary `json:"created_by"`
+	AssignedUser         *types.UserSummary `json:"assigned_user"`
+	ApprovalRequestID    string             `json:"approval_request_id"`
+	StartsAt             *time.Time         `json:"starts_at"`
+	ExpiresAt            time.Time          `json:"expires_at"`
+	StartedAt            *time.Time         `json:"started_at"`
+	CompletedAt          *time.Time         `json:"completed_at"`
+	AddedAt              time.Time          `json:"added_at"`
+	UpdatedAt            time.Time          `json:"updated_at"`
+	SudoPolicies         []SudoPolicyInline `json:"sudo_policies"`
+	ProposedSudoPolicies []SudoPolicyInline `json:"proposed_sudo_policies,omitempty"`
+	Adjustments          *Adjustments       `json:"adjustments"`
+	Recommendations      []Recommendation   `json:"recommendations"`
 
 	// PendingExtensionRequest is the open extension request, nil when there is none. 'extend'
 	// answers 202 with it set when the workspace's approval policy holds the request, and later
 	// reads keep it set until the request is approved, rejected, cancelled, or lapses.
 	PendingExtensionRequest *PendingExtensionRequest `json:"pending_extension_request"`
+
+	// PendingModificationRequest is the open change request on the session, nil when there is none.
+	PendingModificationRequest *PendingModificationRequest `json:"pending_modification_request"`
+
+	// AccountFlag is set when a target server binds the session's account to another person.
+	// A server older than 2.44.0 sends no key, so a nil flag is left out rather than invented.
+	AccountFlag *AccountFlag `json:"account_flag,omitempty"`
+}
+
+// PendingModificationRequest is a change to the session waiting on approval. Changes stays raw
+// so every key the server sends, changes.servers_hidden among them, reaches the JSON output.
+type PendingModificationRequest struct {
+	ID        string          `json:"id"`
+	Changes   json.RawMessage `json:"changes"`
+	AddedAt   time.Time       `json:"added_at"`
+	CanCancel bool            `json:"can_cancel"`
+}
+
+// AccountFlag says the account the session runs as belongs to another person on some servers.
+// Servers holds bare server IDs, only those the caller reaches; ServersHidden counts the rest.
+type AccountFlag struct {
+	Code          string   `json:"code"`
+	Servers       []string `json:"servers"`
+	ServersHidden *int     `json:"servers_hidden,omitempty"`
 }
 
 // PendingExtensionRequest is the open request 'extend' filed instead of applying at once.
@@ -77,10 +108,13 @@ type ScopeDiff struct {
 	New []string `json:"new"`
 }
 
-// ServerDiff holds the requested (old) and granted (new) server lists.
+// ServerDiff holds the requested (old) and granted (new) server lists. OldHidden and NewHidden
+// count the servers each side leaves out because the caller does not reach them.
 type ServerDiff struct {
-	Old []types.ServerSummary `json:"old"`
-	New []types.ServerSummary `json:"new"`
+	Old       []types.ServerSummary `json:"old"`
+	New       []types.ServerSummary `json:"new"`
+	OldHidden *int                  `json:"old_hidden,omitempty"`
+	NewHidden *int                  `json:"new_hidden,omitempty"`
 }
 
 // Recommendation is an admin-confirmed note attached at approval time.
@@ -92,17 +126,21 @@ type Recommendation struct {
 	AutoCheckable bool   `json:"auto_checkable"`
 }
 
+// WorkSessionAttributes is a work session's list row; the Servers and Clusters table text adds
+// the hidden count, which JSON carries in ServersHidden and ClustersHidden instead.
 type WorkSessionAttributes struct {
 	// Active is "*" on the workspace's active session and empty otherwise;
 	// cmd/worksession.MarkActive sets it.
-	Active      string `json:"-"           table:"Active"`
-	ID          string `json:"id"          table:"ID"`
-	Status      string `json:"status"      table:"Status"`
-	Scopes      string `json:"scopes"      table:"Scopes"`
-	Servers     string `json:"servers"     table:"Servers"`
-	Clusters    string `json:"clusters"    table:"Clusters"`
-	ExpiresAt   string `json:"expires_at"  table:"Expires At"`
-	Description string `json:"description" table:"Description"`
+	Active         string              `json:"-"                         table:"Active"`
+	ID             string              `json:"id"                        table:"ID"`
+	Status         string              `json:"status"                    table:"Status"`
+	Scopes         string              `json:"scopes"                    table:"Scopes"`
+	Servers        utils.AnnotatedText `json:"servers"                   table:"Servers"`
+	Clusters       utils.AnnotatedText `json:"clusters"                  table:"Clusters"`
+	ExpiresAt      utils.Timestamp     `json:"expires_at"                table:"Expires At"`
+	Description    utils.TruncatedText `json:"description"               table:"Description"`
+	ServersHidden  *int                `json:"servers_hidden,omitempty"  table:"-"`
+	ClustersHidden *int                `json:"clusters_hidden,omitempty" table:"-"`
 }
 
 // WorkSessionCreateRequest targets either Servers or Clusters, never both.
@@ -131,10 +169,11 @@ type WorkSessionCreateRequest struct {
 // ID is set only on read and on update. An update's sudo_policies is the full desired set: send
 // existing policies back with their ID and new ones without, since a policy left out is deleted.
 type SudoPolicyInline struct {
-	ID                string   `json:"id,omitempty"`
-	Commands          []string `json:"commands"`
-	Reason            string   `json:"reason,omitempty"`
-	SessionAuthorized bool     `json:"session_authorized"`
+	ID                string    `json:"id,omitempty"`
+	Commands          []string  `json:"commands"`
+	Reason            string    `json:"reason,omitempty"`
+	SessionAuthorized bool      `json:"session_authorized"`
+	BroadPatterns     *[]string `json:"broad_patterns,omitempty"` // Read-only classification from the server.
 }
 
 // MarshalJSON sends both names so older servers receive the same policy.
@@ -164,6 +203,15 @@ func (p *SudoPolicyInline) UnmarshalJSON(data []byte) error {
 		return json.Unmarshal(wire.AllowBypassMFA, &p.SessionAuthorized)
 	}
 	return nil
+}
+
+// sudoPoliciesForRequest drops response-only data without modifying the caller's policies.
+func sudoPoliciesForRequest(policies []SudoPolicyInline) []SudoPolicyInline {
+	policies = slices.Clone(policies)
+	for i := range policies {
+		policies[i].BroadPatterns = nil
+	}
+	return policies
 }
 
 // WorkSessionUpdateRequest is a partial update: omitempty leaves unset fields untouched.
@@ -209,6 +257,10 @@ type TimelineItem struct {
 	ElapsedTime        float64 `json:"elapsed_time"`
 	VerificationStatus string  `json:"verification_status"`
 	event.CommandRejection
+	// The error code of the command's latest refused sudo, such as
+	// work_session_scope_not_allowed; null when none was refused. Sent stays
+	// false for a server that does not send the key.
+	SudoRefusalReason types.SentString `json:"sudo_refusal_reason,omitzero"`
 
 	// tunnel_session
 	IsTunnel   bool `json:"is_tunnel"`
@@ -237,12 +289,14 @@ func (t TimelineItem) IsRejected() bool {
 }
 
 type TimelineAttributes struct {
-	Time                   string `json:"timestamp" table:"Time"`
-	Type                   string `json:"type"      table:"Type"`
-	Server                 string `json:"server"    table:"Server"`
-	User                   string `json:"user"      table:"User"`
-	Details                string `json:"details"   table:"Details"`
+	ID                     string              `json:"id"        table:"-"`
+	Time                   utils.Timestamp     `json:"timestamp" table:"Time"`
+	Type                   string              `json:"type"      table:"Type"`
+	Server                 string              `json:"server"    table:"Server"`
+	User                   string              `json:"user"      table:"User"`
+	Details                utils.TruncatedText `json:"details"   table:"Details"`
 	event.CommandRejection `table:"-"`
+	SudoRefusalReason      types.SentString `json:"sudo_refusal_reason,omitzero" table:"-"`
 }
 
 // RecordChunk is one entry of the per-session recording route's cursor envelope.

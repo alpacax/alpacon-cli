@@ -42,7 +42,7 @@ func apiTestClientFactory(fn apiRoundTripFunc) func() (*client.AlpaconClient, er
 // executeAPI runs the api command in process and prints its ExitError the way cmd.Execute does.
 func executeAPI(newClient func() (*client.AlpaconClient, error), stdin string, args ...string) (stdout, stderr string, err error) {
 	var outBuf, errBuf bytes.Buffer
-	command := newCommand(newClient)
+	command := NewApiCmd(newClient)
 	command.SetArgs(args)
 	command.SetIn(strings.NewReader(stdin))
 	command.SetOut(&outBuf)

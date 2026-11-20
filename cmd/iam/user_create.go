@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/client"
@@ -13,56 +12,58 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var userCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new user",
-	Long: `
+func newUserCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:   "create",
+		Short: "Create a new user",
+		Long: `
 	Create a new user in the Alpacon. 
 	This command allows you to add a new user by specifying required user information such as username and other relevant details.
 	The server generates the password and the command prints it once on stdout.
 	`,
-	Example: ` 
+		Example: ` 
 	alpacon user create
 	`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 
-		isSaaS, err := config.IsSaaS()
-		if err != nil {
-			return utils.NewExitError("Not logged in. Run 'alpacon login' first.")
-		}
-		if isSaaS {
-			return utils.NewExitError("This command is only available for self-hosted workspaces. Use 'alpacon user invite' instead.")
-		}
+			isSaaS, err := config.IsSaaS()
+			if err != nil {
+				return utils.NewExitError("Not logged in. Run 'alpacon login' first.")
+			}
+			if isSaaS {
+				return utils.NewExitError("This command is only available for self-hosted workspaces. Use 'alpacon user invite' instead.")
+			}
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		if err := alpaconClient.LoadCurrentUser(); err != nil {
-			return utils.NewExitError("Failed to load current user: %s", err)
-		}
+			if err := alpaconClient.LoadCurrentUser(); err != nil {
+				return utils.NewExitError("Failed to load current user: %s", err)
+			}
 
-		if alpaconClient.Privileges == "general" {
-			return utils.NewExitError("Insufficient permissions to create users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
-		}
+			if alpaconClient.Privileges == "general" {
+				return utils.NewExitError("Insufficient permissions to create users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
+			}
 
-		userRequest, err := promptForUser(alpaconClient)
-		if err != nil {
-			return err
-		}
+			userRequest, err := promptForUser(alpaconClient)
+			if err != nil {
+				return err
+			}
 
-		password, err := iam.CreateUser(alpaconClient, userRequest)
-		if err != nil {
-			return utils.NewExitError("Failed to create the new user: %s", err)
-		}
+			password, err := iam.CreateUser(alpaconClient, userRequest)
+			if err != nil {
+				return utils.NewExitError("Failed to create the new user: %s", err)
+			}
 
-		utils.CliSuccess("User created: %s", userRequest.Username)
-		if err := printGeneratedPassword(os.Stdout, utils.CliInfo, password); err != nil {
-			return utils.NewExitError("The user was created, but %s. Set a new password for the user before they can log in.", err)
-		}
-		return nil
-	}),
+			ios.Success("User created: %s", userRequest.Username)
+			if err := printGeneratedPassword(ios.Out, ios.Info, password); err != nil {
+				return utils.NewExitError("The user was created, but %s. Set a new password for the user before they can log in.", err)
+			}
+			return nil
+		}),
+	}
 }
 
 // promptForUser offers the privilege fields only to a superuser, so the caller must run

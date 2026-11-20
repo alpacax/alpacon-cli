@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newForceCloseCommand(newClient clientFactory) *cobra.Command {
+func newForceCloseCommand(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "force-close SESSION_ID",
 		Short:   "Force close a Websh session (superuser only)",
@@ -25,7 +25,7 @@ func newForceCloseCommand(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to force close websh session: %s.", err)
 			}
 
-			utils.CliSuccess("Session '%s' has been force closed.", sessionID)
+			ios.Success("Session '%s' has been force closed.", sessionID)
 			return nil
 		}),
 	}

@@ -61,7 +61,7 @@ func TestValidateEventTargetReturnsTrimmedID(t *testing.T) {
 
 func TestWaitAndWatch_RefuseWhatTheyCannotRun(t *testing.T) {
 	t.Parallel()
-	newCommands := map[string]func(func() (*client.AlpaconClient, error)) *cobra.Command{opWait: newWaitCommand, opWatch: newWatchCommand}
+	newCommands := map[string]func(func() (*client.AlpaconClient, error), *utils.IOStreams) *cobra.Command{opWait: newWaitCommand, opWatch: newWatchCommand}
 	cases := []struct {
 		name       string
 		command    string
@@ -92,8 +92,8 @@ func TestWaitAndWatch_RefuseWhatTheyCannotRun(t *testing.T) {
 				}
 				return nil, errors.New("no client")
 			}
-			cmd := newCommands[tc.command](newClient)
-			cmd.SetArgs(tc.args)
+			cmd := newCommands[tc.command](newClient, utils.Stdio)
+			cmd.SetArgs(append([]string{}, tc.args...)) // never nil, or Cobra reads os.Args[1:]
 			var stdout, stderr bytes.Buffer
 			cmd.SetOut(&stdout)
 			cmd.SetErr(&stderr)
@@ -119,7 +119,7 @@ func TestRunWait_LeavesNoGoroutineBehindOnceItReturns(t *testing.T) {
 	newClient := func() (*client.AlpaconClient, error) {
 		return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, nil
 	}
-	cmd := newWaitCommand(newClient)
+	cmd := newWaitCommand(newClient, utils.Stdio)
 	cmd.SetArgs([]string{"--type", "notification", "--until", "created", "--timeout", "5s"})
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})

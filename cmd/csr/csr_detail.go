@@ -2,38 +2,38 @@ package csr
 
 import (
 	"github.com/alpacax/alpacon-cli/api/cert"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var csrDetailCmd = &cobra.Command{
-	Use:     "describe CSR_ID",
-	Aliases: []string{"desc"},
-	Short:   "Show details of a CSR",
-	Long: `
+func newCsrDetailCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:     "describe CSR_ID",
+		Aliases: []string{"desc"},
+		Short:   "Show details of a CSR",
+		Long: `
 	The describe command fetches and displays detailed information about a specific certificate signing request, 
 	including its csr text, certificate authority and other relevant attributes. 
 	`,
-	Example: `
+		Example: `
 	alpacon csr describe 550e8400-e29b-41d4-a716-446655440000
 	alpacon csr desc 550e8400-e29b-41d4-a716-446655440000
 	`,
-	Args: cobra.ExactArgs(1),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		csrId := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			csrId := args[0]
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		csrDetail, err := cert.GetCSRDetail(alpaconClient, csrId)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve the csr details: %s.", err)
-		}
+			csrDetail, err := cert.GetCSRDetail(alpaconClient, csrId)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve the csr details: %s.", err)
+			}
 
-		utils.PrintJson(csrDetail)
-		return nil
-	}),
+			return ios.PrintJson(csrDetail)
+		}),
+	}
 }

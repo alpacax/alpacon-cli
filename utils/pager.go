@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 
 	"golang.org/x/term"
 )
@@ -30,10 +31,20 @@ func WriteToPager() (io.Writer, func()) {
 	)
 }
 
+// lastOutputPaged records whether the latest WriteToPager cleanup handed its output to a pager.
+var lastOutputPaged atomic.Bool
+
+// LastOutputPaged reports whether WriteToPager's last flush ran a pager, not a stdout fallback, so
+// a caller can repeat on stderr what the pager scrolled away.
+func LastOutputPaged() bool {
+	return lastOutputPaged.Load()
+}
+
 func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.File) (io.Writer, func()) {
 	var buf bytes.Buffer
 
 	cleanup := func() {
+		lastOutputPaged.Store(false)
 		output := buf.Bytes()
 
 		if !isTerminal {
@@ -68,7 +79,9 @@ func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.Fil
 
 		if err := cmd.Run(); err != nil {
 			_, _ = stdout.Write(output)
+			return
 		}
+		lastOutputPaged.Store(true)
 	}
 
 	return &buf, cleanup

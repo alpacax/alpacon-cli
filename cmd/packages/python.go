@@ -5,16 +5,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var pythonCmd = &cobra.Command{
-	Use:   "python",
-	Short: "Manage Python packages",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return utils.RequireSubcommand(cmd)
-	},
-}
-
-func init() {
-	pythonCmd.AddCommand(pythonPackageListCmd)
-	pythonCmd.AddCommand(pythonPackageUploadCmd)
-	pythonCmd.AddCommand(pythonPackageDownloadCmd)
+func newPythonCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "python",
+		Short: "Manage Python packages",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return utils.RequireSubcommand(cmd)
+		},
+	}
+	cmd.AddCommand(
+		newPythonPackageListCmd(newClient, ios),
+		newPythonPackageUploadCmd(newClient, ios),
+		newPythonPackageDownloadCmd(newClient, ios),
+	)
+	return cmd
 }

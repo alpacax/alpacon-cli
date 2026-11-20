@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 type ApprovalRequest struct {
@@ -48,6 +49,8 @@ type CommandDetail struct {
 	Tier2Reasoning string         `json:"tier2_reasoning"`
 	Factors        []RiskFactor   `json:"factors"`
 	FileExecution  *FileExecution `json:"file_execution"`
+	// VerdictEvidence is absent on a server that predates it.
+	VerdictEvidence VerdictEvidence `json:"verdict_evidence"`
 }
 
 type RiskFactor struct {
@@ -78,10 +81,13 @@ type WorkSessionRef struct {
 }
 
 type RequestedChanges struct {
-	Title                 string       `json:"title"`
-	Description           string       `json:"description"`
-	Scopes                []string     `json:"scopes"`
-	Servers               []ServerRef  `json:"servers"`
+	Title       string      `json:"title"`
+	Description string      `json:"description"`
+	Scopes      []string    `json:"scopes"`
+	Servers     []ServerRef `json:"servers"`
+	// ServersHidden counts the requested servers left out of Servers because the
+	// caller does not reach them; nil from a server that predates the count.
+	ServersHidden         *int         `json:"servers_hidden,omitempty"`
 	SudoPolicies          []SudoPolicy `json:"sudo_policies"`
 	TargetAccountUsername string       `json:"target_account_username"`
 }
@@ -114,10 +120,13 @@ type FileExecution struct {
 }
 
 type ApprovalRequestAttributes struct {
-	ID          string `json:"id"           table:"ID"`
-	Type        string `json:"request_type" table:"Type"`
-	Status      string `json:"status"       table:"Status"`
-	RequestData string `json:"request_data" table:"Request"`
-	RequestedBy string `json:"requested_by" table:"Requested By"`
-	AddedAt     string `json:"added_at"     table:"Added At"`
+	ID            string              `json:"id"           table:"ID"`
+	Type          string              `json:"request_type" table:"Type"`
+	Status        string              `json:"status"       table:"Status"`
+	RequestData   utils.TruncatedText `json:"request_data" table:"Request"`
+	RequestedBy   string              `json:"requested_by" table:"Requested By"`
+	AddedAt       utils.Timestamp     `json:"added_at"     table:"Added At"`
+	ReviewedBy    string              `json:"reviewed_by"    table:"-"`
+	ReviewedAt    utils.Timestamp     `json:"reviewed_at"    table:"-"`
+	RejectionNote string              `json:"rejection_note" table:"-"`
 }

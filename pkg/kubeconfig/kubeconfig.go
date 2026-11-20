@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 
@@ -512,10 +511,10 @@ func (ed *Editor) holdsToken() bool {
 	return slices.ContainsFunc(users.Content, holdsStaticToken)
 }
 
-// readableByOthers reports a group- or world-readable mode. Windows has no
-// Unix modes (os.Stat reports 0666 for any writable file), so it never warns.
+// readableByOthers reports a group- or world-readable mode. On Windows os.Stat
+// reports 0666 for any writable file, so it never warns there.
 func readableByOthers(perm os.FileMode) bool {
-	return runtime.GOOS != "windows" && perm&0044 != 0
+	return utils.HasUnixModes() && perm&0044 != 0
 }
 
 // Close releases the write lock. It is safe to call more than once, and it

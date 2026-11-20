@@ -10,15 +10,18 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// Serial: each case swaps os.Stderr through CaptureOutput.
 func TestReportLogout(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		err        error
@@ -30,10 +33,12 @@ func TestReportLogout(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, stderr := testutil.CaptureOutput(t, func() {
-				reportLogout(tt.err)
-			})
+			t.Parallel()
+			ios, _, errOut := utils.TestIOStreams()
+			err := reportLogout(ios, tt.err)
+			stderr := errOut.String()
 
+			require.NoError(t, err)
 			assert.Contains(t, stderr, tt.wantStderr)
 		})
 	}
@@ -91,11 +96,10 @@ func TestRunLogout_RemovesCredentialsWhenTheSessionIsUnusable(t *testing.T) {
 				mu.Unlock()
 				http.Error(w, `{"detail":"boom"}`, http.StatusInternalServerError)
 			}))
+			t.Cleanup(ts.Close)
 			workspaceURL := ts.URL
 			if tt.unreachable {
-				ts.Close()
-			} else {
-				t.Cleanup(ts.Close)
+				workspaceURL = testutil.NewDroppingServer(t).URL
 			}
 
 			home := t.TempDir()
@@ -104,8 +108,9 @@ func TestRunLogout_RemovesCredentialsWhenTheSessionIsUnusable(t *testing.T) {
 			login, err := config.LoadConfig()
 			require.NoError(t, err)
 
-			var runErr error
-			_, stderr := testutil.CaptureOutput(t, func() { runErr = runLogout(login) })
+			ios, _, errOut := utils.TestIOStreams()
+			runErr := runLogout(ios, client.NewAlpaconAPIClient, login)
+			stderr := errOut.String()
 
 			require.NoError(t, runErr)
 			assert.NoFileExists(t, filepath.Join(home, ".alpacon", "config.json"))
@@ -174,8 +179,9 @@ func TestRunLogout_RemovesCredentialsWhenTheAuthServerRefuses(t *testing.T) {
 			login, err := config.LoadConfig()
 			require.NoError(t, err)
 
-			var runErr error
-			_, stderr := testutil.CaptureOutput(t, func() { runErr = runLogout(login) })
+			ios, _, errOut := utils.TestIOStreams()
+			runErr := runLogout(ios, client.NewAlpaconAPIClient, login)
+			stderr := errOut.String()
 
 			require.NoError(t, runErr)
 			assert.NoFileExists(t, filepath.Join(home, ".alpacon", "config.json"))
@@ -202,8 +208,8 @@ func TestRunLogout_KeepsALoginAnotherShellMade(t *testing.T) {
 	require.NoError(t, config.CreateConfig("https://my-workspace.invalid", "my-workspace", "other-shell-key", "", "", "", "", 0, false))
 	stale := config.Config{WorkspaceURL: "https://my-workspace.invalid", Token: "fake-api-key"}
 
-	var runErr error
-	_, _ = testutil.CaptureOutput(t, func() { runErr = runLogout(stale) })
+	ios, _, _ := utils.TestIOStreams()
+	runErr := runLogout(ios, client.NewAlpaconAPIClient, stale)
 
 	require.ErrorIs(t, runErr, config.ErrLoginChanged)
 	kept, err := config.LoadConfig()
@@ -248,8 +254,9 @@ func TestRunLogout_DoesNotWarnWhenTheServerLogsOut(t *testing.T) {
 			login, err := config.LoadConfig()
 			require.NoError(t, err)
 
-			var runErr error
-			_, stderr := testutil.CaptureOutput(t, func() { runErr = runLogout(login) })
+			ios, _, errOut := utils.TestIOStreams()
+			runErr := runLogout(ios, client.NewAlpaconAPIClient, login)
+			stderr := errOut.String()
 
 			require.NoError(t, runErr)
 			assert.NoFileExists(t, filepath.Join(home, ".alpacon", "config.json"))
@@ -270,10 +277,46 @@ func TestRunLogout_RemovesCredentialsWhenTheWorkspaceURLDoesNotParse(t *testing.
 	require.NoError(t, config.CreateConfig("http://[::1", "my-workspace", "fake-api-key", "", "", "", "", 0, false))
 	login := config.Config{WorkspaceURL: "http://[::1", Token: "fake-api-key"}
 
-	var runErr error
-	_, stderr := testutil.CaptureOutput(t, func() { runErr = runLogout(login) })
+	ios, _, errOut := utils.TestIOStreams()
+	runErr := runLogout(ios, client.NewAlpaconAPIClient, login)
+	stderr := errOut.String()
 
 	require.NoError(t, runErr)
 	assert.NoFileExists(t, filepath.Join(home, ".alpacon", "config.json"))
 	assert.Contains(t, stderr, "workspace URL does not parse")
+}
+
+// Serial: it sets HOME and captures stdout and stderr.
+func TestLogoutEndsTheSessionThroughTheFactory(t *testing.T) {
+	tests := []struct {
+		name        string
+		noClient    bool
+		wantStderr  string
+		wantLogouts int
+	}{
+		{name: "server logout", wantLogouts: 1},
+		{name: "client cannot be built", noClient: true, wantStderr: "Failed to create Alpacon API client: not logged in."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv(homeEnvVar(), home)
+			ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+				"GET /api/auth/env/":     {Status: http.StatusOK, Body: `{"auth0": {"method": "legacy"}}`},
+				"POST /api/auth/logout/": {Status: http.StatusOK, Body: `{}`},
+			})
+			require.NoError(t, config.CreateConfig(ts.URL, "my-workspace", "api-token", "", "", "", "", 0, false))
+			newClient := ts.Factory()
+			if tt.noClient {
+				newClient = cmdtest.NoClient
+			}
+
+			_, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return newLogoutCmd(newClient, ios) })
+
+			assert.Equal(t, 0, code, stderr)
+			assert.Contains(t, stderr, tt.wantStderr)
+			assert.Equal(t, tt.wantLogouts, ts.Hits("POST /api/auth/logout/"))
+			assert.NoFileExists(t, filepath.Join(home, ".alpacon", "config.json"))
+		})
+	}
 }

@@ -5,15 +5,15 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/rbac"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var userUpdateCmd = &cobra.Command{
-	Use:   "update USER",
-	Short: "Update the user information",
-	Long: `Open a user's details in your editor and save the fields you changed.
+func newUserUpdateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:   "update USER",
+		Short: "Update the user information",
+		Long: `Open a user's details in your editor and save the fields you changed.
 
 Only the fields you actually edit are sent, and the response is printed so you can
 confirm what the server kept—some fields are read-only, and some need privileges
@@ -23,50 +23,53 @@ is_staff and is_superuser are read-only projections of the user's RBAC roles.
 Editing them here does nothing, so this command refuses to send them and tells you
 the 'alpacon user role' command that makes the change instead. An edit that touched
 one of them never exits 0, whether or not the rest of the edit was applied.`,
-	Example: `  alpacon user update john`,
-	Args:    cobra.ExactArgs(1),
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		userName := args[0]
+		Example: `  alpacon user update john`,
+		Args:    cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			userName := args[0]
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		userID, edit, err := iam.PrepareUserUpdate(alpaconClient, userName)
-		if err != nil {
-			if utils.ReportNoChanges(err) {
-				return nil
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
-			return utils.NewExitError("Failed to update the user info: %s.", err)
-		}
 
-		// Report the privilege edits first, so the guidance survives a failed patch.
-		for _, privilege := range edit.Privileges {
-			utils.CliWarning("%s is a read-only projection of %s's RBAC roles and was not sent.",
-				privilege.Field, userName)
-			utils.CliInfo("To make that change: %s", roleCommandFor(userName, privilege).PlainText())
-		}
+			userID, edit, err := iam.PrepareUserUpdate(alpaconClient, userName)
+			if err != nil {
+				if ios.ReportNoChanges(err) {
+					return nil
+				}
+				return utils.NewExitError("Failed to update the user info: %s.", err)
+			}
 
-		if len(edit.Changes) == 0 {
-			return utils.NewExitError("Nothing was applied: the only edits were to read-only privilege flags.")
-		}
+			// Report the privilege edits first, so the guidance survives a failed patch.
+			for _, privilege := range edit.Privileges {
+				ios.Warning("%s is a read-only projection of %s's RBAC roles and was not sent.",
+					privilege.Field, userName)
+				ios.Info("To make that change: %s", roleCommandFor(userName, privilege).PlainText())
+			}
 
-		userDetail, err := iam.PatchUser(alpaconClient, userID, edit.Changes)
-		if err != nil {
-			return utils.NewExitError("Failed to update the user info: %s.", err)
-		}
+			if len(edit.Changes) == 0 {
+				return utils.NewExitError("Nothing was applied: the only edits were to read-only privilege flags.")
+			}
 
-		utils.PrintJson(userDetail)
+			userDetail, err := iam.PatchUser(alpaconClient, userID, edit.Changes)
+			if err != nil {
+				return utils.NewExitError("Failed to update the user info: %s.", err)
+			}
 
-		// Non-zero exit: a wrapper reading 0 would carry on as though the promotion had landed.
-		if len(edit.Privileges) > 0 {
-			return utils.NewExitError("The other edits were applied, but the privilege flags were not sent. Run the 'alpacon user role' command above to change them.")
-		}
+			if err := ios.PrintJson(userDetail); err != nil {
+				return err
+			}
 
-		utils.CliSuccess("User updated: %s", userName)
-		return nil
-	}),
+			// Non-zero exit: a wrapper reading 0 would carry on as though the promotion had landed.
+			if len(edit.Privileges) > 0 {
+				return utils.NewExitError("The other edits were applied, but the privilege flags were not sent. Run the 'alpacon user role' command above to change them.")
+			}
+
+			ios.Success("User updated: %s", userName)
+			return nil
+		}),
+	}
 }
 
 // roleCommandFor maps a privilege-flag edit to the equivalent 'alpacon user role' command.

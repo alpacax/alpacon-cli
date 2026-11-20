@@ -2,18 +2,14 @@ package iam
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/rbac"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var userPermissionCanICmd = newUserPermissionCanICmd(client.NewAlpaconAPIClient)
-
-func newUserPermissionCanICmd(newClient func() (*client.AlpaconClient, error)) *cobra.Command {
+func newUserPermissionCanICmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "can-i [USER] PERMISSION",
 		Short: "Check whether a permission is allowed",
@@ -61,8 +57,7 @@ tell them apart in a script, drop -q and read the allowed field of --output json
 					return utils.NewExitError("Failed to explain the decision: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 				}
 
-				utils.PrintJson(explanation)
-				return nil
+				return ios.PrintJson(explanation)
 			}
 
 			allowed, err := rbac.CheckPermission(alpaconClient, subj.PK, permission)
@@ -77,19 +72,19 @@ tell them apart in a script, drop -q and read the allowed field of --output json
 				return nil
 			}
 
-			if utils.OutputFormat == utils.OutputFormatJSON {
+			if ios.IsJSON() {
 				result := map[string]any{"user": subj.Label, "permission": permission, "allowed": allowed}
-				if err = utils.PrintJSONValue(os.Stdout, result); err != nil {
+				if err = utils.PrintJSONValue(ios.Out, result); err != nil {
 					return utils.NewExitError("Failed to render the answer: %s.", err)
 				}
 				return nil
 			}
 
 			if allowed {
-				fmt.Println("yes")
+				_, _ = fmt.Fprintln(ios.Out, "yes")
 				return nil
 			}
-			fmt.Println("no")
+			_, _ = fmt.Fprintln(ios.Out, "no")
 			return nil
 		}),
 	}

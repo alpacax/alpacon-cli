@@ -1,16 +1,20 @@
 package note
 
 import (
-	"os"
-	osexec "os/exec"
+	"bytes"
+	"net/http"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNoteLsParsesFlags(t *testing.T) {
+	t.Parallel()
+	noteCmd := NewNoteCmd(cmdtest.NoClient, utils.Stdio)
 	tests := []struct {
 		name           string
 		args           []string
@@ -45,7 +49,7 @@ func TestNoteLsParsesFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd, flags, err := NoteCmd.Find(tt.args)
+			cmd, flags, err := noteCmd.Find(tt.args)
 			require.NoError(t, err)
 			require.Equal(t, "ls", cmd.Name())
 
@@ -73,21 +77,54 @@ func TestNoteLsParsesFlags(t *testing.T) {
 
 func TestNoteLsTailZeroExitsWithUsageErrorCode(t *testing.T) {
 	t.Parallel()
-	helper := osexec.Command(os.Args[0], "-test.run=^TestNoteLsTailZeroHelperProcess$")
-	helper.Env = append(os.Environ(), "GO_WANT_NOTE_LS_TAIL_HELPER=1")
 
-	err := helper.Run()
+	err := runNoteList(utils.Stdio, cmdtest.NoClient, 0, "", false)
 
-	var exitErr *osexec.ExitError
+	var exitErr *utils.ExitError
 	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode())
+	assert.Equal(t, utils.ExitCodeUsageError, exitErr.Code)
+	var stderr bytes.Buffer
+	utils.FprintExitError(&stderr, exitErr)
+	assert.Contains(t, stderr.String(), "--tail must be a positive integer.")
 }
 
-// Serial: the child process reaches an os.Exit, and the parent's own run of this
-// function is a two-line guard that parallelism buys nothing for.
-func TestNoteLsTailZeroHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_NOTE_LS_TAIL_HELPER") != "1" {
-		return
+func TestNoteLsPrintsTheNotes(t *testing.T) {
+	t.Parallel()
+	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+		"GET /api/servers/notes/": {Status: http.StatusOK, Body: `{"count": 1, "results": [{"id": "550e8400-e29b-41d4-a716-446655440000", "server": {"name": "my-server"}, "author": {"name": "alice"}, "content": "rotate the disk", "pinned": true, "added_at": "2026-11-01T09:00:00Z"}]}`},
+	})
+
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newNoteListCmd(ts.Factory(), ios) })
+
+	assert.Equal(t, 0, code, stderr)
+	assert.Contains(t, stdout, `"rotate the disk"`)
+	assert.Contains(t, stdout, `"my-server"`)
+}
+
+func TestNoteLsFailsWithExit1(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		noLogin bool
+		want    string
+	}{
+		{name: "no login", noLogin: true, want: "Connection to Alpacon API failed: not logged in"},
+		{name: "server error", want: "Failed to retrieve the notes"},
 	}
-	runNoteList(0, "", false)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			newClient := cmdtest.NoClient
+			if !tt.noLogin {
+				newClient = cmdtest.Server(t, map[string]cmdtest.Reply{
+					"GET /api/servers/notes/": {Status: http.StatusInternalServerError, Body: `{"detail": "unavailable"}`},
+				}).Factory()
+			}
+
+			failure, code := cmdtest.Run(newNoteListCmd(newClient, utils.Stdio))
+
+			assert.Equal(t, utils.ExitCodeGeneralError, code)
+			assert.Contains(t, failure, tt.want)
+		})
+	}
 }

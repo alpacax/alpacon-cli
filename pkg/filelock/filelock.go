@@ -3,6 +3,8 @@
 // need an age rule to survive a killed process, and no age works: shorter than
 // the slowest holder and it evicts a live one, longer and a killed one strands
 // the next run.
+//
+// Locks require a local filesystem; NFS home directories are not supported.
 package filelock
 
 import (

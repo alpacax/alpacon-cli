@@ -3,6 +3,7 @@ package exec
 import (
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -60,7 +61,7 @@ func TestExecCommandParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ParseRemoteExecArgs(tt.args)
+			result := ParseRemoteExecArgs(utils.Stdio, tt.args)
 
 			assert.Equal(t, tt.expectedUsername, result.Username, "Username should match")
 			assert.Equal(t, tt.expectedGroupname, result.Groupname, "Groupname should match")
@@ -107,7 +108,7 @@ func TestExecCommandParsingWithFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ParseRemoteExecArgs(tt.args)
+			result := ParseRemoteExecArgs(utils.Stdio, tt.args)
 
 			assert.Equal(t, tt.expectedUsername, result.Username, "Username should match")
 			assert.Equal(t, tt.expectedGroupname, result.Groupname, "Groupname should match")
@@ -120,7 +121,7 @@ func TestExecCommandParsingWithFlags(t *testing.T) {
 func TestRequiredExecPattern(t *testing.T) {
 	t.Parallel()
 	args := []string{"root@prod-docker", "docker", "ps"}
-	result := ParseRemoteExecArgs(args)
+	result := ParseRemoteExecArgs(utils.Stdio, args)
 
 	assert.Equal(t, "root", result.Username, "Username should be extracted from user@host")
 	assert.Equal(t, "prod-docker", result.Server, "Server name should be extracted correctly")

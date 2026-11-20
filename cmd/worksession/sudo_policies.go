@@ -1,46 +1,44 @@
 package worksession
 
 import (
-	"path"
-	"strings"
+	"encoding/json"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// broadSudoPatterns returns the original patterns that allow arbitrary root commands.
-// An empty command list is represented as "all commands".
-func broadSudoPatterns(policies []wsapi.SudoPolicyInline) []string {
-	var broad []string
+func warnBroadSudoPolicies(ios *utils.IOStreams, policies []wsapi.SudoPolicyInline) {
+	var patterns []string
 	for _, policy := range policies {
-		if !policy.SessionAuthorized {
-			continue
-		}
-		if len(policy.Commands) == 0 {
-			broad = append(broad, "all commands")
-			continue
-		}
-		for _, pattern := range policy.Commands {
-			words := strings.Fields(pattern)
-			if len(words) == 0 {
-				continue
-			}
-			// The server expands * to any characters, so a starred program can be a shell.
-			if strings.Contains(words[0], "*") {
-				broad = append(broad, pattern)
-				continue
-			}
-			switch path.Base(words[0]) {
-			case "bash", "sh", "zsh", "dash", "ksh", "fish", "csh", "tcsh", "sudo", "su":
-				broad = append(broad, pattern)
-			}
+		if policy.BroadPatterns != nil {
+			patterns = append(patterns, (*policy.BroadPatterns)...)
 		}
 	}
-	return broad
+	if len(patterns) > 0 {
+		ios.Warning("These sudo patterns may allow arbitrary commands as root once authorized. Patterns: %q", patterns)
+	}
 }
 
-func warnBroadSudoPolicies(policies []wsapi.SudoPolicyInline) {
-	if patterns := broadSudoPatterns(policies); len(patterns) > 0 {
-		utils.CliWarning("This allows any command as root. Session-authorized sudo runs matching commands without MFA or approval. Patterns: %q", patterns)
+func warnUpdatedSudoPolicies(ios *utils.IOStreams, previous []wsapi.SudoPolicyInline, updated *wsapi.WorkSession, queued bool) {
+	existing := make(map[string]struct{}, len(previous))
+	for _, policy := range previous {
+		existing[policy.ID] = struct{}{}
 	}
+
+	policies := updated.SudoPolicies
+	if pending := updated.PendingModificationRequest; queued && pending != nil {
+		var changes struct {
+			SudoPolicies []wsapi.SudoPolicyInline `json:"sudo_policies"`
+		}
+		if json.Unmarshal(pending.Changes, &changes) == nil && changes.SudoPolicies != nil {
+			policies = changes.SudoPolicies
+		}
+	}
+	var added []wsapi.SudoPolicyInline
+	for _, policy := range policies {
+		if _, found := existing[policy.ID]; policy.ID == "" || !found {
+			added = append(added, policy)
+		}
+	}
+	warnBroadSudoPolicies(ios, added)
 }

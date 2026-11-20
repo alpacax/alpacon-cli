@@ -3,6 +3,7 @@ package utils
 import (
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -229,4 +230,114 @@ func TestConfirmPrompt_RemovesControlCharacters(t *testing.T) {
 	assert.NotContains(t, prompt, "\r")
 	assert.NotContains(t, prompt, "\u202e")
 	assert.Contains(t, prompt, "alice@example.com")
+}
+
+// Serial: it swaps os.Stdin. A pipe hands over every queued line in one read, unlike a terminal.
+func TestPromptsOnPipedStdinEachGetTheirOwnLine(t *testing.T) {
+	tests := []struct {
+		name, input string
+		prompts     []func() (any, error)
+		want        []any
+	}{
+		{name: "two inputs", input: "ops\nOps Team\n", prompts: []func() (any, error){
+			func() (any, error) { return ReadInput("Name: ") },
+			func() (any, error) { return ReadRequiredInput("Display name: ") },
+		}, want: []any{"ops", "Ops Team"}},
+		{name: "input then confirmation", input: "ops\ny\n", prompts: []func() (any, error){
+			func() (any, error) { return ReadInput("Name: ") },
+			func() (any, error) { return PromptForBool("Proceed?"), nil },
+		}, want: []any{"ops", true}},
+		{name: "default then integer", input: "ops\n0\n", prompts: []func() (any, error){
+			func() (any, error) { return ReadInputWithDefault("Name: ", "saved") },
+			func() (any, error) { return ReadIntInput("Count: ", 7) },
+		}, want: []any{"ops", 0}},
+		{name: "required input asks again", input: "\nops\n", prompts: []func() (any, error){
+			func() (any, error) { return ReadRequiredInput("Name: ") },
+		}, want: []any{"ops"}},
+		{name: "required integer asks again", input: "bad\n3\n", prompts: []func() (any, error){
+			func() (any, error) { return ReadRequiredIntInput("Count: ") },
+		}, want: []any{3}},
+		{name: "username then password", input: "alice\ns3cret\n", prompts: []func() (any, error){
+			func() (any, error) { return ReadRequiredInput("Username: ") },
+			func() (any, error) { return PromptForPassword("Password: ") },
+		}, want: []any{"alice", "s3cret"}},
+		{name: "password without a final newline", input: "s3cret", prompts: []func() (any, error){
+			func() (any, error) { return PromptForPassword("Password: ") },
+		}, want: []any{"s3cret"}},
+		{name: "password on empty input", input: "", prompts: []func() (any, error){
+			func() (any, error) { return PromptForPassword("Password: ") },
+		}, want: []any{""}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, w, err := os.Pipe()
+			require.NoError(t, err)
+			_, err = w.WriteString(tt.input)
+			require.NoError(t, err)
+			require.NoError(t, w.Close())
+			saved := os.Stdin
+			os.Stdin = r
+			t.Cleanup(func() { os.Stdin = saved; _ = r.Close() })
+
+			var got []any
+			for _, prompt := range tt.prompts {
+				answer, err := prompt()
+				require.NoError(t, err)
+				got = append(got, answer)
+			}
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestReadRawPasswordReturnsTypedLine(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+		want  string
+		echo  string
+	}{
+		{name: "enter", input: "pw\r", want: "pw", echo: "**\r\n"},
+		{name: "newline", input: "pw\n", want: "pw", echo: "**\r\n"},
+		{name: "backspace", input: "pwx\x7f\r", want: "pw", echo: "***\b \b\r\n"},
+		{name: "control byte ignored", input: "p\x01w\r", want: "pw", echo: "**\r\n"},
+		{name: "input ends", input: "pw", want: "pw", echo: "**\n"},
+		{name: "backspace on empty", input: "\x7fpw\r", want: "pw", echo: "**\r\n"},
+		{name: "ctrl h", input: "pwx\b\r", want: "pw", echo: "***\b \b\r\n"},
+		{name: "surrounding spaces", input: " pw \r", want: "pw", echo: "****\r\n"},
+		{name: "enter only", input: "\r", want: "", echo: "\r\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var echo strings.Builder
+
+			got, err := readRawPassword(strings.NewReader(tt.input), &echo)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.echo, echo.String())
+		})
+	}
+}
+
+// Ctrl+C hands the caller a silent exit-1 failure instead of ending the
+// process, so its deferred cleanup still runs.
+func TestReadRawPasswordCtrlCReturnsSilentExit(t *testing.T) {
+	t.Parallel()
+	var echo strings.Builder
+
+	got, err := readRawPassword(strings.NewReader("pw\x03ignored\r"), &echo)
+
+	exitErr, ok := errors.AsType[*ExitError](err)
+	require.True(t, ok, "want an ExitError, got %v", err)
+	assert.Equal(t, ExitCodeGeneralError, exitErr.Code)
+	assert.Empty(t, got)
+	assert.Equal(t, "**\r\n", echo.String())
+	var printed strings.Builder
+	FprintExitError(&printed, exitErr)
+	assert.Empty(t, printed.String(), "Ctrl+C prints nothing past the line break")
 }

@@ -16,10 +16,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var entryAddCmd = &cobra.Command{
-	Use:   "add",
-	Short: "Pre-approve a command for a service token",
-	Long: `Pre-approve a command pattern for a service token.
+func newEntryAddCmd(ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add",
+		Short: "Pre-approve a command for a service token",
+		Long: `Pre-approve a command pattern for a service token.
 
 Use * as a wildcard for arguments; a pattern without one pre-approves that exact
 command line.
@@ -43,49 +44,52 @@ out; it can only be service_token.
 Only a service token can be pre-approved commands: a personal API token has no
 command list on the ledger. Existing entries for personal API tokens are still
 listed and can be revoked.`,
-	Example: `  alpacon acl entry add --token deploy-bot --command "systemctl restart nginx" \
+		Example: `  alpacon acl entry add --token deploy-bot --command "systemctl restart nginx" \
     --server web-01
 
   alpacon acl entry add --token deploy-bot --command "docker compose *" \
     --username deploy --server web-01,web-02 --expires-at 2027-01-15T10:00:00Z
 
   alpacon acl entry add --file entries.json`,
-	Args: cobra.NoArgs,
-	Run:  runEntryAdd,
+		Args: cobra.NoArgs,
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error { return runEntryAdd(ios, cmd, args) }),
+	}
+	cmd.Flags().String("token", "", "Service token the entry pre-approves the command for (name or ID)")
+	cmd.Flags().StringP("command", "c", "", "Command pattern to pre-approve (supports * wildcard)")
+	cmd.Flags().String("username", "", "Omit to pin the entry to the application's own account; '' or * matches any account bound to the application on that server; the application username matches only its own account; any other value is refused")
+	cmd.Flags().String("groupname", "", "'' or * sets no group restriction; the application username matches its own group; any other value is refused")
+	cmd.Flags().StringSlice("server", nil, "Servers the entry covers, by name or ID (repeatable or comma-separated; default: every server)")
+	cmd.Flags().String("expires-at", "", "Expiry time in RFC 3339 (default: no expiry)")
+	cmd.Flags().Bool("disabled", false, "Issue the entry disabled")
+	cmd.Flags().String("file", "", "Issue every entry in this JSON file")
+	return cmd
 }
 
-func init() {
-	entryAddCmd.Flags().String("token", "", "Service token the entry pre-approves the command for (name or ID)")
-	entryAddCmd.Flags().StringP("command", "c", "", "Command pattern to pre-approve (supports * wildcard)")
-	entryAddCmd.Flags().String("username", "", "Omit to pin the entry to the application's own account; '' or * matches any account bound to the application on that server; the application username matches only its own account; any other value is refused")
-	entryAddCmd.Flags().String("groupname", "", "'' or * sets no group restriction; the application username matches its own group; any other value is refused")
-	entryAddCmd.Flags().StringSlice("server", nil, "Servers the entry covers, by name or ID (repeatable or comma-separated; default: every server)")
-	entryAddCmd.Flags().String("expires-at", "", "Expiry time in RFC 3339 (default: no expiry)")
-	entryAddCmd.Flags().Bool("disabled", false, "Issue the entry disabled")
-	entryAddCmd.Flags().String("file", "", "Issue every entry in this JSON file")
-}
-
-func runEntryAdd(cmd *cobra.Command, args []string) {
+func runEntryAdd(ios *utils.IOStreams, cmd *cobra.Command, args []string) error {
 	file, _ := cmd.Flags().GetString("file")
 
 	var drafts []entryDraft
 	var flagged *flagEntry
 	if file != "" {
 		if flagged := entryFlagsSet(cmd); len(flagged) > 0 {
-			utils.CliUsageErrorWithExit("--file cannot be combined with --%s.", flagged[0])
+			return utils.NewUsageExitError("--file cannot be combined with --%s.", flagged[0])
 		}
 		data, err := os.ReadFile(file)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to read %s: %s.", file, err)
+			return utils.NewExitError("Failed to read %s: %s.", file, err)
 		}
 		if drafts, err = parseEntryFile(data); err != nil {
-			utils.CliErrorWithExit("Failed to read %s: %s.", file, err)
+			return utils.NewExitError("Failed to read %s: %s.", file, err)
 		}
 	} else {
-		flagged = entryFromFlags(cmd)
+		var err error
+		flagged, err = entryFromFlags(cmd)
+		if err != nil {
+			return err
+		}
 	}
 
-	session, err := newLedgerSessionWithCheck(func(s *ledgerSession) error {
+	session, err := newLedgerSessionWithCheck(ios, func(s *ledgerSession) error {
 		if flagged != nil {
 			request, err := flagged.resolve(s)
 			if err != nil {
@@ -98,10 +102,10 @@ func runEntryAdd(cmd *cobra.Command, args []string) {
 	if err != nil {
 		var accountErr serviceTokenAccountError
 		if errors.As(err, &accountErr) {
-			utils.CliErrorWithCode(utils.ExitCodeUsageError, utils.ServiceTokenAccountNotOwn,
+			return utils.NewExitErrorWithErrorCode(utils.ExitCodeUsageError, utils.ServiceTokenAccountNotOwn,
 				"%s", utils.Reword(err, sentence(upperFirst(err.Error()))))
 		}
-		utils.CliErrorWithExit("%s", utils.Reword(err, sentence(upperFirst(err.Error()))))
+		return utils.NewExitError("%s", utils.Reword(err, sentence(upperFirst(err.Error()))))
 	}
 	entries := make([]acl.EntryRequest, len(drafts))
 	for i, draft := range drafts {
@@ -109,13 +113,14 @@ func runEntryAdd(cmd *cobra.Command, args []string) {
 	}
 	issued, err := acl.IssueEntries(session.signer, session.workspaceID, entries)
 	if err != nil {
-		session.fail("pre-approve the command", err)
+		return session.fail("pre-approve the command", err)
 	}
 
-	printWarnings(issued)
+	printWarnings(ios, issued)
 	for _, entry := range issued {
-		utils.CliSuccess("Pre-approved %q (%s)", entry.CommandPattern, entry.ID)
+		ios.Success("Pre-approved %q (%s)", entry.CommandPattern, entry.ID)
 	}
+	return nil
 }
 
 func entryFlagsSet(cmd *cobra.Command) []string {
@@ -136,9 +141,8 @@ type flagEntry struct {
 	request    acl.EntryRequest
 }
 
-// entryFromFlags reads the one entry the flags describe, exiting on a missing
-// or malformed value before anything reaches the signer.
-func entryFromFlags(cmd *cobra.Command) *flagEntry {
+// entryFromFlags reads the one entry the flags describe and refuses malformed values before a signer request.
+func entryFromFlags(cmd *cobra.Command) (*flagEntry, error) {
 	tokenRef, _ := cmd.Flags().GetString("token")
 	command, _ := cmd.Flags().GetString("command")
 	username, _ := cmd.Flags().GetString("username")
@@ -150,14 +154,14 @@ func entryFromFlags(cmd *cobra.Command) *flagEntry {
 	tokenRef, command, username = strings.TrimSpace(tokenRef), strings.TrimSpace(command), strings.TrimSpace(username)
 	for _, required := range []struct{ flag, value string }{{"token", tokenRef}, {"command", command}} {
 		if required.value == "" {
-			utils.CliUsageErrorWithExit("--%s is required (or pass --file).", required.flag)
+			return nil, utils.NewUsageExitError("--%s is required (or pass --file).", required.flag)
 		}
 	}
 	if err := validateExpiry(expiresAt); err != nil {
-		utils.CliUsageErrorWithExit("%s", err)
+		return nil, utils.NewUsageExitError("%s", err)
 	}
 	if err := validateServerRefs(cmd.Flags().Changed("server"), serverRefs); err != nil {
-		utils.CliUsageErrorWithExit("%s", err)
+		return nil, utils.NewUsageExitError("%s", err)
 	}
 
 	return &flagEntry{
@@ -170,7 +174,7 @@ func entryFromFlags(cmd *cobra.Command) *flagEntry {
 			ExpiresAt:      expiresAt,
 			Enabled:        !disabled,
 		},
-	}
+	}, nil
 }
 
 // validateServerRefs refuses a --server given with nothing in it, such as

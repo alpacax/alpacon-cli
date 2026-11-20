@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -115,18 +116,12 @@ func TestExtendCommand_SendsReason(t *testing.T) {
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
 
-	extendExpiresIn = ""
-	extendExpiresAt = "2026-06-01T12:00:00Z"
-	extendReason = "customer escalation"
-	t.Cleanup(func() {
-		extendExpiresIn = ""
-		extendExpiresAt = ""
-		extendReason = ""
-	})
+	cmd := newWorkSessionExtendCmd(client.NewAlpaconAPIClient, utils.Stdio)
+	require.NoError(t, cmd.ParseFlags([]string{"--expires-at", "2026-06-01T12:00:00Z", "--reason", "customer escalation"}))
 
 	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		runErr = workSessionExtendCmd.RunE(workSessionExtendCmd, []string{"ses-1"})
+		runErr = cmd.RunE(cmd, []string{"ses-1"})
 	})
 	require.NoError(t, runErr)
 	assert.Empty(t, stderr)
@@ -237,17 +232,12 @@ func TestExtendCommand_StalePendingOn200_IsSuccess(t *testing.T) {
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
 
-	extendExpiresIn = ""
-	extendExpiresAt = "2026-06-01T12:00:00Z"
-	extendReason = ""
-	t.Cleanup(func() {
-		extendExpiresIn = ""
-		extendExpiresAt = ""
-	})
+	cmd := newWorkSessionExtendCmd(client.NewAlpaconAPIClient, utils.Stdio)
+	require.NoError(t, cmd.ParseFlags([]string{"--expires-at", "2026-06-01T12:00:00Z"}))
 
 	var runErr error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		runErr = workSessionExtendCmd.RunE(workSessionExtendCmd, []string{"ses-1"})
+		runErr = cmd.RunE(cmd, []string{"ses-1"})
 	})
 	require.NoError(t, runErr)
 	assert.Empty(t, stderr)

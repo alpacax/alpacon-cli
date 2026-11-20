@@ -8,27 +8,35 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var usernameSetCmd = &cobra.Command{
-	Use:   "set NAME",
-	Short: "Set the username for your account",
-	Long: `
+func newUsernameSetCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:   "set NAME",
+		Short: "Set the username for your account",
+		Long: `
 	Set the username used for server access services like websh and webftp.
 	The username can be set once; it cannot be changed here afterward.
 	`,
-	Example: `
+		Example: `
 	alpacon username set alice
 	`,
-	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		name := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			name := args[0]
 
-		response, err := iam.SetUsername(name)
-		if err != nil {
-			utils.CliErrorWithExit("%s", utils.Reword(err, setUsernameErrorText(err)))
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		utils.CliSuccess(iam.UsernameSetSuccessFmt, response.Username)
-	},
+			response, err := iam.SetUsername(alpaconClient, name)
+			if err != nil {
+				return utils.NewExitError("%s", utils.Reword(err, setUsernameErrorText(err)))
+			}
+
+			ios.Success(iam.UsernameSetSuccessFmt, response.Username)
+			return nil
+		}),
+	}
 }
 
 func setUsernameErrorText(err error) string {

@@ -42,13 +42,15 @@ func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType, assigne
 // ProjectAttributes converts a WorkSession into its table row.
 func ProjectAttributes(ws *WorkSession) WorkSessionAttributes {
 	return WorkSessionAttributes{
-		ID:          ws.ID,
-		Description: utils.TruncateString(ws.Description, 70),
-		Status:      ws.Status,
-		Scopes:      strings.Join(ws.Scopes, ", "),
-		Servers:     strings.Join(ServerNames(ws), ", "),
-		Clusters:    strings.Join(ClusterNames(ws), ", "),
-		ExpiresAt:   FormatExpiresAt(ws.ExpiresAt),
+		ID:             ws.ID,
+		Description:    utils.Truncate(ws.Description, 70),
+		Status:         ws.Status,
+		Scopes:         strings.Join(ws.Scopes, ", "),
+		Servers:        utils.Annotate(strings.Join(ServerNames(ws), ", "), ServerList(ws)),
+		Clusters:       utils.Annotate(strings.Join(ClusterNames(ws), ", "), ClusterList(ws)),
+		ExpiresAt:      utils.NewTimestamp(ws.ExpiresAt, FormatExpiresAt(ws.ExpiresAt)),
+		ServersHidden:  ws.ServersHidden,
+		ClustersHidden: ws.ClustersHidden,
 	}
 }
 
@@ -77,6 +79,23 @@ func ClusterNames(ws *WorkSession) []string {
 		names[i] = c.Name
 	}
 	return names
+}
+
+// ServerList is the servers ws targets as one line for a reader, saying how many more the
+// caller does not reach, such as "web-1 and 1 more".
+func ServerList(ws *WorkSession) string {
+	return utils.JoinReached(ServerNames(ws), ws.ServersHidden, "server")
+}
+
+// ClusterList is ServerList for the cluster a kube session targets.
+func ClusterList(ws *WorkSession) string {
+	return utils.JoinReached(ClusterNames(ws), ws.ClustersHidden, "cluster")
+}
+
+// IsClusterSession reports whether ws targets a cluster, counting one the caller does not
+// reach, which the server leaves out of Clusters.
+func IsClusterSession(ws *WorkSession) bool {
+	return len(ws.Clusters) > 0 || utils.HiddenCount(ws.ClustersHidden) > 0
 }
 
 // TargetsCluster reports whether ws names clusterID among its targets.
@@ -139,6 +158,7 @@ func FormatDuration(d time.Duration) string {
 }
 
 func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (*WorkSession, error) {
+	req.SudoPolicies = sudoPoliciesForRequest(req.SudoPolicies)
 	body, err := ac.SendPostRequest(workSessionURL, req)
 	if err != nil {
 		return nil, err
@@ -158,19 +178,27 @@ func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (
 // UpdateWorkSession PATCHes a work session. The server may queue the change for approval, in
 // which case it takes effect only once approved.
 func UpdateWorkSession(ac *client.AlpaconClient, id string, req WorkSessionUpdateRequest) (*WorkSession, error) {
+	session, _, err := UpdateWorkSessionWithStatus(ac, id, req)
+	return session, err
+}
+
+// UpdateWorkSessionWithStatus returns the status of this PATCH. A 200 can still include a pending
+// modification from an earlier request.
+func UpdateWorkSessionWithStatus(ac *client.AlpaconClient, id string, req WorkSessionUpdateRequest) (*WorkSession, int, error) {
 	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	body, err := ac.SendPatchRequest(api.IDURL(workSessionURL, pathID, "", nil), req)
+	req.SudoPolicies = sudoPoliciesForRequest(req.SudoPolicies)
+	body, status, err := ac.SendPatchRequestWithStatus(api.IDURL(workSessionURL, pathID, "", nil), req)
 	if err != nil {
-		return nil, err
+		return nil, status, err
 	}
 	var session WorkSession
 	if err = json.Unmarshal(body, &session); err != nil {
-		return nil, err
+		return nil, status, err
 	}
-	return &session, nil
+	return &session, status, nil
 }
 
 func GetWorkSession(ac *client.AlpaconClient, id string) (*WorkSession, error) {

@@ -15,13 +15,15 @@ type describeRow struct {
 	Value string `table:"Value"`
 }
 
-func newKubeDescribeCmd(newClient clientFactory) *cobra.Command {
+func newKubeDescribeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "describe CLUSTER",
 		Aliases: []string{"desc"},
 		Short:   "Show details of a Kubernetes cluster",
 		Long: `Show the details of one cluster: provider, versions, node count,
 connectivity, groups, and tags.
+
+` + rbacDriftHelp + `
 
 Use --output json to see the full raw response, with group IDs in place of
 names and status and tags as the server stores them.`,
@@ -44,13 +46,12 @@ names and status and tags as the server stores them.`,
 				return utils.NewExitError("Failed to retrieve the cluster: %s.", err)
 			}
 
-			if utils.OutputFormat == utils.OutputFormatJSON {
+			if ios.IsJSON() {
 				body, err := kubernetes.GetClusterDetailRaw(ac, clusterID)
 				if err != nil {
 					return utils.NewExitError("Failed to retrieve the cluster: %s.", err)
 				}
-				utils.PrintJson(body)
-				return nil
+				return ios.PrintJson(body)
 			}
 
 			cluster, err := kubernetes.GetClusterDetail(ac, clusterID)
@@ -58,8 +59,7 @@ names and status and tags as the server stores them.`,
 				return utils.NewExitError("Failed to retrieve the cluster: %s.", err)
 			}
 
-			utils.PrintTable(describeRows(cluster, kubernetes.ResolveGroupNames(ac, cluster.Groups), time.Local))
-			return nil
+			return ios.PrintTable(describeRows(cluster, kubernetes.ResolveGroupNames(ac, cluster.Groups), time.Local))
 		}),
 	}
 }
@@ -75,6 +75,7 @@ func describeRows(cluster *kubernetes.ClusterDetail, groupNames []string, zone *
 		{"Connected", strconv.FormatBool(cluster.IsConnected)},
 		{"Enabled", strconv.FormatBool(cluster.Enabled)},
 		{"Status", formatJSONValue(cluster.Status)},
+		{"RBAC drift", kubernetes.Optional[string]{Value: cluster.RBACDrift}.String()},
 		{"Groups", strings.Join(groupNames, ", ")},
 		{"Tags", formatTags(cluster.Tags)},
 		{"Last connectivity", formatTime(cluster.LastConnectivity, zone)},

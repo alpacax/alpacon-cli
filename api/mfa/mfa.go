@@ -90,7 +90,7 @@ func ErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHan
 			return HandleMFAError(ac, serverName)
 		},
 		OnUsernameRequired: func() error {
-			_, err := iam.HandleUsernameRequired()
+			_, err := iam.HandleUsernameRequired(ac)
 			return err
 		},
 		RetryOperation: retry,
@@ -99,7 +99,8 @@ func ErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHan
 
 // WorkspaceErrorCallbacks is ErrorCallbacks for a workspace-level change: a workspace-wide
 // setting or role binding names no server, so the server-scoped MFA link's lookup would be
-// handed an empty name. No username handling: such a change never asks for a system user.
+// handed an empty name. No username handling; a caller that needs it, such as the kube
+// session open, handles it itself.
 func WorkspaceErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHandlerCallbacks {
 	return utils.ErrorHandlerCallbacks{
 		OnMFARequired: func(_ string) error {
@@ -250,7 +251,11 @@ func fetchMFALink(ac *client.AlpaconClient, params map[string]string) (string, e
 		return "", err
 	}
 
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(mfaURL, "", params))
+	linkURL, err := utils.BuildURL(mfaURL, "", params)
+	if err != nil {
+		return "", err
+	}
+	responseBody, err := ac.SendGetRequest(linkURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to get the MFA URL: %w", err)
 	}

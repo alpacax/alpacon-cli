@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -109,7 +110,7 @@ func TestSudoDenialHint(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			hint := sudoDenialHint(denialLine(tt.code))
+			hint := sudoDenialHint(utils.Stdio, denialLine(tt.code))
 			for _, want := range tt.wantContains {
 				assert.Contains(t, hint, want)
 			}
@@ -128,8 +129,8 @@ func TestSudoDenialHint(t *testing.T) {
 func TestSudoDenialHintSeparatesTheTwoPolicyDenials(t *testing.T) {
 	t.Parallel()
 	assert.NotEqual(t,
-		sudoDenialHint(denialLine("SUDO_NO_WORKSESSION_POLICY")),
-		sudoDenialHint(denialLine("SUDO_POLICY_MFA_REQUIRED")))
+		sudoDenialHint(utils.Stdio, denialLine("SUDO_NO_WORKSESSION_POLICY")),
+		sudoDenialHint(utils.Stdio, denialLine("SUDO_POLICY_MFA_REQUIRED")))
 }
 
 func TestHasSudoPresenceDenial(t *testing.T) {
@@ -216,7 +217,7 @@ func TestHasSudoApprovalDenial(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, hasSudoApprovalDenial(tt.output), "output: %q", tt.output)
+			assert.Equal(t, tt.want, hasSudoApprovalDenial(utils.Stdio, tt.output), "output: %q", tt.output)
 		})
 	}
 }
@@ -265,7 +266,7 @@ func TestPendingSudoDenial(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			hint, pending := pendingSudoDenial(tt.output)
+			hint, pending := pendingSudoDenial(utils.Stdio, tt.output)
 			assert.Equal(t, tt.wantPending, pending, "output: %q", tt.output)
 			if tt.wantHintContains == "" {
 				assert.Empty(t, hint)
@@ -279,7 +280,7 @@ func TestPendingSudoDenial(t *testing.T) {
 		// sudoDenialHint and pendingSudoDenial scan the same table by different
 		// rules, so the same output must be able to produce two different hints.
 		out := denialLine("SUDO_NO_WORKSESSION_POLICY") + denialLine("SUDO_INTENT_DEVIATION")
-		assert.Contains(t, sudoDenialHint(out), "--sudo")
+		assert.Contains(t, sudoDenialHint(utils.Stdio, out), "--sudo")
 	})
 }
 
@@ -328,7 +329,7 @@ func TestSudoDenialHintFallsBackToTheRawCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			hint := sudoDenialHint(tt.output)
+			hint := sudoDenialHint(utils.Stdio, tt.output)
 			if len(tt.wantContains) == 0 {
 				assert.Empty(t, hint, "output: %q", tt.output)
 				return
@@ -344,8 +345,8 @@ func TestSudoDenialHintFallsBackToTheRawCode(t *testing.T) {
 		// most likely to drift silently: a longer code has the sanitizer's own
 		// shape and would otherwise be echoed verbatim.
 		atCap := strings.Repeat("A", 63)
-		assert.Contains(t, sudoDenialHint(denialLine(atCap)), atCap)
-		assert.Empty(t, sudoDenialHint(denialLine(strings.Repeat("A", 64))))
+		assert.Contains(t, sudoDenialHint(utils.Stdio, denialLine(atCap)), atCap)
+		assert.Empty(t, sudoDenialHint(utils.Stdio, denialLine(strings.Repeat("A", 64))))
 	})
 }
 
@@ -389,7 +390,7 @@ func TestSudoDenialHintCodelessDenial(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			hint := sudoDenialHint(tt.output)
+			hint := sudoDenialHint(utils.Stdio, tt.output)
 			for _, want := range tt.wantContains {
 				assert.Contains(t, hint, want)
 			}
@@ -433,7 +434,7 @@ func TestIsApprovalDenial(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isApprovalDenial(tt.err), "err: %v", tt.err)
+			assert.Equal(t, tt.want, isApprovalDenial(utils.Stdio, tt.err), "err: %v", tt.err)
 		})
 	}
 }
@@ -562,7 +563,7 @@ func TestSudoDenialHintDefersToTheServerHint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			hint := sudoDenialHint(tt.output)
+			hint := sudoDenialHint(utils.Stdio, tt.output)
 			if tt.wantLocal {
 				assert.Contains(t, hint, "Hint:", "output: %q", tt.output)
 				return
@@ -578,11 +579,11 @@ func TestPendingSudoDenialDefersToTheServerHint(t *testing.T) {
 	t.Parallel()
 	const serverHint = "This command does not match its work session's declared purpose, so it waits on an approval request whose state can be read on it.\n"
 
-	hint, pending := pendingSudoDenial(denialLine("SUDO_INTENT_DEVIATION") + serverHint)
+	hint, pending := pendingSudoDenial(utils.Stdio, denialLine("SUDO_INTENT_DEVIATION")+serverHint)
 	assert.True(t, pending)
 	assert.Empty(t, hint)
 
-	hint, pending = pendingSudoDenial(denialLine("SUDO_INTENT_DEVIATION"))
+	hint, pending = pendingSudoDenial(utils.Stdio, denialLine("SUDO_INTENT_DEVIATION"))
 	assert.True(t, pending)
 	assert.Contains(t, hint, "--title")
 }
@@ -606,7 +607,7 @@ func TestRemoteFailureReportDefersToTheServerHint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			report, exitCode := remoteFailureReport(&event.RemoteCommandError{ExitCode: 1, Output: tt.output})
+			report, exitCode := remoteFailureReport(utils.Stdio, &event.RemoteCommandError{ExitCode: 1, Output: tt.output})
 
 			assert.Equal(t, 1, exitCode)
 			if tt.wantLocal {

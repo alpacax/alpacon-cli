@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 type fakeRunRuntime struct {
@@ -200,7 +201,7 @@ func TestMonitorLocalCommandClosesRuntimeOnProcessExit(t *testing.T) {
 		t.Fatalf("failed to start helper command: %v", err)
 	}
 
-	exitCode, err := monitorLocalCommand(runtime, localCmd)
+	exitCode, err := monitorLocalCommand(utils.Stdio, runtime, localCmd)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -230,7 +231,7 @@ func TestMonitorLocalCommandReturnsErrorWhenTunnelCloses(t *testing.T) {
 		runtime.triggerRemoteClose(errors.New("session closed by remote"))
 	}()
 
-	exitCode, err := monitorLocalCommand(runtime, localCmd)
+	exitCode, err := monitorLocalCommand(utils.Stdio, runtime, localCmd)
 	if err == nil {
 		t.Fatal("expected error when tunnel closes")
 	}
@@ -246,7 +247,7 @@ func TestExecuteTunnelRunWithInvocationInvalidRemotePort(t *testing.T) {
 	t.Parallel()
 	flags := tunnelFlagValues{localPort: "5432", remotePort: "invalid"}
 
-	exitCode, err := executeTunnelRunWithInvocation(&client.AlpaconClient{}, flags, "prod-db", []string{"psql"})
+	exitCode, err := executeTunnelRunWithInvocation(utils.Stdio, &client.AlpaconClient{}, flags, "prod-db", []string{"psql"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

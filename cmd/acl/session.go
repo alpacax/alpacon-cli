@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -37,22 +36,22 @@ var (
 	now                = time.Now
 )
 
-func openLedger() *ledgerSession {
-	session, err := newLedgerSession()
+func openLedger(ios *utils.IOStreams) (*ledgerSession, error) {
+	session, err := newLedgerSession(ios)
 	if err != nil {
-		utils.CliErrorWithExit("%s", sentence(upperFirst(err.Error())))
+		return nil, utils.NewExitError("%s", sentence(upperFirst(err.Error())))
 	}
-	return session
+	return session, nil
 }
 
 // newLedgerSession checks the workspace uses the ledger, authorizes the signer
 // when nothing usable is cached, and confirms the Command ACL admin role here.
-func newLedgerSession() (*ledgerSession, error) {
-	return newLedgerSessionWithCheck(nil)
+func newLedgerSession(ios *utils.IOStreams) (*ledgerSession, error) {
+	return newLedgerSessionWithCheck(ios, nil)
 }
 
 // newLedgerSessionWithCheck validates workspace data before contacting the signer.
-func newLedgerSessionWithCheck(check func(*ledgerSession) error) (*ledgerSession, error) {
+func newLedgerSessionWithCheck(ios *utils.IOStreams, check func(*ledgerSession) error) (*ledgerSession, error) {
 	cfg, err := loadConfig()
 	if err != nil {
 		return nil, errors.New("not logged in. Run 'alpacon login' first")
@@ -84,7 +83,7 @@ func newLedgerSessionWithCheck(check func(*ledgerSession) error) (*ledgerSession
 
 	token, cached := cfg.SignerToken(now(), target)
 	if !cached {
-		token, err = authorizeSigner(cfg, envInfo, target)
+		token, err = authorizeSigner(ios, cfg, envInfo, target)
 		if err != nil {
 			return nil, err
 		}
@@ -119,8 +118,8 @@ func ledgerUnavailableReason(envInfo *auth0.AuthEnvResponse) string {
 
 // runSignerDeviceCode authorizes the signer's audience and caches the token,
 // which has no refresh token and is asked for again once it expires.
-func runSignerDeviceCode(cfg config.Config, envInfo *auth0.AuthEnvResponse, target config.SignerTarget) (string, error) {
-	utils.CliInfo("Pre-approved commands are kept by the command signer, which needs its own authorization. It lasts until its token expires and is not renewed in the background.")
+func runSignerDeviceCode(ios *utils.IOStreams, cfg config.Config, envInfo *auth0.AuthEnvResponse, target config.SignerTarget) (string, error) {
+	ios.Info("Pre-approved commands are kept by the command signer, which needs its own authorization. It lasts until its token expires and is not renewed in the background.")
 
 	// Certificates are verified whatever the workspace login chose: --insecure
 	// covers the workspace's host, not this authorization.
@@ -129,7 +128,7 @@ func runSignerDeviceCode(cfg config.Config, envInfo *auth0.AuthEnvResponse, targ
 		return "", fmt.Errorf("could not start the authorization for the command pre-approval ledger: %w", err)
 	}
 
-	uri := utils.PrintDeviceCodePrompt(os.Stderr, deviceCode.VerificationURIComplete, deviceCode.UserCode)
+	uri := utils.PrintDeviceCodePrompt(ios.ErrOut, deviceCode.VerificationURIComplete, deviceCode.UserCode)
 	utils.OpenBrowser(uri)
 
 	tokenRes, err := auth0.PollForToken(deviceCode, envInfo)
@@ -137,18 +136,18 @@ func runSignerDeviceCode(cfg config.Config, envInfo *auth0.AuthEnvResponse, targ
 		return "", errors.New(authorizationFailureMessage(err))
 	}
 
-	return cacheSignerToken(cfg, target, tokenRes.AccessToken, tokenRes.ExpiresIn)
+	return cacheSignerToken(ios, cfg, target, tokenRes.AccessToken, tokenRes.ExpiresIn)
 }
 
 // cacheSignerToken stores a fresh signer token and returns it, or fails once
 // another shell's login, logout or switch has replaced cfg.
-func cacheSignerToken(cfg config.Config, target config.SignerTarget, token string, expiresIn int) (string, error) {
+func cacheSignerToken(ios *utils.IOStreams, cfg config.Config, target config.SignerTarget, token string, expiresIn int) (string, error) {
 	err := config.SaveSignerToken(cfg, target, token, expiresIn)
 	switch {
 	case errors.Is(err, config.ErrLoginChanged), errors.Is(err, config.ErrWorkspaceChanged), errors.Is(err, fs.ErrNotExist):
 		return "", errors.New("another login, logout or workspace switch changed the configuration while you were authorizing. Run the command again")
 	case err != nil:
-		utils.CliWarning("Could not save the authorization, so the next acl command will ask for it again: %s", err)
+		ios.Warning("Could not save the authorization, so the next acl command will ask for it again: %s", err)
 	}
 	return token, nil
 }
@@ -183,9 +182,9 @@ func (s *ledgerSession) workspaceAPI() (*client.AlpaconClient, error) {
 	return ac, nil
 }
 
-func (s *ledgerSession) fail(action string, err error) {
+func (s *ledgerSession) fail(action string, err error) error {
 	s.dropRefusedToken(err)
-	utils.CliErrorWithExit("%s", s.errorMessage(action, err))
+	return utils.NewExitError("%s", s.errorMessage(action, err))
 }
 
 // dropRefusedToken removes the cached signer token after the signer answered
@@ -247,7 +246,7 @@ func upperFirst(message string) string {
 
 // printWarnings relays the signer's advisories on a write, each once: a batch
 // of unscoped entries would otherwise repeat the same warning per row.
-func printWarnings(entries []acl.EntryResponse) {
+func printWarnings(ios *utils.IOStreams, entries []acl.EntryResponse) {
 	seen := map[string]bool{}
 	for _, entry := range entries {
 		for _, warning := range entry.Warnings {
@@ -255,7 +254,7 @@ func printWarnings(entries []acl.EntryResponse) {
 				continue
 			}
 			seen[warning] = true
-			utils.CliWarning("%s", warning)
+			ios.Warning("%s", warning)
 		}
 	}
 }

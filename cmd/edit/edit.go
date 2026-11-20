@@ -22,6 +22,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// clientFactory builds the API client a command talks to.
+type clientFactory = func() (*client.AlpaconClient, error)
+
 const maxEditPromptSize int64 = 10 * 1024 * 1024
 
 // guiEditors are editors that, without a wait flag, spawn a window and return
@@ -40,10 +43,11 @@ var guiEditors = map[string]bool{
 	"zed":           true,
 }
 
-var EditCmd = &cobra.Command{
-	Use:   "edit [USER@]SERVER:PATH",
-	Short: "Edit a remote file with your local editor",
-	Long: `Download a single remote file, open it in your local editor, and upload
+func NewEditCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "edit [USER@]SERVER:PATH",
+		Short: "Edit a remote file with your local editor",
+		Long: `Download a single remote file, open it in your local editor, and upload
 changes back to the original path when the editor exits.
 
 The command uses the same WebFTP transport and permission behavior as 'alpacon cp'.
@@ -59,56 +63,72 @@ This edits existing remote files only—the file is downloaded first, so it
 cannot create a new one. The --editor value is tokenized without a shell (the
 file path is appended as the last argument), so shell syntax such as pipes,
 redirections, or '&&' will not work.`,
-	Example: `  alpacon edit my-server:/etc/nginx/nginx.conf
+		Example: `  alpacon edit my-server:/etc/nginx/nginx.conf
   alpacon edit my-server:/etc/nginx/nginx.conf --editor "code --wait"
   alpacon edit my-server:/var/log/large.txt --force`,
-	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		editorFlag, _ := cmd.Flags().GetString("editor")
-		usernameFlag, _ := cmd.Flags().GetString("username")
-		groupname, _ := cmd.Flags().GetString("groupname")
-		force, _ := cmd.Flags().GetBool("force")
-		flagWorkSession, _ := cmd.Flags().GetString("work-session")
+		Args: cobra.ExactArgs(1),
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			editorFlag, _ := cmd.Flags().GetString("editor")
+			usernameFlag, _ := cmd.Flags().GetString("username")
+			groupname, _ := cmd.Flags().GetString("groupname")
+			force, _ := cmd.Flags().GetBool("force")
+			flagWorkSession, _ := cmd.Flags().GetString("work-session")
 
-		target, err := parseEditTarget(args[0], usernameFlag)
-		if err != nil {
-			utils.CliUsageErrorWithExit("%s", err)
-		}
-
-		authMethod := config.ResolveAuthMethod()
-
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-		workSessionID := worksession.ResolveOrExit(alpaconClient, flagWorkSession)
-
-		deps := realEditDeps(alpaconClient, groupname)
-		result, err := runEdit(editOptions{
-			Target:        target,
-			Editor:        editorFlag,
-			Force:         force,
-			WorkSessionID: workSessionID,
-		}, deps)
-		if err != nil {
-			printPreservedTempPath(result)
-			utils.HandleWorkSessionError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID)
-			var rejected *event.CommandRejectedError
-			if errors.As(err, &rejected) {
-				utils.CliErrorEnvelopeWithExitCode(rejected.ExitCode(), "edit", err, "Failed to edit '%s:%s': %s", target.Server, target.RemotePath, rejected)
+			target, err := parseEditTarget(args[0], usernameFlag)
+			if err != nil {
+				return utils.NewUsageExitError("%s", err)
 			}
-			if refusedForWantOfForce(err, utils.IsInteractiveShell()) {
-				err = utils.MarkUsageError(err)
-			}
-			utils.CliErrorWithExit("Failed to edit '%s:%s': %s", target.Server, target.RemotePath, err)
-		}
 
-		if !result.Changed {
-			utils.CliInfo("No changes")
-			return
-		}
-		utils.CliSuccess("Uploaded changes to %s:%s", target.Server, target.RemotePath)
-	},
+			authMethod := config.ResolveAuthMethod()
+
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
+			workSessionID, err := worksession.Resolve(alpaconClient, flagWorkSession)
+			if err != nil {
+				return utils.NewExitError("%s", err)
+			}
+
+			deps := realEditDeps(alpaconClient, groupname)
+			result, err := runEdit(ios, editOptions{
+				Target:        target,
+				Editor:        editorFlag,
+				Force:         force,
+				WorkSessionID: workSessionID,
+			}, deps)
+			if err != nil {
+				if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
+					return exitErr
+				}
+				printPreservedTempPath(ios, result)
+				if exitErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID); exitErr != nil {
+					return exitErr
+				}
+				var rejected *event.CommandRejectedError
+				if errors.As(err, &rejected) {
+					return utils.NewEnvelopeExitErrorWithCode(rejected.ExitCode(), "edit", err, "Failed to edit '%s:%s': %s", target.Server, target.RemotePath, rejected)
+				}
+				if refusedForWantOfForce(err, utils.IsInteractiveShell()) {
+					err = utils.MarkUsageError(err)
+				}
+				return utils.NewExitError("Failed to edit '%s:%s': %s", target.Server, target.RemotePath, err)
+			}
+
+			if !result.Changed {
+				ios.Info("No changes")
+				return nil
+			}
+			ios.Success("Uploaded changes to %s:%s", target.Server, target.RemotePath)
+			return nil
+		}),
+	}
+	cmd.Flags().String("editor", "", "Editor command to run (default: ALPACON_EDITOR, VISUAL, EDITOR, then vi)")
+	cmd.Flags().Bool("force", false, "Edit files larger than 10 MB without prompting")
+	cmd.Flags().StringP("username", "u", "", "Specify username")
+	cmd.Flags().StringP("groupname", "g", "", "Specify groupname")
+	cmd.Flags().String("work-session", "", "Attach this edit to a work-session (overrides 'work-session use')")
+	return cmd
 }
 
 type editTarget struct {
@@ -138,14 +158,6 @@ type editDeps struct {
 	tempRoot     string
 }
 
-func init() {
-	EditCmd.Flags().String("editor", "", "Editor command to run (default: ALPACON_EDITOR, VISUAL, EDITOR, then vi)")
-	EditCmd.Flags().Bool("force", false, "Edit files larger than 10 MB without prompting")
-	EditCmd.Flags().StringP("username", "u", "", "Specify username")
-	EditCmd.Flags().StringP("groupname", "g", "", "Specify groupname")
-	EditCmd.Flags().String("work-session", "", "Attach this edit to a work-session (overrides 'work-session use')")
-}
-
 func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 	return editDeps{
 		download: func(target editTarget, localPath, workSessionID string) (ftpapi.DownloadedFile, error) {
@@ -157,8 +169,10 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 					return retryErr
 				}))
 			}
-			err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
-			utils.SignalRefusal(err)
+			if _, mfaFailed := errors.AsType[*utils.ExitError](err); !mfaFailed { // its cause is the MFA lookup's, not a refusal of this request
+				err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
+				utils.SignalRefusal(err)
+			}
 			return downloaded, err
 		},
 		upload: func(target editTarget, localPath, workSessionID string) error {
@@ -168,8 +182,10 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 					return ftpapi.UploadLocalFileAs(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, workSessionID)
 				}))
 			}
-			err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
-			utils.SignalRefusal(err)
+			if _, mfaFailed := errors.AsType[*utils.ExitError](err); !mfaFailed { // its cause is the MFA lookup's, not a refusal of this request
+				err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
+				utils.SignalRefusal(err)
+			}
 			return err
 		},
 		runEditor:    runLocalEditor,
@@ -230,7 +246,7 @@ func guiEditorWaitWarning(editor string) string {
 	return fmt.Sprintf("'%s' looks like a GUI editor launched without a wait flag; it may return before you save, so changes would not be uploaded. Add a wait flag, e.g. --editor \"%s --wait\"", name, name)
 }
 
-func runEdit(opts editOptions, deps editDeps) (editResult, error) {
+func runEdit(ios *utils.IOStreams, opts editOptions, deps editDeps) (editResult, error) {
 	deps = normalizeEditDeps(deps)
 	tempPath, err := editTempPath(deps.tempRoot, opts.Target)
 	result := editResult{TempPath: tempPath}
@@ -240,7 +256,7 @@ func runEdit(opts editOptions, deps editDeps) (editResult, error) {
 
 	downloaded, err := deps.download(opts.Target, tempPath, opts.WorkSessionID)
 	if err != nil {
-		cleanupEditTemp(tempPath, deps.removeAll)
+		cleanupEditTemp(ios, tempPath, deps.removeAll)
 		return result, err
 	}
 	if downloaded.Path != "" {
@@ -250,26 +266,26 @@ func runEdit(opts editOptions, deps editDeps) (editResult, error) {
 	// Owner-only, since edit handles sensitive remote files. The 0700 parents already gate access,
 	// which also covers an editor that saves through a rename and resets the mode.
 	if err := os.Chmod(result.TempPath, 0600); err != nil {
-		cleanupEditTemp(result.TempPath, deps.removeAll)
+		cleanupEditTemp(ios, result.TempPath, deps.removeAll)
 		return result, fmt.Errorf("failed to secure temp file: %w", err)
 	}
 
 	// The size is only known once downloaded, so this guards opening an oversized file in the
 	// editor, not bandwidth.
 	if downloaded.Size > maxEditPromptSize && !opts.Force && !deps.confirmLarge(downloaded.Size) {
-		cleanupEditTemp(result.TempPath, deps.removeAll)
+		cleanupEditTemp(ios, result.TempPath, deps.removeAll)
 		return result, errLargeFile
 	}
 
 	before, err := hashFile(result.TempPath)
 	if err != nil {
-		cleanupEditTemp(result.TempPath, deps.removeAll)
+		cleanupEditTemp(ios, result.TempPath, deps.removeAll)
 		return result, err
 	}
 
 	editor := resolveEditor(opts.Editor)
 	if warning := guiEditorWaitWarning(editor); warning != "" {
-		utils.CliWarning("%s", warning)
+		ios.Warning("%s", warning)
 	}
 	editorErr := deps.runEditor(editor, result.TempPath)
 
@@ -286,13 +302,13 @@ func runEdit(opts editOptions, deps editDeps) (editResult, error) {
 		// Keep the temp only if the user changed it; otherwise it is just a copy of the remote
 		// file.
 		if !result.Changed {
-			cleanupEditTemp(result.TempPath, deps.removeAll)
+			cleanupEditTemp(ios, result.TempPath, deps.removeAll)
 		}
 		return result, fmt.Errorf("editor failed: %w", editorErr)
 	}
 
 	if !result.Changed {
-		cleanupEditTemp(result.TempPath, deps.removeAll)
+		cleanupEditTemp(ios, result.TempPath, deps.removeAll)
 		return result, nil
 	}
 
@@ -300,18 +316,18 @@ func runEdit(opts editOptions, deps editDeps) (editResult, error) {
 		return result, err
 	}
 
-	cleanupEditTemp(result.TempPath, deps.removeAll)
+	cleanupEditTemp(ios, result.TempPath, deps.removeAll)
 	return result, nil
 }
 
-func cleanupEditTemp(filePath string, removeAll func(string) error) {
+func cleanupEditTemp(ios *utils.IOStreams, filePath string, removeAll func(string) error) {
 	if filePath == "" {
 		return
 	}
 	sessionDir := filepath.Dir(filePath)
 	if err := removeAll(sessionDir); err != nil {
 		// Surface failures: the temp may hold a copy of a sensitive remote file.
-		utils.CliWarning("Failed to remove temp directory %s: %s", sessionDir, err)
+		ios.Warning("Failed to remove temp directory %s: %s", sessionDir, err)
 		return
 	}
 	// Prune the now-empty per-file (<hash>) and per-server parents.
@@ -478,13 +494,13 @@ func formatBytes(size int64) string {
 	return fmt.Sprintf("%.1f MB", float64(size)/float64(mb))
 }
 
-func printPreservedTempPath(result editResult) {
+func printPreservedTempPath(ios *utils.IOStreams, result editResult) {
 	// Only claim preservation when the user actually changed the file; an
 	// unchanged temp is either already cleaned up or just a copy of the remote.
 	if !result.Changed || result.TempPath == "" {
 		return
 	}
 	if _, err := os.Stat(result.TempPath); err == nil {
-		utils.CliWarning("Edited file preserved at %s", result.TempPath)
+		ios.Warning("Edited file preserved at %s", result.TempPath)
 	}
 }

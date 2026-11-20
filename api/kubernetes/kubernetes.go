@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -24,6 +25,12 @@ const (
 const (
 	SessionStatusOpen   = "open"
 	SessionStatusClosed = "closed"
+)
+
+// Session kinds sessionKind derives itself; the server stores neither.
+const (
+	sessionKindAPI     = "api"
+	sessionKindUnknown = "unknown"
 )
 
 // SurfaceNotEnabledMessage is what the CLI prints when the workspace does
@@ -60,6 +67,7 @@ func toAttributes(cluster ClusterDetail) ClusterAttributes {
 		NodeCount:    Optional[int]{Value: cluster.NodeCount},
 		Connected:    cluster.IsConnected,
 		Enabled:      cluster.Enabled,
+		RBACDrift:    Optional[string]{Value: cluster.RBACDrift},
 		AgentVersion: cluster.AgentVersion,
 	}
 }
@@ -142,11 +150,13 @@ func ResolveGroupNames(ac *client.AlpaconClient, groupIDs []string) []string {
 
 // CreateSession opens a proxy session to a cluster. The channel token appears
 // only in this response—the server never returns it again—so the caller must
-// persist it at once.
+// persist it at once. The POST's own error is tagged with
+// utils.MarkSubmission, so an MFA wait may send a refused create again; a
+// failure to read or use the answer is not, since the session exists by then.
 func CreateSession(ac *client.AlpaconClient, req KubeSessionCreateRequest) (*KubeSessionResponse, error) {
 	body, err := ac.SendPostRequest(sessionURL, req)
 	if err != nil {
-		return nil, err
+		return nil, utils.MarkSubmission(err)
 	}
 
 	var session KubeSessionResponse
@@ -220,17 +230,21 @@ func GetClusterNames(ac *client.AlpaconClient) (map[string]string, error) {
 // ProjectSessions builds the 'kube sessions' rows, with the expiry shown in loc.
 // A cluster missing from names shows its ID, and the status reads closed_at
 // alone: a session whose token has expired stays open until the server's sweep
-// closes it.
+// closes it. The kind comes from sessionKind and the external grants cell from
+// externalGrantsCell.
 func ProjectSessions(sessions []KubeSessionListItem, names map[string]string, loc *time.Location) []KubeSessionAttributes {
 	rows := make([]KubeSessionAttributes, 0, len(sessions))
 	for _, session := range sessions {
 		row := KubeSessionAttributes{
-			ID:             session.ID,
-			Cluster:        session.Cluster,
-			ClusterID:      session.Cluster,
-			Status:         SessionStatusOpen,
-			TokenExpiredAt: session.TokenExpiredAt,
-			ClosedAt:       session.ClosedAt,
+			ID:               session.ID,
+			Cluster:          session.Cluster,
+			ClusterID:        session.Cluster,
+			Status:           SessionStatusOpen,
+			Kind:             sessionKind(session.LatestExec),
+			TokenExpiredAt:   utils.OptionalTimestamp(session.TokenExpiredAt),
+			ClosedAt:         utils.OptionalTimestamp(session.ClosedAt),
+			RBACDriftWarning: session.RBACDriftWarning,
+			ExternalGrants:   externalGrantsCell(session.RBACDriftWarning),
 		}
 		if name := names[session.Cluster]; name != "" {
 			row.Cluster = name
@@ -245,9 +259,80 @@ func ProjectSessions(sessions []KubeSessionListItem, names map[string]string, lo
 			row.Status = SessionStatusClosed
 		}
 		if session.TokenExpiredAt != nil {
-			row.ExpiresAt = session.TokenExpiredAt.In(loc).Format("2006-01-02 15:04")
+			row.ExpiresAt = utils.NewTimestamp(*session.TokenExpiredAt, session.TokenExpiredAt.In(loc).Format("2006-01-02 15:04"))
 		}
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// sessionKind labels a session by its newest stream. A latest_exec that is
+// null, or absent as from a server older than the field, means no stream, so
+// the label is sessionKindAPI. A stream whose kind is null, empty or not
+// readable is sessionKindUnknown, never a guessed exec. A kind this build does
+// not know is shown as the server sent it.
+func sessionKind(latestExec json.RawMessage) string {
+	if len(latestExec) == 0 || string(latestExec) == "null" {
+		return sessionKindAPI
+	}
+	var stream struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(latestExec, &stream); err != nil || stream.Kind == "" {
+		return sessionKindUnknown
+	}
+	return stream.Kind
+}
+
+// ParseRBACDriftWarning reads a session's rbac_drift_warning. present is false
+// when the field is null or absent, as from a server older than it. A value
+// that is there but does not decode still means the session opened with a
+// warning: present is true and the warning is nil.
+func ParseRBACDriftWarning(raw json.RawMessage) (warning *RBACDriftWarning, present bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, false
+	}
+	var w RBACDriftWarning
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return nil, true
+	}
+	return &w, true
+}
+
+// ExternalGrantCounts names the warning's counts by reach, such as
+// "2 cluster-wide, 1 namespaced", leaving out a zero count. It is "" for a nil
+// warning or one with no count above zero, since then there is nothing to name.
+func ExternalGrantCounts(w *RBACDriftWarning) string {
+	if w == nil {
+		return ""
+	}
+	var parts []string
+	if w.ClusterExternalGrants > 0 {
+		parts = append(parts, fmt.Sprintf("%d cluster-wide", w.ClusterExternalGrants))
+	}
+	if w.NamespacedExternalGrants > 0 {
+		parts = append(parts, fmt.Sprintf("%d namespaced", w.NamespacedExternalGrants))
+	}
+	return strings.Join(parts, ", ")
+}
+
+const externalGrantsUnknown = "unknown"
+
+// externalGrantsCell is the 'kube sessions' marker for a session that opened
+// with an RBAC drift warning: empty without one, the counts otherwise, with a
+// "+" when the check did not finish and the counts are a lower bound. A
+// warning whose counts cannot be read is still marked, as unknown.
+func externalGrantsCell(raw json.RawMessage) string {
+	w, present := ParseRBACDriftWarning(raw)
+	if !present {
+		return ""
+	}
+	counts := ExternalGrantCounts(w)
+	if counts == "" {
+		return externalGrantsUnknown
+	}
+	if w.Incomplete {
+		counts += "+"
+	}
+	return counts
 }

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 
 	"github.com/alpacax/alpacon-cli/api/workspace"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -61,44 +60,45 @@ func renderUsageEstimate(estimate *workspace.UsageEstimate) renderedUsageEstimat
 	}
 }
 
-var workspaceUsageCmd = &cobra.Command{
-	Use:   "usage",
-	Short: "Retrieve workspace usage and billing estimate",
-	Long:  "Display the current billing period usage and cost estimate for the workspace.",
-	Example: `
+func newWorkspaceUsageCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:   "usage",
+		Short: "Retrieve workspace usage and billing estimate",
+		Long:  "Display the current billing period usage and cost estimate for the workspace.",
+		Example: `
 	alpacon workspace usage
 	alpacon ws usage`,
-	RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.LoadConfig()
-		if err != nil {
-			return utils.NewExitError("Not logged in. Run 'alpacon login' first.")
-		}
-		if !cfg.IsSaaS() {
-			return utils.NewExitError("This command is only available on Alpacon Cloud workspaces.")
-		}
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.LoadConfig()
+			if err != nil {
+				return utils.NewExitError("Not logged in. Run 'alpacon login' first.")
+			}
+			if !cfg.IsSaaS() {
+				return utils.NewExitError("This command is only available on Alpacon Cloud workspaces.")
+			}
 
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+			alpaconClient, err := newClient()
+			if err != nil {
+				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			}
 
-		paymentBaseURL := workspace.PaymentAPIBaseURL
+			paymentBaseURL := workspace.PaymentAPIBaseURL
 
-		workspaceID, err := workspace.GetWorkspaceID(alpaconClient, paymentBaseURL, alpaconClient.WorkspaceName)
-		if err != nil {
-			return utils.NewExitError("Failed to find workspace: %s.", err)
-		}
+			workspaceID, err := workspace.GetWorkspaceID(alpaconClient, paymentBaseURL, alpaconClient.WorkspaceName)
+			if err != nil {
+				return utils.NewExitError("Failed to find workspace: %s.", err)
+			}
 
-		estimate, err := workspace.GetUsageEstimate(alpaconClient, paymentBaseURL, workspaceID)
-		if err != nil {
-			return utils.NewExitError("Failed to retrieve usage estimate: %s.", err)
-		}
+			estimate, err := workspace.GetUsageEstimate(alpaconClient, paymentBaseURL, workspaceID)
+			if err != nil {
+				return utils.NewExitError("Failed to retrieve usage estimate: %s.", err)
+			}
 
-		data, err := json.Marshal(renderUsageEstimate(estimate))
-		if err != nil {
-			return utils.NewExitError("Failed to format usage data: %s.", err)
-		}
-		utils.PrintJson(data)
-		return nil
-	}),
+			data, err := json.Marshal(renderUsageEstimate(estimate))
+			if err != nil {
+				return utils.NewExitError("Failed to format usage data: %s.", err)
+			}
+			return ios.PrintJson(data)
+		}),
+	}
 }

@@ -171,10 +171,14 @@ const (
 
 	// Refusals of a kube session the server names itself. The cluster's agent
 	// is not connected; the agent did not accept the session, which the server
-	// then closed; and the caller has no user name the session could act as.
+	// then closed; the caller's username cannot be the session's identity,
+	// unset on an older server or one the server refuses; and
+	// the cluster's RBAC bindings made outside Alpacon grant sessions more than
+	// Alpacon does, under a workspace policy that refuses rather than warns.
 	ClusterNotConnected              = "cluster_not_connected"
 	KubeSessionChannelOpenFailed     = "kube_session_channel_open_failed"
 	KubeSessionPrincipalNotSupported = "kube_session_principal_not_supported"
+	ClusterRBACDrift                 = "cluster_rbac_drift"
 
 	// WorkSession extension refusals: every 'work-session extend' needs a reason and follows the
 	// workspace's approval policy, as 'work-session create' does, and a session holds at most one
@@ -187,7 +191,7 @@ const (
 	WorkSessionAdmissionDenied = "work_session_admission_denied"
 
 	// ExitCodeGeneralError is the process exit code for an ordinary failure, the one
-	// CliErrorWithExit exits with. Name it when calling CliErrorWithExitCode so the general case
+	// NewExitError exits with. Name it when calling NewExitErrorWithCode so the general case
 	// reads like the specific ones beside it.
 	ExitCodeGeneralError = 1
 

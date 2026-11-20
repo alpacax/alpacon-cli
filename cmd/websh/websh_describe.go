@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newDescribeCommand(newClient clientFactory) *cobra.Command {
+func newDescribeCommand(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:     "describe SESSION_ID",
 		Aliases: []string{"desc"},
@@ -27,8 +27,7 @@ func newDescribeCommand(newClient clientFactory) *cobra.Command {
 				return utils.NewExitError("Failed to retrieve websh session details: %s.", err)
 			}
 
-			utils.PrintJson(detail)
-			return nil
+			return ios.PrintJson(detail)
 		}),
 	}
 }

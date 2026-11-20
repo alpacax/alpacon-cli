@@ -1,7 +1,7 @@
 package event
 
 import (
-	"github.com/alpacax/alpacon-cli/cmd/exec"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -11,30 +11,28 @@ const (
 	opWatch = "watch"
 )
 
-var EventCmd = &cobra.Command{
-	Use:     "event",
-	Aliases: []string{"events"},
-	Short:   "List recent command executions (deprecated)",
-	Long: `List recent remote command executions, most recent first.
+// movedGuidance points a user of the removed bare 'alpacon event' list to its replacement.
+const movedGuidance = "The command list moved to 'alpacon exec ls'."
 
-This command has moved to 'alpacon exec ls' and will be removed in a future
-release. It still works today and takes the same flags.
+// clientFactory builds the API client a command talks to.
+type clientFactory = func() (*client.AlpaconClient, error)
 
-The 'event' name is being repurposed for the Alpacon event channel—see
-'alpacon event watch'.`,
-	Example: `  alpacon event
-  alpacon event --tail 10 --server my-server --user admin`,
-	// Deprecated is deliberately unused: it makes IsAvailableCommand() false, dropping
-	// 'event' from root help and with it the event-channel subcommands landing here.
-	Run: runEvent,
-}
+func NewEventCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "event",
+		Aliases: []string{"events"},
+		Short:   "Watch and wait on the Alpacon event channel",
+		Long: `Watch and wait on the Alpacon event channel.
 
-func init() {
-	exec.AddListFlags(EventCmd)
-}
-
-func runEvent(cmd *cobra.Command, _ []string) {
-	utils.CliWarning("'alpacon event' has moved to 'alpacon exec ls' and will be removed in a future release. 'alpacon event watch' streams the event channel.")
-
-	exec.RunListFromFlags(cmd)
+To list recent command executions, use 'alpacon exec ls'.`,
+		Args: utils.RejectUnknownSubcommand(movedGuidance),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return utils.RequireSubcommand(cmd, movedGuidance)
+		},
+	}
+	cmd.AddCommand(
+		newWaitCommand(newClient, ios),
+		newWatchCommand(newClient, ios),
+	)
+	return cmd
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,9 +13,12 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/auth0"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -528,6 +532,18 @@ func TestPromptForLoginTarget(t *testing.T) {
 			{prompt: "Region [us1] (us1, ap1): ", defaultValue: "us1"},
 		}, calls)
 	})
+	t.Run("no input for a required workspace returns the prompt failure", func(t *testing.T) {
+		noInput := errors.New("no input received")
+		failRequired := func(string) (string, error) { return "", noInput }
+		unused := func(promptText, _ string) (string, error) {
+			t.Errorf("unexpected prompt %q after the required prompt failed", promptText)
+			return "", nil
+		}
+
+		_, _, _, err := promptForLoginTargetWithPrompts(config.Config{}, unused, failRequired)
+
+		require.ErrorIs(t, err, noInput)
+	})
 }
 
 func TestValidateInteractiveLoginTargetPrompt(t *testing.T) {
@@ -558,7 +574,6 @@ func TestValidateInteractiveLoginTargetPrompt(t *testing.T) {
 }
 
 func TestLoginNonInteractiveNoTargetCommand(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name string
 		args []string
@@ -830,19 +845,19 @@ func runPromptForLoginTarget(t *testing.T, cfg config.Config, responses ...strin
 		return response
 	}
 
-	promptWithDefault := func(promptText, defaultValue string) string {
+	promptWithDefault := func(promptText, defaultValue string) (string, error) {
 		calls = append(calls, promptCall{prompt: promptText, defaultValue: defaultValue})
 		response := nextResponse()
 		if response == "" {
-			return defaultValue
+			return defaultValue, nil
 		}
-		return response
+		return response, nil
 	}
-	promptRequired := func(promptText string) string {
+	promptRequired := func(promptText string) (string, error) {
 		calls = append(calls, promptCall{prompt: promptText, required: true})
 		response := nextResponse()
 		require.NotEmpty(t, response, "fake required prompt response cannot be empty")
-		return response
+		return response, nil
 	}
 
 	workspaceURL, workspaceName, baseDomain, err = promptForLoginTargetWithPrompts(cfg, promptWithDefault, promptRequired)
@@ -854,25 +869,38 @@ func runLoginCommandHelper(t *testing.T, args []string) (stdout, stderr string, 
 	t.Helper()
 
 	home := t.TempDir()
+	t.Setenv(homeEnvVar(), home)
 	writeLoginCommandTestConfig(t, home)
 
-	return runHelperProcess(t, "TestLoginCommandHelperProcess", "login-helper", args,
-		"GO_WANT_LOGIN_HELPER=1",
-		homeEnvVar()+"="+home,
-	)
-}
+	token := ""
+	noBrowserValue := false
+	for i, arg := range args {
+		switch arg {
+		case "-t", "--token":
+			if i+1 < len(args) {
+				token = args[i+1]
+			}
+		case "--no-browser":
+			noBrowserValue = true
+		}
+	}
+	loginCmd := newLoginCmd(client.NewAlpaconAPIClient, utils.Stdio)
+	require.NoError(t, loginCmd.Flags().Set("token", token))
+	require.NoError(t, loginCmd.Flags().Set("no-browser", fmt.Sprintf("%t", noBrowserValue)))
 
-func TestLoginCommandHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_LOGIN_HELPER") != "1" {
-		return
+	var runErr error
+	stdout, stderr = testutil.CaptureOutput(t, func() {
+		runErr = loginCmd.RunE(loginCmd, nil)
+		if exitErr, ok := errors.AsType[*utils.ExitError](runErr); ok {
+			utils.FprintExitError(os.Stderr, exitErr)
+		}
+	})
+	if runErr == nil {
+		return stdout, stderr, 0
 	}
-	args, ok := helperArgsAfter(os.Args, "login-helper")
-	if !ok {
-		os.Exit(99)
-	}
-	os.Args = append([]string{"alpacon"}, args...)
-	Execute()
-	os.Exit(0)
+	exitErr, ok := errors.AsType[*utils.ExitError](runErr)
+	require.True(t, ok)
+	return stdout, stderr, exitErr.Code
 }
 
 func writeLoginCommandTestConfig(t *testing.T, home string) {
@@ -964,7 +992,7 @@ func TestPersistWorkspaceEnv(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	require.NoError(t, config.CreateConfig("https://ws.example.com", "ws", "token", "", "", "", "", 0, false))
 
-	persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
+	persistWorkspaceEnv(utils.Stdio, "https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "frozen", cfg.SchemaName)
@@ -972,7 +1000,7 @@ func TestPersistWorkspaceEnv(t *testing.T) {
 	assert.Equal(t, "token", cfg.Token)
 
 	// A server that stops reporting either keeps the schema name and turns the surface back off.
-	persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{})
+	persistWorkspaceEnv(utils.Stdio, "https://ws.example.com", &auth0.AuthEnvResponse{})
 	cfg, err = config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "frozen", cfg.SchemaName)
@@ -982,9 +1010,9 @@ func TestPersistWorkspaceEnv(t *testing.T) {
 func TestPersistWorkspaceEnv_WarnsWithoutConfig(t *testing.T) {
 	setTestHome(t, t.TempDir())
 
-	_, stderr := testutil.CaptureOutput(t, func() {
-		persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
-	})
+	ios, _, errOut := utils.TestIOStreams()
+	persistWorkspaceEnv(ios, "https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
+	stderr := errOut.String()
 
 	assert.Contains(t, stderr, "Could not save the workspace identity and Kubernetes support")
 }
@@ -994,9 +1022,9 @@ func TestPersistWorkspaceEnv_SkipsAnotherWorkspace(t *testing.T) {
 	// Another shell's login replaced the config while this login was in flight.
 	require.NoError(t, config.CreateConfig("https://other.example.com", "other", "token", "", "", "", "", 0, false))
 
-	_, stderr := testutil.CaptureOutput(t, func() {
-		persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
-	})
+	ios, _, errOut := utils.TestIOStreams()
+	persistWorkspaceEnv(ios, "https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
+	stderr := errOut.String()
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
@@ -1045,9 +1073,7 @@ func TestIsWorkspaceNotFound_DecidesOnTheStatusNotTheText(t *testing.T) {
 	t.Parallel()
 	notFound := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(notFound.Close)
-	closed := httptest.NewServer(http.NotFoundHandler())
-	unreachable := closed.URL + "/team404"
-	closed.Close()
+	unreachable := testutil.NewDroppingServer(t).URL + "/team404"
 	tests := []struct {
 		name string
 		url  string
@@ -1066,6 +1092,67 @@ func TestIsWorkspaceNotFound_DecidesOnTheStatusNotTheText(t *testing.T) {
 			got := isWorkspaceNotFound(err)
 
 			assert.Equal(t, tt.want, got, "error: %q", err.Error())
+		})
+	}
+}
+
+// Serial: reassigns the promptPassword seam.
+func TestPromptForCredentialsReturnsPasswordPromptFailure(t *testing.T) {
+	saved := promptPassword
+	t.Cleanup(func() { promptPassword = saved })
+	interrupted := utils.NewSilentExitError(utils.ExitCodeGeneralError)
+	promptPassword = func(string) (string, error) { return "", interrupted }
+
+	username, password, err := promptForCredentials("alice", "")
+
+	assert.Same(t, interrupted, err)
+	assert.Empty(t, username)
+	assert.Empty(t, password)
+}
+
+// Serial: reassigns the promptPassword seam.
+func TestPromptForCredentialsReturnsTypedPassword(t *testing.T) {
+	saved := promptPassword
+	t.Cleanup(func() { promptPassword = saved })
+	promptPassword = func(string) (string, error) { return "pw", nil }
+
+	username, password, err := promptForCredentials("alice", "")
+
+	require.NoError(t, err)
+	assert.Equal(t, "alice", username)
+	assert.Equal(t, "pw", password)
+}
+
+// Serial: it sets HOME and captures stdout and stderr.
+func TestLoginVerifiesTheLoginThroughTheFactory(t *testing.T) {
+	tests := []struct {
+		name        string
+		noClient    bool
+		wantCode    int
+		wantStderr  string
+		wantWhoamis int
+	}{
+		{name: "verified", wantStderr: "Login succeeded!", wantWhoamis: 1},
+		{name: "client cannot be built", noClient: true, wantCode: utils.ExitCodeGeneralError, wantStderr: "Connection to Alpacon API failed: not logged in"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(homeEnvVar(), t.TempDir())
+			ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+				"GET /api/auth/env/":    {Status: http.StatusOK, Body: `{"auth0": {"method": "legacy"}}`},
+				"GET /api/status/":      {Status: http.StatusOK, Body: `{}`},
+				"GET /api/auth/whoami/": {Status: http.StatusOK, Body: `{"principal_type": "user"}`},
+			})
+			newClient := ts.Factory()
+			if tt.noClient {
+				newClient = cmdtest.NoClient
+			}
+
+			_, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return newLoginCmd(newClient, ios) }, ts.URL, "-t", "api-token")
+
+			assert.Equal(t, tt.wantCode, code, stderr)
+			assert.Contains(t, stderr, tt.wantStderr)
+			assert.Equal(t, tt.wantWhoamis, ts.Hits("GET /api/auth/whoami/"))
 		})
 	}
 }

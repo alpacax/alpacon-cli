@@ -3,107 +3,104 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
-	"github.com/alpacax/alpacon-cli/client"
 	wscmd "github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var whoamiCmd = &cobra.Command{
-	Use:   "whoami",
-	Short: "Display current authenticated identity",
-	Long: `Display the current authenticated identity, workspace, system user info,
+func newWhoamiCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	return &cobra.Command{
+		Use:   "whoami",
+		Short: "Display current authenticated identity",
+		Long: `Display the current authenticated identity, workspace, system user info,
 and permissions. Useful for verifying context before running infrastructure
 commands, especially for AI agents and operators managing multiple workspaces.`,
-	Example: `  alpacon whoami
+		Example: `  alpacon whoami
   alpacon whoami --output json`,
-	Run: func(cmd *cobra.Command, args []string) {
-		cfg, err := config.LoadConfig()
-		if err != nil {
-			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' to authenticate.")
-		}
-
-		worksessionRequired := isWorksessionRequired(cfg)
-		output := whoamiOutput{
-			WorkspaceName:                cfg.WorkspaceName,
-			WorkspaceURL:                 cfg.WorkspaceURL,
-			AuthMethod:                   config.GetAuthMethod(cfg),
-			AuthClassification:           getAuthClassification(cfg),
-			ExpiresAt:                    getExpiresAt(cfg),
-			WorksessionRequired:          worksessionRequired,
-			WorksessionRequiredForAccess: worksessionRequired,
-		}
-
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliWarning("Could not create authenticated API client: %s", err)
-			utils.CliWarning("Showing local config only. Server fields are unavailable.")
-			warnIfExpiringSoon(cfg)
-			printWhoami(output)
-			return
-		}
-
-		// Only a service token can be an application principal. It has no user profile,
-		// so identity comes from whoami and the user-only IAM endpoint is skipped.
-		if config.IsServiceToken(cfg.Token) {
-			who, whoErr := auth.GetWhoami(ac)
-			switch {
-			case whoErr != nil:
-				utils.CliWarning("Could not fetch application identity: %s", whoErr)
-			case who.PrincipalType == auth.PrincipalTypeApplication:
-				output = applyApplicationPrincipal(output, who)
-			default:
-				utils.CliWarning("Unexpected principal type %q for service token.", who.PrincipalType)
+		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.LoadConfig()
+			if err != nil {
+				return utils.NewExitError("Not logged in. Run 'alpacon login' to authenticate.")
 			}
-			warnIfExpiringSoon(cfg)
-			printWhoami(output)
-			return
-		}
 
-		user, err := iam.GetCurrentUser(ac)
-		if err != nil {
-			utils.CliWarning("Could not fetch user info: %s", err)
-			warnIfExpiringSoon(cfg)
-			printWhoami(output)
-			return
-		}
-
-		output.Username = user.Username
-		output.Email = user.Email
-		output.Phone = user.Phone
-		output.UID = user.UID
-		output.Shell = user.Shell
-		output.HomeDirectory = user.HomeDirectory
-		output.Role = getRole(user.IsStaff, user.IsSuperuser)
-
-		groups, err := iam.GetUserMemberships(ac, user.ID)
-		if err != nil {
-			utils.CliWarning("Could not fetch group memberships: %s", err)
-		} else {
-			output.Groups = groups
-		}
-
-		if output.WorksessionRequired {
-			_, ws, wsErr := wscmd.RunCurrent(ac)
-			if wsErr != nil {
-				utils.CliWarning("Could not fetch active work-session: %s", wsErr)
-			} else if ws != nil {
-				// normalized() mirrors this into ActiveWorksessionCanonical.
-				output.ActiveWorksession = summarizeWorkSession(ws)
+			worksessionRequired := isWorksessionRequired(cfg)
+			output := whoamiOutput{
+				WorkspaceName:                cfg.WorkspaceName,
+				WorkspaceURL:                 cfg.WorkspaceURL,
+				AuthMethod:                   config.GetAuthMethod(cfg),
+				AuthClassification:           getAuthClassification(cfg),
+				ExpiresAt:                    getExpiresAt(cfg),
+				WorksessionRequired:          worksessionRequired,
+				WorksessionRequiredForAccess: worksessionRequired,
 			}
-		}
 
-		warnIfExpiringSoon(cfg)
-		printWhoami(output)
-	},
+			ac, err := newClient()
+			if err != nil {
+				ios.Warning("Could not create authenticated API client: %s", err)
+				ios.Warning("Showing local config only. Server fields are unavailable.")
+				warnIfExpiringSoon(ios, cfg)
+				return printWhoami(ios, output)
+			}
+
+			// Only a service token can be an application principal. It has no user profile,
+			// so identity comes from whoami and the user-only IAM endpoint is skipped.
+			if config.IsServiceToken(cfg.Token) {
+				who, whoErr := auth.GetWhoami(ac)
+				switch {
+				case whoErr != nil:
+					ios.Warning("Could not fetch application identity: %s", whoErr)
+				case who.PrincipalType == auth.PrincipalTypeApplication:
+					output = applyApplicationPrincipal(output, who)
+				default:
+					ios.Warning("Unexpected principal type %q for service token.", who.PrincipalType)
+				}
+				warnIfExpiringSoon(ios, cfg)
+				return printWhoami(ios, output)
+			}
+
+			user, err := iam.GetCurrentUser(ac)
+			if err != nil {
+				ios.Warning("Could not fetch user info: %s", err)
+				warnIfExpiringSoon(ios, cfg)
+				return printWhoami(ios, output)
+			}
+
+			output.Username = user.Username
+			output.Email = user.Email
+			output.Phone = user.Phone
+			output.UID = user.UID
+			output.Shell = user.Shell
+			output.HomeDirectory = user.HomeDirectory
+			output.Role = getRole(user.IsStaff, user.IsSuperuser)
+
+			groups, err := iam.GetUserMemberships(ac, user.ID)
+			if err != nil {
+				ios.Warning("Could not fetch group memberships: %s", err)
+			} else {
+				output.Groups = groups
+			}
+
+			if output.WorksessionRequired {
+				_, ws, wsErr := wscmd.RunCurrent(ac)
+				if wsErr != nil {
+					ios.Warning("Could not fetch active work-session: %s", wsErr)
+				} else if ws != nil {
+					// normalized() mirrors this into ActiveWorksessionCanonical.
+					output.ActiveWorksession = summarizeWorkSession(ws)
+				}
+			}
+
+			warnIfExpiringSoon(ios, cfg)
+			return printWhoami(ios, output)
+		}),
+	}
 }
 
 // summarizeWorkSession is what whoami reports of the work session in use.
@@ -113,12 +110,14 @@ func summarizeWorkSession(ws *wsapi.WorkSession) *activeWorkSessionSummary {
 		expiresAt = ws.ExpiresAt.UTC().Format(time.RFC3339)
 	}
 	return &activeWorkSessionSummary{
-		ID:        ws.ID,
-		Status:    ws.Status,
-		Scopes:    ws.Scopes,
-		Servers:   wsapi.ServerNames(ws),
-		Clusters:  wsapi.ClusterNames(ws),
-		ExpiresAt: expiresAt,
+		ID:             ws.ID,
+		Status:         ws.Status,
+		Scopes:         ws.Scopes,
+		Servers:        wsapi.ServerNames(ws),
+		Clusters:       wsapi.ClusterNames(ws),
+		ExpiresAt:      expiresAt,
+		ServersHidden:  ws.ServersHidden,
+		ClustersHidden: ws.ClustersHidden,
 	}
 }
 
@@ -129,6 +128,10 @@ type activeWorkSessionSummary struct {
 	Servers   []string `json:"servers"`
 	Clusters  []string `json:"clusters,omitempty"`
 	ExpiresAt string   `json:"expires_at,omitempty"`
+	// ServersHidden and ClustersHidden count the targets Servers and Clusters leave out
+	// because the caller does not reach them.
+	ServersHidden  *int `json:"servers_hidden,omitempty"`
+	ClustersHidden *int `json:"clusters_hidden,omitempty"`
 }
 
 type whoamiOutput struct {
@@ -241,7 +244,7 @@ func isWorksessionRequired(cfg config.Config) bool {
 	return method == "Browser login" || method == "Token"
 }
 
-func warnIfExpiringSoon(cfg config.Config) {
+func warnIfExpiringSoon(ios *utils.IOStreams, cfg config.Config) {
 	if !isTokenAuth(cfg) {
 		return
 	}
@@ -258,9 +261,9 @@ func warnIfExpiringSoon(cfg config.Config) {
 
 	remaining := time.Until(expireTime)
 	if remaining < 0 {
-		utils.CliWarning("Token has expired. Run 'alpacon login' to re-authenticate.")
+		ios.Warning("Token has expired. Run 'alpacon login' to re-authenticate.")
 	} else if remaining < time.Hour {
-		utils.CliWarning("Token expires in %s. Consider re-authenticating soon.", formatDuration(remaining))
+		ios.Warning("Token expires in %s. Consider re-authenticating soon.", formatDuration(remaining))
 	}
 }
 
@@ -322,15 +325,14 @@ func formatWSRequired(required bool, active *activeWorkSessionSummary) string {
 	return fmt.Sprintf("yes—active session %s (%s)", active.ID, active.Status)
 }
 
-func printWhoami(output whoamiOutput) {
-	if utils.OutputFormat == utils.OutputFormatJSON {
+func printWhoami(ios *utils.IOStreams, output whoamiOutput) error {
+	if ios.IsJSON() {
 		// MarshalJSON normalizes, so no need to pre-normalize here.
 		body, err := json.Marshal(output)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to marshal whoami: %s", err)
+			return utils.NewExitError("Failed to marshal whoami: %s", err)
 		}
-		utils.PrintJson(body)
-		return
+		return ios.PrintJson(body)
 	}
 
 	output = output.normalized()
@@ -375,6 +377,7 @@ func printWhoami(output whoamiOutput) {
 		}
 		// Application, workspace and group names are set by other people, so a
 		// control sequence here rewrites the identity lines being read.
-		fmt.Fprintf(os.Stdout, "%-*s%s\n", pad, l.label+":", utils.SanitizeTerminalText(l.value))
+		fmt.Fprintf(ios.Out, "%-*s%s\n", pad, l.label+":", utils.SanitizeTerminalText(l.value))
 	}
+	return nil
 }

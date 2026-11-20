@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -22,7 +21,7 @@ type ExitError struct {
 	cause     error
 	msg       string
 	args      []any
-	print     func(text, envelope io.Writer) // replaces the error line for a failure with its own layout
+	print     func(w io.Writer, s *IOStreams) // replaces the error line for a failure with its own layout
 }
 
 func (e *ExitError) Error() string {
@@ -52,12 +51,22 @@ func NewExitError(msg string, args ...any) error {
 	return newExitError(ExitCodeGeneralError, true, msg, args)
 }
 
-// NewExitErrorWithCode is the failure CliErrorWithExitCode reports: the given exit and no footer.
+// NewExitErrorWithCode returns a failure with the given exit code and no footer, for an expected
+// refusal scripts branch on.
 func NewExitErrorWithCode(code int, msg string, args ...any) error {
 	return newExitError(code, false, msg, args)
 }
 
-// NewSilentExitError exits with code and prints nothing, for a command that wrote its own failure line.
+// NewExitErrorWithErrorCode names the json error_code (an ErrorCode* constant); table mode follows the
+// exit code, so only exit 1 keeps the report footer.
+func NewExitErrorWithErrorCode(exitCode int, errorCode, msg string, args ...any) error {
+	e := newExitError(exitCode, exitCode == ExitCodeGeneralError, msg, args)
+	e.errorCode = errorCode
+	return e
+}
+
+// NewSilentExitError returns a failure with the given exit code that prints nothing, for a command
+// that wrote its own failure line.
 func NewSilentExitError(code int) error {
 	return &ExitError{Code: code, silent: true}
 }
@@ -106,7 +115,36 @@ func newUsageExitError(operation, msg string, args []any) *ExitError {
 // envelope under --output json.
 func PrintExitError(e *ExitError) {
 	signalExitError(e)
-	printExitError(TrackedStderr(), os.Stderr, e)
+	Stdio.PrintExitError(e)
+}
+
+// PrintExitError writes e to s.ErrOut in s's format, as cmd.Execute prints a failure.
+func (s *IOStreams) PrintExitError(e *ExitError) { s.FprintExitError(s.ErrOut, e) }
+
+// FprintExitError writes e to w in s's format.
+func (s *IOStreams) FprintExitError(w io.Writer, e *ExitError) {
+	if e.silent {
+		return
+	}
+	if e.print != nil {
+		e.print(w, s)
+		return
+	}
+	if s.IsJSON() {
+		failure := envelopeFailure(e.Code, e.errorCode, e.msg, e.args)
+		switch {
+		case e.usage:
+			failure.ErrorCode, failure.Operation, failure.Err = ErrorCodeUsage, e.operation, nil
+		case e.envelope:
+			failure = Failure{ExitCode: e.Code, Operation: e.operation, Err: e.cause, Message: failure.Message, NextActions: RefusalNextActions(refusalGuidance(e.cause, e.args))}
+		}
+		PrintJSONError(w, failure.envelope())
+		return
+	}
+	s.printCliErrorTo(w, refusalGuidance(e.cause, e.args), e.msg, e.args...)
+	if e.footer {
+		printIssueFooter(w, append([]any{e.cause}, e.args...)...)
+	}
 }
 
 // signalExitError signals what the legacy helpers signaled on the same failure: the first error under
@@ -115,7 +153,7 @@ func signalExitError(e *ExitError) {
 	if e.silent || e.print != nil {
 		return
 	}
-	if OutputFormat == OutputFormatJSON {
+	if Stdio.IsJSON() {
 		if e.envelope && e.cause != nil {
 			SignalPaused(e.cause)
 		} else if !e.usage {
@@ -127,40 +165,11 @@ func signalExitError(e *ExitError) {
 }
 
 // FprintExitError writes what PrintExitError writes to w.
-func FprintExitError(w io.Writer, e *ExitError) {
-	printExitError(w, w, e)
-}
-
-// printExitError takes two writers because the envelope starts on a fresh line only when it is
-// handed os.Stderr itself.
-func printExitError(text, envelope io.Writer, e *ExitError) {
-	if e.silent {
-		return
-	}
-	if e.print != nil {
-		e.print(text, envelope)
-		return
-	}
-	if OutputFormat == OutputFormatJSON {
-		failure := envelopeFailure(e.Code, e.errorCode, e.msg, e.args)
-		switch {
-		case e.usage:
-			failure.ErrorCode, failure.Operation, failure.Err = ErrorCodeUsage, e.operation, nil
-		case e.envelope:
-			failure = Failure{ExitCode: e.Code, Operation: e.operation, Err: e.cause, Message: failure.Message, NextActions: RefusalNextActions(refusalGuidance(e.cause, e.args))}
-		}
-		PrintJSONError(envelope, failure.envelope())
-		return
-	}
-	printCliErrorTo(text, refusalGuidance(e.cause, e.args), e.msg, e.args...)
-	if e.footer {
-		printIssueFooter(text, append([]any{e.cause}, e.args...)...)
-	}
-}
+func FprintExitError(w io.Writer, e *ExitError) { Stdio.FprintExitError(w, e) }
 
 func exitWithError(e *ExitError) {
 	PrintExitError(e)
-	os.Exit(e.Code)
+	Exit(e.Code)
 }
 
 // WithExitError wraps a RunE that returns ExitError. Cobra prints nothing for an ExitError, which

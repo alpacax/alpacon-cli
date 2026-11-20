@@ -1,20 +1,26 @@
 package packages
 
 import (
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var PackagesCmd = &cobra.Command{
-	Use:     "package",
-	Aliases: []string{"packages"},
-	Short:   "Manage system and Python packages",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return utils.RequireSubcommand(cmd)
-	},
-}
+// clientFactory builds the API client a command talks to.
+type clientFactory = func() (*client.AlpaconClient, error)
 
-func init() {
-	PackagesCmd.AddCommand(systemCmd)
-	PackagesCmd.AddCommand(pythonCmd)
+func NewPackagesCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "package",
+		Aliases: []string{"packages"},
+		Short:   "Manage system and Python packages",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return utils.RequireSubcommand(cmd)
+		},
+	}
+	cmd.AddCommand(
+		newSystemCmd(newClient, ios),
+		newPythonCmd(newClient, ios),
+	)
+	return cmd
 }

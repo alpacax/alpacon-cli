@@ -249,17 +249,20 @@ func nameOr(names map[string]string, id string) string {
 	return id
 }
 
-func formatExpiry(expiresAt *string) string {
+func formatExpiry(expiresAt *string) utils.Timestamp {
 	if expiresAt == nil || *expiresAt == "" {
-		return "never"
+		return utils.NewTimestamp(time.Time{}, "never")
 	}
 	return formatTime(*expiresAt)
 }
 
-func formatTime(value string) string {
+func formatTime(value string) utils.Timestamp {
+	if value == "" {
+		return utils.NewTimestamp(time.Time{}, "")
+	}
 	parsed, err := time.Parse(time.RFC3339, value)
 	if err != nil {
-		return value
+		return utils.ParseTimestamp(value)
 	}
-	return utils.TimeUtils(parsed)
+	return utils.RelativeTime(parsed)
 }

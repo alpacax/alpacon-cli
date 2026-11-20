@@ -93,7 +93,7 @@ func GetCSRList(ac *client.AlpaconClient, status string) ([]CSRAttributes, error
 			Status:        csr.Status,
 			RequestedIp:   csr.RequestedIp,
 			RequestedBy:   csr.RequestedBy.Name,
-			RequestedDate: utils.TimeUtils(csr.AddedAt),
+			RequestedDate: utils.RelativeTime(csr.AddedAt),
 		})
 	}
 
@@ -117,7 +117,7 @@ func GetAuthorityList(ac *client.AlpaconClient) ([]AuthorityAttributes, error) {
 			DefaultValidDays: authority.DefaultValidDays,
 			MaxValidDays:     authority.MaxValidDays,
 			Server:           authority.Agent.Name,
-			SignedAt:         utils.TimeUtils(authority.SignedAt),
+			SignedAt:         utils.RelativeTime(authority.SignedAt),
 		})
 	}
 
@@ -263,14 +263,19 @@ func GetCertificateList(ac *client.AlpaconClient) ([]CertificateAttributes, erro
 	var certList []CertificateAttributes
 	for _, cert := range certs {
 		certList = append(certList, CertificateAttributes{
-			ID:        cert.ID,
-			Authority: cert.Authority.Name,
-			Csr:       cert.Csr,
-			ValidDays: cert.ValidDays,
-			SignedAt:  utils.TimeUtils(cert.SignedAt),
-			ExpiresAt: utils.TimeUtils(cert.ExpiresAt),
-			SignedBy:  cert.SignedBy,
-			RenewedBy: cert.RenewedBy,
+			ID:           cert.ID,
+			Authority:    cert.Authority.Name,
+			CommonName:   cert.CommonName,
+			SerialNumber: cert.SerialNumber,
+			Status:       cert.Status,
+			IsRevoked:    cert.IsRevoked,
+			RevokedAt:    utils.OptionalTimestamp(cert.RevokedAt),
+			Csr:          cert.Csr,
+			ValidDays:    cert.ValidDays,
+			SignedAt:     utils.RelativeTime(cert.SignedAt),
+			ExpiresAt:    utils.RelativeTime(cert.ExpiresAt),
+			SignedBy:     cert.SignedBy,
+			RenewedBy:    cert.RenewedBy,
 		})
 	}
 

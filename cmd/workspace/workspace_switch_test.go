@@ -13,8 +13,10 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api/workspace"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,10 +48,9 @@ func TestFetchKubernetesSurface(t *testing.T) {
 			}))
 			defer ts.Close()
 
-			var got bool
-			_, stderr := testutil.CaptureOutput(t, func() {
-				got = fetchKubernetesSurface(ts.URL, "next", false)
-			})
+			ios, _, errOut := utils.TestIOStreams()
+			got := fetchKubernetesSurface(ios, ts.URL, "next", false)
+			stderr := errOut.String()
 
 			assert.Equal(t, tt.expected, got)
 			if tt.expectWarning != "" {
@@ -322,8 +323,9 @@ func TestRenewWorkspaceClaimClassifiesTheServersAnswer(t *testing.T) {
 	}
 }
 
-// Serial: sets HOME, swaps os.Stderr and runs a package-level command.
+// Serial: sets HOME and swaps os.Stderr.
 func TestWorkspaceSwitch_ToTheCurrentWorkspaceSucceedsWithANotice(t *testing.T) {
+	workspaceSwitchCmd := newWorkspaceSwitchCmd(client.NewAlpaconAPIClient, utils.Stdio)
 	t.Setenv("HOME", t.TempDir())
 	require.NoError(t, config.CreateConfig("https://prev.us1.alpacon.io", "prev", "", "", "access-token", "refresh-token", "alpacon.io", 3600, false))
 

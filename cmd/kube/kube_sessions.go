@@ -13,7 +13,7 @@ import (
 
 const opKubeSessions = "kube_sessions"
 
-func newKubeSessionsCmd(newClient clientFactory) *cobra.Command {
+func newKubeSessionsCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	var (
 		clusterFlag string
 		all         bool
@@ -26,7 +26,18 @@ cluster you manage, everyone's, which is why each row names its user. Use --all
 to include closed sessions.
 
 A session reads as open until the server closes it, which can be a few minutes
-after its token has expired.`,
+after its token has expired.
+
+The kind column says what the session was used for: api when it opened no
+exec, attach or port-forward stream, otherwise the kind of its newest stream
+(exec, attach or port_forward), or unknown when the server has not recorded
+that kind.
+
+The external grants column marks a session that opened even though its
+cluster grants sessions more than Alpacon does through RBAC bindings made
+outside Alpacon: it counts those grants, cluster-wide and namespaced, with a
+"+" when the cluster's check did not finish, or reads unknown when the server's
+counts cannot be read.`,
 		Example: `  alpacon kube sessions
   alpacon kube sessions --cluster prod-east
   alpacon kube sessions --all --output json`,
@@ -42,7 +53,7 @@ after its token has expired.`,
 				return utils.NewEnvelopeExitError(opKubeSessions, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
 
-			rows, err := listKubeSessions(ac, cluster, all)
+			rows, err := listKubeSessions(ios, ac, cluster, all)
 			if err != nil {
 				// Both lists answer 404 only when the surface is off. A named exit code keeps that
 				// expected refusal free of the "report an issue" footer.
@@ -55,8 +66,7 @@ after its token has expired.`,
 				return utils.NewEnvelopeExitError(opKubeSessions, err, "Failed to retrieve the kube sessions: %s.", err)
 			}
 
-			utils.PrintTable(rows)
-			return nil
+			return ios.PrintTable(rows)
 		}),
 	}
 	cmd.Flags().StringVar(&clusterFlag, "cluster", "", "only sessions on this cluster")
@@ -68,7 +78,7 @@ after its token has expired.`,
 // so the filtering stays on the server. The session list names clusters by ID
 // alone, so without --cluster the names come from one read of the cluster list;
 // if that fails the rows show the IDs.
-func listKubeSessions(ac *client.AlpaconClient, cluster string, all bool) ([]kubernetes.KubeSessionAttributes, error) {
+func listKubeSessions(ios *utils.IOStreams, ac *client.AlpaconClient, cluster string, all bool) ([]kubernetes.KubeSessionAttributes, error) {
 	status := kubernetes.SessionStatusOpen
 	if all {
 		status = ""
@@ -93,7 +103,7 @@ func listKubeSessions(ac *client.AlpaconClient, cluster string, all bool) ([]kub
 	if cluster == "" && len(sessions) > 0 {
 		found, err := kubernetes.GetClusterNames(ac)
 		if err != nil {
-			utils.CliWarning("Could not resolve cluster names; showing IDs instead: %s", err)
+			ios.Warning("Could not resolve cluster names; showing IDs instead: %s", err)
 		}
 		names = found
 	}
