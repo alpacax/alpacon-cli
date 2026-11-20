@@ -128,6 +128,8 @@ PSScriptAnalyzerSettings.psd1  # Lint rules for the installer
 
 ## Code style guidelines
 
+Function doc comments state the operation before explaining parameters or return values.
+
 ### CLI usage string convention
 
 All Cobra command `Use` fields must follow POSIX/Cobra conventions:
