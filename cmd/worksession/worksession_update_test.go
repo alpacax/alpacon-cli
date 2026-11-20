@@ -11,6 +11,7 @@ import (
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -106,7 +107,7 @@ func TestApplyWorkSessionUpdate_PreservesExistingSudoPolicies(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	_, err := applyWorkSessionUpdate(ac, "ses-1", wsapi.WorkSessionUpdateRequest{}, []wsapi.SudoPolicyInline{
 		{Commands: []string{"systemctl reload nginx"}, SessionAuthorized: true},
-	})
+	}, utils.Stdio)
 	require.NoError(t, err)
 	assert.True(t, patchCalled, "PATCH must be issued")
 	assert.Len(t, gotPATCH.SudoPolicies, 2)
@@ -134,7 +135,7 @@ func TestApplyWorkSessionUpdate_PendingSessionAbortsBeforePATCH(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	_, err := applyWorkSessionUpdate(ac, "ses-pending", wsapi.WorkSessionUpdateRequest{},
-		[]wsapi.SudoPolicyInline{{Commands: []string{"x"}, SessionAuthorized: true}})
+		[]wsapi.SudoPolicyInline{{Commands: []string{"x"}, SessionAuthorized: true}}, utils.Stdio)
 	require.Error(t, err)
 	assert.False(t, patchCalled, "PATCH must not be issued when the validator rejects")
 }
@@ -164,7 +165,7 @@ func TestApplyWorkSessionUpdate_FieldsOnlySkipsGet(t *testing.T) {
 	_, err := applyWorkSessionUpdate(ac, "ses-1", wsapi.WorkSessionUpdateRequest{
 		Title:   "deploy v2",
 		Servers: []string{"srv-1", "srv-2"},
-	}, nil)
+	}, nil, utils.Stdio)
 	require.NoError(t, err)
 	assert.False(t, getCalled, "no GET should be issued when sudo is not touched")
 	assert.True(t, patchCalled)
@@ -294,7 +295,7 @@ func TestApplyWorkSessionUpdate_TimeFields(t *testing.T) {
 			defer ts.Close()
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			_, err := applyWorkSessionUpdate(ac, "ses-1", tt.req, nil)
+			_, err := applyWorkSessionUpdate(ac, "ses-1", tt.req, nil, utils.Stdio)
 
 			assert.Equal(t, tt.wantPatch, patchCalled)
 			if len(tt.wantErr) == 0 {
@@ -335,7 +336,7 @@ func TestApplyWorkSessionUpdate_SudoPlusFields(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	_, err := applyWorkSessionUpdate(ac, "ses-1",
 		wsapi.WorkSessionUpdateRequest{Description: "rollout"},
-		[]wsapi.SudoPolicyInline{{Commands: []string{"systemctl reload nginx"}, SessionAuthorized: true}})
+		[]wsapi.SudoPolicyInline{{Commands: []string{"systemctl reload nginx"}, SessionAuthorized: true}}, utils.Stdio)
 	require.NoError(t, err)
 	assert.Equal(t, "rollout", gotPATCH.Description)
 	assert.Len(t, gotPATCH.SudoPolicies, 1)

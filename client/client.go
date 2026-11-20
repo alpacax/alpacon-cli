@@ -985,16 +985,22 @@ func (ac *AlpaconClient) SendDeleteRequestWithBody(url string, body any) ([]byte
 }
 
 func (ac *AlpaconClient) SendPatchRequest(url string, body any) ([]byte, error) {
+	response, _, err := ac.SendPatchRequestWithStatus(url, body)
+	return response, err
+}
+
+// SendPatchRequestWithStatus exposes the difference between an applied and a queued change.
+func (ac *AlpaconClient) SendPatchRequestWithStatus(url string, body any) ([]byte, int, error) {
 	jsonValue, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	req, err := ac.createRequest(http.MethodPatch, url, bytes.NewBuffer(jsonValue))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return ac.sendRequest(req)
+	return ac.sendRequestWithStatus(req)
 }
 
 func (ac *AlpaconClient) SendMultipartStreamRequest(url, contentType string, body io.Reader, contentLength int64) ([]byte, error) {

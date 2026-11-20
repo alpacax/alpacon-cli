@@ -158,6 +158,7 @@ func FormatDuration(d time.Duration) string {
 }
 
 func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (*WorkSession, error) {
+	req.SudoPolicies = sudoPoliciesForRequest(req.SudoPolicies)
 	body, err := ac.SendPostRequest(workSessionURL, req)
 	if err != nil {
 		return nil, err
@@ -177,19 +178,27 @@ func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (
 // UpdateWorkSession PATCHes a work session. The server may queue the change for approval, in
 // which case it takes effect only once approved.
 func UpdateWorkSession(ac *client.AlpaconClient, id string, req WorkSessionUpdateRequest) (*WorkSession, error) {
+	session, _, err := UpdateWorkSessionWithStatus(ac, id, req)
+	return session, err
+}
+
+// UpdateWorkSessionWithStatus returns the status of this PATCH. A 200 can still include a pending
+// modification from an earlier request.
+func UpdateWorkSessionWithStatus(ac *client.AlpaconClient, id string, req WorkSessionUpdateRequest) (*WorkSession, int, error) {
 	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	body, err := ac.SendPatchRequest(api.IDURL(workSessionURL, pathID, "", nil), req)
+	req.SudoPolicies = sudoPoliciesForRequest(req.SudoPolicies)
+	body, status, err := ac.SendPatchRequestWithStatus(api.IDURL(workSessionURL, pathID, "", nil), req)
 	if err != nil {
-		return nil, err
+		return nil, status, err
 	}
 	var session WorkSession
 	if err = json.Unmarshal(body, &session); err != nil {
-		return nil, err
+		return nil, status, err
 	}
-	return &session, nil
+	return &session, status, nil
 }
 
 func GetWorkSession(ac *client.AlpaconClient, id string) (*WorkSession, error) {

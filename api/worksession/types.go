@@ -40,19 +40,20 @@ type WorkSession struct {
 	// targets either servers or a cluster, never both.
 	Clusters []types.ClusterSummary `json:"clusters"`
 	// ClustersHidden counts the clusters left out of Clusters, as ServersHidden does for servers.
-	ClustersHidden    *int               `json:"clusters_hidden,omitempty"`
-	CreatedBy         *types.UserSummary `json:"created_by"`
-	AssignedUser      *types.UserSummary `json:"assigned_user"`
-	ApprovalRequestID string             `json:"approval_request_id"`
-	StartsAt          *time.Time         `json:"starts_at"`
-	ExpiresAt         time.Time          `json:"expires_at"`
-	StartedAt         *time.Time         `json:"started_at"`
-	CompletedAt       *time.Time         `json:"completed_at"`
-	AddedAt           time.Time          `json:"added_at"`
-	UpdatedAt         time.Time          `json:"updated_at"`
-	SudoPolicies      []SudoPolicyInline `json:"sudo_policies"`
-	Adjustments       *Adjustments       `json:"adjustments"`
-	Recommendations   []Recommendation   `json:"recommendations"`
+	ClustersHidden       *int               `json:"clusters_hidden,omitempty"`
+	CreatedBy            *types.UserSummary `json:"created_by"`
+	AssignedUser         *types.UserSummary `json:"assigned_user"`
+	ApprovalRequestID    string             `json:"approval_request_id"`
+	StartsAt             *time.Time         `json:"starts_at"`
+	ExpiresAt            time.Time          `json:"expires_at"`
+	StartedAt            *time.Time         `json:"started_at"`
+	CompletedAt          *time.Time         `json:"completed_at"`
+	AddedAt              time.Time          `json:"added_at"`
+	UpdatedAt            time.Time          `json:"updated_at"`
+	SudoPolicies         []SudoPolicyInline `json:"sudo_policies"`
+	ProposedSudoPolicies []SudoPolicyInline `json:"proposed_sudo_policies,omitempty"`
+	Adjustments          *Adjustments       `json:"adjustments"`
+	Recommendations      []Recommendation   `json:"recommendations"`
 
 	// PendingExtensionRequest is the open extension request, nil when there is none. 'extend'
 	// answers 202 with it set when the workspace's approval policy holds the request, and later
@@ -168,10 +169,11 @@ type WorkSessionCreateRequest struct {
 // ID is set only on read and on update. An update's sudo_policies is the full desired set: send
 // existing policies back with their ID and new ones without, since a policy left out is deleted.
 type SudoPolicyInline struct {
-	ID                string   `json:"id,omitempty"`
-	Commands          []string `json:"commands"`
-	Reason            string   `json:"reason,omitempty"`
-	SessionAuthorized bool     `json:"session_authorized"`
+	ID                string    `json:"id,omitempty"`
+	Commands          []string  `json:"commands"`
+	Reason            string    `json:"reason,omitempty"`
+	SessionAuthorized bool      `json:"session_authorized"`
+	BroadPatterns     *[]string `json:"broad_patterns,omitempty"` // Read-only classification from the server.
 }
 
 // MarshalJSON sends both names so older servers receive the same policy.
@@ -201,6 +203,15 @@ func (p *SudoPolicyInline) UnmarshalJSON(data []byte) error {
 		return json.Unmarshal(wire.AllowBypassMFA, &p.SessionAuthorized)
 	}
 	return nil
+}
+
+// sudoPoliciesForRequest drops response-only data without modifying the caller's policies.
+func sudoPoliciesForRequest(policies []SudoPolicyInline) []SudoPolicyInline {
+	policies = slices.Clone(policies)
+	for i := range policies {
+		policies[i].BroadPatterns = nil
+	}
+	return policies
 }
 
 // WorkSessionUpdateRequest is a partial update: omitempty leaves unset fields untouched.
