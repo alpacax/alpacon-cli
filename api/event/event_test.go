@@ -469,7 +469,7 @@ func TestApprovalTimeoutDoesNotReportAnotherStatusAsPending(t *testing.T) {
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 			err := runCommandFallbackWithin(ac, testPathID(t, "cmd-uuid"), io.Discard, time.Millisecond, time.Millisecond, true, errors.New("stream unavailable"))
 			var pending *PendingApprovalError
-			assert.Error(t, err)
+			require.Error(t, err)
 			assert.NotErrorAs(t, err, &pending)
 		})
 	}
