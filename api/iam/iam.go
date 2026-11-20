@@ -158,13 +158,17 @@ func CreateGroup(ac *client.AlpaconClient, groupRequest GroupCreateRequest) erro
 	return nil
 }
 
-func DeleteUser(ac *client.AlpaconClient, userName string) error {
+func DeleteUser(ac *client.AlpaconClient, userName string, archiveHome bool) error {
 	pathID, err := userPathIDByName(ac, userName)
 	if err != nil {
 		return err
 	}
 
-	_, err = ac.SendDeleteRequest(api.IDURL(userURL, pathID, "", nil))
+	var params map[string]string
+	if archiveHome {
+		params = map[string]string{"archive_home": "true"}
+	}
+	_, err = ac.SendDeleteRequest(api.IDURL(userURL, pathID, "", params))
 	if err != nil {
 		return err
 	}

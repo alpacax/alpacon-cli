@@ -437,11 +437,14 @@ When an agent is detected, `work-session create` opens an agent session. `--requ
 ```bash
 $ alpacon user ls
 $ alpacon user describe <username>
-$ alpacon user create / update / rm
+$ alpacon user create / update
+$ alpacon user delete <username> --archive-home
 $ alpacon group ls
 $ alpacon group member add --group <group> -u <user> --role <role>
 $ alpacon group member rm --group <group> -u <user>
 ```
+
+On supported servers and agents, `alpacon user delete <username>` keeps the home directory in place by default. Use `--archive-home` to request moving it to `/home/deleted_users/`, for example when someone else may reuse the username. Apps or services that rely on files in the home directory may stop working after the move. Use `-y` to skip confirmation.
 
 ### Workspace roles
 RBAC roles are the single source of truth for what an account is and may do. Granting `admin` is what makes someone a workspace administrator, and granting `superuser` is what makes someone a platform operator—the `is_staff` and `is_superuser` fields on a user are read-only projections of those roles, so editing them in `alpacon user update` does nothing and the command says so.
