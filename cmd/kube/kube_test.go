@@ -107,36 +107,51 @@ func clusterWithRBACDrift(state string) namedCluster {
 	return namedCluster{name: prod.name, body: fmt.Sprintf(`%s,"rbac_drift":%q}`, strings.TrimSuffix(prod.body, "}"), state)}
 }
 
-func TestKubeListRBACDrift(t *testing.T) {
+// rbacDriftStates are the cluster rbac_drift values the list and describe
+// tests cover: the three the server sends, a field an older server leaves
+// out, and a value this build does not know, which is shown as sent.
+var rbacDriftStates = []struct{ name, state, json string }{
+	{name: "unverified", state: "unverified", json: `"unverified"`},
+	{name: "clear", state: "clear", json: `"clear"`},
+	{name: "degraded", state: "degraded", json: `"degraded"`},
+	{name: "missing", json: "null"},
+	{name: "future value", state: "new-state", json: `"new-state"`},
+}
+
+func TestKubeListRBACDriftTable(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name  string
-		state string
-		json  string
-	}{
-		{name: "unverified", state: "unverified", json: `"unverified"`},
-		{name: "clear", state: "clear", json: `"clear"`},
-		{name: "degraded", state: "degraded", json: `"degraded"`},
-		{name: "missing", json: "null"},
-		{name: "future value", state: "new-state", json: `"new-state"`},
-	}
-	for _, tt := range tests {
+	for _, tt := range rbacDriftStates {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			f := &fakeServer{clusters: []namedCluster{clusterWithRBACDrift(tt.state), fresh}}
 			ts := httptest.NewServer(f.handler(t))
 			defer ts.Close()
-			build := func(ios *utils.IOStreams) *cobra.Command {
-				return NewKubeCmd(apiClientTo(ts), ios)
-			}
 
-			stdout, stderr, code := cmdtest.RunCaptured(build, "ls")
+			stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
+				return NewKubeCmd(apiClientTo(ts), ios)
+			}, "ls")
+
 			require.Equal(t, 0, code, stderr)
 			assert.Regexp(t, `NAME\s+PROVIDER\s+KUBE VERSION\s+NODES\s+CONNECTED\s+ENABLED\s+RBAC DRIFT\s+AGENT VERSION`, stdout)
 			assert.Regexp(t, `(?m)^prod-east +eks +v1\.31\.2 +3 +true +true +`+tt.state+` *0\.1\.0$`, stdout)
 			assert.Regexp(t, `fresh\s+unknown\s+false\s+true`, stdout)
+		})
+	}
+}
 
-			stdout, stderr, code = cmdtest.RunJSON(build, "ls")
+func TestKubeListRBACDriftJSON(t *testing.T) {
+	t.Parallel()
+	for _, tt := range rbacDriftStates {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeServer{clusters: []namedCluster{clusterWithRBACDrift(tt.state), fresh}}
+			ts := httptest.NewServer(f.handler(t))
+			defer ts.Close()
+
+			stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command {
+				return NewKubeCmd(apiClientTo(ts), ios)
+			}, "ls")
+
 			require.Equal(t, 0, code, stderr)
 			assert.JSONEq(t, fmt.Sprintf(`[
 				{"name":"prod-east","provider":"eks","kube_version":"v1.31.2","node_count":3,"connected":true,"enabled":true,"rbac_drift":%s,"agent_version":"0.1.0"},
@@ -183,14 +198,7 @@ func TestKubeDescribePrintsRows(t *testing.T) {
 
 func TestKubeDescribeRBACDrift(t *testing.T) {
 	t.Parallel()
-	tests := []struct{ name, state string }{
-		{name: "unverified", state: "unverified"},
-		{name: "clear", state: "clear"},
-		{name: "degraded", state: "degraded"},
-		{name: "missing"},
-		{name: "future value", state: "new-state"},
-	}
-	for _, tt := range tests {
+	for _, tt := range rbacDriftStates {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			f := &fakeServer{clusters: []namedCluster{prod}, detail: clusterWithRBACDrift(tt.state).body}

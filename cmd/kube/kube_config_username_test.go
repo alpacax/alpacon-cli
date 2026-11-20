@@ -15,6 +15,7 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
+	"github.com/alpacax/alpacon-cli/pkg/kubeconfig"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -98,7 +99,7 @@ func TestOpenKubeConfigUsernameRecovery(t *testing.T) {
 		{name: "username setup refused on an older server", refusals: []string{utils.KubeSessionPrincipalNotSupported},
 			account: `{"username":null}`, reads: 1, prompts: 1, creates: 1, setRefusal: "approval_superuser_approve_required",
 			wantRefusal: utils.KubeSessionPrincipalNotSupported, wantCode: "approval_superuser_approve_required"},
-		{name: "interrupt during username setup", refusals: []string{utils.UsernameRequired},
+		{name: "interrupt after the username is set", refusals: []string{utils.UsernameRequired},
 			prompts: 1, creates: 1, interrupt: true},
 	}
 	for _, tt := range tests {
@@ -148,8 +149,7 @@ func TestOpenKubeConfigUsernameRecovery(t *testing.T) {
 					assert.Equal(t, wantCode, utils.ClassifyError(kubeConfigError(err, "prod-east", "")))
 					if tt.wantRefusal == utils.KubeSessionPrincipalNotSupported && tt.setRefusal == "" {
 						message := kubeConfigError(err, "prod-east", "").Error()
-						assert.Contains(t, message, "this account's IAM username cannot be used as a kube session's identity")
-						assert.Contains(t, message, "be at most 150 characters")
+						assert.Contains(t, message, "this account's username cannot be used as a kube session's identity: it is unset, or it is one the server refuses")
 					}
 				default:
 					require.NoError(t, err)
@@ -223,4 +223,42 @@ func TestKubeUsernameRequiredNonInteractive(t *testing.T) {
 			assert.NoFileExists(t, path)
 		})
 	}
+}
+
+// If another program takes the kubeconfig lock while the username prompt
+// waits and keeps it past the wait for it, the session opened after the
+// prompt is closed, since its token could not be written.
+// Serial: swaps the username prompt.
+func TestOpenKubeConfigClosesTheSessionWhenTheLockIsTakenDuringTheUsernamePrompt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	srv := &usernameServer{sessionServer: newSessionServer()}
+	srv.createRefusals = []string{utils.UsernameRequired}
+	ac := &client.AlpaconClient{
+		HTTPClient:    testutil.HandlerClient(srv.handler(t)),
+		BaseURL:       testutil.StubBaseURL,
+		WorkspaceName: "my-workspace",
+	}
+	oldPrompt := handleKubeUsernameRequired
+	t.Cleanup(func() { handleKubeUsernameRequired = oldPrompt })
+	handleKubeUsernameRequired = func(ac *client.AlpaconClient, _ func() bool) (*iam.SetUsernameResponse, error) {
+		if err := os.WriteFile(path+".lock", nil, 0o600); err != nil {
+			t.Errorf("plant a foreign lock: %v", err)
+		}
+		return iam.SetUsername(ac, "alice")
+	}
+
+	var err error
+	synctest.Test(t, func(t *testing.T) {
+		hold := openHold(t, path)
+		_, err = openKubeConfig(ac, hold, kubeConfigOptions{clusterName: "prod-east", kubeconfig: path})
+	})
+
+	require.ErrorIs(t, err, kubeconfig.ErrLocked)
+	assert.Contains(t, err.Error(), "the kubeconfig could not be opened again")
+	assert.Contains(t, err.Error(), "the kube session was closed")
+	assert.Equal(t, 2, srv.creates())
+	assert.Equal(t, 1, srv.closes())
+	assert.NoFileExists(t, path)
+	// The other program's lock is its own to remove.
+	assert.FileExists(t, path+".lock")
 }

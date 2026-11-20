@@ -169,6 +169,10 @@ func (s *sessionServer) handler(t *testing.T) http.Handler {
 				return
 			}
 			_, _ = w.Write([]byte(`{"mfa_url":"https://auth.example.com/mfa?ticket=t-1"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/iam/users/-/":
+			// An older server's kube_session_principal_not_supported makes the
+			// open read the account; this one has a username already.
+			_, _ = w.Write([]byte(`{"username":"system:reserved"}`))
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.String())
 			w.WriteHeader(http.StatusInternalServerError)
@@ -463,7 +467,8 @@ func TestKubeSessionErrorHint(t *testing.T) {
 	}{
 		{name: "cluster not connected", code: utils.ClusterNotConnected, expected: "'alpacon kube describe prod-east'"},
 		{name: "channel open failed", code: utils.KubeSessionChannelOpenFailed, expected: "try again"},
-		{name: "cluster rbac drift", code: utils.ClusterRBACDrift, expected: "cluster prod-east has RBAC bindings outside Alpacon"},
+		{name: "username the session cannot carry", code: utils.KubeSessionPrincipalNotSupported, expected: "this account's username cannot be used as a kube session's identity"},
+		{name: "cluster rbac drift", code: utils.ClusterRBACDrift, expected: "cluster prod-east has RBAC bindings outside Alpacon that grant sessions more than Alpacon does, and the workspace policy refuses new sessions on it until a cluster admin removes them. The cluster's agent logs an external_grant line for each such binding"},
 		{name: "other code", code: utils.APITokenACLNotAllowed},
 	}
 	for _, tt := range tests {
