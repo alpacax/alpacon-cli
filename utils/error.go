@@ -171,7 +171,8 @@ const (
 
 	// Refusals of a kube session the server names itself. The cluster's agent
 	// is not connected; the agent did not accept the session, which the server
-	// then closed; the caller has no user name the session could act as; and
+	// then closed; the caller's username cannot be the session's identity,
+	// unset on an older server or one the server refuses; and
 	// the cluster's RBAC bindings made outside Alpacon grant sessions more than
 	// Alpacon does, under a workspace policy that refuses rather than warns.
 	ClusterNotConnected              = "cluster_not_connected"

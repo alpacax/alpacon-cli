@@ -64,8 +64,10 @@ changed, so exec, websh, cp and tunnel keep the session they use.
 
 When the workspace requires MFA for Kubernetes exec and the WorkSession has
 the kube_exec scope, the command prints an MFA link, waits up to 3 minutes for
-you to finish it in the browser, and then opens the session. The kubeconfig is
-not locked while it waits.
+you to finish it in the browser, and then opens the session. When your account
+has no username yet, it asks for one, sets it, and then opens the session; a
+non-interactive run exits 1 and names 'alpacon username set <name>'. The
+kubeconfig is not locked while it waits.
 
 The context runs 'alpacon kube credentials' for its token, so the token is
 never written to the kubeconfig; alpacon must be on the PATH kubectl sees. If

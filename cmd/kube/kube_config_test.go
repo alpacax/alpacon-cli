@@ -18,9 +18,11 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/kubeconfig"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
@@ -38,6 +40,7 @@ type sessionServer struct {
 	lookupStatus int // 0 answers the lookup with prod-east
 	createStatus int // 0 answers 201 with the session below
 	createCode   string
+	createHint   string
 	proxyURL     string
 	token        string
 	closeStatus  int // 0 answers 200
@@ -48,6 +51,8 @@ type sessionServer struct {
 	// auth_mfa_required as a workspace requiring MFA for kube exec does. The
 	// createStatus answer, or the session, comes after them.
 	mfaCreates int
+	// createRefusals scripts the codes returned by successive creates.
+	createRefusals []string
 	// onCreate, when set, runs as create number call (from 1) arrives, before
 	// it is answered.
 	onCreate      func(call int)
@@ -110,6 +115,16 @@ func (s *sessionServer) handler(t *testing.T) http.Handler {
 			if s.onCreate != nil {
 				s.onCreate(call)
 			}
+			if call <= len(s.createRefusals) {
+				code := s.createRefusals[call-1]
+				status := http.StatusBadRequest
+				if code == utils.AuthMFARequired {
+					status = http.StatusUnauthorized
+				}
+				w.WriteHeader(status)
+				_, _ = fmt.Fprintf(w, `{"code":%q}`, code)
+				return
+			}
 			if call <= s.mfaCreates {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"code":"auth_mfa_required","source":"kube_exec"}`))
@@ -117,7 +132,7 @@ func (s *sessionServer) handler(t *testing.T) http.Handler {
 			}
 			if s.createStatus != 0 {
 				w.WriteHeader(s.createStatus)
-				_, _ = fmt.Fprintf(w, `{"code":%q}`, s.createCode)
+				_, _ = fmt.Fprintf(w, `{"code":%q,"hint":%q}`, s.createCode, s.createHint)
 				return
 			}
 			warning := ""
@@ -154,6 +169,10 @@ func (s *sessionServer) handler(t *testing.T) http.Handler {
 				return
 			}
 			_, _ = w.Write([]byte(`{"mfa_url":"https://auth.example.com/mfa?ticket=t-1"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/iam/users/-/":
+			// An older server's kube_session_principal_not_supported makes the
+			// open read the account; this one has a username already.
+			_, _ = w.Write([]byte(`{"username":"system:reserved"}`))
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.String())
 			w.WriteHeader(http.StatusInternalServerError)
@@ -448,8 +467,8 @@ func TestKubeSessionErrorHint(t *testing.T) {
 	}{
 		{name: "cluster not connected", code: utils.ClusterNotConnected, expected: "'alpacon kube describe prod-east'"},
 		{name: "channel open failed", code: utils.KubeSessionChannelOpenFailed, expected: "try again"},
-		{name: "no user name", code: utils.KubeSessionPrincipalNotSupported, expected: "log in as a user"},
-		{name: "cluster rbac drift", code: utils.ClusterRBACDrift, expected: "cluster prod-east has RBAC bindings outside Alpacon"},
+		{name: "username the session cannot carry", code: utils.KubeSessionPrincipalNotSupported, expected: "this account's username cannot be used as a kube session's identity"},
+		{name: "cluster rbac drift", code: utils.ClusterRBACDrift, expected: "cluster prod-east has RBAC bindings outside Alpacon that grant sessions more than Alpacon does, and the workspace policy refuses new sessions on it until a cluster admin removes them. The cluster's agent logs an external_grant line for each such binding"},
 		{name: "other code", code: utils.APITokenACLNotAllowed},
 	}
 	for _, tt := range tests {
@@ -490,6 +509,45 @@ func TestKubeSessionErrorHint_DefersToTheServerHint(t *testing.T) {
 
 	plain := hintedKubeError{code: utils.ClusterNotConnected}
 	assert.Contains(t, kubeSessionErrorHint(plain, "prod-east"), "is not connected")
+}
+
+func TestKubeConfigRBACDriftRefusal(t *testing.T) {
+	t.Parallel()
+	const bindingNotice = "The cluster's agent logs an external_grant line for each such binding so the cluster admin can find them there."
+	// The server refuses with 400 and no hint. The client keeps a hint only on
+	// a 402/403/405/429, so the hint case answers 403 to reach that rule.
+	tests := []struct {
+		name   string
+		status int
+		hint   string
+	}{
+		{name: "CLI guidance", status: http.StatusBadRequest},
+		{name: "server guidance", status: http.StatusForbidden, hint: "Contact a cluster admin to review the bindings."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := newSessionServer()
+			srv.createStatus, srv.createCode, srv.createHint = tt.status, utils.ClusterRBACDrift, tt.hint
+			ac := srv.start(t)
+			path := filepath.Join(t.TempDir(), "config")
+
+			stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
+				return NewKubeCmd(func() (*client.AlpaconClient, error) { return ac, nil }, ios)
+			}, "config", "prod-east", "--kubeconfig", path)
+
+			assert.Equal(t, utils.ExitCodeGeneralError, code, stderr)
+			assert.Empty(t, stdout)
+			if tt.hint == "" {
+				assert.Contains(t, stderr, "cluster prod-east has RBAC bindings outside Alpacon")
+				assert.Contains(t, stderr, bindingNotice)
+			} else {
+				assert.Contains(t, stderr, tt.hint)
+				assert.NotContains(t, stderr, "cluster prod-east has RBAC bindings outside Alpacon")
+				assert.NotContains(t, stderr, "external_grant")
+			}
+		})
+	}
 }
 
 func TestCheckProxyURL(t *testing.T) {
