@@ -125,7 +125,7 @@ func Start(opts StartOptions) (*Runtime, error) {
 		return nil, err
 	}
 
-	session, err := smux.Client(basetunnel.NewWebSocketConn(wsConn), smuxConfig)
+	session, err := smux.Client(basetunnel.NewWebSocketConnWithText(wsConn, tunnelRefusalHandler(opts.Client)), smuxConfig)
 	if err != nil {
 		_ = listener.Close()
 		_ = wsConn.Close()
@@ -371,7 +371,7 @@ func isRetryableAcceptError(err error) bool {
 
 // dialTunnel connects to the tunnel proxy and, when that fails, asks the session why it did not open.
 func dialTunnel(ac *client.AlpaconClient, tunnelSession *tunnelapi.TunnelSessionResponse, serverName string, maxFrameSize int, lookupTimeout time.Duration) (*websocket.Conn, error) {
-	wsConn, resp, err := newTunnelDialer(maxFrameSize).Dial(tunnelSession.WebsocketURL, ac.SetWebsocketHeader())
+	wsConn, resp, err := newTunnelDialer(maxFrameSize).Dial(tunnelSession.WebsocketURL, ac.SetWebsocketHeaderWithCapabilities(client.CapabilityRefusalFrame))
 	if err == nil {
 		return wsConn, nil
 	}

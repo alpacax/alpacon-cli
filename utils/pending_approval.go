@@ -20,6 +20,7 @@ type pendingApprovalJSON struct {
 	Message     string             `json:"message"`
 	RequestID   string             `json:"request_id,omitempty"`
 	Context     pendingApprovalCtx `json:"context"`
+	Server      map[string]any     `json:"server,omitempty"`
 	NextActions []NextAction       `json:"next_actions,omitempty"`
 }
 
@@ -27,12 +28,18 @@ type pendingApprovalJSON struct {
 // reading the message. retry is the surface-specific way to retry (re-run the
 // command, or attach the session); it leads, then the generic console pointer,
 // then any extra actions the surface has. A zero-value retry is skipped.
-func pendingApprovalNextActions(retry NextAction, extra ...NextAction) []NextAction {
+func pendingApprovalNextActions(retry NextAction, sessionStatus string, triggeredPause bool, extra ...NextAction) []NextAction {
 	actions := make([]NextAction, 0, 2+len(extra))
 	if retry != (NextAction{}) {
 		actions = append(actions, retry)
 	}
-	actions = append(actions, NextAction{Description: "Approve it out of band in the Alpacon console (web/Slack). Where supported, pass --wait (or --wait-approval DURATION for a longer timeout) on the original command to block until approval."})
+	guidance := "Approve it out of band in the Alpacon console (web/Slack). Where supported, pass --wait (or --wait-approval DURATION for a longer timeout) on the original command to block until approval."
+	if sessionStatus == "paused" {
+		guidance = "Approve or confirm it in the Alpacon web console. An authorized person must also use Resume on the paused work session before the command can run."
+	} else if sessionStatus == "" && triggeredPause {
+		guidance = "Approve or confirm it in the Alpacon web console. If the work session is still paused, an authorized person must also use Resume before the command can run."
+	}
+	actions = append(actions, NextAction{Description: guidance})
 	return append(actions, extra...)
 }
 
@@ -47,6 +54,20 @@ func PrintPendingApproval(message, requestID string, retry NextAction, extra ...
 
 // PrintPendingApproval is the package-level PrintPendingApproval on s.
 func (s *IOStreams) PrintPendingApproval(message, requestID string, retry NextAction, extra ...NextAction) {
+	s.PrintPendingApprovalWithError(message, requestID, nil, retry, extra...)
+}
+
+// PrintPendingApprovalWithError preserves the cause's server fields in the pending envelope.
+func (s *IOStreams) PrintPendingApprovalWithError(message, requestID string, cause error, retry NextAction, extra ...NextAction) {
+	fields := serverErrorFields(cause)
+	sessionStatus := ""
+	for err := range errorChain(cause) {
+		if state, ok := err.(interface{ CurrentWorkSessionStatus() string }); ok {
+			sessionStatus = state.CurrentWorkSessionStatus()
+			break
+		}
+	}
+	actions := pendingApprovalNextActions(retry, sessionStatus, fields["work_session_paused"] == true, extra...)
 	if s.IsJSON() {
 		envelope := pendingApprovalJSON{
 			OK:          false,
@@ -55,7 +76,8 @@ func (s *IOStreams) PrintPendingApproval(message, requestID string, retry NextAc
 			Message:     message,
 			RequestID:   requestID,
 			Context:     pendingApprovalCtx{RequestID: requestID},
-			NextActions: pendingApprovalNextActions(retry, extra...),
+			Server:      fields,
+			NextActions: actions,
 		}
 		if err := PrintJSONValue(s.Out, envelope); err != nil {
 			// Fall back to a minimal, still-parseable object so a machine consumer
@@ -66,7 +88,7 @@ func (s *IOStreams) PrintPendingApproval(message, requestID string, retry NextAc
 	}
 
 	s.Warning("%s", message)
-	for _, action := range pendingApprovalNextActions(retry, extra...) {
+	for _, action := range actions {
 		fmt.Fprintf(s.ErrOut, "  %s\n", action.PlainText())
 	}
 }

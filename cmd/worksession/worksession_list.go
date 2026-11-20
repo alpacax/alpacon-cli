@@ -105,7 +105,7 @@ func newWorkSessionListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra
 			return ios.PrintTable(sessions)
 		}),
 	}
-	cmd.Flags().StringVar(&statusFilter, "status", "active", "Filter by status (pending, approved, active, completed, rejected, expired, revoked, cancelled); use \"all\" for any status")
+	cmd.Flags().StringVar(&statusFilter, "status", "active", "Filter by status (pending, approved, active, paused, completed, rejected, expired, revoked, cancelled); use \"all\" for any status")
 	cmd.Flags().StringVar(&requesterFilter, "requester-type", "", "Filter by requester type (user, agent)")
 	cmd.Flags().StringVar(&userFilter, "user", "", "Filter by assigned user: default is self, \"all\" for everyone, or a user uuid")
 	return cmd

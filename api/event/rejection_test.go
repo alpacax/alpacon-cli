@@ -389,3 +389,28 @@ func TestCommandErrorContextFields(t *testing.T) {
 		})
 	}
 }
+
+// TestErrorFromDetails_PauseTriggerReachesErrorFields pins the marker on the
+// response that paused its work session: the denial or hold keeps its own
+// outcome and carries the marker and the session id the server sent.
+func TestErrorFromDetails_PauseTriggerReachesErrorFields(t *testing.T) {
+	t.Parallel()
+	for _, status := range []string{"denied", "awaiting_approval"} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			var d EventDetails
+			require.NoError(t, json.Unmarshal([]byte(`{"id":"cmd-9","status":"`+status+`","work_session_paused":true,"work_session_id":"ses-2"}`), &d))
+			err := errorFromDetails(testPathID(t, "cmd-9"), d)
+			fields, ok := err.(interface{ ErrorFields() map[string]any })
+			require.True(t, ok)
+			assert.Equal(t, map[string]any{"work_session_paused": true, "work_session_id": "ses-2"}, fields.ErrorFields())
+		})
+	}
+}
+
+func TestErrorFromDetails_NoPauseTriggerOmitsMarker(t *testing.T) {
+	t.Parallel()
+	var d EventDetails
+	require.NoError(t, json.Unmarshal([]byte(`{"id":"cmd-9","status":"denied","work_session_paused":false,"work_session":{"id":"ses-2"}}`), &d))
+	assert.Equal(t, map[string]any{"work_session_id": "ses-2"}, d.Rejection().ErrorFields())
+}

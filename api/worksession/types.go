@@ -11,9 +11,11 @@ import (
 )
 
 const (
-	StatusPending   = "pending"
-	StatusApproved  = "approved"
-	StatusActive    = "active"
+	StatusPending  = "pending"
+	StatusApproved = "approved"
+	StatusActive   = "active"
+	// StatusPaused holds an active session until a person resumes or ends it.
+	StatusPaused    = "paused"
 	StatusCompleted = "completed"
 	StatusExpired   = "expired"
 	StatusRevoked   = "revoked"

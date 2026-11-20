@@ -457,6 +457,67 @@ func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
 	assert.Equal(t, "completed", resp.Status)
 }
 
+func TestApprovalTimeoutRefreshHasADeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		unblock := sync.OnceFunc(func() { close(release) })
+		defer unblock()
+		cancelled := make(chan struct{})
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-r.Context().Done():
+				close(cancelled)
+			case <-release:
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}
+		}))
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		known := EventDetails{Status: "awaiting_approval", WorkSessionPaused: true, FlatWorkSessionID: "550e8400-e29b-41d4-a716-446655440000"}
+		cmdID := testPathID(t, "cmd-uuid")
+		done := make(chan error, 1)
+		go func() {
+			done <- pendingApprovalAfterTimeout(ac, cmdID, known, &ClientTimeoutError{})
+		}()
+		time.Sleep(2 * time.Second)
+		var err error
+		select {
+		case err = <-done:
+		default:
+			t.Error("the final refresh exceeded two seconds")
+			unblock()
+			err = <-done
+		}
+		synctest.Wait()
+		var pending *PendingApprovalError
+		require.ErrorAs(t, err, &pending)
+		assert.True(t, pending.WorkSessionPaused)
+		assert.Equal(t, known.FlatWorkSessionID, pending.WorkSessionID)
+		select {
+		case <-cancelled:
+		default:
+			t.Error("the stalled refresh request was not cancelled")
+		}
+	})
+}
+
+func TestApprovalTimeoutDoesNotReportAnotherStatusAsPending(t *testing.T) {
+	for _, status := range []string{"running", "completed", "rejected"} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"id":"cmd-uuid","status":%q}`, status)
+			}))
+			t.Cleanup(ts.Close)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			err := runCommandFallbackWithin(ac, testPathID(t, "cmd-uuid"), io.Discard, time.Millisecond, time.Millisecond, true, errors.New("stream unavailable"))
+			var pending *PendingApprovalError
+			require.Error(t, err)
+			assert.NotErrorAs(t, err, &pending)
+		})
+	}
+}
+
 func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

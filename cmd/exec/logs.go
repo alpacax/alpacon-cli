@@ -78,9 +78,17 @@ Run the command again later to check for completion.`,
 					ios.Warning("failed to read approval request: %s", lookupErr)
 				}
 				message := heldCommandMessage(assignee, requestID, details.Status)
-				ios.PrintPendingApproval(
+				pending := &event.PendingApprovalError{
+					WorkSessionPaused: details.WorkSessionPaused,
+					WorkSessionID:     details.WorkSessionID(),
+					WorkSessionStatus: details.WorkSessionStatus(),
+					ConsoleURL:        details.ConsoleURL,
+				}
+				message = withSessionResumeGuidance(message, pending)
+				ios.PrintPendingApprovalWithError(
 					message,
 					requestID,
+					pending,
 					utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", details.ID)},
 				)
 				return utils.NewSilentExitError(utils.ExitCodePendingApproval)
