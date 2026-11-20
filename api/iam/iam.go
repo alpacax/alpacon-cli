@@ -496,7 +496,8 @@ func HandleUsernameRequired(ac *client.AlpaconClient) (*SetUsernameResponse, err
 
 // HandleUsernameRequiredUnless is HandleUsernameRequired for a caller whose
 // own Ctrl+C handler takes SIGINT, so the prompt keeps reading after it:
-// once stopped reports true, the next name read is not sent.
+// once stopped reports true, the prompt asks no more and sends nothing, and
+// the next line read, an empty one included, ends it.
 func HandleUsernameRequiredUnless(ac *client.AlpaconClient, stopped func() bool) (*SetUsernameResponse, error) {
 	if !utils.IsInteractiveShell() {
 		return nil, errors.New("username is not set for your account; run 'alpacon username set <name>' to set it (lowercase letters, digits, '-', '_'; must start with a letter)")
@@ -506,18 +507,28 @@ func HandleUsernameRequiredUnless(ac *client.AlpaconClient, stopped func() bool)
 	utils.CliInfo("You can also set it anytime with 'alpacon username set <name>'.")
 
 	return promptUsername(ac, func() (string, error) {
-		return utils.ReadRequiredInput("Please enter your username: ")
+		return utils.ReadInput("Please enter your username: ")
 	}, stopped)
 }
 
+// promptUsername asks with read until a name is set. It checks stopped before
+// each read and after it, since the read blocks until the user presses Enter.
 func promptUsername(ac *client.AlpaconClient, read func() (string, error), stopped func() bool) (*SetUsernameResponse, error) {
+	isStopped := func() bool { return stopped != nil && stopped() }
 	for {
+		if isStopped() {
+			return nil, ErrUsernameSetupStopped
+		}
 		username, err := read()
 		if err != nil {
 			return nil, err
 		}
-		if stopped != nil && stopped() {
+		if isStopped() {
 			return nil, ErrUsernameSetupStopped
+		}
+		if username == "" {
+			utils.CliWarning("This field is required. Please enter a value.")
+			continue
 		}
 
 		response, err := SetUsername(ac, username)
