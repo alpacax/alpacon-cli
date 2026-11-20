@@ -194,9 +194,10 @@ func fileExecutionRows(fe *approvalapi.FileExecution) []describeRow {
 	return rows
 }
 
-// fileExecutionScript includes a trailing empty line when numbering, matching
-// the server's evidence ranges. altered reports removals beyond CRLF
-// normalization and is false for withheld content.
+// fileExecutionScript renders the script for approval. numbered prefixes line
+// numbers, including the final empty line, so evidence ranges can be found.
+// altered reports removals beyond CRLF normalization and is false for withheld
+// content.
 func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (script string, altered bool) {
 	if fe.Content == nil {
 		return "Script: not included in this response; the SHA-256 above identifies the file.", false
