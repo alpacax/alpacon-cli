@@ -136,29 +136,29 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 		switch {
 		case arg == "-h" || arg == "--help":
 			return RemoteExecArgs{ShowHelp: true}
-		case MatchShortOrLongFlag(arg, "-u", "--username"):
+		case matchShortOrLongFlag(arg, "-u", "--username"):
 			var errMsg string
-			username, i, errMsg = ExtractFlagValue(args, i, "-u")
+			username, i, errMsg = extractFlagValue(args, i, "-u")
 			if errMsg != "" {
 				return fail(errMsg)
 			}
-		case MatchShortOrLongFlag(arg, "-g", "--groupname"):
+		case matchShortOrLongFlag(arg, "-g", "--groupname"):
 			var errMsg string
-			groupname, i, errMsg = ExtractFlagValue(args, i, "-g")
+			groupname, i, errMsg = extractFlagValue(args, i, "-g")
 			if errMsg != "" {
 				return fail(errMsg)
 			}
 		case arg == "--work-session" || strings.HasPrefix(arg, "--work-session="):
 			var errMsg string
 			// No short form: pass the long name as sentinel to disable attached-value parsing.
-			workSessionID, i, errMsg = ExtractFlagValue(args, i, "--work-session")
+			workSessionID, i, errMsg = extractFlagValue(args, i, "--work-session")
 			if errMsg != "" {
 				return fail(errMsg)
 			}
 		case arg == "--purpose" || strings.HasPrefix(arg, "--purpose="):
 			var errMsg string
 			// No short form: pass the long name as sentinel to disable attached-value parsing.
-			purpose, i, errMsg = ExtractFlagValue(args, i, "--purpose")
+			purpose, i, errMsg = extractFlagValue(args, i, "--purpose")
 			if errMsg != "" {
 				return fail(errMsg)
 			}
@@ -168,7 +168,7 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 			}
 		case arg == "--output" || strings.HasPrefix(arg, "--output="):
 			var errMsg string
-			outputFormat, i, errMsg = ExtractFlagValue(args, i, "--output")
+			outputFormat, i, errMsg = extractFlagValue(args, i, "--output")
 			if errMsg != "" {
 				return fail(errMsg)
 			}
@@ -181,7 +181,7 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 			}
 		case arg == "--file" || strings.HasPrefix(arg, "--file="):
 			var errMsg string
-			filePath, i, errMsg = ExtractFlagValue(args, i, "--file")
+			filePath, i, errMsg = extractFlagValue(args, i, "--file")
 			if errMsg != "" {
 				return fail(errMsg)
 			}
@@ -193,7 +193,7 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 			}
 		case arg == "--file-from" || strings.HasPrefix(arg, "--file-from="):
 			var errMsg string
-			fileFrom, i, errMsg = ExtractFlagValue(args, i, "--file-from")
+			fileFrom, i, errMsg = extractFlagValue(args, i, "--file-from")
 			if errMsg != "" {
 				return fail(errMsg)
 			}
@@ -202,7 +202,7 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 			}
 		case arg == "--interpreter" || strings.HasPrefix(arg, "--interpreter="):
 			var errMsg string
-			interpreter, i, errMsg = ExtractFlagValue(args, i, "--interpreter")
+			interpreter, i, errMsg = extractFlagValue(args, i, "--interpreter")
 			if errMsg != "" {
 				return fail(errMsg)
 			}
@@ -214,7 +214,7 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 			}
 		case arg == "--reuse-days" || strings.HasPrefix(arg, "--reuse-days="):
 			var raw, errMsg string
-			raw, i, errMsg = ExtractFlagValue(args, i, "--reuse-days")
+			raw, i, errMsg = extractFlagValue(args, i, "--reuse-days")
 			if errMsg != "" {
 				return fail(errMsg)
 			}
@@ -244,7 +244,7 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 			return fail("--wait does not accept a value; use --wait alone")
 		case arg == "--wait-approval" || strings.HasPrefix(arg, "--wait-approval="):
 			var raw, errMsg string
-			raw, i, errMsg = ExtractFlagValue(args, i, "--wait-approval")
+			raw, i, errMsg = extractFlagValue(args, i, "--wait-approval")
 			if errMsg != "" {
 				return fail(errMsg)
 			}
@@ -418,9 +418,9 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// MatchShortOrLongFlag checks whether arg is an exact match for the given short
+// matchShortOrLongFlag checks whether arg is an exact match for the given short
 // or long flag name, or a prefixed form (-uVALUE, --username=VALUE).
-func MatchShortOrLongFlag(arg, short, long string) bool {
+func matchShortOrLongFlag(arg, short, long string) bool {
 	// Short flag: exact (-u), with = (-u=val), or attached value (-uroot)
 	if arg == short || strings.HasPrefix(arg, short+"=") {
 		return true
@@ -431,13 +431,13 @@ func MatchShortOrLongFlag(arg, short, long string) bool {
 	return arg == long || strings.HasPrefix(arg, long+"=")
 }
 
-// ExtractFlagValue extracts a flag value from one of three forms:
+// extractFlagValue extracts a flag value from one of three forms:
 //   - attached short: -uroot          → "root"
 //   - long with =:    --username=root → "root"
 //   - separate:       -u root         → "root" (advances i)
 //
 // Returns the value, updated index, and an error message if no value was found.
-func ExtractFlagValue(args []string, i int, short string) (string, int, string) {
+func extractFlagValue(args []string, i int, short string) (string, int, string) {
 	arg := args[i]
 	if strings.Contains(arg, "=") {
 		parts := strings.SplitN(arg, "=", 2)

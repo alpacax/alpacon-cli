@@ -38,56 +38,34 @@ type WebshArgs struct {
 //
 // Flags are recognized only before the server name. Everything after the server name — known
 // flags included — is the remote command, as the help text says and as ParseRemoteExecArgs
-// parses `alpacon exec`. The -- separator follows exec's rules: after the server name everything
-// following it is the remote command; before it, the first argument after -- is the server and
-// the rest is the command.
+// parses `alpacon exec`.
 func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 	res := WebshArgs{Env: map[string]string{}}
 	for i := 0; i < len(args); i++ {
-		arg := args[i]
-
-		if arg == "--" {
-			remaining := args[i+1:]
-			if res.ServerName == "" {
-				if len(remaining) > 0 {
-					res.ServerName = remaining[0]
-					res.CommandArgs = remaining[1:]
-				}
-			} else {
-				res.CommandArgs = remaining
-			}
-			return res, nil
-		}
-
+		// Once the server name is set, the rest of the line belongs to the remote command:
+		// known flags included, so `websh my-server --work-session x` does not read websh's
+		// own flags out of the remote command.
 		if res.ServerName != "" {
 			res.CommandArgs = args[i:]
 			return res, nil
 		}
 
 		switch {
-		case arg == "-h" || arg == "--help":
-			return res, errHelpRequested
-		case arg == "-s" || arg == "--share":
+		case args[i] == "-s" || args[i] == "--share":
 			res.Share = true
-		case execCmd.MatchShortOrLongFlag(arg, "-u", "--username"):
-			var errMsg string
-			res.Username, i, errMsg = execCmd.ExtractFlagValue(args, i, "-u")
-			if errMsg != "" {
+		case args[i] == "-h" || args[i] == "--help":
+			return res, errHelpRequested
+		case isFlag(args[i], "-u", "--username"):
+			res.Username, i = extractValue(args, i)
+		case isFlag(args[i], "-g", "--groupname"):
+			res.Groupname, i = extractValue(args, i)
+		case args[i] == "--env" || strings.HasPrefix(args[i], "--env="):
+			if errMsg := execCmd.ParseEnvArg(ios, args[i], res.Env); errMsg != "" {
 				return res, errors.New(errMsg)
 			}
-		case execCmd.MatchShortOrLongFlag(arg, "-g", "--groupname"):
-			var errMsg string
-			res.Groupname, i, errMsg = execCmd.ExtractFlagValue(args, i, "-g")
-			if errMsg != "" {
-				return res, errors.New(errMsg)
-			}
-		case arg == "--env" || strings.HasPrefix(arg, "--env="):
-			if errMsg := execCmd.ParseEnvArg(ios, arg, res.Env); errMsg != "" {
-				return res, errors.New(errMsg)
-			}
-		case arg == "--read-only" || strings.HasPrefix(arg, "--read-only="):
-			if strings.Contains(arg, "=") {
-				parts := strings.SplitN(arg, "=", 2)
+		case isFlag(args[i], "--read-only"):
+			if strings.Contains(args[i], "=") {
+				parts := strings.SplitN(args[i], "=", 2)
 				normalized := strings.TrimSpace(strings.ToLower(parts[1]))
 				switch normalized {
 				case "", "true":
@@ -111,30 +89,48 @@ func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 					res.ReadOnly = true
 				}
 			}
-		case arg == "--work-session" || strings.HasPrefix(arg, "--work-session="):
-			ws, newI, errMsg := execCmd.ExtractFlagValue(args, i, "--work-session")
-			if errMsg != "" {
-				return res, errors.New(errMsg)
+		case args[i] == "--work-session" || strings.HasPrefix(args[i], "--work-session="):
+			ws, newI := extractValue(args, i)
+			if ws == "" {
+				return res, fmt.Errorf("--work-session requires a value")
 			}
 			res.WorkSessionID = ws
 			i = newI
-		case arg == "--output" || strings.HasPrefix(arg, "--output="):
-			val, newI, errMsg := execCmd.ExtractFlagValue(args, i, "--output")
-			if errMsg != "" {
-				return res, errors.New(errMsg)
-			}
+		case args[i] == "--output" || strings.HasPrefix(args[i], "--output="):
+			val, newI := extractValue(args, i)
 			if val == "" {
 				return res, fmt.Errorf("--output requires a value (table|json)")
 			}
 			res.OutputFormat = val
 			i = newI
-		case strings.HasPrefix(arg, "-"):
-			return res, fmt.Errorf("unknown flag: %s", arg)
+		case res.ServerName == "" && strings.HasPrefix(args[i], "-"):
+			return res, fmt.Errorf("unknown flag: %s", args[i])
 		default:
-			res.ServerName = arg
+			res.ServerName = args[i]
 		}
 	}
 	return res, nil
+}
+
+// isFlag reports whether arg is one of names, alone or as name=value.
+func isFlag(arg string, names ...string) bool {
+	for _, name := range names {
+		if arg == name || strings.HasPrefix(arg, name+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+func extractValue(args []string, i int) (string, int) {
+	if strings.Contains(args[i], "=") { // --username=admins
+		parts := strings.SplitN(args[i], "=", 2)
+		return parts[1], i
+	}
+	if i+1 < len(args) { // --username admin
+		return args[i+1], i + 1
+	}
+	return "", i
 }
 
 // buildRemoteExecArgs assembles the shared-runner args for websh command mode.

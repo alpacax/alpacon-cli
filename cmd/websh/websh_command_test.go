@@ -67,7 +67,7 @@ func TestWebshRefusesABadCommandLineWithExit2(t *testing.T) {
 		{name: "no server", args: []string{}, wantStderr: "Server name is required."},
 		{name: "share with a remote command", args: []string{"--share", "my-server", "whoami"}, wantStderr: "The --share flag cannot be used with remote commands."},
 		{name: "unknown flag", args: []string{"--bogus", "my-server"}, wantStderr: "unknown flag: --bogus\nRun 'alpacon websh --help' for usage."},
-		{name: "flag without its value", args: []string{"--work-session"}, wantStderr: "flag needs an argument: --work-session"},
+		{name: "flag without its value", args: []string{"--work-session"}, wantStderr: "--work-session requires a value"},
 		{name: "invite without an email", args: []string{"invite", "550e8400-e29b-41d4-a716-446655440000"}, wantStderr: "At least one --email is required."},
 		{name: "ls with a zero tail", args: []string{"ls", "--tail", "0"}, wantStderr: "--tail must be a positive integer."},
 		{name: "records with a zero limit", args: []string{"records", "550e8400-e29b-41d4-a716-446655440000", "--limit", "0"}, wantStderr: "--limit must be a positive integer."},
