@@ -105,18 +105,18 @@ func TestCommandParsing(t *testing.T) {
 			expectCommandArgs: []string{"echo", "hello world"},
 		},
 		{
-			testName:          "FlagsIntermixedWithCommandArgs",
+			testName:          "UsernameFlagAfterTheServerIsPassedToTheCommand",
 			args:              []string{"server-name", "-u", "user", "cmd", "-g", "group"},
-			expectUsername:    "user",
+			expectUsername:    "",
 			expectGroupname:   "",
 			expectEnv:         map[string]string{},
 			expectServerName:  "server-name",
-			expectCommandArgs: []string{"cmd", "-g", "group"},
+			expectCommandArgs: []string{"-u", "user", "cmd", "-g", "group"},
 		},
 		{
-			testName:          "FlagsAndCommandArgsIntertwined",
-			args:              []string{"server-name", "-u", "user", "cmd", "-g", "group"},
-			expectUsername:    "user",
+			testName:          "GroupnameFlagAfterTheCommandIsPassedToIt",
+			args:              []string{"server-name", "cmd", "-g", "group"},
+			expectUsername:    "",
 			expectGroupname:   "",
 			expectEnv:         map[string]string{},
 			expectServerName:  "server-name",
@@ -359,11 +359,9 @@ func TestParseWebshArgsRejectsAnUnknownFlagBeforeTheServer(t *testing.T) {
 		{name: "combined short flags", args: []string{"-rh"}, flag: "-rh"},
 		{name: "unknown flag after known ones", args: []string{"-u", "user", "-g", "group", "-x", "my-server", "cmd"}, flag: "-x"},
 		{name: "a flag that only shares the env prefix", args: []string{"--env-file=secrets", "ls"}, flag: "--env-file=secrets"},
-		{name: "a separator, which websh has no use for", args: []string{"--", "my-server", "ls"}, flag: "--"},
 		{name: "a flag that only shares the username prefix", args: []string{"--username-typo", "my-server"}, flag: "--username-typo"},
 		{name: "a flag that only shares the groupname prefix", args: []string{"--groupname-extra", "my-server"}, flag: "--groupname-extra"},
 		{name: "a flag that only shares the read-only prefix", args: []string{"--read-onlyx", "my-server"}, flag: "--read-onlyx"},
-		{name: "a short username with its value attached", args: []string{"-uadmin", "my-server"}, flag: "-uadmin"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -383,6 +381,79 @@ func TestParseWebshArgs_CommandAfterServerNotConsumed(t *testing.T) {
 	assert.Equal(t, "my-server", got.ServerName)
 	assert.Empty(t, got.WorkSessionID)
 	assert.Equal(t, []string{"ls", "--work-session", "fake"}, got.CommandArgs)
+}
+
+func TestParseWebshArgs_FlagsAfterTheServerGoToTheRemoteCommand(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{name: "output flag", args: []string{"my-server", "--output", "json", "ls"}, want: []string{"--output", "json", "ls"}},
+		{name: "help flag", args: []string{"my-server", "-h"}, want: []string{"-h"}},
+		{name: "share flag", args: []string{"my-server", "-s"}, want: []string{"-s"}},
+		{name: "username flag with value", args: []string{"my-server", "-u", "alice"}, want: []string{"-u", "alice"}},
+		{name: "env flag", args: []string{"my-server", "--env", "A=B", "ls"}, want: []string{"--env", "A=B", "ls"}},
+		{name: "work-session flag", args: []string{"my-server", "--work-session", "x", "ls"}, want: []string{"--work-session", "x", "ls"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := ParseWebshArgs(utils.Stdio, tt.args)
+
+			require.NoError(t, err)
+			assert.Equal(t, "my-server", got.ServerName)
+			assert.Equal(t, tt.want, got.CommandArgs)
+		})
+	}
+}
+
+func TestParseWebshArgs_OutputAfterTheServerIsNotWebshsOutput(t *testing.T) {
+	t.Parallel()
+	got, err := ParseWebshArgs(utils.Stdio, []string{"my-server", "--output", "json", "ls"})
+	require.NoError(t, err)
+	assert.Empty(t, got.OutputFormat, "the remote command's --output must not be read as websh's")
+}
+
+func TestParseWebshArgs_ShareAfterTheServerIsNotWebshsShare(t *testing.T) {
+	t.Parallel()
+	got, err := ParseWebshArgs(utils.Stdio, []string{"my-server", "-s"})
+	require.NoError(t, err)
+	assert.False(t, got.Share, "the remote command's -s must not be read as websh's")
+}
+
+func TestParseWebshArgs_AcceptsTheAttachedUsernameLikeExec(t *testing.T) {
+	t.Parallel()
+	got, err := ParseWebshArgs(utils.Stdio, []string{"-ualice", "my-server", "ls"})
+	require.NoError(t, err)
+	assert.Equal(t, "alice", got.Username)
+	assert.Equal(t, "my-server", got.ServerName)
+	assert.Equal(t, []string{"ls"}, got.CommandArgs)
+}
+
+func TestParseWebshArgs_SeparatorBehavesLikeExec(t *testing.T) {
+	t.Parallel()
+	got, err := ParseWebshArgs(utils.Stdio, []string{"--", "my-server", "ls", "-x"})
+	require.NoError(t, err)
+	assert.Equal(t, "my-server", got.ServerName)
+	assert.Equal(t, []string{"ls", "-x"}, got.CommandArgs)
+
+	got, err = ParseWebshArgs(utils.Stdio, []string{"my-server", "--", "ls"})
+	require.NoError(t, err)
+	assert.Equal(t, "my-server", got.ServerName)
+	assert.Equal(t, []string{"ls"}, got.CommandArgs)
+}
+
+func TestParseWebshArgs_MissingFlagValueErrorMatchesExec(t *testing.T) {
+	t.Parallel()
+	_, err := ParseWebshArgs(utils.Stdio, []string{"-u"})
+	require.EqualError(t, err, "flag needs an argument: -u")
+
+	got, err := ParseWebshArgs(utils.Stdio, []string{"my-server", "-u"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"-u"}, got.CommandArgs)
 }
 
 func TestSanitizeRecord(t *testing.T) {
