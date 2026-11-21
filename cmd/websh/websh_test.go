@@ -105,18 +105,18 @@ func TestCommandParsing(t *testing.T) {
 			expectCommandArgs: []string{"echo", "hello world"},
 		},
 		{
-			testName:          "FlagsIntermixedWithCommandArgs",
+			testName:          "UsernameFlagAfterTheServerIsPassedToTheCommand",
 			args:              []string{"server-name", "-u", "user", "cmd", "-g", "group"},
-			expectUsername:    "user",
+			expectUsername:    "",
 			expectGroupname:   "",
 			expectEnv:         map[string]string{},
 			expectServerName:  "server-name",
-			expectCommandArgs: []string{"cmd", "-g", "group"},
+			expectCommandArgs: []string{"-u", "user", "cmd", "-g", "group"},
 		},
 		{
-			testName:          "FlagsAndCommandArgsIntertwined",
-			args:              []string{"server-name", "-u", "user", "cmd", "-g", "group"},
-			expectUsername:    "user",
+			testName:          "GroupnameFlagAfterTheCommandIsPassedToIt",
+			args:              []string{"server-name", "cmd", "-g", "group"},
+			expectUsername:    "",
 			expectGroupname:   "",
 			expectEnv:         map[string]string{},
 			expectServerName:  "server-name",
@@ -383,6 +383,47 @@ func TestParseWebshArgs_CommandAfterServerNotConsumed(t *testing.T) {
 	assert.Equal(t, "my-server", got.ServerName)
 	assert.Empty(t, got.WorkSessionID)
 	assert.Equal(t, []string{"ls", "--work-session", "fake"}, got.CommandArgs)
+}
+
+func TestParseWebshArgs_FlagsAfterTheServerGoToTheRemoteCommand(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{name: "output flag", args: []string{"my-server", "--output", "json", "ls"}, want: []string{"--output", "json", "ls"}},
+		{name: "help flag", args: []string{"my-server", "-h"}, want: []string{"-h"}},
+		{name: "share flag", args: []string{"my-server", "-s"}, want: []string{"-s"}},
+		{name: "username flag with value", args: []string{"my-server", "-u", "alice"}, want: []string{"-u", "alice"}},
+		{name: "env flag", args: []string{"my-server", "--env", "A=B", "ls"}, want: []string{"--env", "A=B", "ls"}},
+		{name: "work-session flag", args: []string{"my-server", "--work-session", "x", "ls"}, want: []string{"--work-session", "x", "ls"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := ParseWebshArgs(utils.Stdio, tt.args)
+
+			require.NoError(t, err)
+			assert.Equal(t, "my-server", got.ServerName)
+			assert.Equal(t, tt.want, got.CommandArgs)
+		})
+	}
+}
+
+func TestParseWebshArgs_OutputAfterTheServerIsNotWebshsOutput(t *testing.T) {
+	t.Parallel()
+	got, err := ParseWebshArgs(utils.Stdio, []string{"my-server", "--output", "json", "ls"})
+	require.NoError(t, err)
+	assert.Empty(t, got.OutputFormat, "the remote command's --output must not be read as websh's")
+}
+
+func TestParseWebshArgs_ShareAfterTheServerIsNotWebshsShare(t *testing.T) {
+	t.Parallel()
+	got, err := ParseWebshArgs(utils.Stdio, []string{"my-server", "-s"})
+	require.NoError(t, err)
+	assert.False(t, got.Share, "the remote command's -s must not be read as websh's")
 }
 
 func TestSanitizeRecord(t *testing.T) {

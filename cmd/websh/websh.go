@@ -34,12 +34,22 @@ type WebshArgs struct {
 }
 
 // ParseWebshArgs parses raw CLI args for `alpacon websh` (DisableFlagParsing mode), returning
-// errHelpRequested when -h/--help is seen.
+// errHelpRequested when -h/--help is seen before the server name.
 //
-// NOTE: every named flag must be matched before the unknown-flag case.
+// Flags are recognized only before the server name. Everything after the server name — known
+// flags included — is the remote command, as the help text says and as ParseRemoteExecArgs
+// parses `alpacon exec`.
 func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 	res := WebshArgs{Env: map[string]string{}}
 	for i := 0; i < len(args); i++ {
+		// Once the server name is set, the rest of the line belongs to the remote command:
+		// known flags included, so `websh my-server --work-session x` does not read websh's
+		// own flags out of the remote command.
+		if res.ServerName != "" {
+			res.CommandArgs = args[i:]
+			return res, nil
+		}
+
 		switch {
 		case args[i] == "-s" || args[i] == "--share":
 			res.Share = true
@@ -96,15 +106,31 @@ func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 		case res.ServerName == "" && strings.HasPrefix(args[i], "-"):
 			return res, fmt.Errorf("unknown flag: %s", args[i])
 		default:
-			if res.ServerName == "" {
-				res.ServerName = args[i]
-			} else {
-				res.CommandArgs = append(res.CommandArgs, args[i:]...)
-				i = len(args)
-			}
+			res.ServerName = args[i]
 		}
 	}
 	return res, nil
+}
+
+// isFlag reports whether arg is one of names, alone or as name=value.
+func isFlag(arg string, names ...string) bool {
+	for _, name := range names {
+		if arg == name || strings.HasPrefix(arg, name+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+func extractValue(args []string, i int) (string, int) {
+	if strings.Contains(args[i], "=") { // --username=admins
+		parts := strings.SplitN(args[i], "=", 2)
+		return parts[1], i
+	}
+	if i+1 < len(args) { // --username admin
+		return args[i+1], i + 1
+	}
+	return "", i
 }
 
 // buildRemoteExecArgs assembles the shared-runner args for websh command mode.
@@ -347,27 +373,6 @@ func runWebsh(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient
 		}
 	}
 	return nil
-}
-
-// isFlag reports whether arg is one of names, alone or as name=value.
-func isFlag(arg string, names ...string) bool {
-	for _, name := range names {
-		if arg == name || strings.HasPrefix(arg, name+"=") {
-			return true
-		}
-	}
-	return false
-}
-
-func extractValue(args []string, i int) (string, int) {
-	if strings.Contains(args[i], "=") { // --username=admins
-		parts := strings.SplitN(args[i], "=", 2)
-		return parts[1], i
-	}
-	if i+1 < len(args) { // --username admin
-		return args[i+1], i + 1
-	}
-	return "", i
 }
 
 // sudoListenerExitGrace is how long exit waits for a sudo listener still being set up.
