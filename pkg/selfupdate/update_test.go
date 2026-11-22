@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -245,6 +246,10 @@ func TestRunWritesNoLockFileWhenThereIsNothingToSweep(t *testing.T) {
 // Options.Runner has a zero value, and a caller who leaves it there must not
 // get "nobody owns it" for free—the real query answers instead.
 func TestRunAsksTheRealQueryWhenTheCallerSuppliedNone(t *testing.T) {
+	// A loaded CI runner can take longer than the production bound to answer.
+	original := packageQueryTimeout
+	t.Cleanup(func() { packageQueryTimeout = original })
+	packageQueryTimeout = time.Minute
 	opts, executable := updateFixture(t, nil)
 
 	result, err := Run(opts)
