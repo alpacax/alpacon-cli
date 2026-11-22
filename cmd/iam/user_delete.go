@@ -13,10 +13,12 @@ func newUserDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Comm
 		Aliases: []string{"rm"},
 		Short:   "Delete a specified user",
 		Long: `
-	Delete an Alpacon user account by exact username. By default, the home directory
-	is kept in place on supported servers and agents. Use --archive-home to request
-	a move to /home/deleted_users/. Services that use files in the home directory
-	may stop working after the move. Verify the move on the affected servers before
+	Delete an Alpacon user account by exact username. Depending on the server and
+	agent versions, the home directory is either kept in place or moved to
+	/home/deleted_users/. Use --archive-home to request the move where the home
+	directory is kept by default; servers that do not support the option ignore it
+	and move the home directory anyway. Services that use files in the home
+	directory may stop working after the move. Check the affected servers before
 	reusing the username.
 	`,
 		Example: `
@@ -65,6 +67,6 @@ func newUserDeleteCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Comm
 		}),
 	}
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
-	cmd.Flags().BoolVar(&archiveHome, "archive-home", false, "Request archiving the home directory")
+	cmd.Flags().BoolVar(&archiveHome, "archive-home", false, "Request moving the home directory to /home/deleted_users/ where it is kept by default")
 	return cmd
 }
