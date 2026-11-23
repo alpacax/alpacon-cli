@@ -95,7 +95,7 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 	root.Flags().BoolVarP(&showVersion, "version", "v", false, versionCmd.Short)
 	defaultHelp := root.HelpFunc()
 	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		if ios.IsJSON() || utils.OutputFormatIn(args) == utils.OutputFormatJSON {
+		if ios.IsJSON() || output == utils.OutputFormatJSON { // exec and websh parse --output into ios themselves
 			cmd.SetOut(cmd.ErrOrStderr())
 		}
 		defaultHelp(cmd, args)
@@ -158,7 +158,8 @@ func Execute() {
 		utils.PrintExitError(exitErr)
 		utils.Exit(exitErr.Code)
 	case !utils.IsHookError(err):
-		utils.CliParseErrorWithExit(cmd, utils.OutputFormatIn(os.Args[1:]), err.Error())
+		format, _ := utils.OutputFormatIn(cmd, os.Args[1:])
+		utils.CliParseErrorWithExit(cmd, format, err.Error())
 	case utils.IsUsageError(err):
 		utils.CliUsageErrorWithExit("%s", err)
 	default:

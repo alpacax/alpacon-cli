@@ -214,20 +214,54 @@ func TestApplySurfaceGate_DisabledHelpTopicOfOtherCommandPrintsHelp(t *testing.T
 
 func TestApplySurfaceGate_DisabledRejectsAnInvalidOutput(t *testing.T) {
 	t.Parallel()
-	ios, out, errOut := utils.TestIOStreams()
+	tests := []struct {
+		name, want string
+		args       []string
+	}{
+		{name: "unknown value", args: []string{"kube", "ls", "--output", "bogus"}, want: `"bogus"`},
+		{name: "empty value", args: []string{"kube", "ls", "--output="}, want: `""`},
+		{name: "missing value", args: []string{"kube", "ls", "--output"}, want: `""`},
+		{name: "empty value after a set one", args: []string{"kube", "ls", "--output=json", "--output="}, want: `""`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ios, out, errOut := utils.TestIOStreams()
+			root, real := newGateTree()
+			applySurfaceGate(root, ios, real, false)
+			root.SilenceErrors, root.SilenceUsage = true, true // as the root sets them
+			root.SetArgs(tt.args)
+
+			err := root.Execute()
+
+			var exitErr *utils.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, utils.ExitCodeUsageError, exitErr.Code)
+			ios.FprintExitError(errOut, exitErr)
+			assert.Empty(t, out.String())
+			assert.Contains(t, errOut.String(), "invalid --output value "+tt.want)
+		})
+	}
+}
+
+func TestApplySurfaceGate_DisabledIgnoresAnotherFlagsValue(t *testing.T) {
+	t.Parallel()
+	ios, _, errOut := utils.TestIOStreams()
 	root, real := newGateTree()
+	login := &cobra.Command{Use: "login CLUSTER", Run: func(*cobra.Command, []string) {}}
+	login.Flags().String("purpose", "", "")
+	real.AddCommand(login)
 	applySurfaceGate(root, ios, real, false)
 	root.SilenceErrors, root.SilenceUsage = true, true // as the root sets them
-	root.SetArgs([]string{"kube", "ls", "--output", "bogus"})
+	root.SetArgs([]string{"kube", "login", "my-cluster", "--purpose", "--output=json"})
 
 	err := root.Execute()
 
 	var exitErr *utils.ExitError
 	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, utils.ExitCodeUsageError, exitErr.Code)
+	assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
 	ios.FprintExitError(errOut, exitErr)
-	assert.Empty(t, out.String())
-	assert.Contains(t, errOut.String(), "bogus")
+	assert.Contains(t, errOut.String(), "Error: "+kubernetes.SurfaceNotEnabledMessage)
 }
 
 func TestApplySurfaceGate_DisabledReportsAnEnvelopeUnderJSON(t *testing.T) {

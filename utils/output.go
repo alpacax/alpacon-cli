@@ -11,6 +11,8 @@ import (
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
+
+	"github.com/spf13/cobra"
 )
 
 // Valid values for the --output persistent flag.
@@ -29,21 +31,54 @@ func invalidOutputFormat(value string) error {
 	return MarkUsageError(fmt.Errorf("invalid --output value %q (expected %q or %q)", value, OutputFormatTable, OutputFormatJSON))
 }
 
-// OutputFormatIn is the last --output value before any "--" in args, for a command line
-// whose parse stopped before reaching it.
-func OutputFormatIn(args []string) string {
-	var format string
-	for i, arg := range args {
+// OutputFormatIn is the last --output value before any "--" in args, skipping the values of cmd's other
+// flags, for a command line whose parse stopped before reaching it; given reports whether there was one.
+func OutputFormatIn(cmd *cobra.Command, args []string) (format string, given bool) {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		if arg == "--" {
 			break
 		}
-		if value, ok := strings.CutPrefix(arg, "--output="); ok {
-			format = value
-		} else if arg == "--output" && i+1 < len(args) {
-			format = args[i+1]
+		value, inline := strings.CutPrefix(arg, "--output=")
+		switch {
+		case inline:
+			format, given = value, true
+		case arg == "--output":
+			format, given = "", true
+			i++
+			if i < len(args) {
+				format = args[i]
+			}
+		case takesNextArg(cmd, arg):
+			i++
 		}
 	}
-	return format
+	return format, given
+}
+
+// takesNextArg reports whether arg is a flag of cmd whose value is the next argument, as pflag reads it.
+func takesNextArg(cmd *cobra.Command, arg string) bool {
+	if name, ok := strings.CutPrefix(arg, "--"); ok {
+		flag := cmd.Flag(name) // a name=value form matches no flag and takes nothing
+		return flag != nil && flag.NoOptDefVal == ""
+	}
+	if !strings.HasPrefix(arg, "-") {
+		return false
+	}
+	inherited := cmd.InheritedFlags()
+	for i := 1; i < len(arg); i++ {
+		flag := cmd.Flags().ShorthandLookup(arg[i : i+1])
+		if flag == nil {
+			flag = inherited.ShorthandLookup(arg[i : i+1])
+		}
+		if flag == nil {
+			return false
+		}
+		if flag.NoOptDefVal == "" {
+			return i == len(arg)-1
+		}
+	}
+	return false
 }
 
 type PartialInfo struct {

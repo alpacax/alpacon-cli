@@ -32,6 +32,7 @@ func TestHelpUnderJSONGoesToStderr(t *testing.T) {
 		{name: "websh output after server", args: []string{"websh", "-h", "my-server", "--output", "json"}},
 		{name: "websh flag", args: []string{"websh", "--help", "--output", "json"}},
 		{name: "websh output after read-only and a server", args: []string{"websh", "-h", "--read-only", "false", "my-server", "--output", "json"}},
+		{name: "output before a flag whose value names table", args: []string{"api", "--output", "json", "--help", "-f", "--output=table"}},
 		{name: "group flag", args: []string{"token", "--help", "--output", "json"}},
 		{name: "leaf flag", args: []string{"token", "ls", "--help", "--output", "json"}},
 		{name: "help command", args: []string{"help", "token", "--output", "json"}},
@@ -61,6 +62,7 @@ func TestHelpUnderTableGoesToStdout(t *testing.T) {
 		{name: "group flag", args: []string{"token", "--help"}, wantStdout: "--output"},
 		{name: "leaf flag", args: []string{"token", "ls", "--help"}, wantStdout: "--output"},
 		{name: "group without subcommand", args: []string{"token"}, wantCode: 2, wantStdout: "--output"},
+		{name: "value of another flag names json", args: []string{"api", "--help", "-f", "--output=json"}, wantStdout: "--output"},
 		{name: "exec flag value names json", args: []string{"exec", "--help", "-u", "--output=json"}, wantStdout: "--output"},
 		{name: "websh flag value names json", args: []string{"websh", "--help", "-u", "--output=json"}, wantStdout: "--output"},
 		{name: "exec remote command output flag", args: []string{"exec", "-h", "my-server", "cmd", "--output", "json"}, wantStdout: "--output"},
@@ -98,6 +100,33 @@ func TestHelpPrintsNoUnsetEnvWarning(t *testing.T) {
 			assert.Equal(t, 0, code)
 			assert.Contains(t, stdout, "--output")
 			assert.Empty(t, stderr)
+		})
+	}
+}
+
+func TestParseErrorFormatIgnoresAnotherFlagsValue(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		args     []string
+		wantJSON bool
+	}{
+		{name: "value names table", args: []string{"api", "--output", "json", "--bogus", "-f", "--output=table"}, wantJSON: true},
+		{name: "value names json", args: []string{"api", "-f", "--output=json", "--bogus"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			stdout, stderr, code := cmdtest.RunCaptured(buildRoot, tt.args...)
+
+			assert.Equal(t, utils.ExitCodeUsageError, code)
+			assert.Empty(t, stdout)
+			if tt.wantJSON {
+				assert.Contains(t, stderr, `"error_code":"usage_error"`)
+			} else {
+				assert.Contains(t, stderr, "Error: unknown flag: --bogus\n")
+			}
 		})
 	}
 }

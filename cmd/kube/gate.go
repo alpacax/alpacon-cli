@@ -80,7 +80,8 @@ func newDisabledKubeCmd(ios *utils.IOStreams, real *cobra.Command) *cobra.Comman
 		Args:               cobra.ArbitraryArgs,
 		ValidArgsFunction:  cobra.NoFileCompletions,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
-			if format := utils.OutputFormatIn(args); format != "" { // flag parsing is off, so root never read it
+			target, _, _ := real.Find(args)                                 // the command typed, whose flags tell a value from --output
+			if format, given := utils.OutputFormatIn(target, args); given { // flag parsing is off, so root never read it
 				if err := ios.SetOutputFormat(format); err != nil {
 					return utils.NewUsageExitError("%s", err)
 				}
