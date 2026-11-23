@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
-	tunnelruntime "github.com/alpacax/alpacon-cli/pkg/tunnel/runtime"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
@@ -23,11 +22,19 @@ const (
 	shellOneLinerHint        = "(for shell-style one-liner, use: -- sh -c \"<command>\")"
 )
 
+var tunnelSignals = func() (<-chan os.Signal, func()) {
+	signals := make(chan os.Signal, forceInterruptBufferSize)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	return signals, func() { signal.Stop(signals) }
+}
+
+var newLocalCommand = exec.Command
+
 func executeTunnelRunWithInvocation(ios *utils.IOStreams, ac *client.AlpaconClient, flags tunnelFlagValues, serverName string, localCommand []string) (int, error) {
-	runtime, err := tunnelruntime.Start(flags.toStartOptions(ac, serverName))
+	runtime, err := startTunnel(flags.toStartOptions(ac, serverName))
 	if err != nil {
 		err = handleTunnelStartError(ac, flags, err, serverName, func() error {
-			runtime, err = tunnelruntime.Start(flags.toStartOptions(ac, serverName))
+			runtime, err = startTunnel(flags.toStartOptions(ac, serverName))
 			return err
 		})
 		if err != nil {
@@ -41,6 +48,8 @@ func executeTunnelRunWithInvocation(ios *utils.IOStreams, ac *client.AlpaconClie
 	if err := runtime.CheckReady(); err != nil {
 		return 1, fmt.Errorf("failed to establish tunnel connection: %w", err)
 	}
+	sigChan, stopSignals := tunnelSignals()
+	defer stopSignals()
 
 	fmt.Fprintf(ios.ErrOut, "[alpacon tunnel] CONNECTED %s -> %s\n", runtime.LocalAddress(), runtime.RemoteAddress())
 	_, _ = fmt.Fprintln(ios.ErrOut, "[alpacon tunnel] (Ctrl+C: interrupt, Ctrl+C twice: force stop)")
@@ -48,7 +57,7 @@ func executeTunnelRunWithInvocation(ios *utils.IOStreams, ac *client.AlpaconClie
 	commandName := localCommand[0]
 	commandArgs := localCommand[1:]
 
-	localCmd := exec.Command(commandName, commandArgs...)
+	localCmd := newLocalCommand(commandName, commandArgs...)
 	localCmd.Stdin = os.Stdin
 	localCmd.Stdout = os.Stdout
 	localCmd.Stderr = utils.StderrForChild()
@@ -57,7 +66,7 @@ func executeTunnelRunWithInvocation(ios *utils.IOStreams, ac *client.AlpaconClie
 		return 1, fmt.Errorf("failed to start local command %q: %w", commandName, err)
 	}
 
-	exitCode, runtimeErr := monitorLocalCommand(ios, runtime, localCmd)
+	exitCode, runtimeErr := monitorLocalCommand(ios, runtime, localCmd, sigChan)
 	if runtimeErr != nil {
 		return exitCode, runtimeErr
 	}
@@ -84,15 +93,11 @@ func extractRunInvocation(args []string, dashIndex int) (string, []string, error
 	return args[0], append([]string(nil), args[dashIndex:]...), nil
 }
 
-func monitorLocalCommand(ios *utils.IOStreams, runtime tunnelCommandRuntime, localCmd *exec.Cmd) (int, error) {
+func monitorLocalCommand(ios *utils.IOStreams, runtime tunnelCommandRuntime, localCmd *exec.Cmd, sigChan <-chan os.Signal) (int, error) {
 	waitCh := make(chan error, 1)
 	go func() {
 		waitCh <- localCmd.Wait()
 	}()
-
-	sigChan := make(chan os.Signal, forceInterruptBufferSize)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
 
 	interruptCount := 0
 	var graceTimer <-chan time.Time

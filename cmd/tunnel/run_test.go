@@ -14,7 +14,11 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/cmd/worksession"
+	tunnelruntime "github.com/alpacax/alpacon-cli/pkg/tunnel/runtime"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type fakeRunRuntime struct {
@@ -201,7 +205,7 @@ func TestMonitorLocalCommandClosesRuntimeOnProcessExit(t *testing.T) {
 		t.Fatalf("failed to start helper command: %v", err)
 	}
 
-	exitCode, err := monitorLocalCommand(utils.Stdio, runtime, localCmd)
+	exitCode, err := monitorLocalCommand(utils.Stdio, runtime, localCmd, make(chan os.Signal))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -231,7 +235,7 @@ func TestMonitorLocalCommandReturnsErrorWhenTunnelCloses(t *testing.T) {
 		runtime.triggerRemoteClose(errors.New("session closed by remote"))
 	}()
 
-	exitCode, err := monitorLocalCommand(utils.Stdio, runtime, localCmd)
+	exitCode, err := monitorLocalCommand(utils.Stdio, runtime, localCmd, make(chan os.Signal))
 	if err == nil {
 		t.Fatal("expected error when tunnel closes")
 	}
@@ -256,6 +260,37 @@ func TestExecuteTunnelRunWithInvocationInvalidRemotePort(t *testing.T) {
 	}
 	if exitCode != 1 {
 		t.Fatalf("exitCode = %d, want 1", exitCode)
+	}
+}
+
+func TestTunnelRunHandlesSignalsOnlyAfterRecoveryAndClosesCleanly(t *testing.T) {
+	runtime := newFakeRunRuntime()
+	originalStart, originalCommand := startTunnel, newLocalCommand
+	t.Cleanup(func() { startTunnel, newLocalCommand = originalStart, originalCommand })
+	var started atomic.Bool
+	startTunnel = func(tunnelruntime.StartOptions) (tunnelCommandRuntime, error) {
+		started.Store(true)
+		return runtime, nil
+	}
+	newLocalCommand = func(string, ...string) *exec.Cmd {
+		require.True(t, started.Load(), "the tunnel must be ready before the local command is prepared")
+		self, err := os.FindProcess(os.Getpid())
+		require.NoError(t, err)
+		require.NoError(t, self.Signal(os.Interrupt))
+		time.Sleep(50 * time.Millisecond)
+		return runHelperCommand("wait-sigint")
+	}
+	flags := tunnelFlagValues{sel: worksession.Fixed("session-1")}
+
+	exitCode, err := executeTunnelRunWithInvocation(utils.Stdio, &client.AlpaconClient{}, flags, "prod-db", []string{"ignored"})
+
+	require.NoError(t, err)
+	assert.NotZero(t, exitCode)
+	assert.GreaterOrEqual(t, runtime.closeCalls.Load(), int32(1))
+	select {
+	case <-runtime.Done():
+	default:
+		t.Fatal("the tunnel runtime must close after the queued interrupt")
 	}
 }
 

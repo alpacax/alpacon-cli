@@ -1,17 +1,25 @@
 package tunnel
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	osexec "os/exec"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/cmd/worksession"
+	"github.com/alpacax/alpacon-cli/config"
+	tunnelruntime "github.com/alpacax/alpacon-cli/pkg/tunnel/runtime"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -186,7 +194,7 @@ func TestHandleTunnelStartError_GateRefusalExitsThreeWithNextActions(t *testing.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			flags := tunnelFlagValues{workSessionID: tunnelGateSessionID, authMethod: "Browser login"}
+			flags := tunnelFlagValues{sel: worksession.Fixed(tunnelGateSessionID), authMethod: "Browser login"}
 			err := tunnelCreateError(t, tt.code)
 
 			got := handleTunnelStartError(&client.AlpaconClient{}, flags, err, "my-server", nil)
@@ -229,7 +237,164 @@ func TestToStartOptionsCarriesTheCallersClient(t *testing.T) {
 	t.Parallel()
 	ac := &client.AlpaconClient{WorkspaceName: "ws-a"}
 
-	opts := tunnelFlagValues{remotePort: "5432"}.toStartOptions(ac, "my-db")
+	opts := tunnelFlagValues{remotePort: "5432", sel: worksession.Fixed("")}.toStartOptions(ac, "my-db")
 
 	assert.Same(t, ac, opts.Client)
+}
+
+func TestPlainTunnelHandlesSignalsOnlyAfterRecoveryAndClosesCleanly(t *testing.T) {
+	runtime := newFakeRunRuntime()
+	originalStart, originalSignals := startTunnel, tunnelSignals
+	t.Cleanup(func() { startTunnel, tunnelSignals = originalStart, originalSignals })
+	var started atomic.Bool
+	startTunnel = func(tunnelruntime.StartOptions) (tunnelCommandRuntime, error) {
+		started.Store(true)
+		return runtime, nil
+	}
+	signalChannel := make(chan os.Signal, 1)
+	tunnelSignals = func() (<-chan os.Signal, func()) {
+		require.True(t, started.Load(), "signal handling must begin after tunnel creation and recovery")
+		signalChannel <- os.Interrupt
+		return signalChannel, func() {}
+	}
+	ios, _, stderr := utils.TestIOStreams()
+	flags := tunnelFlagValues{sel: worksession.Fixed("session-1")}
+
+	err := executeTunnel(ios, &client.AlpaconClient{}, flags, "prod-db", nil)
+
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, runtime.closeCalls.Load(), int32(1))
+	assert.Contains(t, stderr.String(), "Tunnel closed")
+}
+
+type tunnelOfferError struct{ code string }
+
+func (e tunnelOfferError) Error() string       { return e.code }
+func (e tunnelOfferError) ErrorCode() string   { return e.code }
+func (e tunnelOfferError) ErrorSource() string { return "tunnel" }
+
+func TestTunnelOfferResendsWithCreatedTunnelSession(t *testing.T) {
+	var createdScopes []string
+	active := func() map[string]any {
+		return map[string]any{
+			"id": "new-session", "status": "active", "requester_type": "user", "scopes": createdScopes,
+			"servers": []map[string]string{{"id": "server-1", "name": "prod"}}, "clusters": []any{},
+			"assigned_user": map[string]string{"id": "user-1"}, "expires_at": time.Now().Add(time.Hour).UTC(),
+		}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/iam/users/-/":
+			_, _ = w.Write([]byte(`{"id":"user-1"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"server-1","name":"prod"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/":
+			_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/":
+			var body struct {
+				Scopes []string `json:"scopes"`
+			}
+			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&body)) {
+				http.Error(w, "invalid request", http.StatusBadRequest)
+				return
+			}
+			createdScopes = body.Scopes
+			if !assert.NoError(t, json.NewEncoder(w).Encode(active())) {
+				return
+			}
+		case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/new-session/":
+			if !assert.NoError(t, json.NewEncoder(w).Encode(active())) {
+				return
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, config.CreateConfig(server.URL, "ws", "", "", "access-token", "refresh-token", "", 3600, false))
+	read, write, err := os.Pipe()
+	require.NoError(t, err)
+	_, err = write.WriteString("y\npurpose\n1h\n")
+	require.NoError(t, err)
+	require.NoError(t, write.Close())
+	originalStdin := os.Stdin
+	os.Stdin = read
+	t.Cleanup(func() { os.Stdin = originalStdin; _ = read.Close() })
+	ac := &client.AlpaconClient{BaseURL: server.URL, HTTPClient: server.Client(), WorkspaceName: "ws"}
+	ac.SetAccessToken("access-token")
+	originalSelect, originalStart := selectTunnelWorkSession, startTunnel
+	t.Cleanup(func() { selectTunnelWorkSession, startTunnel = originalSelect, originalStart })
+	selectTunnelWorkSession = func(ios *utils.IOStreams, ac *client.AlpaconClient, _ string, need worksession.Need) (*worksession.Selection, error) {
+		assert.Equal(t, worksession.Tunnel, need.Operation)
+		return worksession.OfferedForTest(ios, ac, "old-session", need), nil
+	}
+	var ids []string
+	startTunnel = func(opts tunnelruntime.StartOptions) (tunnelCommandRuntime, error) {
+		ids = append(ids, opts.WorkSessionID)
+		if len(ids) == 1 {
+			return nil, utils.MarkSubmission(tunnelOfferError{code: utils.WorkSessionRequired})
+		}
+		return nil, errors.New("retry observed")
+	}
+	ios, _, _ := utils.TestIOStreams()
+
+	err = runTunnel(ios, &cobra.Command{}, []string{"prod"}, tunnelFlagValues{localPort: "0", remotePort: "5432"}, func() (*client.AlpaconClient, error) { return ac, nil })
+
+	require.Error(t, err)
+	assert.Equal(t, []string{"old-session", "new-session"}, ids)
+	assert.Equal(t, []string{utils.OperationTunnel}, createdScopes)
+}
+
+func TestTunnelStartupWaitIsInterruptibleInBothModes(t *testing.T) {
+	for _, mode := range []string{"plain", "command"} {
+		t.Run(mode, func(t *testing.T) {
+			child := osexec.Command(os.Args[0], "-test.run=^TestTunnelStartupInterruptHelper$", "--", mode)
+			stdout, err := child.StdoutPipe()
+			require.NoError(t, err)
+			require.NoError(t, child.Start())
+			scanner := bufio.NewScanner(stdout)
+			require.True(t, scanner.Scan(), "helper must reach the startup wait")
+			assert.Equal(t, "ready", scanner.Text())
+			require.NoError(t, child.Process.Signal(os.Interrupt))
+			done := make(chan error, 1)
+			go func() { done <- child.Wait() }()
+			select {
+			case waitErr := <-done:
+				require.Error(t, waitErr)
+				assert.Contains(t, waitErr.Error(), "interrupt")
+			case <-time.After(3 * time.Second):
+				_ = child.Process.Kill()
+				t.Fatal("Ctrl+C did not stop the tunnel startup wait")
+			}
+		})
+	}
+}
+
+func TestTunnelStartupInterruptHelper(t *testing.T) {
+	mode := ""
+	for i, arg := range os.Args {
+		if arg == "--" && i+1 < len(os.Args) {
+			mode = os.Args[i+1]
+			break
+		}
+	}
+	if mode == "" {
+		return
+	}
+	original := selectTunnelWorkSession
+	defer func() { selectTunnelWorkSession = original }()
+	selectTunnelWorkSession = func(*utils.IOStreams, *client.AlpaconClient, string, worksession.Need) (*worksession.Selection, error) {
+		_, _ = fmt.Fprintln(os.Stdout, "ready")
+		select {}
+	}
+	cmd := &cobra.Command{}
+	args := []string{"prod"}
+	if mode == "command" {
+		cmd, args = parseTunnelCommandArgs(t, []string{"prod", "--", "true"})
+	}
+	_ = runTunnel(utils.Stdio, cmd, args, tunnelFlagValues{localPort: "0", remotePort: "5432"}, func() (*client.AlpaconClient, error) {
+		return &client.AlpaconClient{}, nil
+	})
 }
