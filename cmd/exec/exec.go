@@ -252,7 +252,7 @@ This is client guidance; personal-token enforcement depends on the server versio
 			parsed := ParseRemoteExecArgs(ios, args)
 
 			if parsed.ShowHelp {
-				_ = cmd.Help()
+				cmd.HelpFunc()(cmd, args)
 				return nil
 			}
 			if parsed.Err != "" {

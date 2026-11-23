@@ -245,7 +245,7 @@ Note: All flags must be placed before the server name.
 func runWebsh(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient clientFactory) error {
 	parsed, err := ParseWebshArgs(ios, args)
 	if errors.Is(err, errHelpRequested) {
-		_ = cmd.Help()
+		cmd.HelpFunc()(cmd, args)
 		return nil
 	}
 	if err != nil {

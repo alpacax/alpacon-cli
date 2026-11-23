@@ -93,7 +93,15 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 	// A local, not utils.OutputFormat: binding the global would write its default each time a tree is built.
 	root.PersistentFlags().StringVar(&output, "output", utils.OutputFormatTable, "Output format: table or json")
 	root.Flags().BoolVarP(&showVersion, "version", "v", false, versionCmd.Short)
+	defaultHelp := root.HelpFunc()
+	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		if ios.IsJSON() || utils.OutputFormatIn(args) == utils.OutputFormatJSON {
+			cmd.SetOut(cmd.ErrOrStderr())
+		}
+		defaultHelp(cmd, args)
+	})
 	root.AddCommand(
+		newOutputHelpCmd(),
 		versionCmd,
 		newUpdateCmd(ios),
 		newLoginCmd(newClient, ios),
