@@ -2,9 +2,11 @@ package mfa
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
@@ -25,6 +27,12 @@ const (
 	stepUpPollInterval = 500 * time.Millisecond
 	stepUpTimeout      = 60 * time.Second
 )
+
+// ErrNoMFALink is what a link request returns when the server answers 200 with no link, as it
+// does once this client's MFA is already fresh. The error still reads as a missing link, so a
+// caller that needs the link fails as before. An empty answer is not proof of a fresh MFA on its
+// own, so a caller that needs only the MFA (kube mfa) confirms it with CheckMFACompletion.
+var ErrNoMFALink = errors.New("the server issued no MFA link")
 
 type mfaResponse struct {
 	MfaURL string `json:"mfa_url"`
@@ -64,10 +72,16 @@ func HandleMFAErrorForServerID(ac *client.AlpaconClient, serverID string) error 
 }
 
 // CheckMFACompletion reports whether the server has recorded a fresh MFA for
-// this client. Only the exec sudo step-up polls it: the refused request there is
-// a command that already ran, so re-running it would repeat its side effects.
+// this client. It serves steps with no request safe to retry: the exec sudo
+// step-up, whose refused command already ran, and kube mfa.
 func CheckMFACompletion(ac *client.AlpaconClient) (bool, error) {
-	responseBody, err := ac.SendGetRequest(mfaCompletionURL)
+	return checkMFACompletion(context.Background(), ac)
+}
+
+// checkMFACompletion is CheckMFACompletion bounded by ctx, so a wait's deadline also ends a
+// check still in flight: once connected, the HTTP client caps no transfer on its own.
+func checkMFACompletion(ctx context.Context, ac *client.AlpaconClient) (bool, error) {
+	responseBody, err := ac.SendGetRequestWithContext(ctx, mfaCompletionURL)
 	if err != nil {
 		return false, fmt.Errorf("failed to check MFA completion: %w", err)
 	}
@@ -217,6 +231,83 @@ func stepUpForSudo(ac *client.AlpaconClient, serverName string, pollInterval, ti
 	}
 }
 
+// ErrMFAWaitTimedOut marks the timeout AwaitMFACompletion returns. The MFA may still complete
+// after it, since the browser leg credits the client on its own, so a caller tells this apart
+// from a refusal rather than reporting it as one.
+var ErrMFAWaitTimedOut = errors.New("MFA verification timed out")
+
+// mfaWaitTimeout is the timeout AwaitMFACompletion returns. It reads as its own message and
+// carries the last refusal's hint, never its code or status, so it stays a timeout to anything
+// that classifies errors.
+type mfaWaitTimeout struct{ hinted error }
+
+func (e *mfaWaitTimeout) Error() string   { return e.hinted.Error() }
+func (e *mfaWaitTimeout) Unwrap() []error { return []error{ErrMFAWaitTimedOut, e.hinted} }
+
+// AwaitMFACompletion polls the completion endpoint until it reports this client's MFA fresh, and
+// returns nil then. The answer is a freshness check rather than a mark left by one link, so it can
+// be true on the first poll when an earlier MFA is still fresh.
+//
+// The tick is fixed, as in the other MFA waits: a person is finishing MFA in a browser, and a
+// widening gap would only add to how long they wait for the CLI to notice. A 429 stretches the
+// next gap to its Retry-After within NextPollBackoff's cap and ends nothing. A failure the next
+// poll may not repeat (no response, a 5xx, a 408) is ridden through at the same tick, or its
+// Retry-After, up to MaxConsecutivePollFailures in a row; a 429 neither counts toward that run
+// nor ends it. Any other failure is returned at once, since polling again cannot change it.
+// The wait never runs past timeout: a poll that would start after it is never sent, and one
+// still in flight when it passes is cancelled. Either way the wait returns an error that
+// matches ErrMFAWaitTimedOut.
+//
+// Pacing is passed in rather than read from package variables, so a test sets its own without
+// racing a parallel one.
+func AwaitMFACompletion(ac *client.AlpaconClient, tick, timeout time.Duration) error {
+	start := time.Now()
+	ctx, cancel := context.WithDeadline(context.Background(), start.Add(timeout))
+	defer cancel()
+	throttle := utils.NewThrottleBudget(timeout)
+	delay := tick
+	failures := 0
+	// lastRefusal is the latest refusal a poll got, so a timeout still carries its hint.
+	var lastRefusal error
+	timedOut := func() error {
+		return &mfaWaitTimeout{hinted: utils.HintOnly(fmt.Sprintf("MFA verification timed out after %v", timeout), lastRefusal)}
+	}
+	for {
+		if remaining := timeout - time.Since(start); delay > remaining {
+			return timedOut()
+		}
+		time.Sleep(delay)
+
+		completed, err := checkMFACompletion(ctx, ac)
+		if ctx.Err() != nil {
+			return timedOut()
+		}
+		status := utils.HTTPStatusCode(err)
+		switch {
+		case err == nil:
+			if completed {
+				return nil
+			}
+			lastRefusal = nil
+			failures = 0
+			delay = tick
+			throttle.Reset()
+		case status == http.StatusTooManyRequests:
+			lastRefusal = err
+			delay = max(tick, utils.NextPollBackoff(tick, 0, utils.RetryAfter(err)))
+			throttle.WarnThrottled(delay)
+		case utils.IsTransientRequestError(err):
+			failures++
+			if failures >= utils.MaxConsecutivePollFailures {
+				return err
+			}
+			delay = max(tick, utils.NextPollBackoff(tick, 0, utils.RetryAfter(err)))
+		default:
+			return err
+		}
+	}
+}
+
 // GetWorkspaceSecurityMFALink uses location "cli" so the mfa-success page credits
 // the MFA to this client, which is what the retried request is then checked against.
 func GetWorkspaceSecurityMFALink(ac *client.AlpaconClient) (string, error) {
@@ -264,8 +355,9 @@ func fetchMFALink(ac *client.AlpaconClient, params map[string]string) (string, e
 	if err := json.Unmarshal(responseBody, &mfaResp); err != nil {
 		return "", fmt.Errorf("failed to parse MFA URL response: %w", err)
 	}
+	// The server answers 200 with no link once this client's MFA is already fresh.
 	if mfaResp.MfaURL == "" {
-		return "", fmt.Errorf("MFA URL is empty in server response")
+		return "", fmt.Errorf("MFA URL is empty in server response: %w", ErrNoMFALink)
 	}
 
 	return mfaResp.MfaURL, nil
