@@ -889,6 +889,21 @@ func TestParseRemoteExecArgs_Errors(t *testing.T) {
 			expectedErr: "flag needs an argument: --groupname",
 		},
 		{
+			name:        "empty username",
+			args:        []string{"--username=", "server", "ls"},
+			expectedErr: "--username requires a value",
+		},
+		{
+			name:        "empty short groupname",
+			args:        []string{"-g", "", "server", "ls"},
+			expectedErr: "--groupname requires a value",
+		},
+		{
+			name:        "empty work session",
+			args:        []string{"--work-session=", "server", "ls"},
+			expectedErr: "--work-session requires a value",
+		},
+		{
 			name:        "--detach=VALUE equals-form is rejected",
 			args:        []string{"--detach=true", "server", "apt", "upgrade"},
 			expectedErr: "--detach does not accept a value; use --detach alone",

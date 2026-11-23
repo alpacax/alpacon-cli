@@ -376,6 +376,29 @@ func TestParseWebshArgsRejectsAnUnknownFlagBeforeTheServer(t *testing.T) {
 	}
 }
 
+func TestParseWebshArgsRefusesAFlagWithNoValue(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "missing username", args: []string{"my-server", "-u"}, want: "--username requires a value"},
+		{name: "empty username", args: []string{"--username=", "my-server"}, want: "--username requires a value"},
+		{name: "missing groupname", args: []string{"my-server", "-g"}, want: "--groupname requires a value"},
+		{name: "empty groupname", args: []string{"-g", "", "my-server"}, want: "--groupname requires a value"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := ParseWebshArgs(utils.Stdio, tt.args)
+
+			require.EqualError(t, err, tt.want)
+		})
+	}
+}
+
 func TestParseWebshArgs_CommandAfterServerNotConsumed(t *testing.T) {
 	t.Parallel()
 	got, err := ParseWebshArgs(utils.Stdio, []string{"my-server", "ls", "--work-session", "fake"})

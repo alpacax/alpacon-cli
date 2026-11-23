@@ -154,11 +154,17 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 			if errMsg != "" {
 				return fail(errMsg)
 			}
+			if username == "" {
+				return fail("--username requires a value")
+			}
 		case matchShortOrLongFlag(arg, "-g", "--groupname"):
 			var errMsg string
 			groupname, i, errMsg = extractFlagValue(args, i, "-g")
 			if errMsg != "" {
 				return fail(errMsg)
+			}
+			if groupname == "" {
+				return fail("--groupname requires a value")
 			}
 		case arg == "--work-session" || strings.HasPrefix(arg, "--work-session="):
 			var errMsg string
@@ -166,6 +172,9 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 			workSessionID, i, errMsg = extractFlagValue(args, i, "--work-session")
 			if errMsg != "" {
 				return fail(errMsg)
+			}
+			if workSessionID == "" {
+				return fail("--work-session requires a value")
 			}
 		case arg == "--purpose" || strings.HasPrefix(arg, "--purpose="):
 			var errMsg string

@@ -64,8 +64,14 @@ func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 			showHelp = true // keep reading: --output may follow
 		case isFlag(args[i], "-u", "--username"):
 			res.Username, i = extractValue(args, i)
+			if res.Username == "" {
+				return fail(errors.New("--username requires a value"))
+			}
 		case isFlag(args[i], "-g", "--groupname"):
 			res.Groupname, i = extractValue(args, i)
+			if res.Groupname == "" {
+				return fail(errors.New("--groupname requires a value"))
+			}
 		case args[i] == "--env" || strings.HasPrefix(args[i], "--env="):
 			if errMsg := execCmd.ParseEnvArg(ios, args[i], res.Env); errMsg != "" {
 				return fail(errors.New(errMsg))
