@@ -62,6 +62,12 @@ func executeTunnelRunWithInvocation(ios *utils.IOStreams, ac *client.AlpaconClie
 	localCmd.Stdout = os.Stdout
 	localCmd.Stderr = utils.StderrForChild()
 
+	select {
+	case <-sigChan:
+		ios.Info("Interrupt received. The local command was not started.")
+		return 1, nil
+	default:
+	}
 	if err := localCmd.Start(); err != nil {
 		return 1, fmt.Errorf("failed to start local command %q: %w", commandName, err)
 	}

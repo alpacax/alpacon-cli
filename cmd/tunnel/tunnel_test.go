@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	osexec "os/exec"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -347,54 +348,90 @@ func TestTunnelOfferResendsWithCreatedTunnelSession(t *testing.T) {
 	assert.Equal(t, []string{utils.OperationTunnel}, createdScopes)
 }
 
-func TestTunnelStartupWaitIsInterruptibleInBothModes(t *testing.T) {
+func TestTunnelOfferIsInterruptibleInBothModes(t *testing.T) {
 	for _, mode := range []string{"plain", "command"} {
-		t.Run(mode, func(t *testing.T) {
-			child := osexec.Command(os.Args[0], "-test.run=^TestTunnelStartupInterruptHelper$", "--", mode)
-			stdout, err := child.StdoutPipe()
-			require.NoError(t, err)
-			require.NoError(t, child.Start())
-			scanner := bufio.NewScanner(stdout)
-			require.True(t, scanner.Scan(), "helper must reach the startup wait")
-			assert.Equal(t, "ready", scanner.Text())
-			require.NoError(t, child.Process.Signal(os.Interrupt))
-			done := make(chan error, 1)
-			go func() { done <- child.Wait() }()
-			select {
-			case waitErr := <-done:
-				require.Error(t, waitErr)
-				assert.Contains(t, waitErr.Error(), "interrupt")
-			case <-time.After(3 * time.Second):
-				_ = child.Process.Kill()
-				t.Fatal("Ctrl+C did not stop the tunnel startup wait")
-			}
-		})
+		for _, tc := range []struct{ name, input, want string }{
+			{name: "prompt", want: "signal: interrupt"},
+			{name: "wait", input: "y\npurpose\n1h\n", want: "exit status 4"},
+		} {
+			t.Run(mode+" "+tc.name, func(t *testing.T) {
+				child := osexec.Command(os.Args[0], "-test.run=^TestTunnelOfferInterruptHelper$", "--", mode, tc.name)
+				child.Env = append(os.Environ(), "HOME="+t.TempDir())
+				stdin, err := child.StdinPipe()
+				require.NoError(t, err)
+				stdout, err := child.StdoutPipe()
+				require.NoError(t, err)
+				require.NoError(t, child.Start())
+				t.Cleanup(func() { _ = child.Process.Kill() })
+				_, err = stdin.Write([]byte(tc.input))
+				require.NoError(t, err)
+				scanner := bufio.NewScanner(stdout)
+				require.True(t, scanner.Scan(), "helper must reach the offer")
+				require.Equal(t, "ready", scanner.Text())
+
+				require.NoError(t, child.Process.Signal(os.Interrupt))
+
+				done := make(chan error, 1)
+				go func() { done <- child.Wait() }()
+				select {
+				case waitErr := <-done:
+					require.EqualError(t, waitErr, tc.want)
+				case <-time.After(5 * time.Second):
+					t.Fatal("Ctrl+C did not stop the offer")
+				}
+			})
+		}
 	}
 }
 
-func TestTunnelStartupInterruptHelper(t *testing.T) {
-	mode := ""
-	for i, arg := range os.Args {
-		if arg == "--" && i+1 < len(os.Args) {
-			mode = os.Args[i+1]
-			break
-		}
-	}
-	if mode == "" {
+// Serial: the child process exits or dies by the signal, and the parent's own run returns at once.
+func TestTunnelOfferInterruptHelper(t *testing.T) {
+	dash := slices.Index(os.Args, "--")
+	if dash < 0 || len(os.Args) != dash+3 {
 		return
 	}
-	original := selectTunnelWorkSession
-	defer func() { selectTunnelWorkSession = original }()
-	selectTunnelWorkSession = func(*utils.IOStreams, *client.AlpaconClient, string, worksession.Need) (*worksession.Selection, error) {
-		_, _ = fmt.Fprintln(os.Stdout, "ready")
-		select {}
+	mode, stage := os.Args[dash+1], os.Args[dash+2]
+	pending := `{"id":"new-session","status":"pending","requester_type":"user"}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		ready := ""
+		switch {
+		case r.URL.Path == "/api/iam/users/-/":
+			_, _ = w.Write([]byte(`{"id":"user-1"}`))
+		case r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"server-1","name":"prod"}]}`))
+		case r.URL.Path == "/api/work-sessions/sessions/" && r.Method == http.MethodGet:
+			ready = "prompt"
+			_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
+		case r.URL.Path == "/api/work-sessions/sessions/":
+			_, _ = w.Write([]byte(pending))
+		default:
+			ready = "wait"
+			_, _ = w.Write([]byte(pending))
+		}
+		if ready == stage {
+			_, _ = fmt.Fprintln(os.Stdout, "ready")
+		}
+	}))
+	defer server.Close()
+	ac := &client.AlpaconClient{BaseURL: server.URL, HTTPClient: server.Client(), WorkspaceName: "ws"}
+	selectTunnelWorkSession = func(ios *utils.IOStreams, ac *client.AlpaconClient, _ string, need worksession.Need) (*worksession.Selection, error) {
+		return worksession.OfferedForTest(ios, ac, "old-session", need), nil
+	}
+	startTunnel = func(tunnelruntime.StartOptions) (tunnelCommandRuntime, error) {
+		return nil, utils.MarkSubmission(tunnelOfferError{code: utils.WorkSessionRequired})
 	}
 	cmd := &cobra.Command{}
 	args := []string{"prod"}
 	if mode == "command" {
 		cmd, args = parseTunnelCommandArgs(t, []string{"prod", "--", "true"})
 	}
-	_ = runTunnel(utils.Stdio, cmd, args, tunnelFlagValues{localPort: "0", remotePort: "5432"}, func() (*client.AlpaconClient, error) {
-		return &client.AlpaconClient{}, nil
-	})
+
+	err := runTunnel(utils.Stdio, cmd, args, tunnelFlagValues{localPort: "0", remotePort: "5432"}, func() (*client.AlpaconClient, error) { return ac, nil })
+
+	var exitErr *utils.ExitError
+	if errors.As(err, &exitErr) {
+		os.Exit(exitErr.Code)
+	}
+	os.Exit(99)
 }

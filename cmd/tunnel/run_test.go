@@ -272,20 +272,23 @@ func TestTunnelRunHandlesSignalsOnlyAfterRecoveryAndClosesCleanly(t *testing.T) 
 		started.Store(true)
 		return runtime, nil
 	}
+	var localCmd *exec.Cmd
 	newLocalCommand = func(string, ...string) *exec.Cmd {
 		require.True(t, started.Load(), "the tunnel must be ready before the local command is prepared")
 		self, err := os.FindProcess(os.Getpid())
 		require.NoError(t, err)
 		require.NoError(t, self.Signal(os.Interrupt))
 		time.Sleep(50 * time.Millisecond)
-		return runHelperCommand("wait-sigint")
+		localCmd = runHelperCommand("wait-sigint")
+		return localCmd
 	}
 	flags := tunnelFlagValues{sel: worksession.Fixed("session-1")}
 
 	exitCode, err := executeTunnelRunWithInvocation(utils.Stdio, &client.AlpaconClient{}, flags, "prod-db", []string{"ignored"})
 
 	require.NoError(t, err)
-	assert.NotZero(t, exitCode)
+	assert.Equal(t, 1, exitCode)
+	assert.Nil(t, localCmd.Process, "a queued interrupt must keep the local command from starting")
 	assert.GreaterOrEqual(t, runtime.closeCalls.Load(), int32(1))
 	select {
 	case <-runtime.Done():
