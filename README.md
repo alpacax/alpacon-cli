@@ -660,7 +660,7 @@ Also separate from the work session gate: when you authenticate with an API toke
 
 ### Partial list output
 
-When a paginated read fails part-way, `log`, `audit`, `webftp-log`, and `websh records` print the entries collected before the failure rather than nothing. Stdout carries the short list and stderr says how short it is; under `--output json` the list is a plain array with nothing in it marking it as partial. The exit code is `1`, so a script reading their output has to check the exit code before taking the list for the whole answer.
+When a paginated read fails part-way, `log`, `audit`, `webftp-log`, and `websh records` print the entries collected before the failure rather than nothing. Stdout carries the short list and stderr says how short it is. Under `--output json`, stdout carries the rows as a plain array and stderr ends with an error envelope carrying `partial.count`, the number of rows already printed, instead of a warning line. The exit code is `1`, so a script reading their output has to check the exit code before taking the list for the whole answer.
 
 ## Contributing
 

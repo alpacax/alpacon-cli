@@ -239,20 +239,24 @@ func (s *IOStreams) PrintTable(slice any) error {
 	return nil
 }
 
-// PartialTableExitError prints the reason to stderr and rows to stdout, then returns a silent
-// ExitCodeGeneralError, since the warning is the failure line, or PrintTable's failure when rows do not print.
-// It does not check for empty rows: a caller with none to show returns an ordinary failure instead.
+// PartialTableExitError prints rows to stdout and the reason to stderr (an envelope under --output json),
+// then returns exit 1, or PrintTable's failure when rows do not print. It does not check for empty rows.
 func PartialTableExitError(rows any, msg string, args ...any) error {
 	return Stdio.PartialTableExitError(rows, msg, args...)
 }
 
 // PartialTableExitError is the package-level PartialTableExitError on s.
 func (s *IOStreams) PartialTableExitError(rows any, msg string, args ...any) error {
-	s.Warning(msg, args...)
+	if !s.IsJSON() {
+		s.Warning(msg, args...)
+	}
 	if err := s.PrintTable(rows); err != nil {
 		return err
 	}
-	return NewSilentExitError(ExitCodeGeneralError)
+	failure := envelopeFailure(ExitCodeGeneralError, "", msg, args)
+	failure.Message = SanitizeTerminalText(failure.Message)
+	failure.Partial = &PartialInfo{Count: reflect.ValueOf(rows).Len()}
+	return NewFailureExitError(failure, nil /* table */)
 }
 
 // PrintList prints a list a paginated read returned with err. On a nil err it is PrintTable; otherwise

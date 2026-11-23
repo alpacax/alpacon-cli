@@ -619,3 +619,40 @@ func TestSetOutputFormatRefusesAnyOtherValueAsAUsageError(t *testing.T) {
 		})
 	}
 }
+
+func TestPrintListTo_JSONReportsPartialRowsInOneEnvelope(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		cause      error
+		wantStderr string
+	}{
+		{
+			name:       "plain error",
+			cause:      errors.New("\x1b[31mboom\x1b[0m"),
+			wantStderr: `{"ok":false,"exit_code":1,"error_code":"cli_error","message":"Showing only the 1 entries read before the request failed: boom.","context":{"operation":""},"partial":{"count":1}}`,
+		},
+		{
+			name:       "refusal keeps its metadata",
+			cause:      &statusWrap{err: &hintedError{code: "rbac_permission_required", hint: "Ask an admin."}, status: 403},
+			wantStderr: `{"ok":false,"exit_code":1,"error_code":"rbac_permission_required","message":"Showing only the 1 entries read before the request failed: permission denied.","context":{"operation":""},"http_status":403,"partial":{"count":1},"next_actions":[{"description":"Ask an admin."}]}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ios, out, errOut := TestIOStreams()
+			require.NoError(t, ios.SetOutputFormat(OutputFormatJSON))
+			rows := []outputTestItem{{Name: "alpha", ID: 1}}
+
+			err := PrintListTo(ios, rows, tt.cause, "Failed to get logs")
+
+			var exitErr *ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, ExitCodeGeneralError, exitErr.Code)
+			ios.PrintExitError(exitErr)
+			assert.JSONEq(t, `[{"name":"alpha","id":1}]`, out.String())
+			assert.JSONEq(t, tt.wantStderr, errOut.String())
+		})
+	}
+}

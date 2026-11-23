@@ -71,6 +71,17 @@ func NewSilentExitError(code int) error {
 	return &ExitError{Code: code, silent: true}
 }
 
+// NewFailureExitError prints f's envelope under --output json or calls table when non-nil.
+func NewFailureExitError(f Failure, table func(w io.Writer, s *IOStreams)) error {
+	return &ExitError{Code: f.ExitCode, print: func(w io.Writer, s *IOStreams) {
+		if s.IsJSON() {
+			FprintFailureJSON(w, f)
+		} else if table != nil {
+			table(w, s)
+		}
+	}}
+}
+
 // NewUsageExitError is the failure CliUsageErrorWithExit reports: exit 2 with error_code usage_error.
 func NewUsageExitError(msg string, args ...any) error {
 	return newUsageExitError("", msg, args)
