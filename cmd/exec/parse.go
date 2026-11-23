@@ -104,10 +104,17 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 		upload, overwrite, fromServer                            bool
 		wait                                                     bool
 		separated                                                bool
+		showHelp                                                 bool
 		waitApproval                                             time.Duration
 	)
 	env := map[string]string{}
-	fail := func(msg string) RemoteExecArgs { return RemoteExecArgs{Err: msg, OutputFormat: outputFormat} }
+	help := func() RemoteExecArgs { return RemoteExecArgs{ShowHelp: true, OutputFormat: outputFormat} }
+	fail := func(msg string) RemoteExecArgs {
+		if showHelp {
+			return help()
+		}
+		return RemoteExecArgs{Err: msg, OutputFormat: outputFormat}
+	}
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -135,7 +142,7 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 
 		switch {
 		case arg == "-h" || arg == "--help":
-			return RemoteExecArgs{ShowHelp: true}
+			showHelp = true // keep reading: --output may follow
 		case matchShortOrLongFlag(arg, "-u", "--username"):
 			var errMsg string
 			username, i, errMsg = extractFlagValue(args, i, "-u")
@@ -258,6 +265,10 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 		default:
 			server = arg
 		}
+	}
+
+	if showHelp {
+		return help()
 	}
 
 	if detach && wait {

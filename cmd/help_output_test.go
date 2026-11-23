@@ -25,6 +25,8 @@ func TestHelpUnderJSONGoesToStderr(t *testing.T) {
 		wantCode int
 	}{
 		{name: "exec flag", args: []string{"exec", "--help", "--output", "json"}},
+		{name: "exec output before help", args: []string{"exec", "--output=json", "-h"}},
+		{name: "websh output after server", args: []string{"websh", "-h", "my-server", "--output", "json"}},
 		{name: "websh flag", args: []string{"websh", "--help", "--output", "json"}},
 		{name: "group flag", args: []string{"token", "--help", "--output", "json"}},
 		{name: "leaf flag", args: []string{"token", "ls", "--help", "--output", "json"}},
@@ -55,6 +57,8 @@ func TestHelpUnderTableGoesToStdout(t *testing.T) {
 		{name: "group flag", args: []string{"token", "--help"}, wantStdout: "--output"},
 		{name: "leaf flag", args: []string{"token", "ls", "--help"}, wantStdout: "--output"},
 		{name: "group without subcommand", args: []string{"token"}, wantCode: 2, wantStdout: "--output"},
+		{name: "exec remote command output flag", args: []string{"exec", "-h", "my-server", "cmd", "--output", "json"}, wantStdout: "--output"},
+		{name: "websh remote command output flag", args: []string{"websh", "-h", "my-server", "cmd", "--output", "json"}, wantStdout: "--output"},
 		{name: "output topic", args: []string{"help", "output"}, wantStdout: "Stdout carries data only"},
 	}
 	for _, tt := range tests {
