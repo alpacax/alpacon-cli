@@ -161,9 +161,10 @@ func logsFailure(details event.EventDetails) utils.Failure {
 		return remoteFailure(details.ExitCode, phase, details.Result, "" /* status */)
 	}
 	return utils.Failure{
-		ErrorCode: utils.ErrorCodeCLI,
-		Message:   "the command ended with unrecognised status " + utils.SanitizeTerminalText(details.Status),
-		Operation: "command",
+		ErrorCode:      utils.ErrorCodeCLI,
+		Message:        "the command ended with unrecognised status " + utils.SanitizeTerminalText(details.Status),
+		Operation:      "command",
+		RemoteExitCode: details.ExitCode,
 	}
 }
 

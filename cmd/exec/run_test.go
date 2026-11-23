@@ -1172,32 +1172,42 @@ func TestCommandResultFailureReportsClientTimeoutInJSON(t *testing.T) {
 
 func TestCommandResultFailureReportsAStatusOnlyFailureInJSON(t *testing.T) {
 	t.Parallel()
-	ios, out, errOut := utils.TestIOStreams()
-	require.NoError(t, ios.SetOutputFormat(utils.OutputFormatJSON))
-	statusErr := fmt.Errorf("failed to execute command on 'srv' server: %w", &event.CommandStatusError{Status: "stuck"})
+	tests := []struct {
+		name, wantJSON string
+		err            error
+	}{
+		{
+			name:     "wrapped status",
+			err:      fmt.Errorf("failed to execute command on 'srv' server: %w", &event.CommandStatusError{Status: "stuck"}),
+			wantJSON: `{"ok":false,"exit_code":1,"error_code":"remote_command_failed","message":"the command failed with status stuck","context":{"operation":"command"}}`,
+		},
+		{
+			name:     "status beside an exit code",
+			err:      &event.CommandStatusError{Status: "cancelled", ReportedExitCode: new(23)},
+			wantJSON: `{"ok":false,"exit_code":1,"error_code":"remote_command_failed","message":"the command failed with status cancelled","context":{"operation":"command"},"remote_exit_code":23}`,
+		},
+		{
+			name:     "status beside a phase",
+			err:      &event.CommandStatusError{Status: "stuck", ErrorPhase: "agent_timeout"},
+			wantJSON: `{"ok":false,"exit_code":1,"error_code":"remote_command_failed","message":"[agent_timeout] agent acknowledged the command but did not return a result in time (status=stuck)","context":{"operation":"command"}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ios, out, errOut := utils.TestIOStreams()
+			require.NoError(t, ios.SetOutputFormat(utils.OutputFormatJSON))
 
-	err := commandResultFailure(ios, errOut, statusErr, ExecInvocation)
+			err := commandResultFailure(ios, errOut, tt.err, ExecInvocation)
 
-	var exitErr *utils.ExitError
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
-	ios.FprintExitError(errOut, exitErr)
-	assert.Empty(t, out.String())
-	assert.JSONEq(t, `{"ok":false,"exit_code":1,"error_code":"remote_command_failed","message":"the command failed with status stuck","context":{"operation":"command"}}`, errOut.String())
-}
-
-func TestCommandResultFailureKeepsAStatusOnlyFailuresExitCode(t *testing.T) {
-	t.Parallel()
-	ios, _, errOut := utils.TestIOStreams()
-	require.NoError(t, ios.SetOutputFormat(utils.OutputFormatJSON))
-
-	err := commandResultFailure(ios, errOut, &event.CommandStatusError{Status: "cancelled", ReportedExitCode: new(23)}, ExecInvocation)
-
-	var exitErr *utils.ExitError
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
-	ios.FprintExitError(errOut, exitErr)
-	assert.JSONEq(t, `{"ok":false,"exit_code":1,"error_code":"remote_command_failed","message":"the remote command exited with status 23","context":{"operation":"command"},"remote_exit_code":23}`, errOut.String())
+			var exitErr *utils.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
+			ios.FprintExitError(errOut, exitErr)
+			assert.Empty(t, out.String())
+			assert.JSONEq(t, tt.wantJSON, errOut.String())
+		})
+	}
 }
 
 func TestCommandResultFailureReportsInTable(t *testing.T) {

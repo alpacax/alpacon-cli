@@ -987,16 +987,19 @@ func commandRejectionFailure(ios *utils.IOStreams, stderr io.Writer, err error, 
 }
 
 func remoteFailure(remoteExitCode *int, errorPhase, output, status string) utils.Failure {
+	status = utils.SanitizeTerminalText(status)
 	message := "the remote command failed"
-	if status != "" {
-		message = fmt.Sprintf("the command failed with status %s", utils.SanitizeTerminalText(status))
-	}
-	if remoteExitCode != nil && *remoteExitCode != 0 { // "exited with status 0" would read as success
-		message = fmt.Sprintf("the remote command exited with status %d", *remoteExitCode)
-	}
-	if errorPhase != "" {
+	switch {
+	case errorPhase != "":
 		phase, desc := sanitizedPhaseParts(errorPhase)
 		message = fmt.Sprintf("[%s] %s", phase, desc)
+		if status != "" {
+			message += fmt.Sprintf(" (status=%s)", status)
+		}
+	case status != "":
+		message = "the command failed with status " + status
+	case remoteExitCode != nil && *remoteExitCode != 0: // "exited with status 0" would read as success
+		message = fmt.Sprintf("the remote command exited with status %d", *remoteExitCode)
 	}
 	var actions []utils.NextAction
 	if hint := event.PhaseHint(errorPhase); hint != "" {
