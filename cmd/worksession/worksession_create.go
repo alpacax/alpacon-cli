@@ -292,7 +292,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 			if approvalSignaled {
 				utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: session.ID, ConsoleURL: session.ConsoleURL}, ac)
 			}
-			afterApproval := afterApprovalAction(sessionRequesterType, session.ID, account)
+			afterApproval := afterApprovalAction(sessionRequesterType, session.ID, "exec", account)
 			if clusterName != "" {
 				afterApproval = KubeLoginAction(clusterName, session.ID)
 			}
@@ -640,8 +640,8 @@ func resolveRequesterType(flagValue string, flagSet bool, detected aiagent.Detec
 // afterApprovalAction is the follow-up for a session still waiting on approval.
 // A user session is attached with 'work-session use'; an agent session cannot
 // be, so its ID goes to each subsequent command with --work-session instead.
-func afterApprovalAction(requesterType, id, account string) utils.NextAction {
-	asAccount := accountRunGuidance(account)
+func afterApprovalAction(requesterType, id, command, account string) utils.NextAction {
+	asAccount := accountRunGuidance(command, account)
 	if asAccount != "" {
 		asAccount = "; " + asAccount
 	}
@@ -651,16 +651,19 @@ func afterApprovalAction(requesterType, id, account string) utils.NextAction {
 	return utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", id), Description: "after approval" + asAccount}
 }
 
-func accountRunGuidance(account string) string {
-	quoted, ok := shellSafeAccount(account)
+// accountRunGuidance tells the user to run command as the account a session was created for.
+func accountRunGuidance(command, account string) string {
+	quoted, ok := ShellWord(account)
 	if !ok {
 		return ""
 	}
-	return fmt.Sprintf("run exec with -u %s, the account the session was created for", quoted)
+	return fmt.Sprintf("run %s with -u %s, the account the session was created for", command, quoted)
 }
 
-func shellSafeAccount(account string) (string, bool) {
-	clean, altered := utils.SanitizeTerminalLine(account)
+// ShellWord returns value as one word a shell reads back unchanged, quoting it when needed; ok is
+// false for an empty value or one with control characters.
+func ShellWord(value string) (quoted string, ok bool) {
+	clean, altered := utils.SanitizeTerminalLine(value)
 	if altered || clean == "" {
 		return "", false
 	}

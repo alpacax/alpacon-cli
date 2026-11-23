@@ -36,6 +36,20 @@ type Need struct {
 	Account   string
 }
 
+// command names the alpacon command that resumes the operation; edit resumes with cp.
+func (n Need) command() string {
+	switch n.Operation {
+	case Websh:
+		return "websh"
+	case Transfer:
+		return "cp"
+	case Tunnel:
+		return "tunnel"
+	default:
+		return "exec"
+	}
+}
+
 func (n Need) scopes() []string {
 	switch n.Operation {
 	case FileCommand:

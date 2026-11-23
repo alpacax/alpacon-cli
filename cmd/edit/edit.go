@@ -181,7 +181,7 @@ func realEditDeps(ac *client.AlpaconClient, groupname string, sel *worksession.S
 			return downloaded, err
 		},
 		upload: func(target editTarget, localPath string) error {
-			sel.ResumeWith(uploadResumeStep(target, localPath))
+			sel.ResumeWith(uploadResumeStep(target, groupname, localPath))
 			err := uploadEditFile(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, sel.ID())
 			if err != nil {
 				err = utils.HandleCommonErrors(err, target.Server, sel.Offer(mfa.ErrorCallbacks(ac, func() error {
@@ -199,8 +199,9 @@ func realEditDeps(ac *client.AlpaconClient, groupname string, sel *worksession.S
 	}
 }
 
-// uploadResumeStep names the edited copy and where 'alpacon cp' uploads it, in a form cp reads as remote.
-func uploadResumeStep(target editTarget, localPath string) string {
+// uploadResumeStep names the edited copy, where 'alpacon cp' uploads it in a form cp reads as
+// remote, and the group the edit wrote as.
+func uploadResumeStep(target editTarget, groupname, localPath string) string {
 	dest := target.Server + ":" + target.RemotePath
 	switch {
 	case target.Username != "":
@@ -210,7 +211,11 @@ func uploadResumeStep(target editTarget, localPath string) string {
 	}
 	shownPath, _ := utils.SanitizeTerminalLine(localPath)
 	shownDest, _ := utils.SanitizeTerminalLine(dest)
-	return fmt.Sprintf("upload the edited copy at %s to %s with 'alpacon cp' instead of editing again", shownPath, shownDest)
+	group := ""
+	if quoted, ok := worksession.ShellWord(groupname); ok {
+		group = " and -g " + quoted
+	}
+	return fmt.Sprintf("upload the edited copy at %s to %s with 'alpacon cp'%s instead of editing again", shownPath, shownDest, group)
 }
 
 func parseEditTarget(arg, usernameFlag string) (editTarget, error) {

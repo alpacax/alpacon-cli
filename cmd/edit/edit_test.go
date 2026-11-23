@@ -157,10 +157,30 @@ func TestUploadResumeStepNamesADestinationCpReadsAsRemote(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			step := uploadResumeStep(tt.target, "/tmp/copy")
+			step := uploadResumeStep(tt.target, "", "/tmp/copy")
 
 			assert.Equal(t, "upload the edited copy at /tmp/copy to "+tt.want+" with 'alpacon cp' instead of editing again", step)
 			assert.True(t, utils.IsRemoteTarget(tt.want), "cp must read %q as remote", tt.want)
+		})
+	}
+}
+
+func TestUploadResumeStepKeepsTheGroupTheEditWroteAs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, group, want string
+	}{
+		{name: "plain group", group: "deploy", want: " and -g deploy "},
+		{name: "group a shell would split", group: "dev ops", want: " and -g 'dev ops' "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			target := editTarget{Server: "web-1", RemotePath: "/etc/app.conf", Username: "root"}
+
+			step := uploadResumeStep(target, tt.group, "/tmp/copy")
+
+			assert.Equal(t, "upload the edited copy at /tmp/copy to root@web-1:/etc/app.conf with 'alpacon cp'"+tt.want+"instead of editing again", step)
 		})
 	}
 }

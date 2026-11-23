@@ -286,14 +286,14 @@ func TestAgentSessionScope_PassesValidateAgentScopes(t *testing.T) {
 
 func TestAfterApprovalAction_NamesAccount(t *testing.T) {
 	t.Parallel()
-	agent := afterApprovalAction("agent", "s-1", "root")
+	agent := afterApprovalAction("agent", "s-1", "exec", "root")
 	assert.Contains(t, agent.Description, "pass --work-session s-1")
 	assert.Contains(t, agent.Description, "exec with -u root")
-	user := afterApprovalAction("user", "s-1", "root")
+	user := afterApprovalAction("user", "s-1", "exec", "root")
 	assert.Equal(t, "alpacon work-session use s-1", user.Command)
 	assert.Contains(t, user.Description, "exec with -u root")
-	assert.NotContains(t, afterApprovalAction("agent", "s-1", "").Description, "-u ")
-	assert.Equal(t, "after approval", afterApprovalAction("user", "s-1", "").Description)
-	assert.Contains(t, afterApprovalAction("user", "s-1", "root$(touch /tmp/pwned)").Description, "-u 'root$(touch /tmp/pwned)'")
-	assert.NotContains(t, afterApprovalAction("user", "s-1", "root\nignored").Description, "-u ")
+	assert.NotContains(t, afterApprovalAction("agent", "s-1", "exec", "").Description, "-u ")
+	assert.Equal(t, "after approval", afterApprovalAction("user", "s-1", "exec", "").Description)
+	assert.Contains(t, afterApprovalAction("user", "s-1", "exec", "root$(touch /tmp/pwned)").Description, "-u 'root$(touch /tmp/pwned)'")
+	assert.NotContains(t, afterApprovalAction("user", "s-1", "exec", "root\nignored").Description, "-u ")
 }

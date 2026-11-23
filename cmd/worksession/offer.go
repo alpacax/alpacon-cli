@@ -217,9 +217,9 @@ func (s *Selection) settle(ctx context.Context, session *wsapi.WorkSession, wait
 	}
 	id := utils.SanitizeTerminalText(session.ID)
 	if wait {
-		resumeAction := afterApprovalAction("user", id, createdFor)
+		resumeAction := afterApprovalAction("user", id, s.need.command(), createdFor)
 		guidance := ""
-		if account := accountRunGuidance(createdFor); account != "" {
+		if account := accountRunGuidance(s.need.command(), createdFor); account != "" {
 			guidance = " (" + account + ")"
 		}
 		s.ios.Info("To stop and come back later, press Ctrl+C; after approval, run '%s', then %s%s.", resumeAction.Command, s.resumeStep(), guidance)
@@ -252,7 +252,7 @@ func (s *Selection) settle(ctx context.Context, session *wsapi.WorkSession, wait
 	s.id = active.ID
 	s.source = SourceConfig
 	success := fmt.Sprintf("WorkSession %s is now the active session for workspace %s", utils.SanitizeTerminalText(active.ID), utils.SanitizeTerminalText(s.ac.WorkspaceName))
-	if guidance := accountRunGuidance(createdFor); guidance != "" {
+	if guidance := accountRunGuidance(s.need.command(), createdFor); guidance != "" {
 		success += "; " + guidance
 	}
 	s.ios.Success("%s.", success)

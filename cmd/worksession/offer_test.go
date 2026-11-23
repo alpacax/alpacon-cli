@@ -929,3 +929,40 @@ func TestCtrlCAtTheOfferPromptDeclinesWithoutCreating(t *testing.T) {
 	assert.Equal(t, "old-session", selection.ID())
 	assert.Contains(t, stderr.String(), "Stopped at the prompt; no WorkSession was selected.")
 }
+
+func TestOfferAccountGuidanceNamesTheOperationsCommand(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		operation Operation
+		want      string
+	}{
+		{name: "command", operation: Command, want: "run exec with -u root"},
+		{name: "websh", operation: Websh, want: "run websh with -u root"},
+		{name: "transfer", operation: Transfer, want: "run cp with -u root"},
+		{name: "tunnel", operation: Tunnel, want: "run tunnel with -u root"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pending := wsapi.WorkSession{ID: "pending-session", Status: wsapi.StatusPending, RequesterType: "user"}
+			ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, WorkspaceName: "ws", HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+				body, _ := json.Marshal(pending)
+				return http.StatusOK, string(body)
+			})}
+			ios, _, stderr := utils.TestIOStreams()
+			selection := &Selection{need: Need{Operation: tt.operation}, ios: ios, ac: ac}
+
+			synctest.Test(t, func(*testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				_, _ = selection.settle(ctx, &pending, true, Want{}, "root")
+			})
+
+			assert.Contains(t, stderr.String(), tt.want)
+			if tt.operation != Command {
+				assert.NotContains(t, stderr.String(), "run exec with")
+			}
+		})
+	}
+}
