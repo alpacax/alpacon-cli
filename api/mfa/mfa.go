@@ -27,11 +27,11 @@ const (
 	stepUpTimeout      = 60 * time.Second
 )
 
-// ErrMFAAlreadyDone is what a link request returns when the server answers that this client's MFA
-// is already fresh: a 200 that carries no link. The error still reads as a missing link, so a
-// caller that needs the link fails as before, and one that only needs the MFA (kube mfa) can tell
-// the two apart with errors.Is.
-var ErrMFAAlreadyDone = errors.New("the server reports that MFA is already done")
+// ErrNoMFALink is what a link request returns when the server answers 200 with no link, as it
+// does once this client's MFA is already fresh. The error still reads as a missing link, so a
+// caller that needs the link fails as before. An empty answer is not proof of a fresh MFA on its
+// own, so a caller that needs only the MFA (kube mfa) confirms it with CheckMFACompletion.
+var ErrNoMFALink = errors.New("the server issued no MFA link")
 
 type mfaResponse struct {
 	MfaURL string `json:"mfa_url"`
@@ -338,10 +338,9 @@ func fetchMFALink(ac *client.AlpaconClient, params map[string]string) (string, e
 	if err := json.Unmarshal(responseBody, &mfaResp); err != nil {
 		return "", fmt.Errorf("failed to parse MFA URL response: %w", err)
 	}
-	// The server answers 200 with no link once this client's MFA is already fresh; it sends
-	// nothing else that names that case, so an empty link is all there is to read.
+	// The server answers 200 with no link once this client's MFA is already fresh.
 	if mfaResp.MfaURL == "" {
-		return "", fmt.Errorf("MFA URL is empty in server response: %w", ErrMFAAlreadyDone)
+		return "", fmt.Errorf("MFA URL is empty in server response: %w", ErrNoMFALink)
 	}
 
 	return mfaResp.MfaURL, nil

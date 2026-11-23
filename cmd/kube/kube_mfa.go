@@ -3,12 +3,14 @@ package kube
 import (
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 const opKubeMFA = "kube_mfa"
@@ -23,13 +25,14 @@ const (
 	kubeMFATimeout = 3 * time.Minute
 )
 
-// kubeMFAOptions are the seams a test replaces: whether stdin is a terminal, what opens
-// the browser, and the wait's pacing.
+// kubeMFAOptions are the seams a test replaces: whether stdin and stderr are terminals, what
+// opens the browser, and the wait's pacing.
 type kubeMFAOptions struct {
-	interactive func() bool
-	open        func(url string)
-	tick        time.Duration
-	timeout     time.Duration
+	interactive    func() bool
+	stderrTerminal func() bool
+	open           func(url string)
+	tick           time.Duration
+	timeout        time.Duration
 }
 
 // kubeMFAResult is what --output json prints on success.
@@ -43,10 +46,11 @@ type kubeMFAResult struct {
 
 func newKubeMFACmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	return newKubeMFACmdWith(newClient, ios, kubeMFAOptions{
-		interactive: utils.IsInteractiveShell,
-		open:        utils.OpenBrowser,
-		tick:        kubeMFATick,
-		timeout:     kubeMFATimeout,
+		interactive:    utils.IsInteractiveShell,
+		stderrTerminal: func() bool { return term.IsTerminal(int(os.Stderr.Fd())) },
+		open:           utils.OpenBrowser,
+		tick:           kubeMFATick,
+		timeout:        kubeMFATimeout,
 	})
 }
 
@@ -58,8 +62,9 @@ func newKubeMFACmdWith(newClient clientFactory, ios *utils.IOStreams, opts kubeM
 
 A workspace can require a recent MFA for writes and deletes in kube sessions. When
 yours is older than the workspace allows, the cluster refuses the request and the
-message kubectl prints names this command. It prints a link and opens it in your
-browser; once you finish MFA there, it exits and you retry the request. The MFA then
+message kubectl prints names this command. Run from a terminal, it prints a link and
+opens it in your browser; once you finish MFA there, it exits and you retry the
+request. The MFA then
 holds until the workspace's MFA window passes. kubectl cannot ask for it itself, so
 this is how Helm, Lens and any other client get past the refusal too.
 
@@ -70,11 +75,12 @@ last 'alpacon login', keeps being refused after this command succeeds; run
 'alpacon kube login' for the cluster again to open one this CLI can confirm.
 When the MFA is still fresh, it says so and issues no link.
 
-Without a terminal on stdin, as when an AI agent or a script runs it, it prints the
-link and exits 9 at once instead of waiting. The link still works after the command
+Without a terminal on stdin, as when an AI agent or a script runs it, it hands out
+the link and exits 9 at once, without opening a browser or waiting. The link still works after the command
 exits: hand it to the person who signs in, and run 'alpacon kube mfa' again once
 they are done to confirm. An interactive run that waits 3 minutes without seeing
-the MFA finish exits 9 the same way.`,
+the MFA finish exits 9 the same way. Under --output json with stderr redirected,
+stderr carries only the error envelope, which holds the link in next_actions.`,
 		Example: `  alpacon kube mfa
   alpacon kube mfa --output json`,
 		Args: cobra.NoArgs,
@@ -100,27 +106,35 @@ func runKubeMFA(ios *utils.IOStreams, ac *client.AlpaconClient, opts kubeMFAOpti
 	}
 
 	link, err := mfa.GetWorkspaceSecurityMFALink(ac)
-	if errors.Is(err, mfa.ErrMFAAlreadyDone) {
-		return printKubeMFAResult(ios, kubeMFAResult{Workspace: ac.WorkspaceName, Verified: true, AlreadyVerified: true})
+	if errors.Is(err, mfa.ErrNoMFALink) {
+		return confirmFreshMFA(ios, ac, err)
 	}
 	if err != nil {
 		return utils.NewEnvelopeExitError(opKubeMFA, err, "Failed to get the MFA link: %s.", err)
 	}
 
-	opts.open(link)
 	// Without a terminal nobody watches a wait, and the browser leg credits the MFA whether or
 	// not the CLI is still polling, so the link is handed out in the failure's next actions.
+	// No browser opens either: a script on a desktop must not raise one.
 	if !opts.interactive() {
 		return kubeMFAPending(link, fmt.Sprintf("Kubernetes writes and deletes in workspace %q need a recent MFA, and it is not verified yet.", ac.WorkspaceName), nil)
 	}
+	opts.open(link)
 
-	_, _ = fmt.Fprintf(ios.ErrOut, "Kubernetes writes and deletes in workspace %q need a recent MFA. Open this link to verify:\n  %s\n",
-		utils.SanitizeTerminalText(ac.WorkspaceName), utils.SanitizeTerminalText(link))
-
-	spinner := utils.NewSpinner("Waiting for MFA verification...")
-	spinner.Start()
+	// Under --output json with stderr redirected, a program reads stderr and the envelope is
+	// all it may hold; the envelope carries the link. Anywhere else a person is reading.
+	toPerson := !ios.IsJSON() || opts.stderrTerminal()
+	var spinner *utils.Spinner
+	if toPerson {
+		_, _ = fmt.Fprintf(ios.ErrOut, "Kubernetes writes and deletes in workspace %q need a recent MFA. Open this link to verify:\n  %s\n",
+			utils.SanitizeTerminalText(ac.WorkspaceName), utils.SanitizeTerminalText(link))
+		spinner = utils.NewSpinner("Waiting for MFA verification...")
+		spinner.Start()
+	}
 	err = mfa.AwaitMFACompletion(ac, opts.tick, opts.timeout)
-	spinner.Stop()
+	if spinner != nil {
+		spinner.Stop()
+	}
 	if errors.Is(err, mfa.ErrMFAWaitTimedOut) {
 		return kubeMFAPending(link, fmt.Sprintf("MFA was not verified within %v.", opts.timeout), err)
 	}
@@ -128,6 +142,20 @@ func runKubeMFA(ios *utils.IOStreams, ac *client.AlpaconClient, opts kubeMFAOpti
 		return utils.NewEnvelopeExitError(opKubeMFA, err, "Failed to confirm the MFA: %s.", err)
 	}
 	return printKubeMFAResult(ios, kubeMFAResult{Workspace: ac.WorkspaceName, Verified: true})
+}
+
+// confirmFreshMFA reports an MFA the server answered with no link for. That answer is how the
+// server says the MFA is already fresh, but nothing else in it names that case, so the
+// completion probe confirms it before the command reports success.
+func confirmFreshMFA(ios *utils.IOStreams, ac *client.AlpaconClient, noLink error) error {
+	completed, err := mfa.CheckMFACompletion(ac)
+	if err != nil {
+		return utils.NewEnvelopeExitError(opKubeMFA, err, "Failed to confirm the MFA: %s.", err)
+	}
+	if !completed {
+		return utils.NewEnvelopeExitError(opKubeMFA, noLink, "The server issued no MFA link and does not report the MFA as done; run 'alpacon kube mfa' again, or 'alpacon login' if it keeps failing.")
+	}
+	return printKubeMFAResult(ios, kubeMFAResult{Workspace: ac.WorkspaceName, Verified: true, AlreadyVerified: true})
 }
 
 // kubeMFAPending is the exit-9 failure for an MFA the person has not finished yet. The link

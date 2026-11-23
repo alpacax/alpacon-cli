@@ -119,13 +119,13 @@ func TestGetMFALink_EmptyURLIsAnError(t *testing.T) {
 
 // The server answers a link request with no link once the client's MFA is already fresh. It
 // stays an error for a caller that needs the link, and is told apart by the sentinel.
-func TestGetWorkspaceSecurityMFALink_AlreadyDoneIsTheSentinel(t *testing.T) {
+func TestGetWorkspaceSecurityMFALink_NoLinkIsTheSentinel(t *testing.T) {
 	t.Parallel()
 	ac, _ := mfaLinkServer(t, `{"detail": "MFA is already done."}`)
 
 	link, err := GetWorkspaceSecurityMFALink(ac)
 
-	require.ErrorIs(t, err, ErrMFAAlreadyDone)
+	require.ErrorIs(t, err, ErrNoMFALink)
 	assert.Empty(t, link)
 	assert.Contains(t, err.Error(), "MFA URL is empty in server response")
 }

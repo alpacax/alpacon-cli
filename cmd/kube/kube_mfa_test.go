@@ -96,17 +96,32 @@ type mfaRun struct {
 	code           int
 }
 
-func runKubeMFACmd(ac *client.AlpaconClient, interactive, jsonOut bool, args ...string) *mfaRun {
+// mfaMode is how a run is invoked: from a terminal or not, under --output json or not, and
+// whether stderr is a terminal a person reads.
+type mfaMode struct {
+	interactive, json, stderrTerminal bool
+}
+
+var (
+	ttyTable     = mfaMode{interactive: true, stderrTerminal: true}
+	ttyJSON      = mfaMode{interactive: true, json: true, stderrTerminal: true}
+	ttyJSONPiped = mfaMode{interactive: true, json: true}
+	scriptTable  = mfaMode{}
+	scriptJSON   = mfaMode{json: true}
+)
+
+func runKubeMFACmd(ac *client.AlpaconClient, mode mfaMode, args ...string) *mfaRun {
 	run := &mfaRun{}
 	build := func(ios *utils.IOStreams) *cobra.Command {
 		return newKubeMFACmdWith(func() (*client.AlpaconClient, error) { return ac, nil }, ios, kubeMFAOptions{
-			interactive: func() bool { return interactive },
-			open:        func(url string) { run.opened = append(run.opened, url) },
-			tick:        testMFATick,
-			timeout:     testMFAWindow,
+			interactive:    func() bool { return mode.interactive },
+			stderrTerminal: func() bool { return mode.stderrTerminal },
+			open:           func(url string) { run.opened = append(run.opened, url) },
+			tick:           testMFATick,
+			timeout:        testMFAWindow,
 		})
 	}
-	if jsonOut {
+	if mode.json {
 		run.stdout, run.stderr, run.code = cmdtest.RunJSON(build, args...)
 	} else {
 		run.stdout, run.stderr, run.code = cmdtest.RunCaptured(build, args...)
@@ -127,11 +142,14 @@ func envelopeOf(t *testing.T, stderr string) utils.JSONErrorEnvelope[map[string]
 func TestKubeMFA_ConfirmsAfterTheBrowserStep(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		jsonOut bool
+		name     string
+		mode     mfaMode
+		wantLink bool
 	}{
-		{name: "table"},
-		{name: "json", jsonOut: true},
+		{name: "table", mode: ttyTable, wantLink: true},
+		{name: "json_on_a_terminal", mode: ttyJSON, wantLink: true},
+		// A program reads a redirected stderr, so nothing but a failure's envelope goes there.
+		{name: "json_with_stderr_redirected", mode: ttyJSONPiped},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -139,22 +157,27 @@ func TestKubeMFA_ConfirmsAfterTheBrowserStep(t *testing.T) {
 			srv := &mfaServer{link: linkIssued, completions: []func(http.ResponseWriter){notYet, notYet, done}}
 			var run *mfaRun
 			synctest.Test(t, func(t *testing.T) {
-				run = runKubeMFACmd(mfaClient(t, srv), true, tt.jsonOut)
+				run = runKubeMFACmd(mfaClient(t, srv), tt.mode)
 			})
 
 			require.Equal(t, 0, run.code, run.stderr)
 			assert.Equal(t, []string{testMFALink}, run.opened)
-			assert.Contains(t, run.stderr, testMFALink, "the person needs the link even when the browser opens")
-			assert.Contains(t, run.stderr, `workspace "my-workspace"`)
 			_, polls := srv.counts()
 			assert.Equal(t, 3, polls)
 			assert.Contains(t, srv.query, "location=cli")
 			assert.Contains(t, srv.query, "workspace=my-workspace")
 			assert.NotContains(t, srv.query, "server=", "a kube session names no server")
-			if tt.jsonOut {
+			if tt.mode.json {
 				assert.JSONEq(t, `{"workspace": "my-workspace", "verified": true, "already_verified": false}`, run.stdout)
+				if tt.wantLink {
+					assert.Contains(t, run.stderr, testMFALink, "the person needs the link even when the browser opens")
+				} else {
+					assert.Empty(t, run.stderr)
+				}
 				return
 			}
+			assert.Contains(t, run.stderr, `Kubernetes writes and deletes in workspace "my-workspace" need a recent MFA. Open this link to verify:
+  `+testMFALink+"\n")
 			assert.Empty(t, run.stdout)
 			assert.Contains(t, run.stderr, `MFA verified for this CLI in workspace "my-workspace".`)
 			assert.Contains(t, run.stderr, "Retry the Kubernetes request.")
@@ -163,36 +186,64 @@ func TestKubeMFA_ConfirmsAfterTheBrowserStep(t *testing.T) {
 	}
 }
 
-// The server answers with no link while the client's MFA is still fresh. That is success, and
-// nothing is opened or polled.
+// The server answers with no link while the client's MFA is still fresh. One completion check
+// confirms it before success is reported, and nothing is opened or waited on.
 func TestKubeMFA_AlreadyFreshIssuesNoLink(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name        string
-		interactive bool
-		jsonOut     bool
+		name string
+		mode mfaMode
 	}{
-		{name: "interactive_table", interactive: true},
-		{name: "non_interactive_json", jsonOut: true},
+		{name: "interactive_table", mode: ttyTable},
+		{name: "non_interactive_json", mode: scriptJSON},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			srv := &mfaServer{link: alreadyDone, completions: []func(http.ResponseWriter){done}}
-			run := runKubeMFACmd(mfaClient(t, srv), tt.interactive, tt.jsonOut)
+			run := runKubeMFACmd(mfaClient(t, srv), tt.mode)
 
 			require.Equal(t, 0, run.code, run.stderr)
 			assert.Empty(t, run.opened)
 			linkHits, polls := srv.counts()
 			assert.Equal(t, 1, linkHits)
-			assert.Zero(t, polls)
-			if tt.jsonOut {
+			assert.Equal(t, 1, polls)
+			if tt.mode.json {
 				assert.JSONEq(t, `{"workspace": "my-workspace", "verified": true, "already_verified": true}`, run.stdout)
 				assert.Empty(t, run.stderr)
 				return
 			}
 			assert.Contains(t, run.stderr, `MFA is already verified for this CLI in workspace "my-workspace".`)
 			assert.NotContains(t, run.stderr, "Open this link")
+		})
+	}
+}
+
+// A 200 with no link is not proof of a fresh MFA by itself: when the completion check does not
+// confirm it, the command fails rather than report an MFA it never saw.
+func TestKubeMFA_NoLinkWithoutAFreshMFAExitsOne(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		completion func(w http.ResponseWriter)
+		want       string
+	}{
+		{name: "not_completed", completion: notYet, want: "The server issued no MFA link and does not report the MFA as done"},
+		{name: "check_failed", completion: reply(http.StatusServiceUnavailable, `{}`), want: "Failed to confirm the MFA"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := &mfaServer{link: reply(http.StatusOK, `{}`), completions: []func(http.ResponseWriter){tt.completion}}
+			run := runKubeMFACmd(mfaClient(t, srv), ttyTable)
+
+			assert.Equal(t, utils.ExitCodeGeneralError, run.code)
+			assert.Empty(t, run.stdout)
+			assert.Contains(t, run.stderr, tt.want)
+			assert.NotContains(t, run.stderr, "verified for this CLI")
+			assert.Empty(t, run.opened)
+			_, polls := srv.counts()
+			assert.Equal(t, 1, polls)
 		})
 	}
 }
@@ -205,13 +256,13 @@ func TestKubeMFA_NonInteractiveHandsOutTheLinkAndExitsNine(t *testing.T) {
 	t.Run("table", func(t *testing.T) {
 		t.Parallel()
 		srv := &mfaServer{link: linkIssued, completions: []func(http.ResponseWriter){done}}
-		run := runKubeMFACmd(mfaClient(t, srv), false, false)
+		run := runKubeMFACmd(mfaClient(t, srv), scriptTable)
 
 		assert.Equal(t, utils.ExitCodeMFARequired, run.code)
 		assert.Empty(t, run.stdout)
 		_, polls := srv.counts()
 		assert.Zero(t, polls, "a run nobody watches must not wait")
-		assert.Equal(t, []string{testMFALink}, run.opened)
+		assert.Empty(t, run.opened, "a script on a desktop must not raise a browser")
 		assert.Equal(t, `Warning: Kubernetes writes and deletes in workspace "my-workspace" need a recent MFA, and it is not verified yet.
 Next:
   Open this link in a browser and finish MFA: `+testMFALink+`
@@ -222,10 +273,11 @@ Next:
 	t.Run("json", func(t *testing.T) {
 		t.Parallel()
 		srv := &mfaServer{link: linkIssued, completions: []func(http.ResponseWriter){done}}
-		run := runKubeMFACmd(mfaClient(t, srv), false, true)
+		run := runKubeMFACmd(mfaClient(t, srv), scriptJSON)
 
 		assert.Equal(t, utils.ExitCodeMFARequired, run.code)
 		assert.Empty(t, run.stdout)
+		assert.Empty(t, run.opened)
 		env := envelopeOf(t, run.stderr)
 		assert.Equal(t, utils.ExitCodeMFARequired, env.ExitCode)
 		assert.Equal(t, utils.ErrorCodeMFARequired, env.ErrorCode)
@@ -241,11 +293,11 @@ Next:
 func TestKubeMFA_TimeoutExitsNine(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		jsonOut bool
+		name string
+		mode mfaMode
 	}{
-		{name: "table"},
-		{name: "json", jsonOut: true},
+		{name: "table", mode: ttyTable},
+		{name: "json_with_stderr_redirected", mode: ttyJSONPiped},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -253,23 +305,19 @@ func TestKubeMFA_TimeoutExitsNine(t *testing.T) {
 			srv := &mfaServer{link: linkIssued, completions: []func(http.ResponseWriter){notYet}}
 			var run *mfaRun
 			synctest.Test(t, func(t *testing.T) {
-				run = runKubeMFACmd(mfaClient(t, srv), true, tt.jsonOut)
+				run = runKubeMFACmd(mfaClient(t, srv), tt.mode)
 			})
 
 			assert.Equal(t, utils.ExitCodeMFARequired, run.code)
 			assert.Empty(t, run.stdout)
 			_, polls := srv.counts()
 			assert.Equal(t, 100, polls)
-			if !tt.jsonOut {
+			if !tt.mode.json {
 				assert.Contains(t, run.stderr, "Warning: MFA was not verified within 1.005s.\n")
 				assert.Contains(t, run.stderr, "  alpacon kube mfa  # ")
 				return
 			}
-			// The link line goes first, for the person at the terminal; the envelope ends stderr.
-			at := strings.Index(run.stderr, "{")
-			require.Positive(t, at, run.stderr)
-			assert.Contains(t, run.stderr[:at], testMFALink)
-			env := envelopeOf(t, run.stderr[at:])
+			env := envelopeOf(t, run.stderr)
 			assert.Equal(t, utils.ErrorCodeMFARequired, env.ErrorCode)
 			assert.Equal(t, "MFA was not verified within 1.005s.", env.Message)
 			require.Len(t, env.NextActions, 2)
@@ -287,13 +335,13 @@ func TestKubeMFA_RefusalDuringTheWaitExitsOne(t *testing.T) {
 	}}
 	var run *mfaRun
 	synctest.Test(t, func(t *testing.T) {
-		run = runKubeMFACmd(mfaClient(t, srv), true, true)
+		run = runKubeMFACmd(mfaClient(t, srv), ttyJSONPiped)
 	})
 
 	assert.Equal(t, utils.ExitCodeGeneralError, run.code)
 	_, polls := srv.counts()
 	assert.Equal(t, 2, polls)
-	env := envelopeOf(t, run.stderr[strings.Index(run.stderr, "{"):])
+	env := envelopeOf(t, run.stderr)
 	assert.Equal(t, "auth_client_instance_revoked", env.ErrorCode)
 	assert.Contains(t, env.Message, "Failed to confirm the MFA")
 }
@@ -341,7 +389,7 @@ func TestKubeMFA_FailuresBeforeTheWait(t *testing.T) {
 				ac.SetAccessToken("")
 				ac.Token = "api-token"
 			}
-			run := runKubeMFACmd(ac, true, false, tt.args...)
+			run := runKubeMFACmd(ac, ttyTable, tt.args...)
 
 			assert.Equal(t, tt.wantCode, run.code, run.stderr)
 			assert.Contains(t, run.stderr, tt.wantError)

@@ -300,32 +300,35 @@ type interruptWatch struct {
 	first   chan struct{} // closed on the first Ctrl+C
 	signals chan os.Signal
 	done    chan struct{}
-	stop    func()
+	exited  chan struct{} // closed when the watcher goroutine returns
+	// stop ends the watch and waits for the watcher to return, so a notice it
+	// is still writing is out before the command finishes and its caller, or a
+	// test, takes stderr back.
+	stop func()
 }
 
 func watchInterrupt(ios *utils.IOStreams, firstNotice string, quit func()) *interruptWatch {
-	w := &interruptWatch{first: make(chan struct{}), signals: make(chan os.Signal, 2), done: make(chan struct{})}
+	w := &interruptWatch{first: make(chan struct{}), signals: make(chan os.Signal, 2), done: make(chan struct{}), exited: make(chan struct{})}
 	signal.Notify(w.signals, os.Interrupt, syscall.SIGTERM)
 	w.stop = sync.OnceFunc(func() {
 		signal.Stop(w.signals)
 		close(w.done)
+		<-w.exited
 	})
 	go func() {
-		seen := false
+		defer close(w.exited)
 		for {
 			select {
 			case <-w.signals:
-				if seen {
+				if w.fired.Swap(true) {
 					quit()
 					return
 				}
-				seen = true
-				// The notice goes out before the command can see the interrupt:
-				// once it does, it may finish and its caller restore stderr while
-				// the notice is still being written.
-				ios.Warning("%s", firstNotice)
-				w.fired.Store(true)
+				// The command sees the interrupt before the notice is written,
+				// so a stderr that blocks cannot hold up the cancellation; stop
+				// waits for the notice instead.
 				close(w.first)
+				ios.Warning("%s", firstNotice)
 			case <-w.done:
 				return
 			}

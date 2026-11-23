@@ -4,46 +4,49 @@ import (
 	"os"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type writerFunc func(p []byte) (int, error)
 
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 
-// The first Ctrl+C's notice is written before the command can see the
-// interrupt. Seen first, the command may finish and its caller restore
-// stderr while the notice is still being written to it.
+// A first Ctrl+C reaches the command at once, even while its notice cannot be
+// written, so a stderr that blocks does not hold up the cancellation. stop
+// still returns only once the notice is out: the command's caller takes
+// stderr back after it returns.
 // Serial: watchInterrupt registers for the process's own signals.
-func TestWatchInterruptWritesTheNoticeBeforeReportingTheInterrupt(t *testing.T) {
-	var watch *interruptWatch
-	var reportedFirst atomic.Bool
-	wrote := make(chan struct{}, 1)
+func TestWatchInterruptReportsAtOnceAndStopWaitsForTheNotice(t *testing.T) {
+	release := make(chan struct{})
+	var written atomic.Bool
 	ios, _, _ := utils.TestIOStreams()
 	ios.ErrOut = writerFunc(func(p []byte) (int, error) {
-		select {
-		case <-watch.first:
-			reportedFirst.Store(true)
-		default:
-		}
-		if watch.fired.Load() {
-			reportedFirst.Store(true)
-		}
-		select {
-		case wrote <- struct{}{}:
-		default:
-		}
+		<-release
+		written.Store(true)
 		return len(p), nil
 	})
-	watch = watchInterrupt(ios, "Interrupted.", func() { t.Error("a first Ctrl+C must not quit") })
-	defer watch.stop()
+	watch := watchInterrupt(ios, "Interrupted.", func() { t.Error("a first Ctrl+C must not quit") })
 
 	watch.signals <- os.Interrupt
-	<-watch.first
-	<-wrote
-
+	select {
+	case <-watch.first:
+	case <-time.After(5 * time.Second):
+		close(release)
+		watch.stop()
+		require.FailNow(t, "the interrupt waited on the notice's write")
+	}
 	assert.True(t, watch.fired.Load())
-	assert.False(t, reportedFirst.Load(), "the interrupt was visible to the command before its notice was written")
+
+	go func() {
+		// Late enough that a stop which does not wait has long returned.
+		time.Sleep(50 * time.Millisecond)
+		close(release)
+	}()
+	watch.stop()
+
+	assert.True(t, written.Load(), "stop returned while the notice was still being written")
 }
