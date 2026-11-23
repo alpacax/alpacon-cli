@@ -44,6 +44,8 @@ func exitCodeFallback(exitCode int) string {
 		return ErrorCodeUsage
 	case ExitCodeNotApproved:
 		return ErrorCodeNotApproved
+	case ExitCodeMFARequired:
+		return ErrorCodeMFARequired
 	}
 	return ErrorCodeCLI
 }

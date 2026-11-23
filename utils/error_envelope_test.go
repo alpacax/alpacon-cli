@@ -72,6 +72,8 @@ func TestNewFailureEnvelopeFallsBackToTheExitCodesCode(t *testing.T) {
 		{name: "server code wins over the usage exit", exitCode: ExitCodeUsageError, err: serverErr, want: "rbac_permission_required"},
 		{name: "server code wins over the not approved exit", exitCode: ExitCodeNotApproved, err: serverErr, want: "rbac_permission_required"},
 		{name: "http status wins over the exit", exitCode: ExitCodeNotApproved, err: &fakeAPIError{status: 404}, want: "http_404"},
+		{name: "mfa required exit without a cause", exitCode: ExitCodeMFARequired, want: ErrorCodeMFARequired},
+		{name: "server code wins over the mfa required exit", exitCode: ExitCodeMFARequired, err: serverErr, want: "rbac_permission_required"},
 		{name: "busy exit stays cli_error", exitCode: ExitCodeServerBusy, want: ErrorCodeCLI},
 		{name: "explicit cli_error survives the not approved exit", exitCode: ExitCodeNotApproved, code: ErrorCodeCLI, want: ErrorCodeCLI},
 	}

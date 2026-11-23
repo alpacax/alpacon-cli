@@ -282,6 +282,10 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 				}
 				return utils.NewEnvelopeExitError(opCreate, err, "Failed to create work session: %s.", err)
 			}
+			if len(sudoPolicies) > 0 {
+				warnBroadSudoPolicies(ios, session.SudoPolicies)
+				warnBroadSudoPolicies(ios, session.ProposedSudoPolicies)
+			}
 			approvalSignaled := session.Status == wsapi.StatusPending
 			if approvalSignaled {
 				utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: session.ID, ConsoleURL: session.ConsoleURL}, ac)

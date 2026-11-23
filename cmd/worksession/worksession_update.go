@@ -3,6 +3,7 @@ package worksession
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -150,7 +151,7 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 				req.Servers = ids
 			}
 
-			updated, err := applyWorkSessionUpdate(ac, sessionID, req, newSudo)
+			updated, err := applyWorkSessionUpdate(ac, sessionID, req, newSudo, ios)
 			if err != nil {
 				if hint := TargetErrorHint(err); hint != "" {
 					return utils.NewEnvelopeExitError(opUpdate, err, "Failed to update work session: %s.", hint)
@@ -223,7 +224,7 @@ func validateSessionForTimeUpdate(session *wsapi.WorkSession, req wsapi.WorkSess
 
 // applyWorkSessionUpdate sends req. sudo_policies replaces the whole set, so existing policies are
 // sent back with newSudo, or adding would delete them.
-func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsapi.WorkSessionUpdateRequest, newSudo []wsapi.SudoPolicyInline) (*wsapi.WorkSession, error) {
+func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsapi.WorkSessionUpdateRequest, newSudo []wsapi.SudoPolicyInline, ios *utils.IOStreams) (*wsapi.WorkSession, error) {
 	checkTime := req.StartsAt != "" || req.ExpiresAt != ""
 	if len(newSudo) == 0 && !checkTime {
 		return wsapi.UpdateWorkSession(ac, sessionID, req)
@@ -250,9 +251,12 @@ func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsap
 		desired = append(desired, newSudo...)
 		req.SudoPolicies = desired
 	}
-	updated, err := wsapi.UpdateWorkSession(ac, sessionID, req)
+	updated, status, err := wsapi.UpdateWorkSessionWithStatus(ac, sessionID, req)
 	if err != nil {
 		return nil, err
+	}
+	if len(newSudo) > 0 {
+		warnUpdatedSudoPolicies(ios, session.SudoPolicies, updated, status == http.StatusAccepted)
 	}
 	if checkTime {
 		if stored := unappliedTimes(updated, req); len(stored) > 0 {

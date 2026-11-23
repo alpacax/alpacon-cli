@@ -989,16 +989,22 @@ func (ac *AlpaconClient) SendDeleteRequestWithBody(url string, body any) ([]byte
 }
 
 func (ac *AlpaconClient) SendPatchRequest(url string, body any) ([]byte, error) {
+	response, _, err := ac.SendPatchRequestWithStatus(url, body)
+	return response, err
+}
+
+// SendPatchRequestWithStatus exposes the difference between an applied and a queued change.
+func (ac *AlpaconClient) SendPatchRequestWithStatus(url string, body any) ([]byte, int, error) {
 	jsonValue, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	req, err := ac.createRequest(http.MethodPatch, url, bytes.NewBuffer(jsonValue))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return ac.sendRequest(req)
+	return ac.sendRequestWithStatus(req)
 }
 
 func (ac *AlpaconClient) SendMultipartStreamRequest(url, contentType string, body io.Reader, contentLength int64) ([]byte, error) {
@@ -1556,6 +1562,10 @@ func codeSentence(code string) (sentence string, known bool) {
 		return "The server refused the command's environment: names must use letters, digits and underscores, values must be strings of at most 4096 characters, and at most 64 variables are allowed.", true
 	case utils.ApplicationSystemUserNotFound:
 		return "the service token's application cannot run as that account on that server—run as an account bound to the application or as its own account, and check that it is provisioned there", true
+	case "home_purge_removed":
+		return "Deleting a home directory is no longer supported. Delete the user, optionally archiving the home directory.", true
+	case "system_home_conflict":
+		return "The home directory belongs to a different UID. Ask a server administrator to resolve its ownership before retrying.", true
 	case utils.APINotFound:
 		return "the requested resource was not found", true
 	case utils.APIRateLimited:
