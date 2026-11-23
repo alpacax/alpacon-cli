@@ -178,6 +178,7 @@ func (s *Selection) reusableSessions() ([]wsapi.WorkSession, Want, error) {
 		Status:        strings.Join([]string{wsapi.StatusActive, wsapi.StatusApproved, wsapi.StatusPending}, ","),
 		RequesterType: "user",
 		AssignedUser:  me.ID,
+		ServerID:      serverID,
 	})
 	if err != nil {
 		return nil, Want{}, err

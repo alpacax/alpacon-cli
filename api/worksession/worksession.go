@@ -15,17 +15,7 @@ import (
 const workSessionURL = "/api/work-sessions/sessions/"
 
 func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType, assignedUser string) ([]WorkSessionAttributes, error) {
-	params := map[string]string{}
-	if status != "" {
-		params["status"] = status
-	}
-	if requesterType != "" {
-		params["requester_type"] = requesterType
-	}
-	if assignedUser != "" {
-		params["assigned_user"] = assignedUser
-	}
-
+	params := SessionFilter{Status: status, RequesterType: requesterType, AssignedUser: assignedUser}.params()
 	sessions, err := api.FetchAllPages[WorkSession](ac, workSessionURL, params)
 	if err != nil {
 		return nil, err
@@ -107,31 +97,35 @@ func TargetsCluster(ws *WorkSession, clusterID string) bool {
 	return false
 }
 
-// SessionFilter narrows ListWorkSessions. Empty fields are not
-// sent; Status takes several statuses separated by commas.
+// SessionFilter narrows a work session list. Empty fields are not sent; Status takes several
+// statuses separated by commas. A server that ignores a filter still answers, so callers check targets locally.
 type SessionFilter struct {
 	ClusterID     string
+	ServerID      string
 	Status        string
 	RequesterType string
 	AssignedUser  string
 }
 
-// ListWorkSessions returns whole work sessions, optionally narrowed to one cluster.
-func ListWorkSessions(ac *client.AlpaconClient, filter SessionFilter) ([]WorkSession, error) {
+func (f SessionFilter) params() map[string]string {
 	params := map[string]string{}
-	if strings.TrimSpace(filter.ClusterID) != "" {
-		params["cluster"] = filter.ClusterID
+	for key, value := range map[string]string{
+		"cluster":        strings.TrimSpace(f.ClusterID),
+		"server":         strings.TrimSpace(f.ServerID),
+		"status":         f.Status,
+		"requester_type": f.RequesterType,
+		"assigned_user":  f.AssignedUser,
+	} {
+		if value != "" {
+			params[key] = value
+		}
 	}
-	if filter.Status != "" {
-		params["status"] = filter.Status
-	}
-	if filter.RequesterType != "" {
-		params["requester_type"] = filter.RequesterType
-	}
-	if filter.AssignedUser != "" {
-		params["assigned_user"] = filter.AssignedUser
-	}
-	sessions, err := api.FetchAllPages[WorkSession](ac, workSessionURL, params)
+	return params
+}
+
+// ListWorkSessions returns whole work sessions, optionally narrowed to one server or cluster.
+func ListWorkSessions(ac *client.AlpaconClient, filter SessionFilter) ([]WorkSession, error) {
+	sessions, err := api.FetchAllPages[WorkSession](ac, workSessionURL, filter.params())
 	if err != nil {
 		return nil, err
 	}

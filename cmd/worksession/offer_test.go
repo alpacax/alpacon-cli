@@ -117,6 +117,7 @@ func TestAcceptedReusableSessionIsSavedWithoutCreatingAnother(t *testing.T) {
 			assert.Equal(t, "user", r.URL.Query().Get("requester_type"))
 			assert.Equal(t, "user-1", r.URL.Query().Get("assigned_user"))
 			assert.Empty(t, r.URL.Query().Get("cluster"))
+			assert.Equal(t, "server-1", r.URL.Query().Get("server"))
 			_ = json.NewEncoder(w).Encode(map[string]any{"count": 1, "results": []wsapi.WorkSession{candidate}})
 		case r.URL.Path == "/api/work-sessions/sessions/" && r.Method == http.MethodPost:
 			creates.Add(1)
