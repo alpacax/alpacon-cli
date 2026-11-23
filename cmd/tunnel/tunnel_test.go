@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	osexec "os/exec"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -349,6 +350,9 @@ func TestTunnelOfferResendsWithCreatedTunnelSession(t *testing.T) {
 }
 
 func TestTunnelOfferIsInterruptibleInBothModes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows cannot send os.Interrupt to a process")
+	}
 	for _, mode := range []string{"plain", "command"} {
 		for _, tc := range []struct{ name, input, want string }{
 			{name: "prompt", want: "exit status 3"},
