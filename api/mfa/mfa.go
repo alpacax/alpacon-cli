@@ -2,6 +2,7 @@ package mfa
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -74,7 +75,13 @@ func HandleMFAErrorForServerID(ac *client.AlpaconClient, serverID string) error 
 // this client. Only the exec sudo step-up polls it: the refused request there is
 // a command that already ran, so re-running it would repeat its side effects.
 func CheckMFACompletion(ac *client.AlpaconClient) (bool, error) {
-	responseBody, err := ac.SendGetRequest(mfaCompletionURL)
+	return checkMFACompletion(context.Background(), ac)
+}
+
+// checkMFACompletion is CheckMFACompletion bounded by ctx, so a wait's deadline also ends a
+// check still in flight: once connected, the HTTP client caps no transfer on its own.
+func checkMFACompletion(ctx context.Context, ac *client.AlpaconClient) (bool, error) {
+	responseBody, err := ac.SendGetRequestWithContext(ctx, mfaCompletionURL)
 	if err != nil {
 		return false, fmt.Errorf("failed to check MFA completion: %w", err)
 	}
@@ -245,26 +252,36 @@ func (e *mfaWaitTimeout) Unwrap() []error { return []error{ErrMFAWaitTimedOut, e
 // widening gap would only add to how long they wait for the CLI to notice. A 429 stretches the
 // next gap to its Retry-After within NextPollBackoff's cap and ends nothing. A failure the next
 // poll may not repeat (no response, a 5xx, a 408) is ridden through at the same tick, or its
-// Retry-After, up to MaxConsecutivePollFailures in a row; a 429 neither counts toward that run nor ends it. Any
-// other failure is returned at once, since polling again cannot change it. A poll that would start
-// past timeout is never sent: the wait returns an error that matches ErrMFAWaitTimedOut.
+// Retry-After, up to MaxConsecutivePollFailures in a row; a 429 neither counts toward that run
+// nor ends it. Any other failure is returned at once, since polling again cannot change it.
+// The wait never runs past timeout: a poll that would start after it is never sent, and one
+// still in flight when it passes is cancelled. Either way the wait returns an error that
+// matches ErrMFAWaitTimedOut.
 //
 // Pacing is passed in rather than read from package variables, so a test sets its own without
 // racing a parallel one.
 func AwaitMFACompletion(ac *client.AlpaconClient, tick, timeout time.Duration) error {
 	start := time.Now()
+	ctx, cancel := context.WithDeadline(context.Background(), start.Add(timeout))
+	defer cancel()
 	throttle := utils.NewThrottleBudget(timeout)
 	delay := tick
 	failures := 0
 	// lastRefusal is the latest refusal a poll got, so a timeout still carries its hint.
 	var lastRefusal error
+	timedOut := func() error {
+		return &mfaWaitTimeout{hinted: utils.HintOnly(fmt.Sprintf("MFA verification timed out after %v", timeout), lastRefusal)}
+	}
 	for {
 		if remaining := timeout - time.Since(start); delay > remaining {
-			return &mfaWaitTimeout{hinted: utils.HintOnly(fmt.Sprintf("MFA verification timed out after %v", timeout), lastRefusal)}
+			return timedOut()
 		}
 		time.Sleep(delay)
 
-		completed, err := CheckMFACompletion(ac)
+		completed, err := checkMFACompletion(ctx, ac)
+		if ctx.Err() != nil {
+			return timedOut()
+		}
 		status := utils.HTTPStatusCode(err)
 		switch {
 		case err == nil:

@@ -509,3 +509,26 @@ func TestAwaitMFACompletion_RidesThroughFewerThanTheFailureLimit(t *testing.T) {
 		assert.Equal(t, tick, polls.WidestGap(), "a failed poll keeps the base tick, as the person may finish MFA meanwhile")
 	})
 }
+
+// A completion check still in flight when the deadline passes is cancelled, so the wait ends at
+// its timeout even when the server never answers: once connected, the HTTP client caps no
+// transfer on its own.
+func TestAwaitMFACompletion_CancelsACheckInFlightAtTheDeadline(t *testing.T) {
+	t.Parallel()
+	const tick = 10 * time.Millisecond
+	ac := &client.AlpaconClient{
+		BaseURL:       testutil.StubBaseURL,
+		WorkspaceName: "pinned-ws",
+		HTTPClient: testutil.HandlerClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			<-r.Context().Done() // a check the server never answers
+		})),
+	}
+
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		err := AwaitMFACompletion(ac, tick, 5*tick+tick/2)
+
+		require.ErrorIs(t, err, ErrMFAWaitTimedOut)
+		assert.Equal(t, 5*tick+tick/2, time.Since(start), "the wait must end at its timeout, not when the check answers")
+	})
+}
