@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -36,6 +37,7 @@ type purposeRequiredSignal struct {
 type purposeAnswerSignal struct {
 	OK          bool         `json:"ok"`
 	Status      string       `json:"status"`
+	ErrorCode   string       `json:"error_code"`
 	ExitCode    int          `json:"exit_code"`
 	Message     string       `json:"message"`
 	CommandID   string       `json:"command_id"`
@@ -177,22 +179,53 @@ func TestPrintPurposeRefused_JSONDoesNotSendTheCallerToResubmit(t *testing.T) {
 	// A settled command and a bystander's answer share one server code, so the
 	// envelope cannot say which happened—and must not turn that uncertainty
 	// into a resubmission, which would create a second command.
-	var out string
+	var stdout, out string
 	withFormat(OutputFormatJSON, func() {
-		out = testutil.CaptureStdout(t, func() {
+		stdout, out = testutil.CaptureOutput(t, func() {
 			PrintPurposeRefused(purposeTestCommandID, errors.New("400 Bad Request"))
 		})
 	})
 
+	assert.Empty(t, stdout)
 	var got purposeAnswerSignal
-	require.NoError(t, json.Unmarshal([]byte(out), &got), "stdout: %s", out)
+	require.NoError(t, json.Unmarshal([]byte(out), &got), "stderr: %s", out)
 	assert.False(t, got.OK)
-	assert.Equal(t, "purpose_refused", got.Status)
+	assert.Equal(t, "purpose_refused", got.ErrorCode)
 	assert.Equal(t, ExitCodeGeneralError, got.ExitCode)
-	assert.Equal(t, purposeTestCommandID, got.CommandID)
 	require.Len(t, got.NextActions, 1)
-	assert.Contains(t, got.NextActions[0].Command, "alpacon exec logs")
+	assert.Equal(t, "alpacon exec logs "+purposeTestCommandID, got.NextActions[0].Command)
 	assert.Contains(t, got.NextActions[0].Description, "do not re-submit")
+}
+
+func TestPrintPurposeRefused_JSONKeepsTheCodeOfAFailureTheCallerCanActOn(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		cause     error
+		wantCode  string
+		wantGuess bool
+	}{
+		{name: "server refusal", cause: &fakeAPIError{code: "event_command_not_requester", status: 400}, wantCode: ErrorCodePurposeRefused, wantGuess: true},
+		{name: "network failure", cause: &net.OpError{Op: "dial", Err: errors.New("connection refused")}, wantCode: ErrorCodeNetwork},
+		{name: "MFA required", cause: &fakeAPIError{code: AuthMFARequired, status: 403}, wantCode: AuthMFARequired},
+		{name: "throttled", cause: &fakeAPIError{status: 429}, wantCode: "http_429"},
+		{name: "server error", cause: &fakeAPIError{status: 503}, wantCode: "http_503"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ios, out, errOut := TestIOStreams()
+			require.NoError(t, ios.SetOutputFormat(OutputFormatJSON))
+
+			ios.PrintPurposeRefused(purposeTestCommandID, tt.cause)
+
+			var got purposeAnswerSignal
+			require.NoError(t, json.Unmarshal(errOut.Bytes(), &got), "stderr: %s", errOut)
+			assert.Empty(t, out.String())
+			assert.Equal(t, tt.wantCode, got.ErrorCode)
+			assert.Equal(t, tt.wantGuess, strings.Contains(got.Message, "may have expired"), "message: %s", got.Message)
+		})
+	}
 }
 
 func TestPrintPurposeAnswer_TableModeKeepsStdoutClean(t *testing.T) {
@@ -247,10 +280,10 @@ func TestPrintPurposeRefused_ServerHintReplacesTheGuess(t *testing.T) {
 
 	var out string
 	withFormat(OutputFormatJSON, func() {
-		out = testutil.CaptureStdout(t, func() { PrintPurposeRefused(purposeTestCommandID, refusal) })
+		_, out = testutil.CaptureOutput(t, func() { PrintPurposeRefused(purposeTestCommandID, refusal) })
 	})
 	var got purposeAnswerSignal
-	require.NoError(t, json.Unmarshal([]byte(out), &got), "stdout: %s", out)
+	require.NoError(t, json.Unmarshal([]byte(out), &got), "stderr: %s", out)
 	assert.Equal(t, "failed to state the purpose for "+purposeTestCommandID+": permission denied.", got.Message)
 	require.Len(t, got.NextActions, 2)
 	assert.Equal(t, NextAction{Description: hint}, got.NextActions[0])
@@ -292,7 +325,7 @@ func TestPrintPurposeRefused_NextOrRetryWithoutHintKeepsTheGuess(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var out string
 			withFormat(OutputFormatJSON, func() {
-				out = testutil.CaptureStdout(t, func() { PrintPurposeRefused(purposeTestCommandID, tt.refusal) })
+				_, out = testutil.CaptureOutput(t, func() { PrintPurposeRefused(purposeTestCommandID, tt.refusal) })
 			})
 
 			var got purposeAnswerSignal

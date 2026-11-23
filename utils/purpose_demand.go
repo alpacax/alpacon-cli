@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"math"
+	"net/http"
 	"time"
 )
 
@@ -183,8 +184,13 @@ func (s *IOStreams) PrintPurposeRefused(commandID string, cause error) {
 	// The server's hint, when the refusal carries one, says why in place of the
 	// local guess, and leads the follow-ups.
 	actions := RefusalNextActions(cause)
-	if RefusalHint(cause) != "" {
+	refused := isPurposeRefusal(cause)
+	if RefusalHint(cause) != "" || !refused {
 		message = fmt.Sprintf("failed to state the purpose for %s: %s.", commandID, cause)
+	}
+	errorCode := "" // classified from cause
+	if refused {
+		errorCode = ErrorCodePurposeRefused
 	}
 	next := NextAction{
 		Command:     fmt.Sprintf("alpacon exec logs %s", commandID),
@@ -193,17 +199,14 @@ func (s *IOStreams) PrintPurposeRefused(commandID string, cause error) {
 	actions = append(actions, next)
 
 	if s.IsJSON() {
-		envelope := purposeAnswerJSON{
-			OK:          false,
-			Status:      "purpose_refused",
+		FprintFailureJSON(s.ErrOut, Failure{
 			ExitCode:    ExitCodeGeneralError,
-			Message:     message,
-			CommandID:   commandID,
+			ErrorCode:   errorCode,
+			Operation:   "command",
+			Err:         cause,
+			Message:     SanitizeTerminalText(message),
 			NextActions: actions,
-		}
-		if err := PrintJSONValue(s.Out, envelope); err != nil {
-			_, _ = fmt.Fprintf(s.Out, `{"ok":false,"status":"purpose_refused"}`+"\n")
-		}
+		})
 		return
 	}
 
@@ -211,4 +214,14 @@ func (s *IOStreams) PrintPurposeRefused(commandID string, cause error) {
 	for _, action := range actions {
 		fmt.Fprintf(s.ErrOut, "  %s\n", action.PlainText())
 	}
+}
+
+// isPurposeRefusal reports a server's refusal of the answer, as opposed to a failure the caller can act
+// on: no answer at all, an MFA step-up, a throttle, or a server error.
+func isPurposeRefusal(cause error) bool {
+	if status := HTTPStatusCode(cause); status == http.StatusTooManyRequests || status >= http.StatusInternalServerError {
+		return false
+	}
+	code := ClassifyError(cause)
+	return code != ErrorCodeNetwork && code != AuthMFARequired
 }

@@ -27,6 +27,7 @@ const (
 	ErrorCodeCLI                  = "cli_error"
 	ErrorCodeRemoteCommandFailed  = "remote_command_failed" // a remote command ended in failure
 	ErrorCodeLocalCommandFailed   = "local_command_failed"  // tunnel's local command exited non-zero
+	ErrorCodePurposeRefused       = "purpose_refused"
 )
 
 // ErrNotLoggedIn marks a missing config file; a malformed or unreadable one stays cli_error.
