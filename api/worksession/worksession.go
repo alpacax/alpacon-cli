@@ -3,7 +3,6 @@ package worksession
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -108,22 +107,21 @@ func TargetsCluster(ws *WorkSession, clusterID string) bool {
 	return false
 }
 
-// ClusterSessionFilter narrows GetClusterWorkSessions. Empty fields are not
+// SessionFilter narrows ListWorkSessions. Empty fields are not
 // sent; Status takes several statuses separated by commas.
-type ClusterSessionFilter struct {
+type SessionFilter struct {
 	ClusterID     string
 	Status        string
 	RequesterType string
 	AssignedUser  string
 }
 
-// GetClusterWorkSessions returns, whole, the work sessions that target one
-// cluster, through the server's cluster filter.
-func GetClusterWorkSessions(ac *client.AlpaconClient, filter ClusterSessionFilter) ([]WorkSession, error) {
-	if strings.TrimSpace(filter.ClusterID) == "" {
-		return nil, errors.New("cluster ID is required")
+// ListWorkSessions returns whole work sessions, optionally narrowed to one cluster.
+func ListWorkSessions(ac *client.AlpaconClient, filter SessionFilter) ([]WorkSession, error) {
+	params := map[string]string{}
+	if strings.TrimSpace(filter.ClusterID) != "" {
+		params["cluster"] = filter.ClusterID
 	}
-	params := map[string]string{"cluster": filter.ClusterID}
 	if filter.Status != "" {
 		params["status"] = filter.Status
 	}
