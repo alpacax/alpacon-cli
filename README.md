@@ -221,7 +221,7 @@ Run `alpacon --help` for the full command list. Common workflows below.
 
 ### Direct API requests
 
-`alpacon api` sends one authenticated request to the current workspace's API. ENDPOINT is a path on that workspace, with or without a leading slash. The response body goes to stdout; an HTTP error also prints `HTTP <code>` to stderr and exits 1. An MFA-required response opens the workspace MFA link and retries the request once MFA completes, like other commands—unless the request carries its own `-H 'Authorization: ...'` header, which is sent through unchanged.
+`alpacon api` sends one authenticated request to the current workspace's API. ENDPOINT is a path on that workspace, with or without a leading slash. The response body goes to stdout; an HTTP error also prints `HTTP <code>` to stderr and exits 1. Under `--output json`, an error envelope replaces that stderr line, carrying the HTTP status in `http_status` and the body's `code` in `error_code` when it has one, or `http_<status>` otherwise; the body stays on stdout and the exit code stays `1`. An MFA-required response opens the workspace MFA link and retries the request once MFA completes, like other commands—unless the request carries its own `-H 'Authorization: ...'` header, which is sent through unchanged.
 
 An invalid endpoint, method, field, header, or input file exits `2`, and so does an unknown flag.
 

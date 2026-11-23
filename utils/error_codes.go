@@ -72,6 +72,9 @@ func usageErrorIn(args []any) bool {
 
 var serverCodeShape = regexp.MustCompile(`^[a-z0-9_]+$`)
 
+// IsServerErrorCode reports whether code has the shape accepted for a server error code.
+func IsServerErrorCode(code string) bool { return serverCodeShape.MatchString(code) }
+
 // HTTPErrorCode is the synthetic code for a server or proxy answer that carried none.
 func HTTPErrorCode(status int) string {
 	return fmt.Sprintf("http_%d", status)
@@ -83,7 +86,7 @@ func ClassifyError(err error) string {
 	if code := StructuredErrorCode(err); code != "" {
 		return code
 	}
-	if code, _ := ParseErrorResponse(err); serverCodeShape.MatchString(code) {
+	if code, _ := ParseErrorResponse(err); IsServerErrorCode(code) {
 		return code
 	}
 	if errors.Is(err, ErrNotLoggedIn) {
