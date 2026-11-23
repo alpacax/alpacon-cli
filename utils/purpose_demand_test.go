@@ -182,7 +182,7 @@ func TestPrintPurposeRefused_JSONDoesNotSendTheCallerToResubmit(t *testing.T) {
 	var stdout, out string
 	withFormat(OutputFormatJSON, func() {
 		stdout, out = testutil.CaptureOutput(t, func() {
-			PrintPurposeRefused(purposeTestCommandID, errors.New("400 Bad Request"))
+			PrintPurposeRefused(purposeTestCommandID, &fakeAPIError{code: commandPurposeNotDemandedCode, status: 400})
 		})
 	})
 
@@ -205,10 +205,15 @@ func TestPrintPurposeRefused_JSONKeepsTheCodeOfAFailureTheCallerCanActOn(t *test
 		wantCode  string
 		wantGuess bool
 	}{
-		{name: "server refusal", cause: &fakeAPIError{code: "event_command_not_requester", status: 400}, wantCode: ErrorCodePurposeRefused, wantGuess: true},
+		{name: "server refusal", cause: &fakeAPIError{code: commandPurposeNotDemandedCode, status: 400}, wantCode: ErrorCodePurposeRefused, wantGuess: true},
 		{name: "network failure", cause: &net.OpError{Op: "dial", Err: errors.New("connection refused")}, wantCode: ErrorCodeNetwork},
 		{name: "MFA required", cause: &fakeAPIError{code: AuthMFARequired, status: 403}, wantCode: AuthMFARequired},
 		{name: "throttled", cause: &fakeAPIError{status: 429}, wantCode: "http_429"},
+		{name: "sign-in refused", cause: &fakeAPIError{code: "auth_authentication_failed", status: 401}, wantCode: "auth_authentication_failed"},
+		{name: "permission refused", cause: &fakeAPIError{code: "permission_denied", status: 403}, wantCode: "permission_denied"},
+		{name: "command not found", cause: &fakeAPIError{status: 404}, wantCode: "http_404"},
+		{name: "not logged in", cause: MarkNotLoggedIn(errors.New("no config")), wantCode: ErrorCodeNotLoggedIn},
+		{name: "local failure", cause: errors.New("unreadable answer"), wantCode: ErrorCodeCLI},
 		{name: "server error", cause: &fakeAPIError{status: 503}, wantCode: "http_503"},
 	}
 	for _, tt := range tests {
@@ -276,7 +281,7 @@ func TestPrintPurposeDemand_StatesLocalDeadlineAndLapseOutcome(t *testing.T) {
 // hint in place of the local guess at why; without a hint the guess stays.
 func TestPrintPurposeRefused_ServerHintReplacesTheGuess(t *testing.T) {
 	const hint = "Your account may not act on this command, which it did not request."
-	refusal := &hintedError{code: "event_command_not_requester", hint: hint}
+	refusal := &hintedError{code: commandPurposeNotDemandedCode, hint: hint}
 
 	var out string
 	withFormat(OutputFormatJSON, func() {
@@ -298,11 +303,16 @@ func TestPrintPurposeRefused_ServerHintReplacesTheGuess(t *testing.T) {
 
 	withFormat(OutputFormatTable, func() {
 		_, stderr = testutil.CaptureOutput(t, func() {
-			PrintPurposeRefused(purposeTestCommandID, &hintedError{code: "event_command_not_requester"})
+			PrintPurposeRefused(purposeTestCommandID, &hintedError{code: commandPurposeNotDemandedCode})
 		})
 	})
 	assert.Contains(t, stderr, "may have expired")
 }
+
+// notDemandedError is a refusedError carrying the code of a refused purpose answer.
+type notDemandedError struct{ *refusedError }
+
+func (notDemandedError) ErrorCode() string { return commandPurposeNotDemandedCode }
 
 func TestPrintPurposeRefused_NextOrRetryWithoutHintKeepsTheGuess(t *testing.T) {
 	tests := []struct {
@@ -325,7 +335,7 @@ func TestPrintPurposeRefused_NextOrRetryWithoutHintKeepsTheGuess(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var out string
 			withFormat(OutputFormatJSON, func() {
-				_, out = testutil.CaptureOutput(t, func() { PrintPurposeRefused(purposeTestCommandID, tt.refusal) })
+				_, out = testutil.CaptureOutput(t, func() { PrintPurposeRefused(purposeTestCommandID, notDemandedError{tt.refusal}) })
 			})
 
 			var got purposeAnswerSignal
