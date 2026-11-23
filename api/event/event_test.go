@@ -518,6 +518,79 @@ func TestApprovalTimeoutDoesNotReportAnotherStatusAsPending(t *testing.T) {
 	}
 }
 
+func TestApprovalTimeoutKeepsConfirmedRejection(t *testing.T) {
+	for _, status := range []string{"denied", "rejected"} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"status":%q,"denial_code":"superseded_by_pause","work_session_paused":true}`, status)
+			}))
+			t.Cleanup(ts.Close)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			err := pendingApprovalAfterTimeout(ac, testPathID(t, "cmd-1"), EventDetails{Status: "awaiting_approval"}, &ClientTimeoutError{})
+			var rejected *CommandRejectedError
+			require.ErrorAs(t, err, &rejected)
+			assert.Equal(t, "superseded_by_pause", utils.StructuredErrorCode(err))
+			assert.Equal(t, "cmd-1", rejected.CommandID)
+			assert.True(t, rejected.WorkSessionPaused)
+			assert.Equal(t, utils.ExitCodeNotApproved, rejected.ExitCode())
+		})
+	}
+}
+
+func TestApprovalPollDeadlineCancelsAnInFlightRead(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		unblock := sync.OnceFunc(func() { close(release) })
+		defer unblock()
+		cancelled := make(chan struct{})
+		var reads atomic.Int32
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if reads.Add(1) == 1 {
+				_, _ = w.Write([]byte(`{"status":"awaiting_approval","work_session_paused":true}`))
+				return
+			}
+			select {
+			case <-r.Context().Done():
+				close(cancelled)
+			case <-release:
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}
+		}))
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		cmdID := testPathID(t, "cmd-1")
+		type result struct {
+			details EventDetails
+			err     error
+		}
+		done := make(chan result, 1)
+		go func() {
+			d, err := pollCommandExecution(ac, cmdID, time.Second, 100*time.Millisecond, true, pollSeams{})
+			done <- result{d, err}
+		}()
+		time.Sleep(2 * time.Second)
+		var got result
+		select {
+		case got = <-done:
+		default:
+			t.Error("the stalled poll exceeded the approval deadline")
+			unblock()
+			got = <-done
+		}
+		synctest.Wait()
+		var timeout *ClientTimeoutError
+		require.ErrorAs(t, got.err, &timeout)
+		assert.True(t, got.details.WorkSessionPaused)
+		select {
+		case <-cancelled:
+		default:
+			t.Error("the stalled poll request was not cancelled")
+		}
+	})
+}
+
 func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

@@ -83,6 +83,7 @@ Run the command again later to check for completion.`,
 					WorkSessionID:     details.WorkSessionID(),
 					WorkSessionStatus: details.WorkSessionStatus(),
 					ConsoleURL:        details.ConsoleURL,
+					ApprovalLane:      details.ApprovalLane,
 				}
 				message = withSessionResumeGuidance(message, pending)
 				ios.PrintPendingApprovalWithError(

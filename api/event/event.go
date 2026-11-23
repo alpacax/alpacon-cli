@@ -444,7 +444,13 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 			return response, &ClientTimeoutError{hint: lastRefusalHint}
 		}
 
-		responseBody, err := ac.SendGetRequest(api.IDURL(getEventURL, pathID, "", nil))
+		ctx, cancel := context.WithTimeout(context.Background(), deadline.Sub(seams.Now()))
+		responseBody, err := ac.SendGetRequestWithContext(ctx, api.IDURL(getEventURL, pathID, "", nil))
+		timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
+		cancel()
+		if err != nil && timedOut {
+			return response, &ClientTimeoutError{hint: lastRefusalHint}
+		}
 		lastRefusalHint = ""
 		switch {
 		case err != nil && !utils.IsTransientRequestError(err):
@@ -927,6 +933,9 @@ func pendingApprovalAfterTimeout(ac *client.AlpaconClient, cmdID api.PathID, det
 		details, known = refreshed, true
 	}
 	if known && !IsAwaitingApprovalStatus(details.Status) {
+		if details.IsRejected() {
+			return errorFromDetails(cmdID, details)
+		}
 		return commandPollError(cmdID, timeout)
 	}
 	return pendingApprovalFromDetails(cmdID, details)

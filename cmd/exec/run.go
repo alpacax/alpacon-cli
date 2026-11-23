@@ -12,6 +12,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/mfa"
+	"github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -597,6 +598,9 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 		if pendingErr.AssigneeConfirms() {
 			waiting = "Waiting for your confirmation in the Alpacon web console (output streams once confirmed)..."
 		}
+		if worksession.IsEndedStatus(pendingErr.WorkSessionStatus) {
+			waiting = "Waiting for the command's final status; its work session has ended and the command cannot run in that session..."
+		}
 		spinner := utils.NewSpinner(waiting)
 		spinner.Start()
 		defer spinner.Stop()
@@ -605,19 +609,7 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 		streamErr := streamApprovedCommand(ac, pendingErr.CommandID, spinner.StopWriter(out), waitTimeout)
 		var stillPending *event.PendingApprovalError
 		if errors.As(streamErr, &stillPending) {
-			stillPending.WorkSessionPaused = stillPending.WorkSessionPaused || pendingErr.WorkSessionPaused
-			if stillPending.WorkSessionID == "" {
-				stillPending.WorkSessionID = pendingErr.WorkSessionID
-			}
-			if stillPending.WorkSessionStatus == "" {
-				stillPending.WorkSessionStatus = pendingErr.WorkSessionStatus
-			}
-			if stillPending.ConsoleURL == "" {
-				stillPending.ConsoleURL = pendingErr.ConsoleURL
-			}
-			if stillPending.ApprovalLane == "" {
-				stillPending.ApprovalLane = pendingErr.ApprovalLane
-			}
+			mergePendingApprovalMetadata(stillPending, pendingErr)
 		}
 		return streamErr
 	}
@@ -881,8 +873,31 @@ func pendingApprovalFailure(ios *utils.IOStreams, stderr io.Writer, err error, p
 	return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 }
 
+func mergePendingApprovalMetadata(latest, known *event.PendingApprovalError) {
+	latest.WorkSessionPaused = latest.WorkSessionPaused || known.WorkSessionPaused
+	if latest.WorkSessionID == "" {
+		latest.WorkSessionID = known.WorkSessionID
+	}
+	if latest.WorkSessionStatus == "" {
+		latest.WorkSessionStatus = known.WorkSessionStatus
+	}
+	if latest.ConsoleURL == "" {
+		latest.ConsoleURL = known.ConsoleURL
+	}
+	if latest.ApprovalLane == "" {
+		latest.ApprovalLane = known.ApprovalLane
+	}
+	if latest.FileSuggestion == nil && latest.ScriptBodySuggestion == nil {
+		latest.FileSuggestion = known.FileSuggestion
+		latest.ScriptBodySuggestion = known.ScriptBodySuggestion
+	}
+}
+
 func withSessionResumeGuidance(message string, pending *event.PendingApprovalError) string {
 	status := pending.WorkSessionStatus
+	if worksession.IsEndedStatus(status) {
+		return fmt.Sprintf("Command held—the work session has ended (%s). This command cannot run in that session. Check the command and work session in the Alpacon web console.", status)
+	}
 	if status != "paused" && (status != "" || !pending.WorkSessionPaused) {
 		return message
 	}

@@ -38,6 +38,8 @@ func pendingApprovalNextActions(retry NextAction, sessionStatus string, triggere
 		guidance = "Approve or confirm it in the Alpacon web console. An authorized person must also use Resume on the paused work session before the command can run."
 	} else if sessionStatus == "" && triggeredPause {
 		guidance = "Approve or confirm it in the Alpacon web console. If the work session is still paused, an authorized person must also use Resume before the command can run."
+	} else if sessionStatus != "" && sessionStatus != "active" {
+		guidance = "Check the command and work session in the Alpacon web console; the command cannot run unless its work session is active."
 	}
 	actions = append(actions, NextAction{Description: guidance})
 	return append(actions, extra...)
