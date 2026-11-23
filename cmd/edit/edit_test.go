@@ -1,17 +1,194 @@
 package edit
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	ftpapi "github.com/alpacax/alpacon-cli/api/ftp"
+	"github.com/alpacax/alpacon-cli/api/types"
+	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/cmd/worksession"
+	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type editGateError struct{}
+
+func (editGateError) Error() string       { return "work session required" }
+func (editGateError) ErrorCode() string   { return utils.WorkSessionRequired }
+func (editGateError) ErrorSource() string { return "" }
+
+func TestEditDownloadResendsWithTheCreatedWorkSession(t *testing.T) {
+	var sentIDs []string
+	var create wsapi.WorkSessionCreateRequest
+	ac, ios, _ := setupEditOffer(t, &create)
+	downloadEditFile = func(_ *client.AlpaconClient, _, _, localPath, _, _, id string) (ftpapi.DownloadedFile, error) {
+		sentIDs = append(sentIDs, id)
+		if len(sentIDs) == 1 {
+			return ftpapi.DownloadedFile{}, utils.MarkSubmission(editGateError{})
+		}
+		require.NoError(t, os.WriteFile(localPath, []byte("original"), 0600))
+		return ftpapi.DownloadedFile{Path: localPath, Size: int64(len("original"))}, nil
+	}
+	uploadEditFile = func(*client.AlpaconClient, string, string, string, string, string, string) error {
+		t.Fatal("an unchanged download must not upload")
+		return nil
+	}
+	localEditorRunner = func(string, string) error { return nil }
+
+	cmd := NewEditCmd(func() (*client.AlpaconClient, error) { return ac, nil }, ios)
+	cmd.SetArgs([]string{"web-1:/etc/app.conf"})
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"old-session", "new-session"}, sentIDs)
+	assert.Equal(t, []string{utils.OperationWebFTP}, create.Scopes)
+	assert.Equal(t, []string{"server-1"}, create.Servers)
+}
+
+func TestEditUploadResendsWithTheCreatedWorkSession(t *testing.T) {
+	var downloadIDs, uploadIDs []string
+	var create wsapi.WorkSessionCreateRequest
+	ac, ios, _ := setupEditOffer(t, &create)
+	downloadEditFile = func(_ *client.AlpaconClient, _, _, localPath, _, _, id string) (ftpapi.DownloadedFile, error) {
+		downloadIDs = append(downloadIDs, id)
+		require.NoError(t, os.WriteFile(localPath, []byte("original"), 0600))
+		return ftpapi.DownloadedFile{Path: localPath, Size: int64(len("original"))}, nil
+	}
+	localEditorRunner = func(_, path string) error {
+		return os.WriteFile(path, []byte("changed"), 0600)
+	}
+	uploadEditFile = func(_ *client.AlpaconClient, _, _, _, _, _, id string) error {
+		uploadIDs = append(uploadIDs, id)
+		if len(uploadIDs) == 1 {
+			return utils.MarkSubmission(editGateError{})
+		}
+		return nil
+	}
+
+	cmd := NewEditCmd(func() (*client.AlpaconClient, error) { return ac, nil }, ios)
+	cmd.SetArgs([]string{"web-1:/etc/app.conf"})
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"old-session"}, downloadIDs)
+	assert.Equal(t, []string{"old-session", "new-session"}, uploadIDs)
+	assert.Equal(t, []string{utils.OperationWebFTP}, create.Scopes)
+	assert.Equal(t, []string{"server-1"}, create.Servers)
+}
+
+func TestEditUploadRecoveryFailurePrintsThePreservedPath(t *testing.T) {
+	var create wsapi.WorkSessionCreateRequest
+	ac, ios, stderr := setupEditOffer(t, &create)
+	downloadEditFile = func(_ *client.AlpaconClient, _, _, localPath, _, _, _ string) (ftpapi.DownloadedFile, error) {
+		require.NoError(t, os.WriteFile(localPath, []byte("original"), 0600))
+		return ftpapi.DownloadedFile{Path: localPath, Size: int64(len("original"))}, nil
+	}
+	localEditorRunner = func(_, path string) error {
+		return os.WriteFile(path, []byte("changed"), 0600)
+	}
+	attempts := 0
+	uploadEditFile = func(*client.AlpaconClient, string, string, string, string, string, string) error {
+		attempts++
+		if attempts == 1 {
+			return utils.MarkSubmission(editGateError{})
+		}
+		return utils.NewExitError("recovery failed")
+	}
+
+	cmd := NewEditCmd(func() (*client.AlpaconClient, error) { return ac, nil }, ios)
+	cmd.SetArgs([]string{"web-1:/etc/app.conf"})
+	err := cmd.Execute()
+
+	var exitErr *utils.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
+	assert.Contains(t, stderr.String(), "Edited file preserved at ")
+}
+
+func setupEditOffer(t *testing.T, create *wsapi.WorkSessionCreateRequest) (*client.AlpaconClient, *utils.IOStreams, fmt.Stringer) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, config.CreateConfig("https://workspace.example", "workspace", "", "", "", "", "", 0, false))
+	replaceEditStdin(t, "y\nedit a file\n1h\n")
+	ios, _, stderr := utils.TestIOStreams()
+	active := wsapi.WorkSession{
+		ID:            "new-session",
+		Status:        wsapi.StatusActive,
+		RequesterType: "user",
+		Scopes:        []string{utils.OperationWebFTP},
+		Servers:       []types.ServerSummary{{ID: "server-1", Name: "web-1"}},
+		AssignedUser:  &types.UserSummary{ID: "user-1"},
+		ExpiresAt:     time.Now().Add(time.Hour),
+	}
+	activeJSON, err := json.Marshal(active)
+	require.NoError(t, err)
+	ac := &client.AlpaconClient{
+		BaseURL:       testutil.StubBaseURL,
+		WorkspaceName: "workspace",
+		HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/api/iam/users/-/":
+				return http.StatusOK, `{"id":"user-1"}`
+			case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+				return http.StatusOK, `{"count":1,"results":[{"id":"server-1","name":"web-1"}]}`
+			case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/":
+				return http.StatusOK, `{"count":0,"results":[]}`
+			case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/":
+				body, readErr := io.ReadAll(r.Body)
+				require.NoError(t, readErr)
+				require.NoError(t, json.Unmarshal(body, create))
+				return http.StatusCreated, string(activeJSON)
+			case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/new-session/":
+				return http.StatusOK, string(activeJSON)
+			default:
+				t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+				return http.StatusInternalServerError, `{}`
+			}
+		}),
+	}
+	originalSelect := selectWorkSession
+	originalDownload := downloadEditFile
+	originalUpload := uploadEditFile
+	originalEditor := localEditorRunner
+	selectWorkSession = func(gotIOS *utils.IOStreams, gotAC *client.AlpaconClient, _ string, need worksession.Need) (*worksession.Selection, error) {
+		assert.Equal(t, worksession.Transfer, need.Operation)
+		return worksession.OfferedForTest(gotIOS, gotAC, "old-session", need), nil
+	}
+	t.Cleanup(func() {
+		selectWorkSession = originalSelect
+		downloadEditFile = originalDownload
+		uploadEditFile = originalUpload
+		localEditorRunner = originalEditor
+	})
+	return ac, ios, stderr
+}
+
+func replaceEditStdin(t *testing.T, input string) {
+	t.Helper()
+	read, write, err := os.Pipe()
+	require.NoError(t, err)
+	_, err = write.WriteString(input)
+	require.NoError(t, err)
+	require.NoError(t, write.Close())
+	original := os.Stdin
+	os.Stdin = read
+	t.Cleanup(func() {
+		os.Stdin = original
+		_ = read.Close()
+	})
+}
 
 func TestResolveEditor(t *testing.T) {
 	t.Setenv("ALPACON_EDITOR", "zed --wait")
@@ -161,12 +338,12 @@ func TestRunEditRestrictsDownloadedFilePermissions(t *testing.T) {
 	tempRoot := t.TempDir()
 	var editorPerm os.FileMode
 	deps := editDeps{
-		download: func(target editTarget, localPath, workSessionID string) (ftpapi.DownloadedFile, error) {
+		download: func(target editTarget, localPath string) (ftpapi.DownloadedFile, error) {
 			require.NoError(t, os.MkdirAll(filepath.Dir(localPath), 0700))
 			require.NoError(t, os.WriteFile(localPath, []byte("secret"), 0644))
 			return ftpapi.DownloadedFile{Path: localPath, Size: int64(len("secret"))}, nil
 		},
-		upload: func(target editTarget, localPath, workSessionID string) error {
+		upload: func(target editTarget, localPath string) error {
 			return nil
 		},
 		runEditor: func(editor, filePath string) error {
@@ -196,12 +373,12 @@ func TestRunEditNoChangesSkipsUploadAndRemovesTemp(t *testing.T) {
 	tempRoot := t.TempDir()
 	var uploadCalled bool
 	deps := editDeps{
-		download: func(target editTarget, localPath, workSessionID string) (ftpapi.DownloadedFile, error) {
+		download: func(target editTarget, localPath string) (ftpapi.DownloadedFile, error) {
 			require.NoError(t, os.MkdirAll(filepath.Dir(localPath), 0700))
 			require.NoError(t, os.WriteFile(localPath, []byte("original"), 0600))
 			return ftpapi.DownloadedFile{Path: localPath, Size: int64(len("original"))}, nil
 		},
-		upload: func(target editTarget, localPath, workSessionID string) error {
+		upload: func(target editTarget, localPath string) error {
 			uploadCalled = true
 			return nil
 		},
@@ -231,12 +408,12 @@ func TestRunEditSuccessfulUploadRemovesEditorSidecarFiles(t *testing.T) {
 	t.Parallel()
 	tempRoot := t.TempDir()
 	deps := editDeps{
-		download: func(target editTarget, localPath, workSessionID string) (ftpapi.DownloadedFile, error) {
+		download: func(target editTarget, localPath string) (ftpapi.DownloadedFile, error) {
 			require.NoError(t, os.MkdirAll(filepath.Dir(localPath), 0700))
 			require.NoError(t, os.WriteFile(localPath, []byte("original"), 0600))
 			return ftpapi.DownloadedFile{Path: localPath, Size: int64(len("original"))}, nil
 		},
-		upload: func(target editTarget, localPath, workSessionID string) error {
+		upload: func(target editTarget, localPath string) error {
 			return nil
 		},
 		runEditor: func(editor, filePath string) error {
@@ -266,12 +443,12 @@ func TestRunEditUploadFailurePreservesTempPath(t *testing.T) {
 	tempRoot := t.TempDir()
 	uploadErr := errors.New("upload failed")
 	deps := editDeps{
-		download: func(target editTarget, localPath, workSessionID string) (ftpapi.DownloadedFile, error) {
+		download: func(target editTarget, localPath string) (ftpapi.DownloadedFile, error) {
 			require.NoError(t, os.MkdirAll(filepath.Dir(localPath), 0700))
 			require.NoError(t, os.WriteFile(localPath, []byte("original"), 0600))
 			return ftpapi.DownloadedFile{Path: localPath, Size: int64(len("original"))}, nil
 		},
-		upload: func(target editTarget, localPath, workSessionID string) error {
+		upload: func(target editTarget, localPath string) error {
 			return uploadErr
 		},
 		runEditor: func(editor, filePath string) error {
@@ -299,12 +476,12 @@ func TestRunEditEditorFailureWithoutChangeRemovesTemp(t *testing.T) {
 	tempRoot := t.TempDir()
 	editorErr := errors.New("editor exited 1")
 	deps := editDeps{
-		download: func(target editTarget, localPath, workSessionID string) (ftpapi.DownloadedFile, error) {
+		download: func(target editTarget, localPath string) (ftpapi.DownloadedFile, error) {
 			require.NoError(t, os.MkdirAll(filepath.Dir(localPath), 0700))
 			require.NoError(t, os.WriteFile(localPath, []byte("original"), 0600))
 			return ftpapi.DownloadedFile{Path: localPath, Size: int64(len("original"))}, nil
 		},
-		upload: func(target editTarget, localPath, workSessionID string) error {
+		upload: func(target editTarget, localPath string) error {
 			t.Fatal("upload should not be called")
 			return nil
 		},
@@ -330,12 +507,12 @@ func TestRunEditEditorFailureAfterChangePreservesTemp(t *testing.T) {
 	tempRoot := t.TempDir()
 	editorErr := errors.New("editor exited 1")
 	deps := editDeps{
-		download: func(target editTarget, localPath, workSessionID string) (ftpapi.DownloadedFile, error) {
+		download: func(target editTarget, localPath string) (ftpapi.DownloadedFile, error) {
 			require.NoError(t, os.MkdirAll(filepath.Dir(localPath), 0700))
 			require.NoError(t, os.WriteFile(localPath, []byte("original"), 0600))
 			return ftpapi.DownloadedFile{Path: localPath, Size: int64(len("original"))}, nil
 		},
-		upload: func(target editTarget, localPath, workSessionID string) error {
+		upload: func(target editTarget, localPath string) error {
 			t.Fatal("upload should not be called")
 			return nil
 		},
@@ -363,12 +540,12 @@ func TestRunEditLargeFileDeclineRemovesTempAndSkipsEditor(t *testing.T) {
 	tempRoot := t.TempDir()
 	var editorCalled bool
 	deps := editDeps{
-		download: func(target editTarget, localPath, workSessionID string) (ftpapi.DownloadedFile, error) {
+		download: func(target editTarget, localPath string) (ftpapi.DownloadedFile, error) {
 			require.NoError(t, os.MkdirAll(filepath.Dir(localPath), 0700))
 			require.NoError(t, os.WriteFile(localPath, []byte("large"), 0600))
 			return ftpapi.DownloadedFile{Path: localPath, Size: maxEditPromptSize + 1}, nil
 		},
-		upload: func(target editTarget, localPath, workSessionID string) error {
+		upload: func(target editTarget, localPath string) error {
 			t.Fatal("upload should not be called")
 			return nil
 		},

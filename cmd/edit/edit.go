@@ -27,6 +27,13 @@ type clientFactory = func() (*client.AlpaconClient, error)
 
 const maxEditPromptSize int64 = 10 * 1024 * 1024
 
+var (
+	selectWorkSession = worksession.Select
+	downloadEditFile  = ftpapi.DownloadFileToPath
+	uploadEditFile    = ftpapi.UploadLocalFileAs
+	localEditorRunner = runLocalEditor
+)
+
 // guiEditors are editors that, without a wait flag, spawn a window and return
 // immediately—so edit would hash an unchanged file and skip the upload.
 var guiEditors = map[string]bool{
@@ -85,24 +92,23 @@ redirections, or '&&' will not work.`,
 			if err != nil {
 				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
-			workSessionID, err := worksession.Resolve(alpaconClient, flagWorkSession)
+			sel, err := selectWorkSession(ios, alpaconClient, flagWorkSession, worksession.Need{Operation: worksession.Transfer, Server: target.Server, Account: target.Username})
 			if err != nil {
 				return utils.NewExitError("%s", err)
 			}
 
-			deps := realEditDeps(alpaconClient, groupname)
+			deps := realEditDeps(alpaconClient, groupname, sel)
 			result, err := runEdit(ios, editOptions{
-				Target:        target,
-				Editor:        editorFlag,
-				Force:         force,
-				WorkSessionID: workSessionID,
+				Target: target,
+				Editor: editorFlag,
+				Force:  force,
 			}, deps)
 			if err != nil {
+				printPreservedTempPath(ios, result)
 				if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
 					return exitErr
 				}
-				printPreservedTempPath(ios, result)
-				if exitErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID); exitErr != nil {
+				if exitErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, target.Server, authMethod, sel.ID()); exitErr != nil {
 					return exitErr
 				}
 				var rejected *event.CommandRejectedError
@@ -138,10 +144,9 @@ type editTarget struct {
 }
 
 type editOptions struct {
-	Target        editTarget
-	Editor        string
-	Force         bool
-	WorkSessionID string
+	Target editTarget
+	Editor string
+	Force  bool
 }
 
 type editResult struct {
@@ -150,45 +155,45 @@ type editResult struct {
 }
 
 type editDeps struct {
-	download     func(target editTarget, localPath, workSessionID string) (ftpapi.DownloadedFile, error)
-	upload       func(target editTarget, localPath, workSessionID string) error
+	download     func(target editTarget, localPath string) (ftpapi.DownloadedFile, error)
+	upload       func(target editTarget, localPath string) error
 	runEditor    func(editor, filePath string) error
 	confirmLarge func(size int64) bool
 	removeAll    func(path string) error
 	tempRoot     string
 }
 
-func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
+func realEditDeps(ac *client.AlpaconClient, groupname string, sel *worksession.Selection) editDeps {
 	return editDeps{
-		download: func(target editTarget, localPath, workSessionID string) (ftpapi.DownloadedFile, error) {
-			downloaded, err := ftpapi.DownloadFileToPath(ac, target.Server, target.RemotePath, localPath, target.Username, groupname, workSessionID)
+		download: func(target editTarget, localPath string) (ftpapi.DownloadedFile, error) {
+			downloaded, err := downloadEditFile(ac, target.Server, target.RemotePath, localPath, target.Username, groupname, sel.ID())
 			if err != nil {
-				err = utils.HandleCommonErrors(err, target.Server, mfa.ErrorCallbacks(ac, func() error {
+				err = utils.HandleCommonErrors(err, target.Server, sel.Offer(mfa.ErrorCallbacks(ac, func() error {
 					var retryErr error
-					downloaded, retryErr = ftpapi.DownloadFileToPath(ac, target.Server, target.RemotePath, localPath, target.Username, groupname, workSessionID)
+					downloaded, retryErr = downloadEditFile(ac, target.Server, target.RemotePath, localPath, target.Username, groupname, sel.ID())
 					return retryErr
-				}))
+				})))
 			}
-			if _, mfaFailed := errors.AsType[*utils.ExitError](err); !mfaFailed { // its cause is the MFA lookup's, not a refusal of this request
-				err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
+			if _, recoveryFailed := errors.AsType[*utils.ExitError](err); !recoveryFailed { // MFA or WorkSession recovery failed; not a refusal of this request.
+				err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: sel.ID()}, ac)
 				utils.SignalRefusal(err)
 			}
 			return downloaded, err
 		},
-		upload: func(target editTarget, localPath, workSessionID string) error {
-			err := ftpapi.UploadLocalFileAs(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, workSessionID)
+		upload: func(target editTarget, localPath string) error {
+			err := uploadEditFile(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, sel.ID())
 			if err != nil {
-				err = utils.HandleCommonErrors(err, target.Server, mfa.ErrorCallbacks(ac, func() error {
-					return ftpapi.UploadLocalFileAs(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, workSessionID)
-				}))
+				err = utils.HandleCommonErrors(err, target.Server, sel.Offer(mfa.ErrorCallbacks(ac, func() error {
+					return uploadEditFile(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, sel.ID())
+				})))
 			}
-			if _, mfaFailed := errors.AsType[*utils.ExitError](err); !mfaFailed { // its cause is the MFA lookup's, not a refusal of this request
-				err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: workSessionID}, ac)
+			if _, recoveryFailed := errors.AsType[*utils.ExitError](err); !recoveryFailed { // MFA or WorkSession recovery failed; not a refusal of this request.
+				err = utils.WithSignalFields(err, localsignal.Fields{Server: target.Server, Account: target.Username, Session: sel.ID()}, ac)
 				utils.SignalRefusal(err)
 			}
 			return err
 		},
-		runEditor:    runLocalEditor,
+		runEditor:    localEditorRunner,
 		confirmLarge: confirmLargeEdit,
 	}
 }
@@ -254,7 +259,7 @@ func runEdit(ios *utils.IOStreams, opts editOptions, deps editDeps) (editResult,
 		return result, err
 	}
 
-	downloaded, err := deps.download(opts.Target, tempPath, opts.WorkSessionID)
+	downloaded, err := deps.download(opts.Target, tempPath)
 	if err != nil {
 		cleanupEditTemp(ios, tempPath, deps.removeAll)
 		return result, err
@@ -312,7 +317,7 @@ func runEdit(ios *utils.IOStreams, opts editOptions, deps editDeps) (editResult,
 		return result, nil
 	}
 
-	if err := deps.upload(opts.Target, result.TempPath, opts.WorkSessionID); err != nil {
+	if err := deps.upload(opts.Target, result.TempPath); err != nil {
 		return result, err
 	}
 

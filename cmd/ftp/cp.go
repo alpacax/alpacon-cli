@@ -21,6 +21,12 @@ import (
 // clientFactory builds the API client a command talks to.
 type clientFactory = func() (*client.AlpaconClient, error)
 
+var (
+	selectWorkSession  = worksession.Select
+	uploadCopyObject   = uploadObject
+	downloadCopyObject = downloadObject
+)
+
 func NewCpCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cp SOURCE... DESTINATION",
@@ -105,29 +111,29 @@ This is client guidance; personal-token enforcement depends on the server versio
 					"  • Verify the API endpoint is accessible", err)
 			}
 
-			workSessionID, err := worksession.Resolve(alpaconClient, flagWorkSession)
+			sel, err := selectWorkSession(ios, alpaconClient, flagWorkSession, worksession.Need{Operation: worksession.Transfer, Account: username})
 			if err != nil {
 				return utils.NewExitError("%s", err)
 			}
 
 			if plan.isUpload() {
-				serverName, err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
+				serverName, err := uploadCopyObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, sel.ID())
 				if err != nil {
 					if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
 						return exitErr
 					}
-					err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(alpaconClient, func() error {
-						_, err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
+					err = utils.HandleCommonErrors(err, serverName, sel.Offer(mfa.ErrorCallbacks(alpaconClient, func() error {
+						_, err := uploadCopyObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, sel.ID())
 						return err
-					}))
+					})))
 
 					if err != nil {
 						if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
 							return exitErr
 						}
-						err = utils.WithSignalFields(err, localsignal.Fields{Server: serverName, Account: username, Session: workSessionID}, alpaconClient)
+						err = utils.WithSignalFields(err, localsignal.Fields{Server: serverName, Account: username, Session: sel.ID()}, alpaconClient)
 						utils.SignalRefusal(err)
-						if exitErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, serverName, authMethod, workSessionID); exitErr != nil {
+						if exitErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, serverName, authMethod, sel.ID()); exitErr != nil {
 							return exitErr
 						}
 						return utils.NewExitError("Failed to upload to '%s': %s", dest, err)
@@ -136,23 +142,23 @@ This is client guidance; personal-token enforcement depends on the server versio
 				wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
 				ios.Success("Uploaded %s to %s", wrappedSrc, dest)
 			} else if plan.isDownload() {
-				serverName, err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
+				serverName, err := downloadCopyObject(alpaconClient, sources, dest, username, groupname, recursive, sel.ID())
 				if err != nil {
 					if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
 						return exitErr
 					}
-					err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(alpaconClient, func() error {
-						_, err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
+					err = utils.HandleCommonErrors(err, serverName, sel.Offer(mfa.ErrorCallbacks(alpaconClient, func() error {
+						_, err := downloadCopyObject(alpaconClient, sources, dest, username, groupname, recursive, sel.ID())
 						return err
-					}))
+					})))
 
 					if err != nil {
 						if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
 							return exitErr
 						}
-						err = utils.WithSignalFields(err, localsignal.Fields{Server: serverName, Account: username, Session: workSessionID}, alpaconClient)
+						err = utils.WithSignalFields(err, localsignal.Fields{Server: serverName, Account: username, Session: sel.ID()}, alpaconClient)
 						utils.SignalRefusal(err)
-						if exitErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, serverName, authMethod, workSessionID); exitErr != nil {
+						if exitErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, serverName, authMethod, sel.ID()); exitErr != nil {
 							return exitErr
 						}
 						wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
