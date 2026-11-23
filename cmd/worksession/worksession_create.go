@@ -785,9 +785,14 @@ func waitForApproval(ctx context.Context, ios *utils.IOStreams, ac *client.Alpac
 	budget := utils.NewThrottleBudget(timeout)
 	lastStatus := ""
 	for {
-		s, err := wsapi.GetWorkSessionWithContext(ctx, ac, id)
-		if ctx.Err() != nil {
+		requestCtx, cancel := context.WithDeadline(ctx, deadline) // a stalled response cannot outlast the wait
+		s, err := wsapi.GetWorkSessionWithContext(requestCtx, ac, id)
+		cancel()
+		if ctx.Err() != nil || err != nil && !time.Now().Before(deadline) {
 			return nil, timedOut()
+		}
+		if err == nil && s.ID != id {
+			return nil, errors.New("polling failed: the server answered for a different work session")
 		}
 		lastRefusal = nil
 		if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
