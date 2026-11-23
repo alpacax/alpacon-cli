@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
@@ -134,9 +135,36 @@ func TestRunWait_LeavesNoGoroutineBehindOnceItReturns(t *testing.T) {
 		"the signal goroutine is still running")
 }
 
+func TestRunWait_JSONEndsARefusedWaitWithOneEnvelope(t *testing.T) {
+	t.Parallel()
+	const sessionID = "550e8400-e29b-41d4-a716-446655440000"
+	ts := newEventServer(t, http.StatusCreated, `{}`)
+	ts.Config.Handler.(*http.ServeMux).HandleFunc("GET /api/work-sessions/sessions/"+sessionID+"/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"` + sessionID + `","status":"rejected"}`))
+	})
+	newClient := func() (*client.AlpaconClient, error) {
+		return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, nil
+	}
+
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newWaitCommand(newClient, ios) },
+		"--type", "work_session", "--target", sessionID, "--timeout", "30s")
+
+	assert.Equal(t, utils.ExitCodeNotApproved, code)
+	assert.Contains(t, stdout, "rejected")
+	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
+	assert.JSONEq(t, `{"ok":false,"exit_code":6,"error_code":"not_approved","message":"the wait ended on a work_session event in its failure set","context":{"operation":"wait"}}`, lines[len(lines)-1])
+}
+
 // newRejectingEventServer opens an event session and its WebSocket, then refuses the subscription,
 // so Wait returns at once with the server's message.
 func newRejectingEventServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return newEventServer(t, http.StatusBadRequest, `{"detail":"Invalid input."}`)
+}
+
+// newEventServer opens an event session and its WebSocket, then answers the subscription with status and body.
+func newEventServer(t *testing.T, status int, body string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	ts := httptest.NewServer(mux)
@@ -150,8 +178,8 @@ func newRejectingEventServer(t *testing.T) *httptest.Server {
 	})
 	mux.HandleFunc("/api/events/subscriptions/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"detail":"Invalid input."}`))
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
 	})
 	upgrader := websocket.Upgrader{}
 	mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {
