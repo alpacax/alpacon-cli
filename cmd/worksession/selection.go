@@ -1,6 +1,8 @@
 package worksession
 
 import (
+	"context"
+
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -57,6 +59,9 @@ type Selection struct {
 	ac       *client.AlpaconClient
 	canOffer bool
 	offered  bool
+	resume   string
+	// interrupt replaces the Ctrl+C context in a test.
+	interrupt func() (context.Context, context.CancelFunc)
 }
 
 // Select resolves flag, environment, then the client's pinned workspace configuration.
@@ -82,6 +87,21 @@ func (s *Selection) ID() string {
 		return ""
 	}
 	return s.id
+}
+
+// ResumeWith replaces "re-run this command" in the resume guidance, for an operation whose earlier
+// steps a re-run would repeat.
+func (s *Selection) ResumeWith(step string) {
+	if s != nil {
+		s.resume = step
+	}
+}
+
+func (s *Selection) resumeStep() string {
+	if s.resume == "" {
+		return "re-run this command"
+	}
+	return s.resume
 }
 
 // Offer adds this selection's one WorkSession refusal recovery hook when eligible.

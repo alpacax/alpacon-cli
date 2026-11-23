@@ -181,6 +181,8 @@ func realEditDeps(ac *client.AlpaconClient, groupname string, sel *worksession.S
 			return downloaded, err
 		},
 		upload: func(target editTarget, localPath string) error {
+			shownPath, _ := utils.SanitizeTerminalLine(localPath)
+			sel.ResumeWith(fmt.Sprintf("upload the edited copy at %s with 'alpacon cp' instead of editing again", shownPath))
 			err := uploadEditFile(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, sel.ID())
 			if err != nil {
 				err = utils.HandleCommonErrors(err, target.Server, sel.Offer(mfa.ErrorCallbacks(ac, func() error {

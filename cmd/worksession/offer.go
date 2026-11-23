@@ -1,12 +1,15 @@
 package worksession
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/server"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
@@ -101,6 +104,9 @@ func (s *Selection) handleRefusal(serverName string, refusal error) (bool, error
 		Duration:              wsapi.FormatDuration(parsed),
 		TargetAccountUsername: s.need.Account,
 	})
+	if errors.Is(err, api.ErrUnusableID) {
+		return false, utils.NewEnvelopeExitError(opCreate, err, "Could not use the new WorkSession: %s.", err)
+	}
 	if err != nil {
 		if hint := TargetErrorHint(err); hint != "" {
 			s.ios.Warning("Could not create a WorkSession: %s.", hint)
@@ -108,6 +114,9 @@ func (s *Selection) handleRefusal(serverName string, refusal error) (bool, error
 			s.ios.Warning("Could not create a WorkSession: %s", err)
 		}
 		return false, nil
+	}
+	if !safeResumeID(created.ID) {
+		return false, utils.NewEnvelopeExitError(opCreate, api.ErrUnusableID, "The server created the WorkSession, but its ID is unusable; check for it before creating another.")
 	}
 	return s.settle(created, created.Status != wsapi.StatusActive, want, s.need.Account)
 }
@@ -172,11 +181,13 @@ func (s *Selection) settle(session *wsapi.WorkSession, wait bool, want Want, cre
 		if account := accountRunGuidance(createdFor); account != "" {
 			guidance = " (" + account + ")"
 		}
-		s.ios.Info("To stop and come back later, press Ctrl+C; after approval, run '%s', then re-run this command%s.", resumeAction.Command, guidance)
-		final, err := WaitForApproval(s.ios, s.ac, session.ID, true, ApprovalPollInterval, utils.DefaultApprovalWaitTimeout)
+		s.ios.Info("To stop and come back later, press Ctrl+C; after approval, run '%s', then %s%s.", resumeAction.Command, s.resumeStep(), guidance)
+		ctx, stop := s.interruptContext()
+		final, err := waitForApproval(ctx, s.ios, s.ac, session.ID, true, ApprovalPollInterval, utils.DefaultApprovalWaitTimeout, false)
+		stop()
 		if err != nil {
 			resumeAction.Description = strings.TrimPrefix(resumeAction.Description, "after approval")
-			resumeAction.Description = "set this session active, then re-run the command" + resumeAction.Description
+			resumeAction.Description = "set this session active, then " + s.resumeStep() + resumeAction.Description
 			return false, WaitExitError(s.ios, opCreate, session, resumeAction, err)
 		}
 		session = final
@@ -190,7 +201,7 @@ func (s *Selection) settle(session *wsapi.WorkSession, wait bool, want Want, cre
 		session = active
 	}
 	active := session
-	if !safeResumeID(active.ID) || !want.Usable(active, time.Now()) {
+	if active.ID != id || !want.Usable(active, time.Now()) {
 		s.ios.Warning("WorkSession %s does not grant the required access.", id)
 		return false, nil
 	}
@@ -207,6 +218,14 @@ func (s *Selection) settle(session *wsapi.WorkSession, wait bool, want Want, cre
 	}
 	s.ios.Success("%s.", success)
 	return true, nil
+}
+
+// interruptContext ends on Ctrl+C, so an interrupted wait returns and its caller still cleans up.
+func (s *Selection) interruptContext() (context.Context, context.CancelFunc) {
+	if s.interrupt != nil {
+		return s.interrupt()
+	}
+	return signal.NotifyContext(context.Background(), os.Interrupt)
 }
 
 func safeResumeID(id string) bool {

@@ -2,11 +2,14 @@ package worksession
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -147,7 +150,7 @@ func TestOfferWaitTimeoutReturnsPendingExitAndResumeAction(t *testing.T) {
 		return http.StatusOK, string(body)
 	})}
 	ios, _, stderr := utils.TestIOStreams()
-	selection := &Selection{id: "old-session", ios: ios, ac: ac}
+	selection := &Selection{id: "old-session", ios: ios, ac: ac, interrupt: noInterrupt}
 	want := Want{ServerID: "server-1", AssignedUser: "user-1", RequesterType: "user", Scopes: []string{"command"}}
 	var resend bool
 	var failure error
@@ -165,6 +168,63 @@ func TestOfferWaitTimeoutReturnsPendingExitAndResumeAction(t *testing.T) {
 	assert.Equal(t, "old-session", selection.ID())
 }
 
+// noInterrupt keeps signal.Notify's goroutine, which never blocks durably, out of a synctest bubble.
+func noInterrupt() (context.Context, context.CancelFunc) {
+	return context.WithCancel(context.Background())
+}
+
+func TestOfferWaitInterruptReturnsPendingExitWithoutResend(t *testing.T) {
+	setupTmpConfig(t)
+	pending := wsapi.WorkSession{ID: "pending-session", Status: wsapi.StatusPending, RequesterType: "user", ApprovalRequestID: "approval-1"}
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, WorkspaceName: "ws", HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+		body, _ := json.Marshal(pending)
+		return http.StatusOK, string(body)
+	})}
+	ios, _, stderr := utils.TestIOStreams()
+	selection := &Selection{id: "old-session", ios: ios, ac: ac, interrupt: func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), time.Second)
+	}}
+	var resend bool
+	var failure error
+	var waited time.Duration
+
+	synctest.Test(t, func(*testing.T) {
+		start := time.Now()
+		resend, failure = selection.settle(&pending, true, Want{}, "")
+		waited = time.Since(start)
+	})
+
+	assert.False(t, resend)
+	var exitErr *utils.ExitError
+	require.ErrorAs(t, failure, &exitErr)
+	assert.Equal(t, utils.ExitCodePendingApproval, exitErr.Code)
+	assert.Equal(t, time.Second, waited)
+	assert.Contains(t, stderr.String(), "stopped waiting for approval")
+	assert.Contains(t, stderr.String(), "alpacon work-session use pending-session")
+	assert.Equal(t, "old-session", selection.ID())
+	stored, err := config.GetActiveWorkSessionFor("ws")
+	require.NoError(t, err)
+	assert.NotEqual(t, "pending-session", stored)
+}
+
+func TestOfferInterruptContextEndsOnCtrlC(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows cannot send os.Interrupt to a process")
+	}
+	ctx, stop := (&Selection{}).interruptContext()
+	defer stop()
+	self, err := os.FindProcess(os.Getpid())
+	require.NoError(t, err)
+
+	require.NoError(t, self.Signal(os.Interrupt))
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the context outlived Ctrl+C")
+	}
+}
+
 func TestUnsafeResumeIDIsRejectedBeforeRequestOrSave(t *testing.T) {
 	setupTmpConfig(t)
 	var requests atomic.Int32
@@ -173,7 +233,7 @@ func TestUnsafeResumeIDIsRejectedBeforeRequestOrSave(t *testing.T) {
 		return http.StatusOK, `{}`
 	})}
 	ios, _, stderr := utils.TestIOStreams()
-	selection := &Selection{id: "old-session", ios: ios, ac: ac}
+	selection := &Selection{id: "old-session", ios: ios, ac: ac, interrupt: noInterrupt}
 	unsafe := wsapi.WorkSession{ID: "safe$(touch bad)", Status: wsapi.StatusActive}
 
 	resend, failure := selection.settle(&unsafe, false, Want{}, "")
@@ -386,7 +446,7 @@ func TestPendingOfferBecomesActiveAndSavesWithoutAnotherStatusRead(t *testing.T)
 		}
 	})}
 	ios, _, _ := utils.TestIOStreams()
-	selection := &Selection{id: "old-session", source: SourceConfig, canOffer: true, need: Need{Operation: Command, Server: "web-1"}, ios: ios, ac: ac}
+	selection := &Selection{id: "old-session", source: SourceConfig, canOffer: true, need: Need{Operation: Command, Server: "web-1"}, ios: ios, ac: ac, interrupt: noInterrupt}
 	var resentID string
 	var failure error
 
@@ -697,6 +757,92 @@ func TestOfferCreateFailureKeepsOriginalRefusalPath(t *testing.T) {
 	assert.Equal(t, "old-session", selection.ID())
 	assert.Contains(t, stderr.String(), "Could not create a WorkSession")
 	assert.Contains(t, stderr.String(), "ask for a shorter one")
+}
+
+func TestOfferCreateWithUnusableIDFailsInsteadOfReportingTheGate(t *testing.T) {
+	for _, tc := range []struct{ name, id string }{
+		{name: "not a path segment", id: "../other"},
+		{name: "unsafe in a resume command", id: "session$(id)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			read := replaceStdin(t, "y\nrelease investigation\n\n")
+			defer func() { _ = read.Close() }()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.URL.Path == "/api/iam/users/-/":
+					_, _ = w.Write([]byte(`{"id":"user-1"}`))
+				case r.URL.Path == "/api/servers/servers/":
+					_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"server-1","name":"web-1"}]}`))
+				case r.URL.Path == "/api/work-sessions/sessions/" && r.Method == http.MethodGet:
+					_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
+				case r.Method == http.MethodPost:
+					w.WriteHeader(http.StatusCreated)
+					_ = json.NewEncoder(w).Encode(map[string]string{"id": tc.id, "status": wsapi.StatusActive})
+				default:
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			defer ts.Close()
+			ios, _, _ := utils.TestIOStreams()
+			selection := &Selection{id: "old-session", source: SourceConfig, need: Need{Operation: Command, Server: "web-1"}, ios: ios, ac: newTestClient(ts)}
+
+			resend, failure := selection.handleRefusal("web-1", selectionCodedError{code: utils.WorkSessionRequired})
+
+			assert.False(t, resend)
+			var exitErr *utils.ExitError
+			require.ErrorAs(t, failure, &exitErr)
+			assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
+			assert.Contains(t, failure.Error(), "check for it before creating another")
+			assert.NotContains(t, failure.Error(), tc.id)
+			assert.Equal(t, "old-session", selection.ID())
+		})
+	}
+}
+
+func TestSettleRejectsADifferentSessionThanTheOneChosen(t *testing.T) {
+	setupTmpConfig(t)
+	now := time.Now().UTC()
+	chosen, other := activeServerSession("chosen-session", now), activeServerSession("other-session", now)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(other)
+	}))
+	defer ts.Close()
+	ios, _, _ := utils.TestIOStreams()
+	selection := &Selection{id: "old-session", source: SourceConfig, ios: ios, ac: newTestClient(ts)}
+	want := Want{ServerID: "server-1", AssignedUser: "user-1", RequesterType: "user", Scopes: []string{"command"}}
+
+	resend, failure := selection.settle(&chosen, false, want, "")
+
+	assert.False(t, resend)
+	require.NoError(t, failure)
+	assert.Equal(t, "old-session", selection.ID())
+	stored, err := config.GetActiveWorkSessionFor("ws")
+	require.NoError(t, err)
+	assert.NotEqual(t, "other-session", stored)
+}
+
+func TestOfferWaitNamesTheOperationsResumeStep(t *testing.T) {
+	t.Parallel()
+	pending := wsapi.WorkSession{ID: "pending-session", Status: wsapi.StatusPending, RequesterType: "user"}
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, WorkspaceName: "ws", HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+		body, _ := json.Marshal(pending)
+		return http.StatusOK, string(body)
+	})}
+	ios, _, stderr := utils.TestIOStreams()
+	selection := &Selection{ios: ios, ac: ac, interrupt: func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), time.Second)
+	}}
+	selection.ResumeWith("upload the edited copy")
+
+	synctest.Test(t, func(*testing.T) {
+		_, _ = selection.settle(&pending, true, Want{}, "")
+	})
+
+	assert.Equal(t, 2, strings.Count(stderr.String(), "then upload the edited copy"), "notice and exit guidance: %q", stderr.String())
+	assert.NotContains(t, stderr.String(), "re-run")
 }
 
 func TestOfferRejectedWaitReturnsNotApproved(t *testing.T) {

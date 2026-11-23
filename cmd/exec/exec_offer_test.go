@@ -39,9 +39,14 @@ func (*execOfferStream) Close() {}
 
 func execOfferServer(t *testing.T, createdScopes *[]string) *httptest.Server {
 	t.Helper()
+	return execOfferServerWithStatus(t, createdScopes, "active")
+}
+
+func execOfferServerWithStatus(t *testing.T, createdScopes *[]string, status string) *httptest.Server {
+	t.Helper()
 	active := func(scopes []string) map[string]any {
 		return map[string]any{
-			"id": "new-session", "status": "active", "requester_type": "user", "scopes": scopes,
+			"id": "new-session", "status": status, "requester_type": "user", "scopes": scopes,
 			"servers": []map[string]string{{"id": "server-1", "name": "prod"}}, "clusters": []any{},
 			"assigned_user": map[string]string{"id": "user-1"}, "expires_at": time.Now().Add(time.Hour).UTC(),
 		}
@@ -161,6 +166,27 @@ func TestExecUploadOfferResendsWithCreatedFileCommandSession(t *testing.T) {
 	assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
 	assert.Equal(t, []string{"old-session", "new-session"}, ids)
 	assert.ElementsMatch(t, []string{utils.OperationCommand, utils.OperationWebFTP}, scopes)
+}
+
+func TestExecOfferAfterUploadSaysNotToUploadAgain(t *testing.T) {
+	var scopes []string
+	server := execOfferServerWithStatus(t, &scopes, "rejected")
+	defer server.Close()
+	enableExecOffer(t)
+	installExecOfferSelection(t, worksession.FileCommand)
+	originalUpload, originalSubmit := uploadContentAs, submitFileCommand
+	t.Cleanup(func() { uploadContentAs, submitFileCommand = originalUpload, originalSubmit })
+	uploadContentAs = func(*client.AlpaconClient, string, string, []byte, string, string, string, bool) error { return nil }
+	submitFileCommand = func(*client.AlpaconClient, string, event.FileExecution, string, string, string, string) (event.CommandResponse, error) {
+		return event.CommandResponse{}, utils.MarkSubmission(execUserCodedErr{code: utils.WorkSessionRequired})
+	}
+	local := t.TempDir() + "/deploy.sh"
+	require.NoError(t, os.WriteFile(local, []byte("echo ok\n"), 0600))
+
+	_, stderr, exitCode := runInProcess(t, server.URL, "", "", []string{"--detach", "--upload", "--file", "/tmp/deploy.sh", "--file-from", local, "prod"})
+
+	assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
+	assert.Contains(t, stderr, "then re-run this command without --upload and --overwrite")
 }
 
 func TestExecFromServerOfferResendsWithCreatedFileCommandSession(t *testing.T) {

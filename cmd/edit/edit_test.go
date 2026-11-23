@@ -117,7 +117,36 @@ func TestEditUploadRecoveryFailurePrintsThePreservedPath(t *testing.T) {
 	assert.Contains(t, stderr.String(), "Edited file preserved at ")
 }
 
+func TestEditUploadOfferNamesTheEditedCopyToResumeWith(t *testing.T) {
+	var create wsapi.WorkSessionCreateRequest
+	ac, ios, stderr := setupEditOfferWithStatus(t, &create, wsapi.StatusRejected)
+	var edited string
+	downloadEditFile = func(_ *client.AlpaconClient, _, _, localPath, _, _, _ string) (ftpapi.DownloadedFile, error) {
+		edited = localPath
+		return ftpapi.DownloadedFile{Path: localPath}, os.WriteFile(localPath, []byte("original"), 0600)
+	}
+	localEditorRunner = func(_, path string) error { return os.WriteFile(path, []byte("changed"), 0600) }
+	uploadEditFile = func(*client.AlpaconClient, string, string, string, string, string, string) error {
+		return utils.MarkSubmission(editGateError{})
+	}
+
+	cmd := NewEditCmd(func() (*client.AlpaconClient, error) { return ac, nil }, ios)
+	cmd.SetArgs([]string{"web-1:/etc/app.conf"})
+	err := cmd.Execute()
+
+	var exitErr *utils.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, utils.ExitCodeNotApproved, exitErr.Code)
+	assert.Contains(t, stderr.String(), "then upload the edited copy at "+edited)
+	assert.FileExists(t, edited)
+}
+
 func setupEditOffer(t *testing.T, create *wsapi.WorkSessionCreateRequest) (*client.AlpaconClient, *utils.IOStreams, fmt.Stringer) {
+	t.Helper()
+	return setupEditOfferWithStatus(t, create, wsapi.StatusActive)
+}
+
+func setupEditOfferWithStatus(t *testing.T, create *wsapi.WorkSessionCreateRequest, status string) (*client.AlpaconClient, *utils.IOStreams, fmt.Stringer) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	require.NoError(t, config.CreateConfig("https://workspace.example", "workspace", "", "", "", "", "", 0, false))
@@ -125,7 +154,7 @@ func setupEditOffer(t *testing.T, create *wsapi.WorkSessionCreateRequest) (*clie
 	ios, _, stderr := utils.TestIOStreams()
 	active := wsapi.WorkSession{
 		ID:            "new-session",
-		Status:        wsapi.StatusActive,
+		Status:        status,
 		RequesterType: "user",
 		Scopes:        []string{utils.OperationWebFTP},
 		Servers:       []types.ServerSummary{{ID: "server-1", Name: "web-1"}},
