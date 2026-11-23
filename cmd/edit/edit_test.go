@@ -137,8 +137,32 @@ func TestEditUploadOfferNamesTheEditedCopyToResumeWith(t *testing.T) {
 	var exitErr *utils.ExitError
 	require.ErrorAs(t, err, &exitErr)
 	assert.Equal(t, utils.ExitCodeNotApproved, exitErr.Code)
-	assert.Contains(t, stderr.String(), "then upload the edited copy at "+edited)
+	assert.Contains(t, stderr.String(), "then upload the edited copy at "+edited+" to web-1:/etc/app.conf")
 	assert.FileExists(t, edited)
+}
+
+func TestUploadResumeStepNamesADestinationCpReadsAsRemote(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		target editTarget
+		want   string
+	}{
+		{name: "server name", target: editTarget{Server: "web-1", RemotePath: "/etc/app.conf"}, want: "web-1:/etc/app.conf"},
+		{name: "account", target: editTarget{Server: "web-1", RemotePath: "/etc/app.conf", Username: "root"}, want: "root@web-1:/etc/app.conf"},
+		{name: "drive-like without an account", target: editTarget{Server: "h", RemotePath: `\app.conf`}, want: `USER@h:\app.conf`},
+		{name: "drive-like with an account", target: editTarget{Server: "h", RemotePath: `\app.conf`, Username: "root"}, want: `root@h:\app.conf`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			step := uploadResumeStep(tt.target, "/tmp/copy")
+
+			assert.Equal(t, "upload the edited copy at /tmp/copy to "+tt.want+" with 'alpacon cp' instead of editing again", step)
+			assert.True(t, utils.IsRemoteTarget(tt.want), "cp must read %q as remote", tt.want)
+		})
+	}
 }
 
 func setupEditOffer(t *testing.T, create *wsapi.WorkSessionCreateRequest) (*client.AlpaconClient, *utils.IOStreams, fmt.Stringer) {

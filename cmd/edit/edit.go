@@ -181,8 +181,7 @@ func realEditDeps(ac *client.AlpaconClient, groupname string, sel *worksession.S
 			return downloaded, err
 		},
 		upload: func(target editTarget, localPath string) error {
-			shownPath, _ := utils.SanitizeTerminalLine(localPath)
-			sel.ResumeWith(fmt.Sprintf("upload the edited copy at %s with 'alpacon cp' instead of editing again", shownPath))
+			sel.ResumeWith(uploadResumeStep(target, localPath))
 			err := uploadEditFile(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, sel.ID())
 			if err != nil {
 				err = utils.HandleCommonErrors(err, target.Server, sel.Offer(mfa.ErrorCallbacks(ac, func() error {
@@ -198,6 +197,20 @@ func realEditDeps(ac *client.AlpaconClient, groupname string, sel *worksession.S
 		runEditor:    localEditorRunner,
 		confirmLarge: confirmLargeEdit,
 	}
+}
+
+// uploadResumeStep names the edited copy and where 'alpacon cp' uploads it, in a form cp reads as remote.
+func uploadResumeStep(target editTarget, localPath string) string {
+	dest := target.Server + ":" + target.RemotePath
+	switch {
+	case target.Username != "":
+		dest = target.Username + "@" + dest
+	case !utils.IsRemoteTarget(dest):
+		dest = "USER@" + dest
+	}
+	shownPath, _ := utils.SanitizeTerminalLine(localPath)
+	shownDest, _ := utils.SanitizeTerminalLine(dest)
+	return fmt.Sprintf("upload the edited copy at %s to %s with 'alpacon cp' instead of editing again", shownPath, shownDest)
 }
 
 func parseEditTarget(arg, usernameFlag string) (editTarget, error) {
