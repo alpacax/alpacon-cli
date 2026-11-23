@@ -23,6 +23,13 @@ func (r *PollRecorder) Record() {
 	r.times = append(r.times, time.Now())
 }
 
+// Count returns how many polls have arrived.
+func (r *PollRecorder) Count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.times)
+}
+
 // WidestGap returns the longest interval between consecutive polls, or 0 when
 // fewer than two arrived. Only a schedule that widens with age can produce a gap
 // above its own base tick.

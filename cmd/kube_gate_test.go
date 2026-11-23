@@ -77,6 +77,8 @@ func TestKubeGateBlocksWhenDisabled(t *testing.T) {
 		{"kube", "login", "--help"},
 		{"kube", "proxy", "prod"},
 		{"kube", "proxy", "prod", "--port", "18444"},
+		{"kube", "mfa"},
+		{"kube", "mfa", "--help"},
 	}
 
 	for _, h := range homes {
