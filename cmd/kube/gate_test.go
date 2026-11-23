@@ -24,11 +24,16 @@ func newGateTree() (root, real *cobra.Command) {
 	return root, real
 }
 
+func gateStreams() *utils.IOStreams {
+	ios, _, _ := utils.TestIOStreams()
+	return ios
+}
+
 func TestApplySurfaceGate_EnabledKeepsCommand(t *testing.T) {
 	t.Parallel()
 	root, real := newGateTree()
 
-	applySurfaceGate(root, real, true)
+	applySurfaceGate(root, gateStreams(), real, true)
 
 	found, _, err := root.Find([]string{"k8s", "ls"})
 	require.NoError(t, err)
@@ -42,7 +47,7 @@ func TestApplySurfaceGate_DisabledSwapsInHiddenStub(t *testing.T) {
 	t.Parallel()
 	root, real := newGateTree()
 
-	applySurfaceGate(root, real, false)
+	applySurfaceGate(root, gateStreams(), real, false)
 
 	for _, path := range [][]string{{"kube"}, {"k8s", "ls"}, {"clusters", "describe", "prod"}, {"kube", "--help"}} {
 		found, _, err := root.Find(path)
@@ -59,7 +64,7 @@ func TestApplySurfaceGate_DisabledSwapsInHiddenStub(t *testing.T) {
 func TestApplySurfaceGate_DisabledRootHelpOmitsKube(t *testing.T) {
 	t.Parallel()
 	root, real := newGateTree()
-	applySurfaceGate(root, real, false)
+	applySurfaceGate(root, gateStreams(), real, false)
 
 	var out bytes.Buffer
 	root.SetOut(&out)
@@ -74,7 +79,7 @@ func TestApplySurfaceGate_DisabledRootHelpOmitsKube(t *testing.T) {
 func TestApplySurfaceGate_DisabledOffersNoSuggestion(t *testing.T) {
 	t.Parallel()
 	root, real := newGateTree()
-	applySurfaceGate(root, real, false)
+	applySurfaceGate(root, gateStreams(), real, false)
 
 	assert.Empty(t, root.SuggestionsFor("kub"))
 }
@@ -82,7 +87,7 @@ func TestApplySurfaceGate_DisabledOffersNoSuggestion(t *testing.T) {
 func TestApplySurfaceGate_EnabledRootHelpListsKube(t *testing.T) {
 	t.Parallel()
 	root, real := newGateTree()
-	applySurfaceGate(root, real, true)
+	applySurfaceGate(root, gateStreams(), real, true)
 
 	var out bytes.Buffer
 	root.SetOut(&out)
@@ -102,7 +107,7 @@ func TestApplySurfaceGate_DisabledKeepsAPassThroughChild(t *testing.T) {
 	keep := &cobra.Command{Use: "credentials", Hidden: true, Run: func(*cobra.Command, []string) { ran = true }}
 	real.AddCommand(keep)
 
-	applySurfaceGate(root, real, false, keep.Name())
+	applySurfaceGate(root, gateStreams(), real, false, keep.Name())
 
 	found, _, err := root.Find([]string{"kube", "credentials", "--cluster", "prod-east"})
 	require.NoError(t, err)
@@ -125,7 +130,7 @@ func TestApplySurfaceGate_DisabledKeepsCredentialsAndLogout(t *testing.T) {
 		kept[name] = found
 	}
 
-	applySurfaceGate(root, real, false, gatePassThrough...)
+	applySurfaceGate(root, gateStreams(), real, false, gatePassThrough...)
 
 	for _, path := range []string{"credentials", "logout"} {
 		found, _, err := root.Find([]string{"kube", path})
@@ -145,7 +150,7 @@ func TestApplySurfaceGate_DisabledHelpTopicReturnsNotEnabled(t *testing.T) {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			t.Parallel()
 			root, real := newGateTree()
-			applySurfaceGate(root, real, false)
+			applySurfaceGate(root, gateStreams(), real, false)
 			var out bytes.Buffer
 			root.SetOut(&out)
 			root.SetErr(&out)
@@ -167,7 +172,7 @@ func TestApplySurfaceGate_DisabledHelpTopicOfKeptChildPrintsHelp(t *testing.T) {
 	t.Parallel()
 	root, real := newGateTree()
 	real.AddCommand(&cobra.Command{Use: "logout", Short: "Remove kube contexts", Run: func(*cobra.Command, []string) {}})
-	applySurfaceGate(root, real, false, "logout")
+	applySurfaceGate(root, gateStreams(), real, false, "logout")
 	var out bytes.Buffer
 	root.SetOut(&out)
 	root.SetErr(&out)
@@ -192,7 +197,7 @@ func TestApplySurfaceGate_DisabledHelpTopicOfOtherCommandPrintsHelp(t *testing.T
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			root, real := newGateTree()
-			applySurfaceGate(root, real, false)
+			applySurfaceGate(root, gateStreams(), real, false)
 			var out bytes.Buffer
 			root.SetOut(&out)
 			root.SetErr(&out)
@@ -203,6 +208,35 @@ func TestApplySurfaceGate_DisabledHelpTopicOfOtherCommandPrintsHelp(t *testing.T
 			require.NoError(t, err)
 			assert.Contains(t, out.String(), tt.want)
 			assert.NotContains(t, out.String(), kubernetes.SurfaceNotEnabledMessage)
+		})
+	}
+}
+
+func TestApplySurfaceGate_DisabledReportsAnEnvelopeUnderJSON(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "subcommand", args: []string{"kube", "ls", "--output", "json"}},
+		{name: "help flag", args: []string{"kube", "--help", "--output=json"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ios, out, errOut := utils.TestIOStreams()
+			root, real := newGateTree()
+			applySurfaceGate(root, ios, real, false)
+			root.SilenceErrors, root.SilenceUsage = true, true // as the root sets them
+			root.SetArgs(tt.args)
+
+			err := root.Execute()
+
+			var exitErr *utils.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			ios.FprintExitError(errOut, exitErr)
+			assert.Empty(t, out.String())
+			assert.JSONEq(t, `{"ok":false,"exit_code":1,"error_code":"cli_error","message":"Kubernetes support is not enabled on this workspace. If it was enabled recently, run 'alpacon login' again to refresh.","context":{"operation":""}}`, errOut.String())
 		})
 	}
 }

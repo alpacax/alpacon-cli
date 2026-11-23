@@ -142,7 +142,7 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 func Execute() {
 	utils.LocalSignalConsoleOrigin = localSignalConsoleOrigin
 	root := newRootCmd(client.NewAlpaconAPIClient, utils.Stdio)
-	kube.ApplySurfaceGate(root, kubernetesSurfaceEnabled())
+	kube.ApplySurfaceGate(root, utils.Stdio, kubernetesSurfaceEnabled())
 	root.InitDefaultCompletionCmd()
 	rejectUnknownSubcommands(root)
 	utils.MarkHookErrors(root)

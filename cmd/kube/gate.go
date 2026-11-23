@@ -28,21 +28,21 @@ func notEnabledError() error {
 // wrote, perhaps in another workspace or before a logout, and it reads only the saved session, so the
 // current workspace's answer says nothing about it. kube logout stays for the same reason: it cleans up
 // such a context and its saved token, and needs the server only for a best-effort close.
-func ApplySurfaceGate(root *cobra.Command, enabled bool) {
+func ApplySurfaceGate(root *cobra.Command, ios *utils.IOStreams, enabled bool) {
 	at := slices.IndexFunc(root.Commands(), func(c *cobra.Command) bool { return c.Name() == "kube" })
 	if at < 0 {
 		return
 	}
-	applySurfaceGate(root, root.Commands()[at], enabled, gatePassThrough...)
+	applySurfaceGate(root, ios, root.Commands()[at], enabled, gatePassThrough...)
 }
 
 // applySurfaceGate moves the children of real named keep under the stand-in.
-func applySurfaceGate(root, real *cobra.Command, enabled bool, keep ...string) {
+func applySurfaceGate(root *cobra.Command, ios *utils.IOStreams, real *cobra.Command, enabled bool, keep ...string) {
 	if enabled {
 		return
 	}
 	root.RemoveCommand(real)
-	disabled := newDisabledKubeCmd(real)
+	disabled := newDisabledKubeCmd(ios, real)
 	for _, child := range real.Commands() {
 		if !slices.Contains(keep, child.Name()) {
 			continue
@@ -70,7 +70,7 @@ func refuseHelpTopic(root, disabled *cobra.Command) {
 // newDisabledKubeCmd answers every path under real's name and aliases with the
 // not-enabled message: no flag parsing and arbitrary args, so nothing Cobra
 // checks first can fail.
-func newDisabledKubeCmd(real *cobra.Command) *cobra.Command {
+func newDisabledKubeCmd(ios *utils.IOStreams, real *cobra.Command) *cobra.Command {
 	return &cobra.Command{
 		Use:                real.Use,
 		Aliases:            real.Aliases,
@@ -80,6 +80,9 @@ func newDisabledKubeCmd(real *cobra.Command) *cobra.Command {
 		Args:               cobra.ArbitraryArgs,
 		ValidArgsFunction:  cobra.NoFileCompletions,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			if format := utils.OutputFormatIn(args); format != "" { // flag parsing is off, so root never read it
+				_ = ios.SetOutputFormat(format)
+			}
 			return notEnabledError()
 		}),
 	}
