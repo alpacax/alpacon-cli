@@ -3,7 +3,6 @@ package tunnel
 import (
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
@@ -158,7 +157,7 @@ func runTunnel(ios *utils.IOStreams, cmd *cobra.Command, args []string, flags tu
 		return utils.NewExitError("%s", err)
 	}
 
-	return tunnelExitError(executeTunnelCommand(ios, ac, flags, cmd, args, nil))
+	return tunnelExitError(executeTunnelCommand(ios, ac, flags, cmd, args))
 }
 
 // tunnelExitError maps a tunnel run's exit code and error to what RunE returns.
@@ -178,7 +177,7 @@ func tunnelExitError(exitCode int, err error) error {
 	return nil
 }
 
-func executeTunnelCommand(ios *utils.IOStreams, ac *client.AlpaconClient, flags tunnelFlagValues, cmd *cobra.Command, args []string, sigChan <-chan os.Signal) (int, error) {
+func executeTunnelCommand(ios *utils.IOStreams, ac *client.AlpaconClient, flags tunnelFlagValues, cmd *cobra.Command, args []string) (int, error) {
 	dashIndex := cmd.ArgsLenAtDash()
 	if dashIndex >= 0 {
 		serverName, localCommand, err := extractRunInvocation(args, dashIndex)
@@ -188,7 +187,7 @@ func executeTunnelCommand(ios *utils.IOStreams, ac *client.AlpaconClient, flags 
 		return executeTunnelRunWithInvocation(ios, ac, flags, serverName, localCommand)
 	}
 
-	return 0, executeTunnel(ios, ac, flags, args[0], sigChan)
+	return 0, executeTunnel(ios, ac, flags, args[0])
 }
 
 func handleTunnelStartError(ac *client.AlpaconClient, flags tunnelFlagValues, err error, serverName string, retry func() error) error {
@@ -204,7 +203,7 @@ func handleTunnelStartError(ac *client.AlpaconClient, flags tunnelFlagValues, er
 	return utils.InteractiveOnly(err, "open a tunnel")
 }
 
-func executeTunnel(ios *utils.IOStreams, ac *client.AlpaconClient, flags tunnelFlagValues, serverName string, sigChan <-chan os.Signal) error {
+func executeTunnel(ios *utils.IOStreams, ac *client.AlpaconClient, flags tunnelFlagValues, serverName string) error {
 	runtime, err := startTunnel(flags.toStartOptions(ac, serverName))
 	if err != nil {
 		err = handleTunnelStartError(ac, flags, err, serverName, func() error {
@@ -219,11 +218,8 @@ func executeTunnel(ios *utils.IOStreams, ac *client.AlpaconClient, flags tunnelF
 	if err := runtime.CheckReady(); err != nil {
 		return fmt.Errorf("failed to establish tunnel connection: %w", err)
 	}
-	if sigChan == nil {
-		var stop func()
-		sigChan, stop = tunnelSignals()
-		defer stop()
-	}
+	sigChan, stop := tunnelSignals()
+	defer stop()
 
 	ios.Info("Tunnel ready: %s -> %s", runtime.LocalAddress(), runtime.RemoteAddress())
 	ios.Info("Waiting for connections... (Ctrl+C to exit)")
