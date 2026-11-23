@@ -338,21 +338,28 @@ func isSanitizedDenialCode(code string) bool {
 // at the console. Whichever line answers, a server hint under it (serverHintFollows) makes the
 // answer "".
 func sudoDenialHint(ios *utils.IOStreams, output string) string {
+	if guidance := sudoDenialGuidance(output); guidance != "" {
+		return denialHintLine(ios, guidance)
+	}
+	return ""
+}
+
+func sudoDenialGuidance(output string) string {
 	for _, h := range sudoDenialHints {
 		if denialCodePresent(output, h.code) {
 			if serverHintFollows(output, sudoDenialLinePrefix+h.code+").") {
 				return ""
 			}
-			return denialHintLine(ios, h.guidance)
+			return h.guidance
 		}
 	}
 	if code := firstDenialCode(output); code != "" {
 		if serverHintFollows(output, sudoDenialLinePrefix+code+").") {
 			return ""
 		}
-		return denialHintLine(ios, fmt.Sprintf(
+		return fmt.Sprintf(
 			"sudo was denied (%s). This build carries no guidance for that code—the server may be newer than the CLI.\n"+
-				"Read the denial in the Alpacon console (web), and update the CLI so a later run explains it.\n", code))
+				"Read the denial in the Alpacon console (web), and update the CLI so a later run explains it.\n", code)
 	}
 	// No code slot to anchor on, so a command printing the same sentence in its own
 	// output gets the hint too. Accepted: this branch only prints a fixed line—a
@@ -362,9 +369,8 @@ func sudoDenialHint(ios *utils.IOStreams, output string) string {
 		if serverHintFollows(output, sudoDenialCodelessLine) {
 			return ""
 		}
-		return denialHintLine(
-			ios, "sudo was denied, and the denial carried no code to explain it.\n"+
-				"Read the denial in the Alpacon console (web).\n")
+		return "sudo was denied, and the denial carried no code to explain it.\n" +
+			"Read the denial in the Alpacon console (web).\n"
 	}
 	return ""
 }
@@ -910,25 +916,30 @@ func commandResultFailure(ios *utils.IOStreams, stderr io.Writer, err error, inv
 	if err == nil {
 		return nil
 	}
-	var remoteErr *event.RemoteCommandError
-	if errors.As(err, &remoteErr) {
-		stderrText, exitCode := remoteFailureReport(ios, remoteErr)
-		_, _ = fmt.Fprint(stderr, stderrText)
-		return utils.NewSilentExitError(exitCode)
+	if remoteErr, ok := errors.AsType[*event.RemoteCommandError](err); ok {
+		failure := remoteFailure(remoteErr.ExitCode(), remoteErr.ReportedExitCode, remoteErr.ErrorPhase,
+			remoteErr.Output, "" /* status */)
+		return utils.NewFailureExitError(failure, func(w io.Writer, s *utils.IOStreams) {
+			_, _ = fmt.Fprint(w, remoteFailureReport(s, remoteErr))
+		})
 	}
-	var clientTimeout *event.ClientTimeoutError
-	if errors.As(err, &clientTimeout) {
-		_, _ = fmt.Fprint(stderr, clientTimeoutLine(ios))
-		// A wait that ended on a refusal (a 429 in practice) keeps its hint.
-		ios.PrintRefusalHints(stderr, clientTimeout)
-		return utils.NewSilentExitError(utils.ExitCodeGeneralError)
+	if clientTimeout, ok := errors.AsType[*event.ClientTimeoutError](err); ok {
+		failure := utils.Failure{
+			ExitCode:    utils.ExitCodeGeneralError,
+			ErrorCode:   utils.ErrorCodeCLI,
+			Message:     "[client_timeout] " + event.DescribePhase("client_timeout"),
+			Operation:   "command",
+			NextActions: utils.RefusalNextActions(clientTimeout),
+		}
+		return utils.NewFailureExitError(failure, func(w io.Writer, s *utils.IOStreams) {
+			_, _ = fmt.Fprint(w, clientTimeoutLine(s))
+			s.PrintRefusalHints(w, clientTimeout) // a wait that ended on a refusal (a 429 in practice) keeps its hint
+		})
 	}
-	var pollFailure *event.CommandPollError
-	if errors.As(err, &pollFailure) {
+	if pollFailure, ok := errors.AsType[*event.CommandPollError](err); ok {
 		return commandPollFailure(ios, stderr, err, pollFailure)
 	}
-	var rejected *event.CommandRejectedError
-	if errors.As(err, &rejected) {
+	if rejected, ok := errors.AsType[*event.CommandRejectedError](err); ok {
 		// Final for this command line: a retry is refused again or files another approval request.
 		return commandRejectionFailure(ios, stderr, err, rejected)
 	}
@@ -965,12 +976,39 @@ func commandRejectionFailure(ios *utils.IOStreams, stderr io.Writer, err error, 
 	return codedRefusalWithExit(ios, stderr, rejected.ExitCode(), "command", err, rejected.Error(), denialHintLine(ios, actions[0].PlainText()+"\n"), actions)
 }
 
-// remoteFailureReport is what commandResultFailure writes to stderr for a
-// command that failed on the server, and the exit code it leaves with: the
-// outcome line, then the sudo denial guidance when the output needs one.
-func remoteFailureReport(ios *utils.IOStreams, remoteErr *event.RemoteCommandError) (string, int) {
-	stderrLine, exitCode := remoteCommandOutcome(ios, remoteErr)
-	return stderrLine + sudoDenialHint(ios, remoteErr.Output), exitCode
+func remoteFailure(exitCode int, remoteExitCode *int, errorPhase, output, status string) utils.Failure {
+	message := "the remote command failed"
+	if status != "" {
+		message = fmt.Sprintf("the command failed with status %s", utils.SanitizeTerminalText(status))
+	}
+	if remoteExitCode != nil {
+		message = fmt.Sprintf("the remote command exited with status %d", *remoteExitCode)
+	}
+	if errorPhase != "" {
+		phase, desc := sanitizedPhaseParts(errorPhase)
+		message = fmt.Sprintf("[%s] %s", phase, desc)
+	}
+	var actions []utils.NextAction
+	if hint := event.PhaseHint(errorPhase); hint != "" {
+		actions = append(actions, utils.NextAction{Description: hint})
+	}
+	if guidance := sudoDenialGuidance(output); guidance != "" {
+		actions = append(actions, utils.NextAction{Description: strings.Join(strings.Fields(guidance), " ")})
+	}
+	return utils.Failure{
+		ExitCode:       exitCode,
+		ErrorCode:      utils.ErrorCodeRemoteCommandFailed,
+		Message:        message,
+		Operation:      "command",
+		RemoteExitCode: remoteExitCode,
+		NextActions:    actions,
+	}
+}
+
+// remoteFailureReport is what commandResultFailure writes to stderr for a command that failed on
+// the server: the outcome line, then the sudo denial guidance when the output needs one.
+func remoteFailureReport(ios *utils.IOStreams, remoteErr *event.RemoteCommandError) string {
+	return remoteCommandOutcome(ios, remoteErr) + sudoDenialHint(ios, remoteErr.Output)
 }
 
 // codedRefusal is the one way out for a server refusal the CLI has a
@@ -1112,16 +1150,14 @@ func phaseHintLine(phase string) string {
 	return fmt.Sprintf("Hint: %s\n", utils.SanitizeTerminalText(hint))
 }
 
-// remoteCommandOutcome renders the stderr phase line and exit code for a remote
-// command failure. The command's stdout was already streamed during execution,
-// so it is not re-emitted here. stderrLine already includes its trailing newline.
-func remoteCommandOutcome(ios *utils.IOStreams, remoteErr *event.RemoteCommandError) (stderrLine string, exitCode int) {
-	if remoteErr.ErrorPhase != "" {
-		phase, desc := sanitizedPhaseParts(remoteErr.ErrorPhase)
-		stderrLine = fmt.Sprintf("%s: [%s] %s\n", ios.Red("Error"), phase, desc) +
-			phaseHintLine(remoteErr.ErrorPhase)
+// remoteCommandOutcome renders the stderr phase line for a remote command failure, with its trailing
+// newline, or "" when it has no phase. The command's stdout was already streamed during execution.
+func remoteCommandOutcome(ios *utils.IOStreams, remoteErr *event.RemoteCommandError) string {
+	if remoteErr.ErrorPhase == "" {
+		return ""
 	}
-	return stderrLine, remoteErr.ExitCode
+	phase, desc := sanitizedPhaseParts(remoteErr.ErrorPhase)
+	return fmt.Sprintf("%s: [%s] %s\n", ios.Red("Error"), phase, desc) + phaseHintLine(remoteErr.ErrorPhase)
 }
 
 // execUserFailure reports the missing execution user and returns exit 1, or nil when err is

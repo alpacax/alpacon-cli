@@ -10,7 +10,9 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -411,6 +413,37 @@ func TestExecLogsPendingSudoApprovalSignals(t *testing.T) {
 				wantStderr = "==== ALPACON: APPROVAL PENDING ====\nsudo on my-server as alice is waiting for approval. Session ses-1. Open the approval or wait for an approver.\n================================\n"
 			}
 			assert.Equal(t, wantStderr, stderr)
+		})
+	}
+}
+
+func TestExecLogsReportsRemoteFailureInJSON(t *testing.T) {
+	t.Parallel()
+	const jobID = "550e8400-e29b-41d4-a716-446655440000"
+	tests := []struct {
+		name, body, stdout, prefix, envelope string
+		code                                 int
+	}{
+		{name: "remote exit", body: `{"id":"550e8400-e29b-41d4-a716-446655440000","status":"completed","success":false,"exit_code":23,"result":"remote output","purpose":"inspect service"}`, stdout: "remote output\n", prefix: "Stated purpose: inspect service\n", code: 23, envelope: `{"ok":false,"exit_code":23,"error_code":"remote_command_failed","message":"the remote command exited with status 23","context":{"operation":"command"},"remote_exit_code":23}`},
+		{name: "status only", body: `{"id":"550e8400-e29b-41d4-a716-446655440000","status":"stuck"}`, code: 1, envelope: `{"ok":false,"exit_code":1,"error_code":"remote_command_failed","message":"the command failed with status stuck","context":{"operation":"command"}}`},
+		{name: "no exit code reported", body: `{"id":"550e8400-e29b-41d4-a716-446655440000","status":"completed","success":false}`, code: 1, envelope: `{"ok":false,"exit_code":1,"error_code":"remote_command_failed","message":"the remote command failed","context":{"operation":"command"}}`},
+		{name: "unrecognised status", body: `{"id":"550e8400-e29b-41d4-a716-446655440000","status":"reticulating"}`, code: 1, envelope: `{"ok":false,"exit_code":1,"error_code":"cli_error","message":"the command ended with unrecognised status reticulating","context":{"operation":"command"}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := cmdtest.Server(t, map[string]cmdtest.Reply{
+				"GET /api/events/commands/" + jobID + "/":        {Status: http.StatusOK, Body: tt.body},
+				"GET /api/events/commands/" + jobID + "/chunks/": {Status: http.StatusNotFound, Body: ""},
+			})
+
+			stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newLogsCommand(server.Factory(), ios) }, jobID)
+
+			assert.Equal(t, tt.code, code)
+			assert.Equal(t, tt.stdout, stdout)
+			assert.Equal(t, 1+strings.Count(tt.prefix, "\n"), strings.Count(stderr, "\n"))
+			assert.True(t, strings.HasPrefix(stderr, tt.prefix), "stderr must begin with %q: %q", tt.prefix, stderr)
+			assert.JSONEq(t, tt.envelope, strings.TrimPrefix(stderr, tt.prefix))
 		})
 	}
 }

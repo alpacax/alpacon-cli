@@ -2,6 +2,7 @@ package exec
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/alpacax/alpacon-cli/api/approval"
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -135,14 +136,34 @@ Run the command again later to check for completion.`,
 			if stdoutLine != "" {
 				_, _ = fmt.Fprintln(stdout, stdoutLine)
 			}
-			if stderrLine != "" {
+			if exitCode == 0 {
 				_, _ = fmt.Fprint(stderr, stderrLine)
+				return nil
 			}
-			if exitCode != 0 {
-				return utils.NewSilentExitError(exitCode)
-			}
-			return nil
+			return utils.NewFailureExitError(logsFailure(details, exitCode), func(w io.Writer, _ *utils.IOStreams) {
+				_, _ = fmt.Fprint(w, stderrLine)
+			})
 		}),
+	}
+}
+
+// logsFailure is the --output json report of a failed command, matching logsCommandOutcome's branches.
+func logsFailure(details event.EventDetails, exitCode int) utils.Failure {
+	var phase string
+	if details.ErrorPhase != nil {
+		phase = *details.ErrorPhase
+	}
+	switch {
+	case event.IsStatusOnlyFailure(details.Status):
+		return remoteFailure(exitCode, details.ExitCode, phase, details.Result, details.Status)
+	case details.Success != nil:
+		return remoteFailure(exitCode, details.ExitCode, phase, details.Result, "" /* status */)
+	}
+	return utils.Failure{
+		ExitCode:  exitCode,
+		ErrorCode: utils.ErrorCodeCLI,
+		Message:   "the command ended with unrecognised status " + utils.SanitizeTerminalText(details.Status),
+		Operation: "command",
 	}
 }
 

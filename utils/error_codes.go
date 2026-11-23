@@ -25,6 +25,7 @@ const (
 	ErrorCodeNetwork              = "network_error"
 	ErrorCodeNotApproved          = "not_approved"
 	ErrorCodeCLI                  = "cli_error"
+	ErrorCodeRemoteCommandFailed  = "remote_command_failed" // a remote command ended in failure
 )
 
 // ErrNotLoggedIn marks a missing config file; a malformed or unreadable one stays cli_error.

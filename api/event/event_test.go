@@ -381,7 +381,8 @@ func TestErrorFromDetails_PropagatesExitCode(t *testing.T) {
 			var remoteErr *RemoteCommandError
 			require.ErrorAs(t, err, &remoteErr)
 			assert.Equal(t, tt.wantOutput, remoteErr.Output)
-			assert.Equal(t, tt.wantExitCode, remoteErr.ExitCode)
+			assert.Equal(t, tt.respExitCode, remoteErr.ReportedExitCode)
+			assert.Equal(t, tt.wantExitCode, remoteErr.ExitCode())
 			assert.Equal(t, tt.wantErrorPhase, remoteErr.ErrorPhase)
 		})
 	}
@@ -1824,7 +1825,7 @@ func TestRunCommandStreaming_FailedStatusPropagatesExitCode(t *testing.T) {
 		require.Error(t, err)
 		var remoteErr *RemoteCommandError
 		require.ErrorAs(t, err, &remoteErr)
-		assert.Equal(t, 23, remoteErr.ExitCode)
+		assert.Equal(t, 23, remoteErr.ExitCode())
 		assert.Equal(t, "before-exit\n", stdoutBuf.String())
 	})
 }
@@ -2369,7 +2370,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 				t.Helper()
 				var re *RemoteCommandError
 				require.ErrorAs(t, err, &re)
-				assert.Equal(t, 7, re.ExitCode)
+				assert.Equal(t, 7, re.ExitCode())
 			},
 		},
 		{

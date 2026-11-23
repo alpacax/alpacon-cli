@@ -866,15 +866,20 @@ func errorFromDetails(id api.PathID, d EventDetails) error {
 	switch d.Status {
 	case "completed", "success", "failed":
 		if d.Success != nil && !*d.Success {
-			exitCode := 1
-			if d.ExitCode != nil {
-				exitCode = *d.ExitCode
-			}
 			phase := ""
 			if d.ErrorPhase != nil {
 				phase = *d.ErrorPhase
 			}
-			return &RemoteCommandError{Username: d.Username, Output: d.Result, ExitCode: exitCode, ErrorPhase: phase, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID(), CommandID: id.String(), Held: d.Held}
+			return &RemoteCommandError{
+				Username:         d.Username,
+				ConsoleURL:       d.ConsoleURL,
+				WorkSessionID:    d.WorkSessionID(),
+				Output:           d.Result,
+				ReportedExitCode: d.ExitCode,
+				ErrorPhase:       phase,
+				CommandID:        id.String(),
+				Held:             d.Held,
+			}
 		}
 		return nil
 	default:

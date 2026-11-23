@@ -51,14 +51,14 @@ var phaseHints = map[string]string{
 }
 
 // RemoteCommandError is returned when the remote command completed but exited
-// with a non-zero status. ExitCode is 1 when the server omits exit_code.
+// with a non-zero status.
 type RemoteCommandError struct {
-	Username      string
-	ConsoleURL    string
-	WorkSessionID string
-	Output        string
-	ExitCode      int
-	ErrorPhase    string
+	Username         string
+	ConsoleURL       string
+	WorkSessionID    string
+	Output           string
+	ReportedExitCode *int // the server's exit_code, nil when it sent none
+	ErrorPhase       string
 	// CommandID identifies the job this failure came from, so an approval wait
 	// has something to poll. ApprovalRequestID is filled in by that wait, not
 	// by the server response this error is built from.
@@ -70,6 +70,14 @@ type RemoteCommandError struct {
 }
 
 func (e *RemoteCommandError) ErrorHeld() *utils.HeldRequest { return e.Held }
+
+// ExitCode is the exit this process leaves with: the server's exit_code, or 1 when it sent none.
+func (e *RemoteCommandError) ExitCode() int {
+	if e.ReportedExitCode == nil {
+		return 1
+	}
+	return *e.ReportedExitCode
+}
 
 // ClientTimeoutError is returned when the CLI gave up polling for the command
 // result before the server reported a terminal status.
@@ -342,9 +350,9 @@ func (r CommandRequest) MarshalJSON() ([]byte, error) {
 
 func (e *RemoteCommandError) Error() string {
 	if e.ErrorPhase != "" {
-		return fmt.Sprintf("remote command failed (%s, exit %d)", e.ErrorPhase, e.ExitCode)
+		return fmt.Sprintf("remote command failed (%s, exit %d)", e.ErrorPhase, e.ExitCode())
 	}
-	return fmt.Sprintf("remote command exited with code %d", e.ExitCode)
+	return fmt.Sprintf("remote command exited with code %d", e.ExitCode())
 }
 
 func (*ClientTimeoutError) Error() string {
