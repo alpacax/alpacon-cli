@@ -176,3 +176,18 @@ func TestTunnelExitError(t *testing.T) {
 		})
 	}
 }
+
+func TestTunnelExitErrorJSONReportsTheLocalCommandStatus(t *testing.T) {
+	t.Parallel()
+	ios, stdout, stderr := utils.TestIOStreams()
+	require.NoError(t, ios.SetOutputFormat(utils.OutputFormatJSON))
+
+	got := tunnelExitError(7, nil)
+
+	exitErr, ok := errors.AsType[*utils.ExitError](got)
+	require.True(t, ok, "want an ExitError, got %v", got)
+	assert.Equal(t, 7, exitErr.Code)
+	ios.PrintExitError(exitErr)
+	assert.Empty(t, stdout.String())
+	assert.JSONEq(t, `{"ok":false,"exit_code":7,"error_code":"local_command_failed","message":"the local command failed, so tunnel exits with status 7","context":{"operation":"tunnel"}}`, stderr.String())
+}
