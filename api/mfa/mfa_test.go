@@ -117,6 +117,19 @@ func TestGetMFALink_EmptyURLIsAnError(t *testing.T) {
 	assert.Empty(t, link)
 }
 
+// The server answers a link request with no link once the client's MFA is already fresh. It
+// stays an error for a caller that needs the link, and is told apart by the sentinel.
+func TestGetWorkspaceSecurityMFALink_NoLinkIsTheSentinel(t *testing.T) {
+	t.Parallel()
+	ac, _ := mfaLinkServer(t, `{"detail": "MFA is already done."}`)
+
+	link, err := GetWorkspaceSecurityMFALink(ac)
+
+	require.ErrorIs(t, err, ErrNoMFALink)
+	assert.Empty(t, link)
+	assert.Contains(t, err.Error(), "MFA URL is empty in server response")
+}
+
 func TestGetWorkspaceSecurityMFALink_SendsNoServerScope(t *testing.T) {
 	t.Parallel()
 	ac, query := mfaLinkServer(t, `{"mfa_url": "https://example.com/mfa"}`)
@@ -338,4 +351,245 @@ func TestStepUpForSudo_TimeoutOnARefusalKeepsTheHint(t *testing.T) {
 	// refusal to an MFA retry.
 	assert.Empty(t, utils.StructuredErrorCode(err))
 	assert.Zero(t, utils.HTTPStatusCode(err))
+}
+
+// completionClient answers the completion endpoint from replies in turn, repeating the last one,
+// and records when each poll arrived.
+func completionClient(polls *testutil.PollRecorder, replies ...func(w http.ResponseWriter)) *client.AlpaconClient {
+	var served int
+	return &client.AlpaconClient{
+		BaseURL:       testutil.StubBaseURL,
+		WorkspaceName: "pinned-ws",
+		HTTPClient: testutil.HandlerClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != mfaCompletionURL {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			polls.Record()
+			reply := replies[min(served, len(replies)-1)]
+			served++
+			w.Header().Set("Content-Type", "application/json")
+			reply(w)
+		})),
+	}
+}
+
+func completedReply(done bool) func(w http.ResponseWriter) {
+	return func(w http.ResponseWriter) {
+		if done {
+			_, _ = w.Write([]byte(`{"completed": true}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"completed": false}`))
+	}
+}
+
+func statusReply(status int, body string, header ...string) func(w http.ResponseWriter) {
+	return func(w http.ResponseWriter) {
+		for i := 0; i+1 < len(header); i += 2 {
+			w.Header().Set(header[i], header[i+1])
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}
+}
+
+func TestAwaitMFACompletion_EndsOnThePollThatSeesItAtAFixedTick(t *testing.T) {
+	t.Parallel()
+	const tick = 10 * time.Millisecond
+	var polls testutil.PollRecorder
+	// Past ten ticks, where utils.NextPollTick would start widening the gap.
+	replies := make([]func(http.ResponseWriter), 0, 15)
+	for range 14 {
+		replies = append(replies, completedReply(false))
+	}
+	ac := completionClient(&polls, append(replies, completedReply(true))...)
+
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		err := AwaitMFACompletion(ac, tick, time.Minute)
+
+		require.NoError(t, err)
+		assert.Equal(t, 15*tick, time.Since(start), "the fifteenth poll sees the MFA and ends the wait")
+	})
+	assert.Equal(t, tick, polls.WidestGap(), "a person is watching a browser, so the gap never widens")
+}
+
+func TestAwaitMFACompletion_TimeoutMatchesTheSentinel(t *testing.T) {
+	t.Parallel()
+	const tick = 10 * time.Millisecond
+	var polls testutil.PollRecorder
+	ac := completionClient(&polls, completedReply(false))
+
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		err := AwaitMFACompletion(ac, tick, 10*tick+tick/2)
+
+		require.ErrorIs(t, err, ErrMFAWaitTimedOut)
+		assert.Equal(t, "MFA verification timed out after 105ms", err.Error())
+		assert.Equal(t, 10*tick, time.Since(start), "no poll may start past the deadline")
+	})
+}
+
+// A throttled poll stretches the next gap to the server's Retry-After and does not end the wait,
+// and a timeout after it keeps only the throttle's hint, never its code or status.
+func TestAwaitMFACompletion_ThrottleStretchesTheGap(t *testing.T) {
+	t.Parallel()
+	// The backoff cap is 60 ticks, so this tick lets a one-second Retry-After through whole.
+	const tick = 100 * time.Millisecond
+	const hint = "Too many checks; wait a moment."
+	var polls testutil.PollRecorder
+	throttled := statusReply(http.StatusTooManyRequests, `{"code": "throttled", "hint": "`+hint+`"}`, "Retry-After", "1")
+	ac := completionClient(&polls, throttled, completedReply(true))
+
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		err := AwaitMFACompletion(ac, tick, time.Minute)
+
+		require.NoError(t, err)
+		assert.Equal(t, tick+time.Second, time.Since(start))
+	})
+
+	synctest.Test(t, func(t *testing.T) {
+		alwaysThrottled := completionClient(&testutil.PollRecorder{}, throttled)
+		err := AwaitMFACompletion(alwaysThrottled, tick, 3*time.Second+tick/2)
+
+		require.ErrorIs(t, err, ErrMFAWaitTimedOut)
+		assert.Equal(t, hint, utils.RefusalHint(err))
+		assert.Empty(t, utils.StructuredErrorCode(err))
+		assert.Zero(t, utils.HTTPStatusCode(err))
+	})
+}
+
+func TestAwaitMFACompletion_EndsOnARefusalAtOnce(t *testing.T) {
+	t.Parallel()
+	const tick = 10 * time.Millisecond
+	var polls testutil.PollRecorder
+	ac := completionClient(&polls, statusReply(http.StatusUnauthorized, `{"code": "auth_client_instance_revoked"}`))
+
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		err := AwaitMFACompletion(ac, tick, time.Minute)
+
+		require.Error(t, err)
+		require.NotErrorIs(t, err, ErrMFAWaitTimedOut)
+		assert.Equal(t, "auth_client_instance_revoked", utils.StructuredErrorCode(err))
+		assert.Equal(t, tick, time.Since(start), "polling again cannot change a refusal")
+	})
+}
+
+func TestAwaitMFACompletion_RidesThroughFewerThanTheFailureLimit(t *testing.T) {
+	t.Parallel()
+	const tick = 10 * time.Millisecond
+	unavailable := statusReply(http.StatusServiceUnavailable, `{}`)
+
+	t.Run("recovers", func(t *testing.T) {
+		t.Parallel()
+		replies := make([]func(http.ResponseWriter), 0, utils.MaxConsecutivePollFailures)
+		for range utils.MaxConsecutivePollFailures - 1 {
+			replies = append(replies, unavailable)
+		}
+		ac := completionClient(&testutil.PollRecorder{}, append(replies, completedReply(true))...)
+		synctest.Test(t, func(t *testing.T) {
+			require.NoError(t, AwaitMFACompletion(ac, tick, time.Minute))
+		})
+	})
+
+	t.Run("gives_up", func(t *testing.T) {
+		t.Parallel()
+		var polls testutil.PollRecorder
+		ac := completionClient(&polls, unavailable)
+		synctest.Test(t, func(t *testing.T) {
+			err := AwaitMFACompletion(ac, tick, time.Minute)
+
+			require.Error(t, err)
+			require.NotErrorIs(t, err, ErrMFAWaitTimedOut)
+			assert.Equal(t, http.StatusServiceUnavailable, utils.HTTPStatusCode(err))
+		})
+		assert.Equal(t, utils.MaxConsecutivePollFailures, polls.Count(), "the wait must end on the poll that reaches the limit")
+		assert.Equal(t, tick, polls.WidestGap(), "a failed poll keeps the base tick, as the person may finish MFA meanwhile")
+	})
+}
+
+// Only a successful read ends a run of failed polls: a read that is not yet done starts the
+// count again, and a 429 neither adds to the run nor ends it.
+func TestAwaitMFACompletion_FailureStreak(t *testing.T) {
+	t.Parallel()
+	const tick = 10 * time.Millisecond
+	unavailable := statusReply(http.StatusServiceUnavailable, `{}`)
+	throttled := statusReply(http.StatusTooManyRequests, `{}`)
+	streak := func(n int) []func(http.ResponseWriter) {
+		replies := make([]func(http.ResponseWriter), 0, n)
+		for range n {
+			replies = append(replies, unavailable)
+		}
+		return replies
+	}
+
+	t.Run("a_read_resets_it", func(t *testing.T) {
+		t.Parallel()
+		short := utils.MaxConsecutivePollFailures - 1
+		replies := append(streak(short), completedReply(false))
+		replies = append(append(replies, streak(short)...), completedReply(true))
+		var polls testutil.PollRecorder
+		ac := completionClient(&polls, replies...)
+		synctest.Test(t, func(t *testing.T) {
+			require.NoError(t, AwaitMFACompletion(ac, tick, time.Minute))
+		})
+		assert.Equal(t, 2*short+2, polls.Count())
+	})
+
+	t.Run("a_throttle_neither_counts_nor_resets", func(t *testing.T) {
+		t.Parallel()
+		short := utils.MaxConsecutivePollFailures - 1
+		replies := append(streak(short), throttled, unavailable, completedReply(true))
+		var polls testutil.PollRecorder
+		ac := completionClient(&polls, replies...)
+		synctest.Test(t, func(t *testing.T) {
+			err := AwaitMFACompletion(ac, tick, time.Minute)
+
+			require.Error(t, err)
+			require.NotErrorIs(t, err, ErrMFAWaitTimedOut)
+			assert.Equal(t, http.StatusServiceUnavailable, utils.HTTPStatusCode(err))
+		})
+		// A counted 429 would end the wait on it; a resetting one would let the done read through.
+		assert.Equal(t, short+2, polls.Count())
+	})
+}
+
+// A failed poll that carries Retry-After waits for it, within the backoff cap, before the next.
+func TestAwaitMFACompletion_FailedPollHonorsRetryAfter(t *testing.T) {
+	t.Parallel()
+	// The backoff cap is 60 ticks, so this tick lets a one-second Retry-After through whole.
+	const tick = 100 * time.Millisecond
+	ac := completionClient(&testutil.PollRecorder{}, statusReply(http.StatusServiceUnavailable, `{}`, "Retry-After", "1"), completedReply(true))
+
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		require.NoError(t, AwaitMFACompletion(ac, tick, time.Minute))
+		assert.Equal(t, tick+time.Second, time.Since(start))
+	})
+}
+
+// A completion check still in flight when the deadline passes is cancelled, so the wait ends at
+// its timeout even when the server never answers: once connected, the HTTP client caps no
+// transfer on its own.
+func TestAwaitMFACompletion_CancelsACheckInFlightAtTheDeadline(t *testing.T) {
+	t.Parallel()
+	const tick = 10 * time.Millisecond
+	ac := &client.AlpaconClient{
+		BaseURL:       testutil.StubBaseURL,
+		WorkspaceName: "pinned-ws",
+		HTTPClient: testutil.HandlerClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			<-r.Context().Done() // a check the server never answers
+		})),
+	}
+
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		err := AwaitMFACompletion(ac, tick, 5*tick+tick/2)
+
+		require.ErrorIs(t, err, ErrMFAWaitTimedOut)
+		assert.Equal(t, 5*tick+tick/2, time.Since(start), "the wait must end at its timeout, not when the check answers")
+	})
 }

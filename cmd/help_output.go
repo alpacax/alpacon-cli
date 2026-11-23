@@ -30,7 +30,7 @@ status), and partial.count (rows already on stdout).
 
 error_code is the server's code when it sent one, otherwise the CLI's own:
 usage_error, confirmation_required, not_logged_in, network_error,
-not_approved, cli_error, remote_command_failed, local_command_failed,
-purpose_refused, or http_<status>. Exit codes are listed in the README.`,
+not_approved, mfa_required, cli_error, remote_command_failed,
+local_command_failed, purpose_refused, or http_<status>. Exit codes are listed in the README.`,
 	}
 }

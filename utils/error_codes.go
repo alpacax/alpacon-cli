@@ -24,6 +24,7 @@ const (
 	ErrorCodeConfirmationRequired = "confirmation_required"
 	ErrorCodeNetwork              = "network_error"
 	ErrorCodeNotApproved          = "not_approved"
+	ErrorCodeMFARequired          = "mfa_required"
 	ErrorCodeCLI                  = "cli_error"
 	ErrorCodeRemoteCommandFailed  = "remote_command_failed" // a remote command ended in failure
 	ErrorCodeLocalCommandFailed   = "local_command_failed"  // tunnel's local command exited non-zero
