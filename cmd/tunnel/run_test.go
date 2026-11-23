@@ -265,20 +265,23 @@ func TestExecuteTunnelRunWithInvocationInvalidRemotePort(t *testing.T) {
 
 func TestTunnelRunHandlesSignalsOnlyAfterRecoveryAndClosesCleanly(t *testing.T) {
 	runtime := newFakeRunRuntime()
-	originalStart, originalCommand := startTunnel, newLocalCommand
-	t.Cleanup(func() { startTunnel, newLocalCommand = originalStart, originalCommand })
+	originalStart, originalCommand, originalSignals := startTunnel, newLocalCommand, tunnelSignals
+	t.Cleanup(func() {
+		startTunnel, newLocalCommand, tunnelSignals = originalStart, originalCommand, originalSignals
+	})
 	var started atomic.Bool
 	startTunnel = func(tunnelruntime.StartOptions) (tunnelCommandRuntime, error) {
 		started.Store(true)
 		return runtime, nil
 	}
+	signals := make(chan os.Signal, 1)
+	tunnelSignals = func() (<-chan os.Signal, func()) {
+		require.True(t, started.Load(), "signal handling must begin after tunnel creation and recovery")
+		signals <- os.Interrupt
+		return signals, func() {}
+	}
 	var localCmd *exec.Cmd
 	newLocalCommand = func(string, ...string) *exec.Cmd {
-		require.True(t, started.Load(), "the tunnel must be ready before the local command is prepared")
-		self, err := os.FindProcess(os.Getpid())
-		require.NoError(t, err)
-		require.NoError(t, self.Signal(os.Interrupt))
-		time.Sleep(50 * time.Millisecond)
 		localCmd = runHelperCommand("wait-sigint")
 		return localCmd
 	}
