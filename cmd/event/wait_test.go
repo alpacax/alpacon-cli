@@ -153,7 +153,8 @@ func TestRunWait_JSONEndsARefusedWaitWithOneEnvelope(t *testing.T) {
 	assert.Equal(t, utils.ExitCodeNotApproved, code)
 	assert.Contains(t, stdout, "rejected")
 	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
-	assert.JSONEq(t, `{"ok":false,"exit_code":6,"error_code":"not_approved","message":"the wait ended on a work_session event in its failure set","context":{"operation":"wait"}}`, lines[len(lines)-1])
+	require.Len(t, lines, 2, "want the waiting notice and one envelope: %q", stderr)
+	assert.JSONEq(t, `{"ok":false,"exit_code":6,"error_code":"not_approved","message":"the wait ended on a work_session event in its failure set","context":{"operation":"wait"}}`, lines[1])
 }
 
 // newRejectingEventServer opens an event session and its WebSocket, then refuses the subscription,
