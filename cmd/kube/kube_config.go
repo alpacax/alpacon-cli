@@ -193,10 +193,12 @@ func holdKubeconfig(ios *utils.IOStreams, path string, quit func(msg string)) (*
 	return &heldKubeconfig{hold: hold, interrupt: interrupt}, nil
 }
 
-// done stops the watch and releases the lock; calling it again does nothing.
+// done releases the lock and stops the watch; calling it again does nothing.
+// The lock goes first: stop waits for a notice the watcher may still be
+// writing, and kubectl's own writes must not wait on a blocked stderr.
 func (h *heldKubeconfig) done() {
-	h.interrupt.stop()
 	h.hold.close()
+	h.interrupt.stop()
 }
 
 // relockTimeout bounds how long take waits for a kubeconfig lock another

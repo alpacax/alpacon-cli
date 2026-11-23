@@ -75,12 +75,13 @@ last 'alpacon login', keeps being refused after this command succeeds; run
 'alpacon kube login' for the cluster again to open one this CLI can confirm.
 When the MFA is still fresh, it says so and issues no link.
 
-Without a terminal on stdin, as when an AI agent or a script runs it, it hands out
-the link and exits 9 at once, without opening a browser or waiting. The link still works after the command
+Without a terminal on stdin and stderr, as when an AI agent or a script runs it or
+stderr is redirected, it hands out the link and exits 9 at once, without opening a
+browser or waiting. The link still works after the command
 exits: hand it to the person who signs in, and run 'alpacon kube mfa' again once
 they are done to confirm. An interactive run that waits 3 minutes without seeing
-the MFA finish exits 9 the same way. Under --output json with stderr redirected,
-stderr carries only the error envelope, which holds the link in next_actions.`,
+the MFA finish exits 9 the same way. Under --output json the error envelope holds
+the link in next_actions.`,
 		Example: `  alpacon kube mfa
   alpacon kube mfa --output json`,
 		Args: cobra.NoArgs,
@@ -113,28 +114,22 @@ func runKubeMFA(ios *utils.IOStreams, ac *client.AlpaconClient, opts kubeMFAOpti
 		return utils.NewEnvelopeExitError(opKubeMFA, err, "Failed to get the MFA link: %s.", err)
 	}
 
-	// Without a terminal nobody watches a wait, and the browser leg credits the MFA whether or
-	// not the CLI is still polling, so the link is handed out in the failure's next actions.
-	// No browser opens either: a script on a desktop must not raise one.
-	if !opts.interactive() {
+	// The command waits only where a person can see the link while it waits: stdin and
+	// stderr both terminals. Anywhere else, a script or an agent reading a redirected stderr,
+	// it hands the link out in the exit-9 failure at once, which is all such a stderr holds;
+	// the browser leg credits the MFA whether or not the CLI is still polling. No browser
+	// opens there either, so a script on a desktop does not raise one.
+	if !opts.interactive() || !opts.stderrTerminal() {
 		return kubeMFAPending(link, fmt.Sprintf("Kubernetes writes and deletes in workspace %q need a recent MFA, and it is not verified yet.", ac.WorkspaceName), nil)
 	}
 	opts.open(link)
 
-	// Under --output json with stderr redirected, a program reads stderr and the envelope is
-	// all it may hold; the envelope carries the link. Anywhere else a person is reading.
-	toPerson := !ios.IsJSON() || opts.stderrTerminal()
-	var spinner *utils.Spinner
-	if toPerson {
-		_, _ = fmt.Fprintf(ios.ErrOut, "Kubernetes writes and deletes in workspace %q need a recent MFA. Open this link to verify:\n  %s\n",
-			utils.SanitizeTerminalText(ac.WorkspaceName), utils.SanitizeTerminalText(link))
-		spinner = utils.NewSpinner("Waiting for MFA verification...")
-		spinner.Start()
-	}
+	_, _ = fmt.Fprintf(ios.ErrOut, "Kubernetes writes and deletes in workspace %q need a recent MFA. Open this link to verify:\n  %s\n",
+		utils.SanitizeTerminalText(ac.WorkspaceName), utils.SanitizeTerminalText(link))
+	spinner := utils.NewSpinner("Waiting for MFA verification...")
+	spinner.Start()
 	err = mfa.AwaitMFACompletion(ac, opts.tick, opts.timeout)
-	if spinner != nil {
-		spinner.Stop()
-	}
+	spinner.Stop()
 	if errors.Is(err, mfa.ErrMFAWaitTimedOut) {
 		return kubeMFAPending(link, fmt.Sprintf("MFA was not verified within %v.", opts.timeout), err)
 	}
