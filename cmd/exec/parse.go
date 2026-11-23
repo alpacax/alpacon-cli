@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	pathpkg "path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +49,13 @@ func checkReuseDays(raw string) (int, string) {
 		return 0, fmt.Sprintf("--reuse-days must be %d to %d days: %d", reuseDaysMin, reuseDaysMax, days)
 	}
 	return days, ""
+}
+
+// valueFlags are the flags ParseRemoteExecArgs reads a value for, which helpOutputFormat skips; a new one
+// goes in both.
+var valueFlags = []string{
+	"-u", "--username", "-g", "--groupname", "--work-session", "--purpose", "--output", "--file",
+	"--file-from", "--interpreter", "--reuse-days", "--wait-approval",
 }
 
 // RemoteExecArgs holds parsed arguments for remote command execution.
@@ -99,25 +107,16 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 		purpose                                                  string
 		filePath, fileFrom, interpreter, waitApprovalRaw         string
 		reuseDays                                                int
-		commandParts                                             []string
+		commandParts, envArgs                                    []string
 		detach                                                   bool
 		upload, overwrite, fromServer                            bool
 		wait                                                     bool
 		separated                                                bool
-		showHelp                                                 bool
 		i                                                        int
 		waitApproval                                             time.Duration
 	)
 	env := map[string]string{}
-	help := func() RemoteExecArgs { return RemoteExecArgs{ShowHelp: true, OutputFormat: outputFormat} }
 	fail := func(msg string) RemoteExecArgs {
-		if showHelp { // an invalid flag does not stop help from finding a later --output
-			rest := ParseRemoteExecArgs(ios, append([]string{"--help"}, args[i+1:]...))
-			if rest.OutputFormat != "" {
-				outputFormat = rest.OutputFormat
-			}
-			return help()
-		}
 		return RemoteExecArgs{Err: msg, OutputFormat: outputFormat}
 	}
 
@@ -147,7 +146,10 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 
 		switch {
 		case arg == "-h" || arg == "--help":
-			showHelp = true // keep reading: --output may follow
+			if later := helpOutputFormat(args[i+1:]); later != "" {
+				outputFormat = later
+			}
+			return RemoteExecArgs{ShowHelp: true, OutputFormat: outputFormat}
 		case matchShortOrLongFlag(arg, "-u", "--username"):
 			var errMsg string
 			username, i, errMsg = extractFlagValue(args, i, "-u")
@@ -197,9 +199,7 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 				return fail("--output requires a value (table|json)")
 			}
 		case arg == "--env" || strings.HasPrefix(arg, "--env="):
-			if errMsg := ParseEnvArg(ios, arg, env); errMsg != "" {
-				return fail(errMsg)
-			}
+			envArgs = append(envArgs, arg) // read once the line is known not to ask for help
 		case arg == "--file" || strings.HasPrefix(arg, "--file="):
 			var errMsg string
 			filePath, i, errMsg = extractFlagValue(args, i, "--file")
@@ -281,8 +281,10 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 		}
 	}
 
-	if showHelp {
-		return help()
+	for _, arg := range envArgs {
+		if errMsg := ParseEnvArg(ios, arg, env); errMsg != "" {
+			return fail(errMsg)
+		}
 	}
 
 	if detach && wait {
@@ -366,6 +368,30 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 	}
 	parsed.Command = ShellJoin(commandParts)
 	return parsed
+}
+
+// helpOutputFormat is the last --output value among the flags after --help, valid or not; it stops where
+// the remote command line starts.
+func helpOutputFormat(args []string) string {
+	var format string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" || !strings.HasPrefix(arg, "-") {
+			break
+		}
+		if value, ok := strings.CutPrefix(arg, "--output="); ok {
+			format = value
+			continue
+		}
+		if !slices.Contains(valueFlags, arg) {
+			continue
+		}
+		i++
+		if arg == "--output" && i < len(args) {
+			format = args[i]
+		}
+	}
+	return format
 }
 
 // ParseEnvArg parses a --env token into env. A bare KEY reads the shell value,

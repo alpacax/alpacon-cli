@@ -1,11 +1,15 @@
 package exec
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseRemoteExecArgs(t *testing.T) {
@@ -1000,4 +1004,31 @@ func TestParseRemoteExecArgsRefusalCarriesTheOutputReadBeforeIt(t *testing.T) {
 			assert.Equal(t, tt.want, parsed.OutputFormat)
 		})
 	}
+}
+
+// documentedFlags matches a flag name anywhere in the help text.
+var documentedFlags = regexp.MustCompile(`--?[a-z][a-z-]*`)
+
+func TestHelpOutputFormatSkipsTheValueOfEveryDocumentedFlag(t *testing.T) {
+	t.Parallel()
+	cmd := NewExecCmd(cmdtest.NoClient, utils.Stdio)
+	help := cmd.Long + cmd.Example
+	checked := 0
+	seen := map[string]bool{"--output": true} // it reads the next word itself
+	for _, flag := range documentedFlags.FindAllString(help, -1) {
+		if seen[flag] {
+			continue
+		}
+		seen[flag] = true
+		if err := ParseRemoteExecArgs(utils.Stdio, []string{flag}).Err; !strings.HasPrefix(err, "flag needs an argument") {
+			continue // takes no value
+		}
+		checked++
+		t.Run(flag, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Empty(t, helpOutputFormat([]string{flag, "--output=json"}), "%s takes a value, so the next word is not --output", flag)
+		})
+	}
+	require.NotZero(t, checked, "no value flag found in the help; the pattern matched nothing")
 }

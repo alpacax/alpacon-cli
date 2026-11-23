@@ -31,6 +31,7 @@ func TestHelpUnderJSONGoesToStderr(t *testing.T) {
 		{name: "exec output after two invalid flags", args: []string{"exec", "-h", "--bogus", "--wait=x", "--output=json"}},
 		{name: "websh output after server", args: []string{"websh", "-h", "my-server", "--output", "json"}},
 		{name: "websh flag", args: []string{"websh", "--help", "--output", "json"}},
+		{name: "websh output after read-only and a server", args: []string{"websh", "-h", "--read-only", "false", "my-server", "--output", "json"}},
 		{name: "group flag", args: []string{"token", "--help", "--output", "json"}},
 		{name: "leaf flag", args: []string{"token", "ls", "--help", "--output", "json"}},
 		{name: "help command", args: []string{"help", "token", "--output", "json"}},
@@ -60,6 +61,8 @@ func TestHelpUnderTableGoesToStdout(t *testing.T) {
 		{name: "group flag", args: []string{"token", "--help"}, wantStdout: "--output"},
 		{name: "leaf flag", args: []string{"token", "ls", "--help"}, wantStdout: "--output"},
 		{name: "group without subcommand", args: []string{"token"}, wantCode: 2, wantStdout: "--output"},
+		{name: "exec flag value names json", args: []string{"exec", "--help", "-u", "--output=json"}, wantStdout: "--output"},
+		{name: "websh flag value names json", args: []string{"websh", "--help", "-u", "--output=json"}, wantStdout: "--output"},
 		{name: "exec remote command output flag", args: []string{"exec", "-h", "my-server", "cmd", "--output", "json"}, wantStdout: "--output"},
 		{name: "exec remote command output flag after an invalid flag", args: []string{"exec", "-h", "--bogus", "my-server", "cmd", "--output", "json"}, wantStdout: "--output"},
 		{name: "websh remote command output flag after an empty work session", args: []string{"websh", "-h", "my-server", "--work-session=", "cmd", "--output", "json"}, wantStdout: "--output"},
@@ -75,6 +78,26 @@ func TestHelpUnderTableGoesToStdout(t *testing.T) {
 			assert.Equal(t, tt.wantCode, code)
 			assert.Contains(t, stdout, tt.wantStdout)
 			assert.NotContains(t, stderr, "--output")
+		})
+	}
+}
+
+func TestHelpPrintsNoUnsetEnvWarning(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"exec", "--help", "--env=ALPACON_TEST_UNSET"},
+		{"exec", "--env=ALPACON_TEST_UNSET", "--help"},
+		{"websh", "--help", "--env=ALPACON_TEST_UNSET"},
+		{"websh", "--env=ALPACON_TEST_UNSET", "--help"},
+	} {
+		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
+			t.Parallel()
+
+			stdout, stderr, code := cmdtest.RunCaptured(buildRoot, args...)
+
+			assert.Equal(t, 0, code)
+			assert.Contains(t, stdout, "--output")
+			assert.Empty(t, stderr)
 		})
 	}
 }

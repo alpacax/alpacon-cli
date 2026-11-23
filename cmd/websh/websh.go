@@ -36,46 +36,31 @@ type WebshArgs struct {
 // ParseWebshArgs parses raw CLI args for `alpacon websh` (DisableFlagParsing mode), returning
 // errHelpRequested when -h/--help is seen.
 //
-// NOTE: every named flag must be matched before the unknown-flag case.
+// NOTE: every named flag must be matched before the unknown-flag case, and in helpOutputFormat too.
 func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 	res := WebshArgs{Env: map[string]string{}}
-	showHelp := false
-	i := 0
-	fail := func(err error) (WebshArgs, error) {
-		if !showHelp {
-			return res, err
-		}
-		// An invalid flag does not stop help from finding a later --output.
-		rest := []string{"--help"}
-		if res.ServerName != "" {
-			rest = append(rest, res.ServerName)
-		}
-		later, _ := ParseWebshArgs(ios, append(rest, args[i+1:]...))
-		if later.OutputFormat != "" {
-			res.OutputFormat = later.OutputFormat
-		}
-		return res, errHelpRequested
-	}
-	for ; i < len(args); i++ {
+	var envArgs []string
+	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "-s" || args[i] == "--share":
 			res.Share = true
 		case args[i] == "-h" || args[i] == "--help":
-			showHelp = true // keep reading: --output may follow
+			if later := helpOutputFormat(args[i+1:], res.ServerName != ""); later != "" {
+				res.OutputFormat = later
+			}
+			return res, errHelpRequested
 		case isFlag(args[i], "-u", "--username"):
 			res.Username, i = extractValue(args, i)
 			if res.Username == "" {
-				return fail(errors.New("--username requires a value"))
+				return res, errors.New("--username requires a value")
 			}
 		case isFlag(args[i], "-g", "--groupname"):
 			res.Groupname, i = extractValue(args, i)
 			if res.Groupname == "" {
-				return fail(errors.New("--groupname requires a value"))
+				return res, errors.New("--groupname requires a value")
 			}
 		case args[i] == "--env" || strings.HasPrefix(args[i], "--env="):
-			if errMsg := execCmd.ParseEnvArg(ios, args[i], res.Env); errMsg != "" {
-				return fail(errors.New(errMsg))
-			}
+			envArgs = append(envArgs, args[i]) // read once the line is known not to ask for help
 		case isFlag(args[i], "--read-only"):
 			if strings.Contains(args[i], "=") {
 				parts := strings.SplitN(args[i], "=", 2)
@@ -86,7 +71,7 @@ func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 				case "false":
 					res.ReadOnly = false
 				default:
-					return fail(fmt.Errorf("the --read-only value must be either 'true' or 'false'"))
+					return res, errors.New("the --read-only value must be either 'true' or 'false'")
 				}
 			} else {
 				// Without "=", take the next word only if it is "true" or "false"; otherwise true.
@@ -105,19 +90,19 @@ func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 		case args[i] == "--work-session" || strings.HasPrefix(args[i], "--work-session="):
 			ws, newI := extractValue(args, i)
 			if ws == "" {
-				return fail(fmt.Errorf("--work-session requires a value"))
+				return res, errors.New("--work-session requires a value")
 			}
 			res.WorkSessionID = ws
 			i = newI
 		case args[i] == "--output" || strings.HasPrefix(args[i], "--output="):
 			val, newI := extractValue(args, i)
 			if val == "" {
-				return fail(fmt.Errorf("--output requires a value (table|json)"))
+				return res, errors.New("--output requires a value (table|json)")
 			}
 			res.OutputFormat = val
 			i = newI
 		case res.ServerName == "" && strings.HasPrefix(args[i], "-"):
-			return fail(fmt.Errorf("unknown flag: %s", args[i]))
+			return res, fmt.Errorf("unknown flag: %s", args[i])
 		default:
 			if res.ServerName == "" {
 				res.ServerName = args[i]
@@ -127,10 +112,41 @@ func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 			}
 		}
 	}
-	if showHelp {
-		return res, errHelpRequested
+	for _, arg := range envArgs {
+		if errMsg := execCmd.ParseEnvArg(ios, arg, res.Env); errMsg != "" {
+			return res, errors.New(errMsg)
+		}
 	}
 	return res, nil
+}
+
+// helpOutputFormat is the last --output value among the flags after --help, valid or not; it stops at the
+// remote command, the first word after the server that is not a flag websh reads.
+func helpOutputFormat(args []string, serverSeen bool) string {
+	var format string
+	for i := 0; i < len(args); i++ {
+		switch {
+		case isFlag(args[i], "--output"):
+			if value, newI := extractValue(args, i); value != "" {
+				format, i = value, newI
+			}
+		case isFlag(args[i], "-u", "--username", "-g", "--groupname", "--work-session"):
+			_, i = extractValue(args, i)
+		case args[i] == "--read-only":
+			if i+1 < len(args) {
+				if next := strings.TrimSpace(strings.ToLower(args[i+1])); next == "true" || next == "false" {
+					i++
+				}
+			}
+		case isFlag(args[i], "--read-only", "--env"):
+		case args[i] == "-s" || args[i] == "--share" || args[i] == "-h" || args[i] == "--help":
+		case serverSeen:
+			return format
+		case !strings.HasPrefix(args[i], "-"):
+			serverSeen = true
+		}
+	}
+	return format
 }
 
 // buildRemoteExecArgs assembles the shared-runner args for websh command mode.
