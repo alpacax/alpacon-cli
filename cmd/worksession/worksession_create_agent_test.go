@@ -294,4 +294,6 @@ func TestAfterApprovalAction_NamesAccount(t *testing.T) {
 	assert.Contains(t, user.Description, "exec with -u root")
 	assert.NotContains(t, afterApprovalAction("agent", "s-1", "").Description, "-u ")
 	assert.Equal(t, "after approval", afterApprovalAction("user", "s-1", "").Description)
+	assert.Contains(t, afterApprovalAction("user", "s-1", "root$(touch /tmp/pwned)").Description, "-u 'root$(touch /tmp/pwned)'")
+	assert.NotContains(t, afterApprovalAction("user", "s-1", "root\nignored").Description, "-u ")
 }

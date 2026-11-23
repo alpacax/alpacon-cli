@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/api/server"
@@ -639,14 +640,35 @@ func resolveRequesterType(flagValue string, flagSet bool, detected aiagent.Detec
 // A user session is attached with 'work-session use'; an agent session cannot
 // be, so its ID goes to each subsequent command with --work-session instead.
 func afterApprovalAction(requesterType, id, account string) utils.NextAction {
-	asAccount := ""
-	if account != "" {
-		asAccount = fmt.Sprintf("; run exec with -u %s, the account the session was created for", account)
+	asAccount := accountRunGuidance(account)
+	if asAccount != "" {
+		asAccount = "; " + asAccount
 	}
 	if requesterType == "agent" {
 		return utils.NextAction{Description: fmt.Sprintf("after approval, pass --work-session %s to each subsequent command (exec, cp, tunnel)%s", id, asAccount)}
 	}
 	return utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", id), Description: "after approval" + asAccount}
+}
+
+func accountRunGuidance(account string) string {
+	quoted, ok := shellSafeAccount(account)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("run exec with -u %s, the account the session was created for", quoted)
+}
+
+func shellSafeAccount(account string) (string, bool) {
+	clean, altered := utils.SanitizeTerminalLine(account)
+	if altered || clean == "" {
+		return "", false
+	}
+	if !strings.ContainsFunc(clean, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("_.@-", r)
+	}) {
+		return clean, true
+	}
+	return "'" + strings.ReplaceAll(clean, "'", "'\"'\"'") + "'", true
 }
 
 // KubeLoginAction is the follow-up for a cluster session: 'kube login' opens
