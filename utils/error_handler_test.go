@@ -459,3 +459,159 @@ func TestHandleCommonErrors_UntaggedOperationIsNeverReplayed(t *testing.T) {
 	require.Error(t, result)
 	assert.Zero(t, retryCount.Load(), "an operation that tagged no request must not be retried at all")
 }
+
+func TestWorkSessionHookOnlyResendsSubmissionOnce(t *testing.T) {
+	t.Parallel()
+	for _, tagged := range []bool{false, true} {
+		t.Run(fmt.Sprint(tagged), func(t *testing.T) {
+			gate := &codedTestError{code: WorkSessionRequired}
+			var err error = gate
+			if tagged {
+				err = MarkSubmission(err)
+			}
+			offers, sends := 0, 0
+			result := HandleCommonErrors(err, "server", ErrorHandlerCallbacks{
+				OnWorkSessionRefused: func(string, error) (bool, error) { offers++; return true, nil },
+				RetryOperation:       func() error { sends++; return MarkSubmission(gate) },
+			})
+			assert.Same(t, gate, result)
+			if tagged {
+				assert.Equal(t, 1, offers)
+				assert.Equal(t, 1, sends)
+			} else {
+				assert.Zero(t, offers)
+				assert.Zero(t, sends)
+			}
+			assert.False(t, IsSubmissionError(result))
+		})
+	}
+}
+
+func TestWorkSessionHookPreservesDeclineAndFailure(t *testing.T) {
+	t.Parallel()
+	for _, failure := range []error{nil, errors.New("wait stopped")} {
+		t.Run(fmt.Sprint(failure), func(t *testing.T) {
+			gate := &codedTestError{code: WorkSessionRequired}
+			result := HandleCommonErrors(MarkSubmission(gate), "server", ErrorHandlerCallbacks{
+				OnWorkSessionRefused: func(string, error) (bool, error) { return false, failure },
+				RetryOperation:       func() error { t.Error("declined offer resent"); return nil },
+			})
+			if failure != nil {
+				assert.Same(t, failure, result)
+			} else {
+				assert.Same(t, gate, result)
+			}
+		})
+	}
+}
+
+func TestWorkSessionHookHandlesUsernameInEitherOrder(t *testing.T) {
+	t.Parallel()
+	for _, gateFirst := range []bool{false, true} {
+		t.Run(fmt.Sprint(gateFirst), func(t *testing.T) {
+			gate := MarkSubmission(&codedTestError{code: WorkSessionRequired})
+			username := MarkSubmission(&codedTestError{code: UsernameRequired})
+			first, second := username, gate
+			if gateFirst {
+				first, second = gate, username
+			}
+			offers, prompts, sends := 0, 0, 0
+			result := HandleCommonErrors(first, "server", ErrorHandlerCallbacks{
+				OnWorkSessionRefused: func(string, error) (bool, error) { offers++; return true, nil },
+				OnUsernameRequired:   func() error { prompts++; return nil },
+				RetryOperation: func() error {
+					sends++
+					if sends == 1 {
+						return second
+					}
+					return nil
+				},
+			})
+			require.NoError(t, result)
+			assert.Equal(t, 1, offers)
+			assert.Equal(t, 1, prompts)
+			assert.Equal(t, 2, sends)
+		})
+	}
+}
+
+func TestWorkSessionHookHandlesMFAInEitherOrder(t *testing.T) {
+	t.Parallel()
+	for _, gateFirst := range []bool{false, true} {
+		t.Run(fmt.Sprint(gateFirst), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				gate := MarkSubmission(&codedTestError{code: WorkSessionRequired})
+				mfa := MarkSubmission(&codedTestError{code: AuthMFARequired})
+				first, second := mfa, gate
+				if gateFirst {
+					first, second = gate, mfa
+				}
+				offers, prompts, sends := 0, 0, 0
+				result := HandleCommonErrors(first, "server", ErrorHandlerCallbacks{
+					OnWorkSessionRefused: func(string, error) (bool, error) { offers++; return true, nil },
+					OnMFARequired:        func(string) error { prompts++; return nil },
+					RetryOperation: func() error {
+						sends++
+						if sends == 1 {
+							return second
+						}
+						return nil
+					},
+				})
+				require.NoError(t, result)
+				assert.Equal(t, 1, offers)
+				assert.Equal(t, 1, prompts)
+				assert.Equal(t, 2, sends)
+			})
+		})
+	}
+}
+
+func TestWorkSessionHookRestoresMFAAfterSettlingTheGate(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		mfa := MarkSubmission(&codedTestError{code: AuthMFARequired})
+		gate := MarkSubmission(&codedTestError{code: WorkSessionRequired})
+		results := []error{gate, mfa, nil}
+		offers, prompts, sends := 0, 0, 0
+
+		result := HandleCommonErrors(mfa, "server", ErrorHandlerCallbacks{
+			OnWorkSessionRefused: func(string, error) (bool, error) { offers++; return true, nil },
+			OnMFARequired:        func(string) error { prompts++; return nil },
+			RetryOperation: func() error {
+				result := results[sends]
+				sends++
+				return result
+			},
+		})
+
+		require.NoError(t, result)
+		assert.Equal(t, 1, offers)
+		assert.Equal(t, 2, prompts)
+		assert.Equal(t, 3, sends)
+	})
+}
+
+func TestWorkSessionHookIgnoresMessageOnlyCodes(t *testing.T) {
+	t.Parallel()
+	refusal := errors.New(`{"code":"work_session_required"}`)
+	retried := false
+	result := HandleCommonErrors(MarkSubmission(refusal), "server", ErrorHandlerCallbacks{
+		OnWorkSessionRefused: func(string, error) (bool, error) { t.Error("unstructured refusal offered"); return true, nil },
+		RetryOperation: func() error {
+			retried = true
+			return nil
+		},
+	})
+	assert.Same(t, refusal, result)
+	assert.False(t, retried, "message text must not trigger a resend")
+}
+
+func TestWorkSessionHookIsNotOfferedWithoutRetry(t *testing.T) {
+	t.Parallel()
+	gate := &codedTestError{code: WorkSessionRequired}
+	result := HandleCommonErrors(MarkSubmission(gate), "server", ErrorHandlerCallbacks{
+		OnWorkSessionRefused: func(string, error) (bool, error) { t.Error("offered with nothing to resend"); return true, nil },
+	})
+	assert.Same(t, gate, result)
+}
