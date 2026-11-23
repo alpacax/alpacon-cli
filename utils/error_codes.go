@@ -24,6 +24,7 @@ const (
 	ErrorCodeConfirmationRequired = "confirmation_required"
 	ErrorCodeNetwork              = "network_error"
 	ErrorCodeNotApproved          = "not_approved"
+	ErrorCodeMFARequired          = "mfa_required"
 	ErrorCodeCLI                  = "cli_error"
 )
 
