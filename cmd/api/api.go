@@ -42,7 +42,7 @@ type options struct {
 type httpStatusError struct {
 	status     int
 	location   string
-	errorCode  string
+	body       []byte
 	retryAfter time.Duration
 	cause      error // an MFA wait that ended on this response
 }
@@ -74,14 +74,8 @@ type preparedRequest struct {
 func newHTTPStatusError(response *client.RawResponse) *httpStatusError {
 	statusErr := &httpStatusError{
 		status:     response.StatusCode,
-		errorCode:  utils.HTTPErrorCode(response.StatusCode),
+		body:       response.Body,
 		retryAfter: utils.RetryAfterFromHeader(response.Header),
-	}
-	var body map[string]any
-	if json.Unmarshal(response.Body, &body) == nil {
-		if code, ok := body["code"].(string); ok && utils.IsServerErrorCode(code) {
-			statusErr.errorCode = code
-		}
 	}
 	if response.StatusCode >= http.StatusMultipleChoices && response.StatusCode < http.StatusBadRequest {
 		statusErr.location = response.Header.Get("Location")
@@ -92,6 +86,20 @@ func newHTTPStatusError(response *client.RawResponse) *httpStatusError {
 func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.status) }
 
 func (e *httpStatusError) exitError() error {
+	return utils.NewFailureExitErrorFunc(utils.ExitCodeGeneralError, e.failure, e.printTable)
+}
+
+func (e *httpStatusError) errorCode() string {
+	var body map[string]any
+	if json.Unmarshal(e.body, &body) == nil {
+		if code, ok := body["code"].(string); ok && utils.IsServerErrorCode(code) {
+			return code
+		}
+	}
+	return utils.HTTPErrorCode(e.status)
+}
+
+func (e *httpStatusError) failure() utils.Failure {
 	message := e.Error()
 	if e.location != "" {
 		message += "; redirect to " + safeTerminal(e.location) + " not followed"
@@ -99,15 +107,13 @@ func (e *httpStatusError) exitError() error {
 	if e.cause != nil {
 		message = e.cause.Error()
 	}
-	failure := utils.Failure{
-		ExitCode:   utils.ExitCodeGeneralError,
-		ErrorCode:  e.errorCode,
+	return utils.Failure{
+		ErrorCode:  e.errorCode(),
 		Message:    message,
 		Operation:  "api",
 		HTTPStatus: e.status,
 		RetryAfter: e.retryAfter,
 	}
-	return utils.NewFailureExitError(failure, e.printTable)
 }
 
 func (e *httpStatusError) printTable(w io.Writer, s *utils.IOStreams) {
@@ -173,9 +179,6 @@ func NewApiCmd(newAPIClient func() (*client.AlpaconClient, error)) *cobra.Comman
 					return statusErr.exitError()
 				}
 				return utils.NewExitErrorWithCode(code, "%s", err)
-			}
-			if code != 0 {
-				return utils.NewSilentExitError(code)
 			}
 			return nil
 		}),

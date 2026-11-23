@@ -917,9 +917,10 @@ func commandResultFailure(ios *utils.IOStreams, stderr io.Writer, err error, inv
 		return nil
 	}
 	if remoteErr, ok := errors.AsType[*event.RemoteCommandError](err); ok {
-		failure := remoteFailure(remoteErr.ExitCode(), remoteErr.ReportedExitCode, remoteErr.ErrorPhase,
-			remoteErr.Output, "" /* status */)
-		return utils.NewFailureExitError(failure, func(w io.Writer, s *utils.IOStreams) {
+		failure := func() utils.Failure {
+			return remoteFailure(remoteErr.ReportedExitCode, remoteErr.ErrorPhase, remoteErr.Output, "" /* status */)
+		}
+		return utils.NewFailureExitErrorFunc(remoteErr.ExitCode(), failure, func(w io.Writer, s *utils.IOStreams) {
 			_, _ = fmt.Fprint(w, remoteFailureReport(s, remoteErr))
 		})
 	}
@@ -937,9 +938,10 @@ func commandResultFailure(ios *utils.IOStreams, stderr io.Writer, err error, inv
 		})
 	}
 	if statusErr, ok := errors.AsType[*event.CommandStatusError](err); ok {
-		failure := remoteFailure(utils.ExitCodeGeneralError, statusErr.ReportedExitCode, statusErr.ErrorPhase,
-			statusErr.Output, statusErr.Status)
-		return utils.NewFailureExitError(failure, func(w io.Writer, s *utils.IOStreams) {
+		failure := func() utils.Failure {
+			return remoteFailure(statusErr.ReportedExitCode, statusErr.ErrorPhase, statusErr.Output, statusErr.Status)
+		}
+		return utils.NewFailureExitErrorFunc(utils.ExitCodeGeneralError, failure, func(w io.Writer, s *utils.IOStreams) {
 			exitErr, _ := utils.NewExitError("%s", err).(*utils.ExitError)
 			s.FprintExitError(w, exitErr)
 		})
@@ -984,7 +986,7 @@ func commandRejectionFailure(ios *utils.IOStreams, stderr io.Writer, err error, 
 	return codedRefusalWithExit(ios, stderr, rejected.ExitCode(), "command", err, rejected.Error(), denialHintLine(ios, actions[0].PlainText()+"\n"), actions)
 }
 
-func remoteFailure(exitCode int, remoteExitCode *int, errorPhase, output, status string) utils.Failure {
+func remoteFailure(remoteExitCode *int, errorPhase, output, status string) utils.Failure {
 	message := "the remote command failed"
 	if status != "" {
 		message = fmt.Sprintf("the command failed with status %s", utils.SanitizeTerminalText(status))
@@ -1004,7 +1006,6 @@ func remoteFailure(exitCode int, remoteExitCode *int, errorPhase, output, status
 		actions = append(actions, utils.NextAction{Description: strings.Join(strings.Fields(guidance), " ")})
 	}
 	return utils.Failure{
-		ExitCode:       exitCode,
 		ErrorCode:      utils.ErrorCodeRemoteCommandFailed,
 		Message:        message,
 		Operation:      "command",

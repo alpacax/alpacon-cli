@@ -140,7 +140,8 @@ Run the command again later to check for completion.`,
 				_, _ = fmt.Fprint(stderr, stderrLine)
 				return nil
 			}
-			return utils.NewFailureExitError(logsFailure(details, exitCode), func(w io.Writer, _ *utils.IOStreams) {
+			failure := func() utils.Failure { return logsFailure(details) }
+			return utils.NewFailureExitErrorFunc(exitCode, failure, func(w io.Writer, _ *utils.IOStreams) {
 				_, _ = fmt.Fprint(w, stderrLine)
 			})
 		}),
@@ -148,19 +149,18 @@ Run the command again later to check for completion.`,
 }
 
 // logsFailure is the --output json report of a failed command, matching logsCommandOutcome's branches.
-func logsFailure(details event.EventDetails, exitCode int) utils.Failure {
+func logsFailure(details event.EventDetails) utils.Failure {
 	var phase string
 	if details.ErrorPhase != nil {
 		phase = *details.ErrorPhase
 	}
 	switch {
 	case event.IsStatusOnlyFailure(details.Status):
-		return remoteFailure(exitCode, details.ExitCode, phase, details.Result, details.Status)
+		return remoteFailure(details.ExitCode, phase, details.Result, details.Status)
 	case details.Success != nil:
-		return remoteFailure(exitCode, details.ExitCode, phase, details.Result, "" /* status */)
+		return remoteFailure(details.ExitCode, phase, details.Result, "" /* status */)
 	}
 	return utils.Failure{
-		ExitCode:  exitCode,
 		ErrorCode: utils.ErrorCodeCLI,
 		Message:   "the command ended with unrecognised status " + utils.SanitizeTerminalText(details.Status),
 		Operation: "command",
