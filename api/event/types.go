@@ -79,6 +79,24 @@ func (e *RemoteCommandError) ExitCode() int {
 	return *e.ReportedExitCode
 }
 
+// CommandStatusError is returned when a command ended in a status that is its whole outcome.
+type CommandStatusError struct {
+	Status     string
+	ErrorPhase string
+	Output     string
+}
+
+func (e *CommandStatusError) Error() string {
+	if e.ErrorPhase == "" {
+		return "command failed with status: " + e.Status
+	}
+	msg := fmt.Sprintf("command failed: [%s] %s (status=%s)", e.ErrorPhase, DescribePhase(e.ErrorPhase), e.Status)
+	if hint := PhaseHint(e.ErrorPhase); hint != "" {
+		msg += "\nHint: " + hint
+	}
+	return msg
+}
+
 // ClientTimeoutError is returned when the CLI gave up polling for the command
 // result before the server reported a terminal status.
 //

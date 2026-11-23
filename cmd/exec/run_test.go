@@ -1170,6 +1170,22 @@ func TestCommandResultFailureReportsClientTimeoutInJSON(t *testing.T) {
 	assert.JSONEq(t, `{"ok":false,"exit_code":1,"error_code":"cli_error","message":"[client_timeout] CLI gave up waiting for the server to report a result","context":{"operation":"command"}}`, errOut.String())
 }
 
+func TestCommandResultFailureReportsAStatusOnlyFailureInJSON(t *testing.T) {
+	t.Parallel()
+	ios, out, errOut := utils.TestIOStreams()
+	require.NoError(t, ios.SetOutputFormat(utils.OutputFormatJSON))
+	statusErr := fmt.Errorf("failed to execute command on 'srv' server: %w", &event.CommandStatusError{Status: "stuck"})
+
+	err := commandResultFailure(ios, errOut, statusErr, ExecInvocation)
+
+	var exitErr *utils.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
+	ios.FprintExitError(errOut, exitErr)
+	assert.Empty(t, out.String())
+	assert.JSONEq(t, `{"ok":false,"exit_code":1,"error_code":"remote_command_failed","message":"the command failed with status stuck","context":{"operation":"command"}}`, errOut.String())
+}
+
 func TestCommandResultFailureReportsInTable(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

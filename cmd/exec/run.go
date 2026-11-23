@@ -936,6 +936,14 @@ func commandResultFailure(ios *utils.IOStreams, stderr io.Writer, err error, inv
 			s.PrintRefusalHints(w, clientTimeout) // a wait that ended on a refusal (a 429 in practice) keeps its hint
 		})
 	}
+	if statusErr, ok := errors.AsType[*event.CommandStatusError](err); ok {
+		failure := remoteFailure(utils.ExitCodeGeneralError, nil /* remoteExitCode */, statusErr.ErrorPhase,
+			statusErr.Output, statusErr.Status)
+		return utils.NewFailureExitError(failure, func(w io.Writer, s *utils.IOStreams) {
+			exitErr, _ := utils.NewExitError("%s", err).(*utils.ExitError)
+			s.FprintExitError(w, exitErr)
+		})
+	}
 	if pollFailure, ok := errors.AsType[*event.CommandPollError](err); ok {
 		return commandPollFailure(ios, stderr, err, pollFailure)
 	}

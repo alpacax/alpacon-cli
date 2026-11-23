@@ -854,14 +854,11 @@ func errorFromDetails(id api.PathID, d EventDetails) error {
 		if d.ErrorPhase != nil {
 			phase = *d.ErrorPhase
 		}
-		if phase == "" {
-			return fmt.Errorf("command failed with status: %s", d.Status)
+		return &CommandStatusError{
+			Status:     d.Status,
+			ErrorPhase: phase,
+			Output:     d.Result,
 		}
-		msg := fmt.Sprintf("command failed: [%s] %s (status=%s)", phase, DescribePhase(phase), d.Status)
-		if hint := PhaseHint(phase); hint != "" {
-			msg += "\nHint: " + hint
-		}
-		return errors.New(msg)
 	}
 	switch d.Status {
 	case "completed", "success", "failed":
