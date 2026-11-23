@@ -991,7 +991,7 @@ func remoteFailure(remoteExitCode *int, errorPhase, output, status string) utils
 	if status != "" {
 		message = fmt.Sprintf("the command failed with status %s", utils.SanitizeTerminalText(status))
 	}
-	if remoteExitCode != nil {
+	if remoteExitCode != nil && *remoteExitCode != 0 { // "exited with status 0" would read as success
 		message = fmt.Sprintf("the remote command exited with status %d", *remoteExitCode)
 	}
 	if errorPhase != "" {

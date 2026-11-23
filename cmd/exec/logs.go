@@ -237,7 +237,7 @@ func logsCommandOutcome(ios *utils.IOStreams, details event.EventDetails) (stdou
 	if details.Success != nil && !*details.Success {
 		exitCode = 1
 		if details.ExitCode != nil {
-			exitCode = *details.ExitCode
+			exitCode = utils.ProcessExitCode(*details.ExitCode)
 		}
 		if details.ErrorPhase != nil && *details.ErrorPhase != "" {
 			phase, desc := sanitizedPhaseParts(*details.ErrorPhase)

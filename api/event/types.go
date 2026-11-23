@@ -71,10 +71,13 @@ type RemoteCommandError struct {
 
 func (e *RemoteCommandError) ErrorHeld() *utils.HeldRequest { return e.Held }
 
-// ExitCode is the exit this process leaves with: the server's exit_code, or 1 when it sent none.
-func (e *RemoteCommandError) ExitCode() int {
+// ExitCode is the exit this process leaves with: the server's exit_code bounded by ProcessExitCode,
+// or 1 when it sent none.
+func (e *RemoteCommandError) ExitCode() int { return utils.ProcessExitCode(e.reportedExitCode()) }
+
+func (e *RemoteCommandError) reportedExitCode() int {
 	if e.ReportedExitCode == nil {
-		return 1
+		return utils.ExitCodeGeneralError
 	}
 	return *e.ReportedExitCode
 }
@@ -369,9 +372,9 @@ func (r CommandRequest) MarshalJSON() ([]byte, error) {
 
 func (e *RemoteCommandError) Error() string {
 	if e.ErrorPhase != "" {
-		return fmt.Sprintf("remote command failed (%s, exit %d)", e.ErrorPhase, e.ExitCode())
+		return fmt.Sprintf("remote command failed (%s, exit %d)", e.ErrorPhase, e.reportedExitCode())
 	}
-	return fmt.Sprintf("remote command exited with code %d", e.ExitCode())
+	return fmt.Sprintf("remote command exited with code %d", e.reportedExitCode())
 }
 
 func (*ClientTimeoutError) Error() string {
