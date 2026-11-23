@@ -181,8 +181,8 @@ func (s *Selection) settle(session *wsapi.WorkSession, wait bool, want Want, cre
 		if account := accountRunGuidance(createdFor); account != "" {
 			guidance = " (" + account + ")"
 		}
-		s.ios.Info("To stop and come back later, press Ctrl+C; after approval, run '%s', then %s%s.", resumeAction.Command, s.resumeStep(), guidance)
 		ctx, stop := s.interruptContext()
+		s.ios.Info("To stop and come back later, press Ctrl+C; after approval, run '%s', then %s%s.", resumeAction.Command, s.resumeStep(), guidance)
 		final, err := waitForApproval(ctx, s.ios, s.ac, session.ID, true, ApprovalPollInterval, utils.DefaultApprovalWaitTimeout, false)
 		stop()
 		if err != nil {

@@ -182,6 +182,7 @@ func TestOfferWaitInterruptReturnsPendingExitWithoutResend(t *testing.T) {
 	})}
 	ios, _, stderr := utils.TestIOStreams()
 	selection := &Selection{id: "old-session", ios: ios, ac: ac, interrupt: func() (context.Context, context.CancelFunc) {
+		assert.Empty(t, stderr.String(), "Ctrl+C must be handled before the notice invites it")
 		return context.WithTimeout(context.Background(), time.Second)
 	}}
 	var resend bool
