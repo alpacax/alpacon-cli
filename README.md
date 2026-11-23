@@ -83,7 +83,7 @@ go build && sudo mv alpacon-cli /usr/local/bin/alpacon
 
 If the binary or its directory is group- or world-writable, the update says so on stderr rather than narrowing anything—re-permissioning what you set up is your call. The directory is the one that usually matters: replacing a file is a rename, which needs no permission on the file itself, so a `0755` root-owned `alpacon` inside a `0775` directory can still be swapped by anyone in that group. Close it with `chmod go-w`.
 
-`alpacon version --output json` prints one object on stdout with `version`, `latest`, `update_available`, and `release_url`. `update_available` is `true` only when `alpacon update` has a newer release to install, so a `dev` build reports `false`. When the latest release cannot be fetched, `latest` and `release_url` are `null`, a warning goes to stderr, and the command still exits `0`—branch on `alpacon update --check` instead.
+`alpacon version --output json` prints one object on stdout with `version`, `latest`, `update_available`, and `release_url`. `alpacon update --check --output json` prints one object with the same fields and exits `0` when current or `8` when a newer release is available. `update_available` is `true` only when `alpacon update` has a newer release to install, so a `dev` build reports `false`. When the latest release cannot be fetched, `latest` and `release_url` are `null`, a warning goes to stderr, and the command still exits `0`—branch on `alpacon update --check` instead.
 
 #### What the checksum and the attestation do and do not prove
 
