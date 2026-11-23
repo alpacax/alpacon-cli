@@ -311,15 +311,21 @@ func watchInterrupt(ios *utils.IOStreams, firstNotice string, quit func()) *inte
 		close(w.done)
 	})
 	go func() {
+		seen := false
 		for {
 			select {
 			case <-w.signals:
-				if w.fired.Swap(true) {
+				if seen {
 					quit()
 					return
 				}
-				close(w.first)
+				seen = true
+				// The notice goes out before the command can see the interrupt:
+				// once it does, it may finish and its caller restore stderr while
+				// the notice is still being written.
 				ios.Warning("%s", firstNotice)
+				w.fired.Store(true)
+				close(w.first)
 			case <-w.done:
 				return
 			}
