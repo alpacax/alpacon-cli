@@ -239,8 +239,8 @@ const (
 	ExitCodeUpdateAvailable = 8
 
 	// ExitCodeMFARequired is the process exit code for an action that waits on a person to finish
-	// MFA in a browser: 'alpacon kube mfa' run without a terminal, or its wait ending before the
-	// MFA did. Nothing was refused, and the link it printed still works after the CLI exits, so
+	// MFA in a browser: 'alpacon kube mfa' run where stdin or stderr is not a terminal, or its
+	// wait ending before the MFA did. Nothing was refused, and the link it printed still works after the CLI exits, so
 	// scripts and AI agents hand the link to the person and run the command again once they are
 	// done, rather than fixing the command line or giving up.
 	ExitCodeMFARequired = 9

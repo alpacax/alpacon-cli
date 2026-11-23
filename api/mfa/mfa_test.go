@@ -506,7 +506,68 @@ func TestAwaitMFACompletion_RidesThroughFewerThanTheFailureLimit(t *testing.T) {
 			require.NotErrorIs(t, err, ErrMFAWaitTimedOut)
 			assert.Equal(t, http.StatusServiceUnavailable, utils.HTTPStatusCode(err))
 		})
+		assert.Equal(t, utils.MaxConsecutivePollFailures, polls.Count(), "the wait must end on the poll that reaches the limit")
 		assert.Equal(t, tick, polls.WidestGap(), "a failed poll keeps the base tick, as the person may finish MFA meanwhile")
+	})
+}
+
+// Only a successful read ends a run of failed polls: a read that is not yet done starts the
+// count again, and a 429 neither adds to the run nor ends it.
+func TestAwaitMFACompletion_FailureStreak(t *testing.T) {
+	t.Parallel()
+	const tick = 10 * time.Millisecond
+	unavailable := statusReply(http.StatusServiceUnavailable, `{}`)
+	throttled := statusReply(http.StatusTooManyRequests, `{}`)
+	streak := func(n int) []func(http.ResponseWriter) {
+		replies := make([]func(http.ResponseWriter), 0, n)
+		for range n {
+			replies = append(replies, unavailable)
+		}
+		return replies
+	}
+
+	t.Run("a_read_resets_it", func(t *testing.T) {
+		t.Parallel()
+		short := utils.MaxConsecutivePollFailures - 1
+		replies := append(streak(short), completedReply(false))
+		replies = append(append(replies, streak(short)...), completedReply(true))
+		var polls testutil.PollRecorder
+		ac := completionClient(&polls, replies...)
+		synctest.Test(t, func(t *testing.T) {
+			require.NoError(t, AwaitMFACompletion(ac, tick, time.Minute))
+		})
+		assert.Equal(t, 2*short+2, polls.Count())
+	})
+
+	t.Run("a_throttle_neither_counts_nor_resets", func(t *testing.T) {
+		t.Parallel()
+		short := utils.MaxConsecutivePollFailures - 1
+		replies := append(streak(short), throttled, unavailable, completedReply(true))
+		var polls testutil.PollRecorder
+		ac := completionClient(&polls, replies...)
+		synctest.Test(t, func(t *testing.T) {
+			err := AwaitMFACompletion(ac, tick, time.Minute)
+
+			require.Error(t, err)
+			require.NotErrorIs(t, err, ErrMFAWaitTimedOut)
+			assert.Equal(t, http.StatusServiceUnavailable, utils.HTTPStatusCode(err))
+		})
+		// A counted 429 would end the wait on it; a resetting one would let the done read through.
+		assert.Equal(t, short+2, polls.Count())
+	})
+}
+
+// A failed poll that carries Retry-After waits for it, within the backoff cap, before the next.
+func TestAwaitMFACompletion_FailedPollHonorsRetryAfter(t *testing.T) {
+	t.Parallel()
+	// The backoff cap is 60 ticks, so this tick lets a one-second Retry-After through whole.
+	const tick = 100 * time.Millisecond
+	ac := completionClient(&testutil.PollRecorder{}, statusReply(http.StatusServiceUnavailable, `{}`, "Retry-After", "1"), completedReply(true))
+
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		require.NoError(t, AwaitMFACompletion(ac, tick, time.Minute))
+		assert.Equal(t, tick+time.Second, time.Since(start))
 	})
 }
 

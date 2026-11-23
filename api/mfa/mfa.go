@@ -72,8 +72,8 @@ func HandleMFAErrorForServerID(ac *client.AlpaconClient, serverID string) error 
 }
 
 // CheckMFACompletion reports whether the server has recorded a fresh MFA for
-// this client. Only the exec sudo step-up polls it: the refused request there is
-// a command that already ran, so re-running it would repeat its side effects.
+// this client. It serves steps with no request safe to retry: the exec sudo
+// step-up, whose refused command already ran, and kube mfa.
 func CheckMFACompletion(ac *client.AlpaconClient) (bool, error) {
 	return checkMFACompletion(context.Background(), ac)
 }

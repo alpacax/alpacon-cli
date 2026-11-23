@@ -64,9 +64,9 @@ A workspace can require a recent MFA for writes and deletes in kube sessions. Wh
 yours is older than the workspace allows, the cluster refuses the request and the
 message kubectl prints names this command. Run from a terminal, it prints a link and
 opens it in your browser; once you finish MFA there, it exits and you retry the
-request. The MFA then
-holds until the workspace's MFA window passes. kubectl cannot ask for it itself, so
-this is how Helm, Lens and any other client get past the refusal too.
+request. The MFA then holds until the workspace's MFA window passes. kubectl cannot
+ask for it itself, so this is how Helm, Lens and any other client get past the
+refusal too.
 
 The MFA counts for this CLI only: the cluster checks the CLI that opened the kube
 session, so run this command on the machine and login that ran 'alpacon kube
@@ -75,13 +75,12 @@ last 'alpacon login', keeps being refused after this command succeeds; run
 'alpacon kube login' for the cluster again to open one this CLI can confirm.
 When the MFA is still fresh, it says so and issues no link.
 
-Without a terminal on stdin and stderr, as when an AI agent or a script runs it or
-stderr is redirected, it hands out the link and exits 9 at once, without opening a
-browser or waiting. The link still works after the command
-exits: hand it to the person who signs in, and run 'alpacon kube mfa' again once
-they are done to confirm. An interactive run that waits 3 minutes without seeing
-the MFA finish exits 9 the same way. Under --output json the error envelope holds
-the link in next_actions.`,
+Unless stdin and stderr are both terminals, as when an AI agent or a script runs it
+or stderr is redirected, it hands out the link and exits 9 at once, without opening
+a browser or waiting. The link still works after the command exits: hand it to the
+person who signs in, and run 'alpacon kube mfa' again once they are done to confirm.
+An interactive run that waits 3 minutes without seeing the MFA finish exits 9 the
+same way. Under --output json the error envelope holds the link in next_actions.`,
 		Example: `  alpacon kube mfa
   alpacon kube mfa --output json`,
 		Args: cobra.NoArgs,

@@ -345,10 +345,35 @@ func TestKubeMFA_TimeoutExitsNine(t *testing.T) {
 			env := envelopeAfterTheLink(t, run.stderr)
 			assert.Equal(t, utils.ErrorCodeMFARequired, env.ErrorCode)
 			assert.Equal(t, "MFA was not verified within 1.005s.", env.Message)
-			require.Len(t, env.NextActions, 2)
-			assert.Equal(t, "alpacon kube mfa", env.NextActions[1].Command)
+			assert.Equal(t, []utils.NextAction{
+				{Description: "Open this link in a browser and finish MFA: " + testMFALink},
+				{Command: "alpacon kube mfa", Description: "run it again once MFA is done to confirm, then retry the Kubernetes request"},
+			}, env.NextActions)
 		})
 	}
+}
+
+// A wait whose last check was throttled times out with that refusal's hint leading the next
+// actions, ahead of the link and the command to run again.
+func TestKubeMFA_TimeoutAfterAThrottleLeadsWithItsHint(t *testing.T) {
+	t.Parallel()
+	const hint = "Too many checks; wait a moment."
+	srv := &mfaServer{link: linkIssued, completions: []func(http.ResponseWriter){
+		reply(http.StatusTooManyRequests, `{"code": "throttled", "hint": "`+hint+`"}`),
+	}}
+	var run *mfaRun
+	synctest.Test(t, func(t *testing.T) {
+		run = runKubeMFACmd(mfaClient(t, srv), ttyJSON)
+	})
+
+	assert.Equal(t, utils.ExitCodeMFARequired, run.code)
+	env := envelopeAfterTheLink(t, run.stderr)
+	assert.Equal(t, utils.ErrorCodeMFARequired, env.ErrorCode, "a timeout after a throttle stays a timeout")
+	assert.Equal(t, []utils.NextAction{
+		{Description: hint},
+		{Description: "Open this link in a browser and finish MFA: " + testMFALink},
+		{Command: "alpacon kube mfa", Description: "run it again once MFA is done to confirm, then retry the Kubernetes request"},
+	}, env.NextActions)
 }
 
 // A refusal on a completion check ends the wait as a failure, not as a timeout: no later poll

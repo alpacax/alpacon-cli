@@ -41,7 +41,7 @@ func TestWatchInterruptReportsAtOnceAndStopWaitsForTheNotice(t *testing.T) {
 		watch.stop()
 		require.FailNow(t, "the interrupt waited on the notice's write")
 	}
-	assert.True(t, watch.fired.Load())
+	assert.True(t, watch.fired.Load(), "the first Ctrl+C must mark the watch fired")
 
 	go func() {
 		// Late enough that a stop which does not wait has long returned.
