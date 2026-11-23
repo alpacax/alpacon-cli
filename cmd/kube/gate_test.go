@@ -212,6 +212,24 @@ func TestApplySurfaceGate_DisabledHelpTopicOfOtherCommandPrintsHelp(t *testing.T
 	}
 }
 
+func TestApplySurfaceGate_DisabledRejectsAnInvalidOutput(t *testing.T) {
+	t.Parallel()
+	ios, out, errOut := utils.TestIOStreams()
+	root, real := newGateTree()
+	applySurfaceGate(root, ios, real, false)
+	root.SilenceErrors, root.SilenceUsage = true, true // as the root sets them
+	root.SetArgs([]string{"kube", "ls", "--output", "bogus"})
+
+	err := root.Execute()
+
+	var exitErr *utils.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, utils.ExitCodeUsageError, exitErr.Code)
+	ios.FprintExitError(errOut, exitErr)
+	assert.Empty(t, out.String())
+	assert.Contains(t, errOut.String(), "bogus")
+}
+
 func TestApplySurfaceGate_DisabledReportsAnEnvelopeUnderJSON(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
