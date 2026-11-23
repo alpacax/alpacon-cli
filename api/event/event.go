@@ -855,9 +855,10 @@ func errorFromDetails(id api.PathID, d EventDetails) error {
 			phase = *d.ErrorPhase
 		}
 		return &CommandStatusError{
-			Status:     d.Status,
-			ErrorPhase: phase,
-			Output:     d.Result,
+			Status:           d.Status,
+			ErrorPhase:       phase,
+			Output:           d.Result,
+			ReportedExitCode: d.ExitCode,
 		}
 	}
 	switch d.Status {

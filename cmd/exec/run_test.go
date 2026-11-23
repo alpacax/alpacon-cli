@@ -1186,6 +1186,20 @@ func TestCommandResultFailureReportsAStatusOnlyFailureInJSON(t *testing.T) {
 	assert.JSONEq(t, `{"ok":false,"exit_code":1,"error_code":"remote_command_failed","message":"the command failed with status stuck","context":{"operation":"command"}}`, errOut.String())
 }
 
+func TestCommandResultFailureKeepsAStatusOnlyFailuresExitCode(t *testing.T) {
+	t.Parallel()
+	ios, _, errOut := utils.TestIOStreams()
+	require.NoError(t, ios.SetOutputFormat(utils.OutputFormatJSON))
+
+	err := commandResultFailure(ios, errOut, &event.CommandStatusError{Status: "cancelled", ReportedExitCode: new(23)}, ExecInvocation)
+
+	var exitErr *utils.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
+	ios.FprintExitError(errOut, exitErr)
+	assert.JSONEq(t, `{"ok":false,"exit_code":1,"error_code":"remote_command_failed","message":"the remote command exited with status 23","context":{"operation":"command"},"remote_exit_code":23}`, errOut.String())
+}
+
 func TestCommandResultFailureReportsInTable(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

@@ -81,9 +81,10 @@ func (e *RemoteCommandError) ExitCode() int {
 
 // CommandStatusError is returned when a command ended in a status that is its whole outcome.
 type CommandStatusError struct {
-	Status     string
-	ErrorPhase string
-	Output     string
+	Status           string
+	ErrorPhase       string
+	Output           string
+	ReportedExitCode *int // the server's exit_code, nil when it sent none
 }
 
 func (e *CommandStatusError) Error() string {

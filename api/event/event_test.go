@@ -3469,3 +3469,13 @@ func TestGetEventList_JSONKeepsCommandIDAndFailureDetail(t *testing.T) {
 		{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","server":"","shell":"","command":"uptime","result":"","status":"null","exit_code":null,"error_phase":null,"operator":"","requested_at":null}
 	]`, string(body))
 }
+
+func TestErrorFromDetails_StatusOnlyKeepsTheReportedExitCode(t *testing.T) {
+	t.Parallel()
+
+	err := errorFromDetails(testPathID(t, "cmd-9"), EventDetails{Status: "cancelled", ExitCode: new(23), Result: "partial"})
+
+	var statusErr *CommandStatusError
+	require.ErrorAs(t, err, &statusErr)
+	assert.Equal(t, &CommandStatusError{Status: "cancelled", Output: "partial", ReportedExitCode: new(23)}, statusErr)
+}

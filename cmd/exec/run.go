@@ -937,7 +937,7 @@ func commandResultFailure(ios *utils.IOStreams, stderr io.Writer, err error, inv
 		})
 	}
 	if statusErr, ok := errors.AsType[*event.CommandStatusError](err); ok {
-		failure := remoteFailure(utils.ExitCodeGeneralError, nil /* remoteExitCode */, statusErr.ErrorPhase,
+		failure := remoteFailure(utils.ExitCodeGeneralError, statusErr.ReportedExitCode, statusErr.ErrorPhase,
 			statusErr.Output, statusErr.Status)
 		return utils.NewFailureExitError(failure, func(w io.Writer, s *utils.IOStreams) {
 			exitErr, _ := utils.NewExitError("%s", err).(*utils.ExitError)
