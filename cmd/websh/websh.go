@@ -40,13 +40,23 @@ type WebshArgs struct {
 func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 	res := WebshArgs{Env: map[string]string{}}
 	showHelp := false
+	i := 0
 	fail := func(err error) (WebshArgs, error) {
-		if showHelp {
-			return res, errHelpRequested
+		if !showHelp {
+			return res, err
 		}
-		return res, err
+		// An invalid flag does not stop help from finding a later --output.
+		rest := []string{"--help"}
+		if res.ServerName != "" {
+			rest = append(rest, res.ServerName)
+		}
+		later, _ := ParseWebshArgs(ios, append(rest, args[i+1:]...))
+		if later.OutputFormat != "" {
+			res.OutputFormat = later.OutputFormat
+		}
+		return res, errHelpRequested
 	}
-	for i := 0; i < len(args); i++ {
+	for ; i < len(args); i++ {
 		switch {
 		case args[i] == "-s" || args[i] == "--share":
 			res.Share = true
@@ -111,7 +121,10 @@ func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 			}
 		}
 	}
-	return fail(nil)
+	if showHelp {
+		return res, errHelpRequested
+	}
+	return res, nil
 }
 
 // buildRemoteExecArgs assembles the shared-runner args for websh command mode.

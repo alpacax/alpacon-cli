@@ -105,18 +105,23 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 		wait                                                     bool
 		separated                                                bool
 		showHelp                                                 bool
+		i                                                        int
 		waitApproval                                             time.Duration
 	)
 	env := map[string]string{}
 	help := func() RemoteExecArgs { return RemoteExecArgs{ShowHelp: true, OutputFormat: outputFormat} }
 	fail := func(msg string) RemoteExecArgs {
-		if showHelp {
+		if showHelp { // an invalid flag does not stop help from finding a later --output
+			rest := ParseRemoteExecArgs(ios, append([]string{"--help"}, args[i+1:]...))
+			if rest.OutputFormat != "" {
+				outputFormat = rest.OutputFormat
+			}
 			return help()
 		}
 		return RemoteExecArgs{Err: msg, OutputFormat: outputFormat}
 	}
 
-	for i := 0; i < len(args); i++ {
+	for ; i < len(args); i++ {
 		arg := args[i]
 
 		if arg == "--" {
