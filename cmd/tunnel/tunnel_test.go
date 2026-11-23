@@ -351,7 +351,7 @@ func TestTunnelOfferResendsWithCreatedTunnelSession(t *testing.T) {
 func TestTunnelOfferIsInterruptibleInBothModes(t *testing.T) {
 	for _, mode := range []string{"plain", "command"} {
 		for _, tc := range []struct{ name, input, want string }{
-			{name: "prompt", want: "signal: interrupt"},
+			{name: "prompt", want: "exit status 3"},
 			{name: "wait", input: "y\npurpose\n1h\n", want: "exit status 4"},
 		} {
 			t.Run(mode+" "+tc.name, func(t *testing.T) {

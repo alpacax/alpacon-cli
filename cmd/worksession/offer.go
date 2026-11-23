@@ -64,6 +64,8 @@ func (s *Selection) handleRefusal(serverName string, refusal error) (bool, error
 		return false, nil
 	}
 	s.offered = true
+	ctx, stop := s.interruptContext() // Ctrl+C at a prompt declines, so the caller still reports and cleans up
+	defer stop()
 	s.ios.Warning("The server refused the request: %s.", utils.WorkSessionReason(utils.StructuredErrorCode(refusal)))
 
 	sessions, want, err := s.reusableSessions()
@@ -72,21 +74,25 @@ func (s *Selection) handleRefusal(serverName string, refusal error) (bool, error
 		return false, nil
 	}
 	if candidate, wait := pick(sessions, want, time.Now(), utils.DefaultApprovalWaitTimeout); candidate != nil {
-		if utils.PromptForBool(reusePrompt(candidate, wait, s.need.Account)) {
-			return s.settle(candidate, wait, want, "")
+		reuse, answered := s.confirm(ctx, reusePrompt(candidate, wait, s.need.Account))
+		if !answered {
+			return false, nil
+		}
+		if reuse {
+			return s.settle(ctx, candidate, wait, want, "")
 		}
 	}
 
-	if !utils.PromptForBool(fmt.Sprintf("Create a WorkSession for %s with scopes %s now?", utils.SanitizeTerminalText(s.need.Server), strings.Join(s.need.scopes(), ", "))) {
+	if create, _ := s.confirm(ctx, fmt.Sprintf("Create a WorkSession for %s with scopes %s now?", utils.SanitizeTerminalText(s.need.Server), strings.Join(s.need.scopes(), ", "))); !create {
 		return false, nil
 	}
-	purpose, err := utils.ReadRequiredInput("Purpose (what you're doing and why): ")
+	purpose, err := s.read(ctx, func() (string, error) { return utils.ReadRequiredInput("Purpose (what you're doing and why): ") })
 	if err != nil {
 		return false, nil
 	}
 	var parsed time.Duration
 	for {
-		duration, readErr := utils.ReadInputWithDefault("Duration [1h]: ", "1h")
+		duration, readErr := s.read(ctx, func() (string, error) { return utils.ReadInputWithDefault("Duration [1h]: ", "1h") })
 		if readErr != nil {
 			return false, nil
 		}
@@ -118,7 +124,42 @@ func (s *Selection) handleRefusal(serverName string, refusal error) (bool, error
 	if !safeResumeID(created.ID) {
 		return false, utils.NewEnvelopeExitError(opCreate, api.ErrUnusableID, "The server created the WorkSession, but its ID is unusable; check for it before creating another.")
 	}
-	return s.settle(created, created.Status != wsapi.StatusActive, want, s.need.Account)
+	return s.settle(ctx, created, created.Status != wsapi.StatusActive, want, s.need.Account)
+}
+
+var errPromptInterrupted = errors.New("interrupted")
+
+// read runs one prompt until it answers or ctx ends; an interrupted read is left blocked on stdin,
+// which nothing reads again before the process exits.
+func (s *Selection) read(ctx context.Context, prompt func() (string, error)) (string, error) {
+	type answer struct {
+		text string
+		err  error
+	}
+	done := make(chan answer, 1)
+	s.reads.Go(func() {
+		text, err := prompt()
+		done <- answer{text, err}
+	})
+	select {
+	case a := <-done:
+		return a.text, a.err
+	case <-ctx.Done():
+		_, _ = fmt.Fprintln(s.ios.ErrOut)
+		s.ios.Warning("Stopped at the prompt; no WorkSession was selected.")
+		return "", errPromptInterrupted
+	}
+}
+
+// confirm asks a yes/no question; answered is false when Ctrl+C ended the prompt.
+func (s *Selection) confirm(ctx context.Context, question string) (yes, answered bool) {
+	reply, err := s.read(ctx, func() (string, error) {
+		if utils.PromptForBool(question) {
+			return "y", nil
+		}
+		return "", nil
+	})
+	return reply == "y", !errors.Is(err, errPromptInterrupted)
 }
 
 func (s *Selection) reusableSessions() ([]wsapi.WorkSession, Want, error) {
@@ -169,7 +210,7 @@ func reusePrompt(session *wsapi.WorkSession, wait bool, account string) string {
 
 // settle makes session the one the operation sends. createdFor is the account it was created for,
 // empty for a reused session, whose account the server does not report.
-func (s *Selection) settle(session *wsapi.WorkSession, wait bool, want Want, createdFor string) (bool, error) {
+func (s *Selection) settle(ctx context.Context, session *wsapi.WorkSession, wait bool, want Want, createdFor string) (bool, error) {
 	if !safeResumeID(session.ID) {
 		s.ios.Warning("The offered WorkSession has an unsafe ID and cannot be selected.")
 		return false, nil
@@ -181,10 +222,8 @@ func (s *Selection) settle(session *wsapi.WorkSession, wait bool, want Want, cre
 		if account := accountRunGuidance(createdFor); account != "" {
 			guidance = " (" + account + ")"
 		}
-		ctx, stop := s.interruptContext()
 		s.ios.Info("To stop and come back later, press Ctrl+C; after approval, run '%s', then %s%s.", resumeAction.Command, s.resumeStep(), guidance)
 		final, err := waitForApproval(ctx, s.ios, s.ac, session.ID, true, ApprovalPollInterval, utils.DefaultApprovalWaitTimeout, false)
-		stop()
 		if err != nil {
 			resumeAction.Description = strings.TrimPrefix(resumeAction.Description, "after approval")
 			resumeAction.Description = "set this session active, then " + s.resumeStep() + resumeAction.Description

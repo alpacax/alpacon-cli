@@ -150,13 +150,13 @@ func TestOfferWaitTimeoutReturnsPendingExitAndResumeAction(t *testing.T) {
 		return http.StatusOK, string(body)
 	})}
 	ios, _, stderr := utils.TestIOStreams()
-	selection := &Selection{id: "old-session", ios: ios, ac: ac, interrupt: noInterrupt}
+	selection := &Selection{id: "old-session", ios: ios, ac: ac}
 	want := Want{ServerID: "server-1", AssignedUser: "user-1", RequesterType: "user", Scopes: []string{"command"}}
 	var resend bool
 	var failure error
 
 	synctest.Test(t, func(*testing.T) {
-		resend, failure = selection.settle(&pending, true, want, "root")
+		resend, failure = selection.settle(context.Background(), &pending, true, want, "root")
 	})
 
 	assert.False(t, resend)
@@ -181,17 +181,16 @@ func TestOfferWaitInterruptReturnsPendingExitWithoutResend(t *testing.T) {
 		return http.StatusOK, string(body)
 	})}
 	ios, _, stderr := utils.TestIOStreams()
-	selection := &Selection{id: "old-session", ios: ios, ac: ac, interrupt: func() (context.Context, context.CancelFunc) {
-		assert.Empty(t, stderr.String(), "Ctrl+C must be handled before the notice invites it")
-		return context.WithTimeout(context.Background(), time.Second)
-	}}
+	selection := &Selection{id: "old-session", ios: ios, ac: ac}
 	var resend bool
 	var failure error
 	var waited time.Duration
 
 	synctest.Test(t, func(*testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second) // stands in for Ctrl+C
+		defer cancel()
 		start := time.Now()
-		resend, failure = selection.settle(&pending, true, Want{}, "")
+		resend, failure = selection.settle(ctx, &pending, true, Want{}, "")
 		waited = time.Since(start)
 	})
 
@@ -234,10 +233,10 @@ func TestUnsafeResumeIDIsRejectedBeforeRequestOrSave(t *testing.T) {
 		return http.StatusOK, `{}`
 	})}
 	ios, _, stderr := utils.TestIOStreams()
-	selection := &Selection{id: "old-session", ios: ios, ac: ac, interrupt: noInterrupt}
+	selection := &Selection{id: "old-session", ios: ios, ac: ac}
 	unsafe := wsapi.WorkSession{ID: "safe$(touch bad)", Status: wsapi.StatusActive}
 
-	resend, failure := selection.settle(&unsafe, false, Want{}, "")
+	resend, failure := selection.settle(context.Background(), &unsafe, false, Want{}, "")
 
 	assert.False(t, resend)
 	require.NoError(t, failure)
@@ -263,7 +262,7 @@ func TestFreshSessionWithoutRequiredScopeIsNotSaved(t *testing.T) {
 	selection := &Selection{id: "old-session", ios: ios, ac: newTestClient(ts)}
 	want := Want{ServerID: "server-1", AssignedUser: "user-1", RequesterType: "user", Scopes: []string{"command"}}
 
-	resend, failure := selection.settle(&initial, false, want, "")
+	resend, failure := selection.settle(context.Background(), &initial, false, want, "")
 
 	assert.False(t, resend)
 	require.NoError(t, failure)
@@ -482,7 +481,7 @@ func TestSettleSavesToClientPinnedWorkspaceAfterConfigSwitch(t *testing.T) {
 	selection := &Selection{id: "old-session", source: SourceConfig, ios: ios, ac: newTestClient(ts)}
 	want := Want{ServerID: "server-1", AssignedUser: "user-1", RequesterType: "user", Scopes: []string{"command"}}
 
-	resend, failure := selection.settle(&active, false, want, "")
+	resend, failure := selection.settle(context.Background(), &active, false, want, "")
 
 	assert.True(t, resend)
 	require.NoError(t, failure)
@@ -815,7 +814,7 @@ func TestSettleRejectsADifferentSessionThanTheOneChosen(t *testing.T) {
 	selection := &Selection{id: "old-session", source: SourceConfig, ios: ios, ac: newTestClient(ts)}
 	want := Want{ServerID: "server-1", AssignedUser: "user-1", RequesterType: "user", Scopes: []string{"command"}}
 
-	resend, failure := selection.settle(&chosen, false, want, "")
+	resend, failure := selection.settle(context.Background(), &chosen, false, want, "")
 
 	assert.False(t, resend)
 	require.NoError(t, failure)
@@ -833,13 +832,13 @@ func TestOfferWaitNamesTheOperationsResumeStep(t *testing.T) {
 		return http.StatusOK, string(body)
 	})}
 	ios, _, stderr := utils.TestIOStreams()
-	selection := &Selection{ios: ios, ac: ac, interrupt: func() (context.Context, context.CancelFunc) {
-		return context.WithTimeout(context.Background(), time.Second)
-	}}
+	selection := &Selection{ios: ios, ac: ac}
 	selection.ResumeWith("upload the edited copy")
 
 	synctest.Test(t, func(*testing.T) {
-		_, _ = selection.settle(&pending, true, Want{}, "")
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_, _ = selection.settle(ctx, &pending, true, Want{}, "")
 	})
 
 	assert.Equal(t, 2, strings.Count(stderr.String(), "then upload the edited copy"), "notice and exit guidance: %q", stderr.String())
@@ -891,4 +890,42 @@ func replaceStdin(t *testing.T, input string) *os.File {
 	require.NoError(t, err)
 	require.NoError(t, write.Close())
 	return read
+}
+
+func TestCtrlCAtTheOfferPromptDeclinesWithoutCreating(t *testing.T) {
+	setupTmpConfig(t)
+	read, write, err := os.Pipe() // stdin stays open, so only Ctrl+C can end the prompt
+	require.NoError(t, err)
+	originalStdin := os.Stdin
+	os.Stdin = read
+	var creates atomic.Int32
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, WorkspaceName: "ws", HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
+		switch {
+		case r.URL.Path == "/api/iam/users/-/":
+			return http.StatusOK, `{"id":"user-1"}`
+		case r.URL.Path == "/api/servers/servers/":
+			return http.StatusOK, `{"count":1,"results":[{"id":"server-1","name":"web-1"}]}`
+		case r.Method == http.MethodPost:
+			creates.Add(1)
+			return http.StatusInternalServerError, `{}`
+		default:
+			return http.StatusOK, `{"count":0,"results":[]}`
+		}
+	})}
+	ios, _, stderr := utils.TestIOStreams()
+	selection := &Selection{id: "old-session", source: SourceConfig, need: Need{Operation: Transfer, Server: "web-1"}, ios: ios, ac: ac, interrupt: func() (context.Context, context.CancelFunc) {
+		assert.Empty(t, stderr.String(), "Ctrl+C must be handled before anything is asked")
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // Ctrl+C arrives while the prompt waits
+		return ctx, cancel
+	}}
+	t.Cleanup(func() { _ = write.Close(); selection.reads.Wait(); os.Stdin = originalStdin })
+
+	resend, failure := selection.handleRefusal("web-1", selectionCodedError{code: utils.WorkSessionRequired})
+
+	assert.False(t, resend)
+	require.NoError(t, failure)
+	assert.Zero(t, creates.Load())
+	assert.Equal(t, "old-session", selection.ID())
+	assert.Contains(t, stderr.String(), "Stopped at the prompt; no WorkSession was selected.")
 }

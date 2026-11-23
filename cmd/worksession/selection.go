@@ -2,6 +2,7 @@ package worksession
 
 import (
 	"context"
+	"sync"
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -62,6 +63,8 @@ type Selection struct {
 	resume   string
 	// interrupt replaces the Ctrl+C context in a test.
 	interrupt func() (context.Context, context.CancelFunc)
+	// reads counts prompt reads still running, so a test can wait out one Ctrl+C left behind.
+	reads sync.WaitGroup
 }
 
 // Select resolves flag, environment, then the client's pinned workspace configuration.
