@@ -351,3 +351,27 @@ func newTestRoot() *cobra.Command {
 	ios, _, _ := utils.TestIOStreams()
 	return newRootCmd(cmdtest.NoClient, ios)
 }
+
+func TestCommandNameResolvesCanonicalPath(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "leaf", args: []string{"token", "ls", "--output", "json"}, want: "token ls"},
+		{name: "alias", args: []string{"ws", "ls", "--output", "json"}, want: "workspace ls"},
+		{name: "root"},
+		{name: "unknown", args: []string{"no-such-command"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			root := newTestRoot()
+
+			got := commandName(root, tt.args)
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

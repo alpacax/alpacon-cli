@@ -139,6 +139,7 @@ func Execute() {
 	rejectUnknownSubcommands(root)
 	utils.MarkHookErrors(root)
 	keepWithOwnParser(root, os.Args[1:])
+	utils.CommandName = commandName(root, os.Args[1:])
 	cmd, err := root.ExecuteC()
 	exitErr, isExitErr := errors.AsType[*utils.ExitError](err)
 	switch {
@@ -155,6 +156,14 @@ func Execute() {
 	default:
 		utils.CliErrorWithExit("While executing the command: %s", err)
 	}
+}
+
+func commandName(root *cobra.Command, args []string) string {
+	cmd, _, err := root.Find(args)
+	if err != nil || cmd == root {
+		return ""
+	}
+	return strings.TrimPrefix(cmd.CommandPath(), root.Name()+" ")
 }
 
 // keepWithOwnParser detaches the subcommands of a command that parses its own flags when a flag Cobra
