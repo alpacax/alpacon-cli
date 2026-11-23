@@ -56,19 +56,20 @@ func targetsServer(ws *wsapi.WorkSession, id string) bool {
 
 // Usable reports whether ws can serve the wanted operation now.
 func (w Want) Usable(ws *wsapi.WorkSession, now time.Time) bool {
-	if !w.fits(ws, now) || ws.Status != wsapi.StatusActive || ws.StartsAt != nil && ws.StartsAt.After(now) {
-		return false
-	}
-	return w.AssignedUser == "" || !ws.ExpiresAt.IsZero()
+	return ws.Status == wsapi.StatusActive && w.fits(ws, now) && w.usableNow(ws, now)
+}
+
+func (w Want) usableNow(ws *wsapi.WorkSession, now time.Time) bool {
+	return (ws.StartsAt == nil || !ws.StartsAt.After(now)) && (w.AssignedUser == "" || !ws.ExpiresAt.IsZero())
 }
 
 // Waitable reports whether ws can serve the operation after its open approval settles.
 func (w Want) Waitable(ws *wsapi.WorkSession, now time.Time) bool {
-	return w.fits(ws, now) && (ws.Status == wsapi.StatusPending || ws.Status == wsapi.StatusApproved)
+	return awaitingApproval(ws) && w.fits(ws, now)
 }
 
-func (w Want) waitableWithin(ws *wsapi.WorkSession, now time.Time, limit time.Duration) bool {
-	return w.Waitable(ws, now) && (ws.StartsAt == nil || !ws.StartsAt.After(now.Add(limit)))
+func awaitingApproval(ws *wsapi.WorkSession) bool {
+	return ws.Status == wsapi.StatusPending || ws.Status == wsapi.StatusApproved
 }
 
 // Pick prefers the newest usable session, then the newest session still waiting on approval.
@@ -76,19 +77,22 @@ func Pick(sessions []wsapi.WorkSession, want Want, now time.Time) (ws *wsapi.Wor
 	return pick(sessions, want, now, 0)
 }
 
+// pick checks each session's status before its targets and scopes, and fits each at most once.
+// A positive waitLimit skips a waiting session that cannot start within it.
 func pick(sessions []wsapi.WorkSession, want Want, now time.Time, waitLimit time.Duration) (ws *wsapi.WorkSession, wait bool) {
 	var usable, waiting *wsapi.WorkSession
 	for i := range sessions {
 		candidate := &sessions[i]
-		if want.Usable(candidate, now) && newer(candidate, usable) {
-			usable = candidate
-		}
-		waitable := want.Waitable(candidate, now)
-		if waitLimit > 0 {
-			waitable = want.waitableWithin(candidate, now, waitLimit)
-		}
-		if waitable && newer(candidate, waiting) {
-			waiting = candidate
+		switch {
+		case candidate.Status == wsapi.StatusActive:
+			if newer(candidate, usable) && want.fits(candidate, now) && want.usableNow(candidate, now) {
+				usable = candidate
+			}
+		case awaitingApproval(candidate):
+			startsInTime := waitLimit <= 0 || candidate.StartsAt == nil || !candidate.StartsAt.After(now.Add(waitLimit))
+			if startsInTime && newer(candidate, waiting) && want.fits(candidate, now) {
+				waiting = candidate
+			}
 		}
 	}
 	if usable != nil {
