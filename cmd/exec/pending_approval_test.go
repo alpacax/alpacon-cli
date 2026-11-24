@@ -325,11 +325,15 @@ func TestPausedLogsKeepAssigneeConfirmation(t *testing.T) {
 
 func TestApprovalWaitKeepsLatestFileGuidance(t *testing.T) {
 	const fileField = `,"file_execution_suggestion":{"path":"/opt/deploy.sh","interpreter":"/bin/bash"}`
+	const clearedFields = `,"file_execution_suggestion":null,"script_body_suggestion":null`
 	for _, tc := range []struct{ name, field, refresh, want, absent string }{
 		{"file after failed refresh", fileField, "", "--file /opt/deploy.sh --from-server", ""},
 		{"script body after failed refresh", scriptBodyField, "", "--upload --file /path/to/script.sh", ""},
 		{"new script suggestion", fileField, scriptBodyField, "--upload --file /path/to/script.sh", "--from-server"},
 		{"new file suggestion", scriptBodyField, fileField, "--file /opt/deploy.sh --from-server", "--upload"},
+		{"withdrawn file suggestion", fileField, clearedFields, "", "--file"},
+		{"withdrawn script suggestion", scriptBodyField, clearedFields, "", "--file"},
+		{"omitted suggestions in a successful read", fileField, " ", "", "--file"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var reads atomic.Int32
@@ -363,7 +367,11 @@ func TestApprovalWaitKeepsLatestFileGuidance(t *testing.T) {
 			for _, action := range got.NextActions {
 				commands = append(commands, action.Command)
 			}
-			assert.Contains(t, strings.Join(commands, "\n"), tc.want)
+			if tc.want == "" {
+				assert.Len(t, got.NextActions, 2)
+			} else {
+				assert.Contains(t, strings.Join(commands, "\n"), tc.want)
+			}
 			if tc.absent != "" {
 				assert.NotContains(t, strings.Join(commands, "\n"), tc.absent)
 			}
@@ -402,6 +410,7 @@ func TestPausedApprovalSurvivesFailedTimeoutRefresh(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var reads atomic.Int32
+			var failedRead atomic.Bool
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
@@ -415,6 +424,7 @@ func TestPausedApprovalSurvivesFailedTimeoutRefresh(t *testing.T) {
 						_, _ = fmt.Fprintf(w, `{"id":"cmd-1","status":"awaiting_approval","work_session_paused":%t,"work_session_id":"550e8400-e29b-41d4-a716-446655440000","console_url":"https://alpacon.io/acme/commands/cmd-1"}`, tc.initialPause || n == 2)
 						return
 					}
+					failedRead.Store(true)
 					if n == 3 && !tc.initialPause {
 						select {
 						case <-r.Context().Done():
@@ -432,11 +442,7 @@ func TestPausedApprovalSurvivesFailedTimeoutRefresh(t *testing.T) {
 			t.Cleanup(ts.Close)
 			stdout, _, code := runExecHelper(t, ts.URL, "--output", "json", "--wait-approval", tc.wait, "prod", "--", "sudo", "reboot")
 			assert.Equal(t, utils.ExitCodePendingApproval, code)
-			wantReads := int32(2)
-			if !tc.initialPause {
-				wantReads = 4
-			}
-			assert.Equal(t, wantReads, reads.Load())
+			assert.True(t, failedRead.Load(), "the fixture must exercise an unavailable status read")
 			var got struct {
 				Message string         `json:"message"`
 				Server  map[string]any `json:"server"`

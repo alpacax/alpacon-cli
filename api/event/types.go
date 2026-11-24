@@ -112,7 +112,8 @@ type PendingApprovalError struct {
 	// Empty on an older server.
 	ApprovalLane string
 	// WorkSessionPaused says this hold paused its work session.
-	WorkSessionPaused bool
+	WorkSessionPaused   bool
+	commandDetailsKnown bool
 }
 
 // ApprovalLaneAssignee is the approval_lane of a held command whose
@@ -127,6 +128,9 @@ func (e *PendingApprovalError) AssigneeConfirms() bool {
 
 // LocalSignalAssignee lets the pending-approval signal word itself for the assignee.
 func (e *PendingApprovalError) LocalSignalAssignee() bool { return e.AssigneeConfirms() }
+
+// HasCommandDetails reports whether this result includes a successful command detail read.
+func (e *PendingApprovalError) HasCommandDetails() bool { return e.commandDetailsKnown }
 
 // FileExecutionSuggestion is a held command line the server recognized as a
 // script on the target, restated as a verified file: the script's path, its

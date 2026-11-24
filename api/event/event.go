@@ -478,9 +478,11 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 			continue
 		}
 		failures, throttles = 0, 0
-		if err = json.Unmarshal(responseBody, &response); err != nil {
+		var current EventDetails
+		if err = json.Unmarshal(responseBody, &current); err != nil {
 			return response, err
 		}
+		response = current
 
 		if IsRunningStatus(response.Status) {
 			deadline = seams.Now().Add(timeout)
@@ -952,6 +954,7 @@ func pendingApprovalFromDetails(cmdID api.PathID, details EventDetails) *Pending
 		WorkSessionStatus:    details.WorkSessionStatus(),
 		ApprovalLane:         details.ApprovalLane,
 		WorkSessionPaused:    details.WorkSessionPaused,
+		commandDetailsKnown:  details.Status != "",
 	}
 }
 

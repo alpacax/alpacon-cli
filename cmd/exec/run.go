@@ -887,7 +887,7 @@ func mergePendingApprovalMetadata(latest, known *event.PendingApprovalError) {
 	if latest.ApprovalLane == "" {
 		latest.ApprovalLane = known.ApprovalLane
 	}
-	if latest.FileSuggestion == nil && latest.ScriptBodySuggestion == nil {
+	if !latest.HasCommandDetails() && latest.FileSuggestion == nil && latest.ScriptBodySuggestion == nil {
 		latest.FileSuggestion = known.FileSuggestion
 		latest.ScriptBodySuggestion = known.ScriptBodySuggestion
 	}
