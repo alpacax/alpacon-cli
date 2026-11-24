@@ -37,13 +37,17 @@ type WebshArgs struct {
 }
 
 // ParseWebshArgs parses raw CLI args for `alpacon websh` (DisableFlagParsing mode), returning
-// errHelpRequested when -h/--help is seen.
+// errHelpRequested when -h/--help is seen before the server name.
+// Every word after the server name, a websh flag included, is the remote command.
 //
 // NOTE: every named flag must be matched before the unknown-flag case.
 func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 	res := WebshArgs{Env: map[string]string{}}
 	for i := 0; i < len(args); i++ {
 		switch {
+		case res.ServerName != "":
+			res.CommandArgs = append(res.CommandArgs, args[i:]...)
+			i = len(args)
 		case args[i] == "-s" || args[i] == "--share":
 			res.Share = true
 		case args[i] == "-h" || args[i] == "--help":
@@ -96,15 +100,10 @@ func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 			}
 			res.OutputFormat = val
 			i = newI
-		case res.ServerName == "" && strings.HasPrefix(args[i], "-"):
+		case strings.HasPrefix(args[i], "-"):
 			return res, fmt.Errorf("unknown flag: %s", args[i])
 		default:
-			if res.ServerName == "" {
-				res.ServerName = args[i]
-			} else {
-				res.CommandArgs = append(res.CommandArgs, args[i:]...)
-				i = len(args)
-			}
+			res.ServerName = args[i]
 		}
 	}
 	return res, nil
