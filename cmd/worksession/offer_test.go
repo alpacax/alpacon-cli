@@ -967,3 +967,28 @@ func TestOfferAccountGuidanceNamesTheOperationsCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestSettleDoesNotSaveIntoALoginMadeWhileItWaited(t *testing.T) {
+	setupTmpConfig(t)
+	active := activeServerSession("new-session", time.Now().UTC())
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		assert.NoError(t, config.CreateConfig("https://ws.example.com", "ws", "", "", "token-b", "refresh-b", "", 3600, false)) // another terminal
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(active)
+	}))
+	defer ts.Close()
+	ac := loggedInClient(t, ts)
+	ios, _, stderr := utils.TestIOStreams()
+	selection := &Selection{id: "old-session", source: SourceConfig, ios: ios, ac: ac}
+	want := Want{ServerID: "server-1", AssignedUser: "user-1", RequesterType: "user", Scopes: []string{"command"}}
+
+	resend, failure := selection.settle(context.Background(), &active, false, want, "")
+
+	assert.False(t, resend)
+	require.NoError(t, failure)
+	assert.Equal(t, "old-session", selection.ID())
+	assert.Contains(t, stderr.String(), config.ErrLoginChanged.Error())
+	stored, err := config.GetActiveWorkSessionFor("ws")
+	require.NoError(t, err)
+	assert.Empty(t, stored)
+}

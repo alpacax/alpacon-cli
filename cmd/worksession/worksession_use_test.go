@@ -212,3 +212,30 @@ func TestRunUse_RejectsAHiddenClusterSession(t *testing.T) {
 	got, _ := config.GetActiveWorkSession()
 	assert.Empty(t, got, "config must not be updated for a cluster session")
 }
+
+// loggedInClient logs account A in to ts and returns the client that login builds.
+func loggedInClient(t *testing.T, ts *httptest.Server) *client.AlpaconClient {
+	t.Helper()
+	require.NoError(t, config.CreateConfig(ts.URL, "ws", "", "", "token-a", "refresh-a", "", 3600, false))
+	ac, err := client.NewAlpaconAPIClient()
+	require.NoError(t, err)
+	ac.WorkspaceName = "ws"
+	return ac
+}
+
+func TestRunUseSessionDoesNotSaveIntoAnotherLogin(t *testing.T) {
+	setupTmpConfig(t)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		assert.NoError(t, config.CreateConfig("https://ws.example.com", "ws", "", "", "token-b", "refresh-b", "", 3600, false)) // another terminal
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ses-a","status":"active"}`))
+	}))
+	defer ts.Close()
+
+	_, err := RunUseSession(loggedInClient(t, ts), "ses-a")
+
+	require.ErrorIs(t, err, config.ErrLoginChanged)
+	stored, err := config.GetActiveWorkSessionFor("ws")
+	require.NoError(t, err)
+	assert.Empty(t, stored)
+}

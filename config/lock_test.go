@@ -30,7 +30,7 @@ const (
 // runConfigWriter is one child process's share of the race.
 func runConfigWriter(name string) error {
 	for i := range configWriterRounds {
-		if err := SetActiveWorkSessionFor(fmt.Sprintf("%s-%d", name, i), "uuid"); err != nil {
+		if err := SetActiveWorkSessionFor(nil, fmt.Sprintf("%s-%d", name, i), "uuid"); err != nil {
 			return err
 		}
 		if name != "b" {
@@ -194,7 +194,7 @@ func TestEveryWriterWaitsForTheLockAndLeavesTheFileAlone(t *testing.T) {
 		}},
 		{name: "signer token clear", write: func(started Config) error { return ClearSignerToken(started.Signer.AccessToken) }},
 		{name: "work session", write: func(Config) error { return SetActiveWorkSession("uuid-2") }},
-		{name: "work session for a workspace", write: func(Config) error { return SetActiveWorkSessionFor("ws1", "uuid-2") }},
+		{name: "work session for a workspace", write: func(Config) error { return SetActiveWorkSessionFor(nil, "ws1", "uuid-2") }},
 		{name: "work session clear", write: func(Config) error {
 			_, err := ClearActiveWorkSessionFor("ws1", "uuid-1")
 			return err

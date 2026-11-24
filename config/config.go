@@ -458,18 +458,20 @@ func (c Config) IsSaaS() bool {
 }
 
 // SetActiveWorkSession persists the work-session UUID for the config's current workspace ("" clears it);
-// a caller holding a client must use SetActiveWorkSessionFor with the client's pinned workspace instead.
+// a caller holding a client must use the client's SaveActiveWorkSession instead.
 func SetActiveWorkSession(uuid string) error {
 	return updateConfig(func(cfg *Config) (bool, error) {
 		return setActiveWorkSessionOn(cfg, cfg.WorkspaceIdentity(), uuid)
 	})
 }
 
-// SetActiveWorkSessionFor persists the work-session UUID under workspaceName ("" clears it); workspaceName
-// is a parameter, not a fresh read, because create --wait --use can block on approval long
-// enough for another shell's 'alpacon ws use' to file it under a workspace it was never created in.
-func SetActiveWorkSessionFor(workspaceName, uuid string) error {
+// SetActiveWorkSessionFor persists uuid under workspaceName ("" clears it), a parameter since a wait can outlast
+// a workspace switch. It writes nothing and returns ErrLoginChanged once the config left login; nil skips that.
+func SetActiveWorkSessionFor(login *Config, workspaceName, uuid string) error {
 	return updateConfig(func(cfg *Config) (bool, error) {
+		if login != nil && !cfg.sameLogin(*login) {
+			return false, ErrLoginChanged
+		}
 		return setActiveWorkSessionOn(cfg, workspaceName, uuid)
 	})
 }

@@ -14,7 +14,6 @@ import (
 	"github.com/alpacax/alpacon-cli/api/server"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/alpacax/alpacon-cli/utils"
 	"golang.org/x/term"
@@ -245,8 +244,7 @@ func (s *Selection) settle(ctx context.Context, session *wsapi.WorkSession, wait
 		s.ios.Warning("WorkSession %s does not grant the required access.", id)
 		return false, nil
 	}
-	err := config.SetActiveWorkSessionFor(s.ac.WorkspaceName, active.ID)
-	if err != nil {
+	if err := s.ac.SaveActiveWorkSession(active.ID); err != nil {
 		s.ios.Warning("Could not set WorkSession %s active for this workspace: %s", id, err)
 		return false, nil
 	}
