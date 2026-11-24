@@ -8,6 +8,7 @@ import (
 
 func TestProcessExitCodeIsTheStatusAParentReadsAndNeverSuccess(t *testing.T) {
 	t.Parallel()
+	wide := int64(1) << 32 // a variable, so a build with a 32-bit int still compiles
 	tests := []struct {
 		name, goos string
 		code, want int
@@ -20,6 +21,9 @@ func TestProcessExitCodeIsTheStatusAParentReadsAndNeverSuccess(t *testing.T) {
 		{name: "negative", goos: "linux", code: -1, want: 255},
 		{name: "windows keeps a wide code", goos: "windows", code: 3010, want: 3010},
 		{name: "windows zero on a failure", goos: "windows", code: 0, want: 1},
+		{name: "windows negative", goos: "windows", code: -1, want: int(wide - 1)},
+		{name: "windows past 32 bits", goos: "windows", code: int(wide + 5), want: 5},
+		{name: "windows low 32 bits all zero", goos: "windows", code: int(wide), want: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
