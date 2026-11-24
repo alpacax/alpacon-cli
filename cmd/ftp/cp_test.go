@@ -57,42 +57,42 @@ func TestIsRemotePath(t *testing.T) {
 		expected bool
 	}{
 		{
-			name:     "Local file path",
+			name:     "local file path",
 			path:     "./test.txt",
 			expected: false,
 		},
 		{
-			name:     "Local absolute path",
+			name:     "local absolute path",
 			path:     "/home/user/test.txt",
 			expected: false,
 		},
 		{
-			name:     "Simple hostname only",
+			name:     "simple hostname only",
 			path:     "prod-docker",
 			expected: false,
 		},
 		{
-			name:     "User and hostname only",
+			name:     "user and hostname only",
 			path:     "root@prod-docker",
 			expected: false,
 		},
 		{
-			name:     "Remote path with hostname",
+			name:     "remote path with hostname",
 			path:     "prod-docker:~/",
 			expected: true,
 		},
 		{
-			name:     "Remote path with user and hostname",
+			name:     "remote path with user and hostname",
 			path:     "root@prod-docker:/var/log/syslog",
 			expected: true,
 		},
 		{
-			name:     "Complex remote path",
+			name:     "complex remote path",
 			path:     "admin@prod-docker:~/alice/test.txt",
 			expected: true,
 		},
 		{
-			name:     "Empty remote path",
+			name:     "empty remote path",
 			path:     "server:",
 			expected: true,
 		},
@@ -115,19 +115,19 @@ func TestValidatePaths(t *testing.T) {
 		wantErrSub string
 	}{
 		{
-			name:    "Local sources with remote destination",
+			name:    "local sources with remote destination",
 			sources: []string{"./test.txt", "/home/user/file.txt"},
 			dest:    "myserver:/tmp/",
 		},
 		{
-			name:    "Remote source with local destination",
+			name:    "remote source with local destination",
 			sources: []string{"myserver:/tmp/file.txt"},
 			dest:    "./",
 		},
 		{
 			// planCopy strips the user prefix before validate runs; this pins
 			// that SplitPath itself does not, so the server name keeps "admin@".
-			name:    "Remote source with a user prefix",
+			name:    "remote source with a user prefix",
 			sources: []string{"admin@myserver:/tmp/file.txt"},
 			dest:    "./",
 		},
@@ -143,19 +143,19 @@ func TestValidatePaths(t *testing.T) {
 			wantErrSub: "cannot mix local and remote source paths",
 		},
 		{
-			name:       "Mixed local and remote sources",
+			name:       "mixed local and remote sources",
 			sources:    []string{"./test.txt", "myserver:/tmp/file.txt"},
 			dest:       "/tmp/",
 			wantErrSub: "cannot mix local and remote source paths",
 		},
 		{
-			name:       "Remote source without server name",
+			name:       "remote source without server name",
 			sources:    []string{":/tmp/file.txt"},
 			dest:       "./",
 			wantErrSub: "invalid remote path format",
 		},
 		{
-			name:       "Remote destination without path",
+			name:       "remote destination without path",
 			sources:    []string{"./test.txt"},
 			dest:       "myserver:",
 			wantErrSub: "invalid remote path format",
@@ -182,63 +182,54 @@ func TestCpCommandSSHParsing(t *testing.T) {
 		args         []string
 		expectedArgs []string
 		expectedUser string
-		description  string
 	}{
 		{
-			name:         "Simple local to remote copy",
+			name:         "simple local to remote copy",
 			args:         []string{"test.txt", "prod-docker:~/"},
 			expectedArgs: []string{"test.txt", "prod-docker:~/"},
 			expectedUser: "",
-			description:  "alpacon cp test.txt prod-docker:~/",
 		},
 		{
-			name:         "Local to remote with path",
+			name:         "local to remote with path",
 			args:         []string{"test.txt", "prod-docker:~/alice/"},
 			expectedArgs: []string{"test.txt", "prod-docker:~/alice/"},
 			expectedUser: "",
-			description:  "alpacon cp test.txt prod-docker:~/alice/",
 		},
 		{
-			name:         "Remote to local copy",
+			name:         "remote to local copy",
 			args:         []string{"prod-docker:~/alice/test.txt", "."},
 			expectedArgs: []string{"prod-docker:~/alice/test.txt", "."},
 			expectedUser: "",
-			description:  "alpacon cp prod-docker:~/alice/test.txt .",
 		},
 		{
-			name:         "Remote with user to local",
+			name:         "remote with user to local",
 			args:         []string{"root@prod-docker:/var/log/syslog", "."},
 			expectedArgs: []string{"prod-docker:/var/log/syslog", "."},
 			expectedUser: "root",
-			description:  "alpacon cp root@prod-docker:/var/log/syslog .",
 		},
 		{
-			name:         "Local to remote with user",
+			name:         "local to remote with user",
 			args:         []string{"test.txt", "admin@prod-docker:~/uploads/"},
 			expectedArgs: []string{"test.txt", "prod-docker:~/uploads/"},
 			expectedUser: "admin",
-			description:  "alpacon cp test.txt admin@prod-docker:~/uploads/",
 		},
 		{
-			name:         "Multiple local files to remote with user",
+			name:         "multiple local files to remote with user",
 			args:         []string{"file1.txt", "file2.txt", "deploy@web-server:/opt/app/"},
 			expectedArgs: []string{"file1.txt", "file2.txt", "web-server:/opt/app/"},
 			expectedUser: "deploy",
-			description:  "alpacon cp file1.txt file2.txt deploy@web-server:/opt/app/",
 		},
 		{
-			name:         "User in hostname only without colon — not parsed as SSH",
+			name:         "user in hostname only without colon — not parsed as SSH",
 			args:         []string{"test.txt", "root@prod-docker"},
 			expectedArgs: []string{"test.txt", "root@prod-docker"},
 			expectedUser: "",
-			description:  "alpacon cp test.txt root@prod-docker (no colon, treated as literal arg)",
 		},
 		{
-			name:         "Local file with @ in name — not parsed as SSH",
+			name:         "local file with @ in name — not parsed as SSH",
 			args:         []string{"report@2026.txt", "prod-docker:~/uploads/"},
 			expectedArgs: []string{"report@2026.txt", "prod-docker:~/uploads/"},
 			expectedUser: "",
-			description:  "alpacon cp report@2026.txt prod-docker:~/uploads/ (@ in local filename)",
 		},
 	}
 
@@ -360,13 +351,11 @@ func TestStripUserPrefix(t *testing.T) {
 		{name: "user, host and path", arg: "alice@myserver:/tmp/f", wantRewritten: "myserver:/tmp/f", wantUser: "alice"},
 		{name: "dot-slash local name holding an at sign and a colon", arg: "./a@b:c.txt", wantRewritten: "./a@b:c.txt"},
 		{name: "user and a single-letter host with a backslash path", arg: `alice@h:\notes.txt`, wantRewritten: `h:\notes.txt`, wantUser: "alice"},
-		{
-			name:          "user and host with a trailing colon",
-			arg:           "alice@myserver:",
-			wantRewritten: "myserver:",
-			wantUser:      "alice",
-		},
+		{name: "user and host with a trailing colon", arg: "alice@myserver:", wantRewritten: "myserver:", wantUser: "alice"},
+		{name: "host with a trailing colon is untouched", arg: "myserver:", wantRewritten: "myserver:"},
 		{name: "user and an empty host", arg: "alice@:", wantRewritten: ":", wantUser: "alice"},
+		{name: "empty user before the host is dropped", arg: "@myserver:/tmp/f", wantRewritten: "myserver:/tmp/f"},
+		{name: "at sign in the remote path is untouched", arg: "myserver:/tmp/a@b", wantRewritten: "myserver:/tmp/a@b"},
 		{name: "no user is untouched", arg: "myserver:/tmp/f", wantRewritten: "myserver:/tmp/f"},
 		{name: "local path with an @ but no colon is untouched", arg: "./mail@example.txt", wantRewritten: "./mail@example.txt"},
 		{name: "path may itself contain an @", arg: "alice@myserver:/tmp/mail@example.txt", wantRewritten: "myserver:/tmp/mail@example.txt", wantUser: "alice"},

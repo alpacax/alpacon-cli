@@ -1286,9 +1286,9 @@ func newTestReconnectClient(baseURL string) *WebsocketClient {
 func pinTerminalSize(t *testing.T, rows, cols int) {
 	t.Helper()
 
-	original := terminalSize
-	terminalSize = func() (int, int, error) { return rows, cols, nil }
-	t.Cleanup(func() { terminalSize = original })
+	original := TerminalSize
+	TerminalSize = func() (int, int, error) { return rows, cols, nil }
+	t.Cleanup(func() { TerminalSize = original })
 }
 
 // What reaches the server on the real entry points' first dial. Raw mode fails on

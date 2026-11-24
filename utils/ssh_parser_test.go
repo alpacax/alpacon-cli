@@ -122,6 +122,40 @@ func TestParseSSHTarget(t *testing.T) {
 	}
 }
 
+func TestParseServerTarget(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		server   string
+		username string
+		wantHost string
+		wantUser string
+	}{
+		{name: "Plain host", server: "my-server", wantHost: "my-server"},
+		{name: "Plain host with a username given", server: "my-server", username: "bob", wantHost: "my-server", wantUser: "bob"},
+		{name: "User and host", server: "alice@my-server", wantHost: "my-server", wantUser: "alice"},
+		{name: "Username given wins over the inline one", server: "alice@my-server", username: "bob", wantHost: "my-server", wantUser: "bob"},
+		{name: "Colon without a user is untouched", server: "my-server:8080", wantHost: "my-server:8080"},
+		{name: "Colon with a user is untouched", server: "alice@my-server:8080", wantHost: "alice@my-server:8080"},
+		{name: "Colon keeps the username given", server: "alice@my-server:8080", username: "bob", wantHost: "alice@my-server:8080", wantUser: "bob"},
+		{name: "Empty server", server: ""},
+		{name: "Empty server with a username given", server: "", username: "bob", wantUser: "bob"},
+		{name: "Empty user", server: "@my-server", wantHost: "my-server"},
+		{name: "Empty host", server: "alice@", wantUser: "alice"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			host, user := ParseServerTarget(tt.server, tt.username)
+
+			assert.Equal(t, tt.wantHost, host)
+			assert.Equal(t, tt.wantUser, user)
+		})
+	}
+}
+
 func TestIsRemoteTarget(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

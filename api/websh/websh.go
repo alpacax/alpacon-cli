@@ -41,9 +41,9 @@ const (
 )
 
 var (
-	// terminalSize reports the local terminal's size, in rows and columns. A var so
+	// TerminalSize reports the local terminal's size, in rows and columns. A var so
 	// a test can pin a size where there is no terminal to read one from.
-	terminalSize = func() (rows, cols int, err error) {
+	TerminalSize = func() (rows, cols int, err error) {
 		cols, rows, err = term.GetSize(int(os.Stdin.Fd()))
 		return rows, cols, err
 	}
@@ -173,7 +173,7 @@ func SendTerminalSize(ac *client.AlpaconClient, sessionID string) error {
 	if err != nil {
 		return err
 	}
-	rows, cols, err := terminalSize()
+	rows, cols, err := TerminalSize()
 	if err != nil {
 		return err
 	}
@@ -261,7 +261,7 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 		return SessionResponse{}, utils.MarkSubmission(err)
 	}
 
-	rows, cols, err := terminalSize()
+	rows, cols, err := TerminalSize()
 	if err != nil {
 		return SessionResponse{}, err
 	}
