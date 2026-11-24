@@ -107,22 +107,13 @@ func TestCommandParsing(t *testing.T) {
 			expectCommandArgs: []string{"echo", "hello world"},
 		},
 		{
-			testName:          "FlagsIntermixedWithCommandArgs",
+			testName:          "KnownFlagsAfterTheServerGoToTheCommand",
 			args:              []string{"server-name", "-u", "user", "cmd", "-g", "group"},
-			expectUsername:    "user",
+			expectUsername:    "",
 			expectGroupname:   "",
 			expectEnv:         map[string]string{},
 			expectServerName:  "server-name",
-			expectCommandArgs: []string{"cmd", "-g", "group"},
-		},
-		{
-			testName:          "FlagsAndCommandArgsIntertwined",
-			args:              []string{"server-name", "-u", "user", "cmd", "-g", "group"},
-			expectUsername:    "user",
-			expectGroupname:   "",
-			expectEnv:         map[string]string{},
-			expectServerName:  "server-name",
-			expectCommandArgs: []string{"cmd", "-g", "group"},
+			expectCommandArgs: []string{"-u", "user", "cmd", "-g", "group"},
 		},
 		{
 			testName:          "ShareSessionWithFlags",
@@ -336,9 +327,9 @@ func TestParseWebshArgsRefusesAFlagWithNoValue(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "missing username", args: []string{"my-server", "-u"}, want: "--username requires a value"},
+		{name: "missing username", args: []string{"-u"}, want: "--username requires a value"},
 		{name: "empty username", args: []string{"--username=", "my-server"}, want: "--username requires a value"},
-		{name: "missing groupname", args: []string{"my-server", "-g"}, want: "--groupname requires a value"},
+		{name: "missing groupname", args: []string{"-g"}, want: "--groupname requires a value"},
 		{name: "empty groupname", args: []string{"-g", "", "my-server"}, want: "--groupname requires a value"},
 	}
 	for _, tt := range tests {
@@ -359,6 +350,38 @@ func TestParseWebshArgs_CommandAfterServerNotConsumed(t *testing.T) {
 	assert.Equal(t, "my-server", got.ServerName)
 	assert.Empty(t, got.WorkSessionID)
 	assert.Equal(t, []string{"ls", "--work-session", "fake"}, got.CommandArgs)
+}
+
+func TestParseWebshArgsLeavesAKnownFlagAfterTheServerToTheCommand(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "output", args: []string{"--output", "json", "ls"}},
+		{name: "output joined by equals", args: []string{"--output=json", "ls"}},
+		{name: "short help", args: []string{"-h"}},
+		{name: "long help", args: []string{"--help"}},
+		{name: "short share", args: []string{"-s"}},
+		{name: "long share", args: []string{"--share"}},
+		{name: "short username", args: []string{"-u", "alice", "id"}},
+		{name: "long username", args: []string{"--username=alice", "id"}},
+		{name: "short groupname", args: []string{"-g", "wheel", "id"}},
+		{name: "env", args: []string{"--env=KEY=value", "printenv", "KEY"}},
+		{name: "read-only", args: []string{"--read-only", "true"}},
+		{name: "work-session", args: []string{"--work-session", "550e8400-e29b-41d4-a716-446655440000", "ls"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			args := append([]string{"my-server"}, tt.args...)
+
+			got, err := ParseWebshArgs(utils.Stdio, args)
+
+			require.NoError(t, err)
+			assert.Equal(t, WebshArgs{Env: map[string]string{}, ServerName: "my-server", CommandArgs: tt.args}, got)
+		})
+	}
 }
 
 func TestSanitizeRecord(t *testing.T) {
