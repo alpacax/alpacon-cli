@@ -223,7 +223,7 @@ func normalizeArgs(args []string, username string) (string, error) {
 // stripUserPrefix rewrites user@host:path as host:path, handing back the user. A local
 // name holding an @ stays as is; "alice@myserver:" stays remote, so validate reports the path.
 func stripUserPrefix(arg string) (rewritten, user string) {
-	if !strings.Contains(arg, "@") || !utils.IsRemoteTarget(arg) {
+	if !utils.IsRemoteTarget(arg) {
 		return arg, ""
 	}
 	sshTarget := utils.ParseSSHTarget(arg)

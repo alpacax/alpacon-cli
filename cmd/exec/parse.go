@@ -332,13 +332,7 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 		}
 	}
 
-	if server != "" && strings.Contains(server, "@") && !strings.Contains(server, ":") {
-		sshTarget := utils.ParseSSHTarget(server)
-		if username == "" && sshTarget.User != "" {
-			username = sshTarget.User
-		}
-		server = sshTarget.Host
-	}
+	server, username = utils.ParseServerTarget(server, username)
 
 	parsed := RemoteExecArgs{
 		Username:        username,
