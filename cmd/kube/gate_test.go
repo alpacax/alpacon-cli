@@ -218,10 +218,11 @@ func TestApplySurfaceGate_DisabledRejectsAnInvalidOutput(t *testing.T) {
 		name, want string
 		args       []string
 	}{
-		{name: "unknown value", args: []string{"kube", "ls", "--output", "bogus"}, want: `"bogus"`},
-		{name: "empty value", args: []string{"kube", "ls", "--output="}, want: `""`},
-		{name: "missing value", args: []string{"kube", "ls", "--output"}, want: `""`},
-		{name: "empty value after a set one", args: []string{"kube", "ls", "--output=json", "--output="}, want: `""`},
+		{name: "unknown value", args: []string{"kube", "ls", "--output", "bogus"}, want: `invalid --output value "bogus"`},
+		{name: "empty value", args: []string{"kube", "ls", "--output="}, want: `invalid --output value ""`},
+		{name: "missing value", args: []string{"kube", "ls", "--output"}, want: "Error: flag needs an argument: --output"},
+		{name: "empty value after a set one", args: []string{"kube", "ls", "--output=json", "--output="}, want: `invalid --output value ""`},
+		{name: "missing value after a set one", args: []string{"kube", "ls", "--output=json", "--output"}, want: `"message":"flag needs an argument: --output"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -239,7 +240,7 @@ func TestApplySurfaceGate_DisabledRejectsAnInvalidOutput(t *testing.T) {
 			assert.Equal(t, utils.ExitCodeUsageError, exitErr.Code)
 			ios.FprintExitError(errOut, exitErr)
 			assert.Empty(t, out.String())
-			assert.Contains(t, errOut.String(), "invalid --output value "+tt.want)
+			assert.Contains(t, errOut.String(), tt.want)
 		})
 	}
 }

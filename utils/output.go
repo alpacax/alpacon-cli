@@ -32,8 +32,9 @@ func invalidOutputFormat(value string) error {
 }
 
 // OutputFormatIn is the last --output value before any "--" in args, skipping the values of cmd's other
-// flags, for a command line whose parse stopped before reaching it; given reports whether there was one.
-func OutputFormatIn(cmd *cobra.Command, args []string) (format string, given bool) {
+// flags, for a command line whose parse stopped before reaching it; given reports whether one was read, and
+// missing whether a final --output had no value, which leaves an earlier value in force.
+func OutputFormatIn(cmd *cobra.Command, args []string) (format string, given, missing bool) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -44,16 +45,16 @@ func OutputFormatIn(cmd *cobra.Command, args []string) (format string, given boo
 		case inline:
 			format, given = value, true
 		case arg == "--output":
-			format, given = "", true
 			i++
-			if i < len(args) {
-				format = args[i]
+			if i == len(args) {
+				return format, given, true
 			}
+			format, given = args[i], true
 		case takesNextArg(cmd, arg):
 			i++
 		}
 	}
-	return format, given
+	return format, given, false
 }
 
 // takesNextArg reports whether arg is a flag of cmd whose value is the next argument, as pflag reads it.

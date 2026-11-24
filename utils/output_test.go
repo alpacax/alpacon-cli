@@ -570,19 +570,21 @@ func TestPartialListOutputHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-func TestOutputFormatInReadsTheLastOutputFlagBeforeTheSeparator(t *testing.T) {
+func TestOutputFormatInReadsTheLastOutputValueBeforeTheSeparator(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name      string
-		args      []string
-		want      string
-		wantGiven bool
+		name        string
+		args        []string
+		want        string
+		wantGiven   bool
+		wantMissing bool
 	}{
 		{name: "no output flag", args: []string{"server", "ls", "--bogus"}},
 		{name: "separate value", args: []string{"server", "ls", "--bogus", "--output", "json"}, want: "json", wantGiven: true},
 		{name: "equals form", args: []string{"server", "ls", "--bogus", "--output=json"}, want: "json", wantGiven: true},
 		{name: "last one wins", args: []string{"--output", "json", "server", "ls", "--output=table"}, want: "table", wantGiven: true},
-		{name: "flag without a value", args: []string{"server", "ls", "--output"}, wantGiven: true},
+		{name: "flag without a value", args: []string{"server", "ls", "--output"}, wantMissing: true},
+		{name: "flag without a value after a set one", args: []string{"--output=json", "server", "ls", "--output"}, want: "json", wantGiven: true, wantMissing: true},
 		{name: "empty value after a set one", args: []string{"--output=json", "--output="}, wantGiven: true},
 		{name: "separator taken as the value", args: []string{"--output", "--", "--output", "json"}, want: "json", wantGiven: true},
 		{name: "value of a long flag", args: []string{"--field", "--output=json"}},
@@ -605,10 +607,11 @@ func TestOutputFormatInReadsTheLastOutputFlagBeforeTheSeparator(t *testing.T) {
 			cmd.Flags().StringP("field", "f", "", "")
 			cmd.Flags().BoolP("verbose", "v", false, "")
 
-			format, given := OutputFormatIn(cmd, tt.args)
+			format, given, missing := OutputFormatIn(cmd, tt.args)
 
 			assert.Equal(t, tt.want, format)
 			assert.Equal(t, tt.wantGiven, given)
+			assert.Equal(t, tt.wantMissing, missing)
 		})
 	}
 }

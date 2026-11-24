@@ -128,7 +128,7 @@ func run(cmd *cobra.Command, args []string, ios *utils.IOStreams, w io.Writer) i
 	switch {
 	case ok:
 	case !utils.IsHookError(err):
-		format, _ := utils.OutputFormatIn(failed, args)
+		format, _, _ := utils.OutputFormatIn(failed, args)
 		exitErr, _ = errors.AsType[*utils.ExitError](ios.NewParseExitError(failed, format, err.Error()))
 	case utils.IsUsageError(err):
 		exitErr, _ = errors.AsType[*utils.ExitError](utils.NewUsageExitError("%s", err))

@@ -190,11 +190,11 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 				return fail(msg)
 			}
 		case arg == "--output" || strings.HasPrefix(arg, "--output="):
-			var errMsg string
-			outputFormat, i, errMsg = extractFlagValue(args, i, "--output")
+			value, next, errMsg := extractFlagValue(args, i, "--output")
 			if errMsg != "" {
-				return fail(errMsg)
+				return fail(errMsg) // a value read earlier still sets the refusal's format
 			}
+			outputFormat, i = value, next
 			if outputFormat == "" {
 				return fail("--output requires a value (table|json)")
 			}

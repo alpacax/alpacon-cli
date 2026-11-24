@@ -991,6 +991,7 @@ func TestParseRemoteExecArgsRefusalCarriesTheOutputReadBeforeIt(t *testing.T) {
 		{name: "output ahead of an unknown flag", args: []string{"--output", "json", "--bogus", "my-server"}, want: "json"},
 		{name: "output joined by equals ahead of an unknown flag", args: []string{"--output=json", "--bogus", "my-server"}, want: "json"},
 		{name: "output after an unknown flag", args: []string{"--bogus", "--output", "json", "my-server"}},
+		{name: "output without a value after a set one", args: []string{"--output=json", "--output"}, want: "json"},
 		{name: "remote output after an attached short value and an unknown flag", args: []string{"-uroot", "--bogus", "my-server", "--output", "json"}},
 		{name: "output ahead of a refused file with a remote output after the separator", args: []string{"--output", "json", "--file", "relative", "my-server", "--", "echo", "--output", "table"}, want: "json"},
 	}

@@ -158,7 +158,7 @@ func Execute() {
 		utils.PrintExitError(exitErr)
 		utils.Exit(exitErr.Code)
 	case !utils.IsHookError(err):
-		format, _ := utils.OutputFormatIn(cmd, os.Args[1:])
+		format, _, _ := utils.OutputFormatIn(cmd, os.Args[1:])
 		utils.CliParseErrorWithExit(cmd, format, err.Error())
 	case utils.IsUsageError(err):
 		utils.CliUsageErrorWithExit("%s", err)
