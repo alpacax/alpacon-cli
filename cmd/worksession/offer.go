@@ -67,7 +67,10 @@ func (s *Selection) handleRefusal(serverName string, refusal error) (bool, error
 	defer stop()
 	s.ios.Warning("The server refused the request: %s.", utils.WorkSessionReason(utils.StructuredErrorCode(refusal)))
 
-	sessions, want, err := s.reusableSessions()
+	sessions, want, err := s.reusableSessions(ctx)
+	if s.stopped(ctx) {
+		return false, nil
+	}
 	if err != nil {
 		s.ios.Warning("Could not look up your WorkSessions: %s", err)
 		return false, nil
@@ -101,7 +104,7 @@ func (s *Selection) handleRefusal(serverName string, refusal error) (bool, error
 		}
 		s.ios.Warning("Could not use that duration: %s", err)
 	}
-	created, err := wsapi.CreateWorkSession(s.ac, wsapi.WorkSessionCreateRequest{
+	created, err := wsapi.CreateWorkSessionWithContext(ctx, s.ac, wsapi.WorkSessionCreateRequest{
 		Description:           purpose,
 		RequesterType:         "user",
 		Scopes:                s.need.scopes(),
@@ -111,6 +114,10 @@ func (s *Selection) handleRefusal(serverName string, refusal error) (bool, error
 	})
 	if errors.Is(err, api.ErrUnusableID) {
 		return false, utils.NewEnvelopeExitError(opCreate, err, "Could not use the new WorkSession: %s.", err)
+	}
+	if err != nil && ctx.Err() != nil && utils.HTTPStatusCode(err) == 0 {
+		s.ios.Warning("Stopped while creating the WorkSession; it may have been created, so check 'alpacon work-session ls' before creating another.")
+		return false, nil
 	}
 	if err != nil {
 		if hint := TargetErrorHint(err); hint != "" {
@@ -142,12 +149,24 @@ func (s *Selection) read(ctx context.Context, prompt func() (string, error)) (st
 	})
 	select {
 	case a := <-done:
+		if s.stopped(ctx) { // select picks at random when both are ready
+			return "", errPromptInterrupted
+		}
 		return a.text, a.err
 	case <-ctx.Done():
 		_, _ = fmt.Fprintln(s.ios.ErrOut)
-		s.ios.Warning("Stopped at the prompt; no WorkSession was selected.")
+		s.stopped(ctx)
 		return "", errPromptInterrupted
 	}
+}
+
+// stopped reports whether Ctrl+C ended the offer before a session was chosen, and says so.
+func (s *Selection) stopped(ctx context.Context) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+	s.ios.Warning("Stopped; no WorkSession was selected.")
+	return true
 }
 
 // confirm asks a yes/no question; answered is false when Ctrl+C ended the prompt.
@@ -161,19 +180,19 @@ func (s *Selection) confirm(ctx context.Context, question string) (yes, answered
 	return reply == "y", !errors.Is(err, errPromptInterrupted)
 }
 
-func (s *Selection) reusableSessions() ([]wsapi.WorkSession, Want, error) {
-	me, err := iam.GetCurrentUser(s.ac)
+func (s *Selection) reusableSessions(ctx context.Context) ([]wsapi.WorkSession, Want, error) {
+	me, err := iam.GetCurrentUserWithContext(ctx, s.ac)
 	if err != nil {
 		return nil, Want{}, err
 	}
 	if strings.TrimSpace(me.ID) == "" {
 		return nil, Want{}, errors.New("the current user has no ID")
 	}
-	serverID, err := server.GetServerIDByName(s.ac, s.need.Server)
+	serverID, err := server.GetServerIDByNameWithContext(ctx, s.ac, s.need.Server)
 	if err != nil {
 		return nil, Want{}, err
 	}
-	sessions, err := wsapi.ListWorkSessions(s.ac, wsapi.SessionFilter{
+	sessions, err := wsapi.ListWorkSessionsWithContext(ctx, s.ac, wsapi.SessionFilter{
 		Status:        strings.Join([]string{wsapi.StatusActive, wsapi.StatusApproved, wsapi.StatusPending}, ","),
 		RequesterType: "user",
 		AssignedUser:  me.ID,
@@ -232,12 +251,16 @@ func (s *Selection) settle(ctx context.Context, session *wsapi.WorkSession, wait
 		session = final
 		PrintSessionAdvisories(s.ios, final)
 	} else {
-		active, err := wsapi.GetWorkSession(s.ac, session.ID)
-		if err != nil {
+		active, err := wsapi.GetWorkSessionWithContext(ctx, s.ac, session.ID)
+		if err != nil && ctx.Err() == nil {
 			s.ios.Warning("Could not verify WorkSession %s: %s", id, err)
 			return false, nil
 		}
 		session = active
+	}
+	if ctx.Err() != nil {
+		s.ios.Warning("Stopped before WorkSession %s was selected.", id)
+		return false, nil
 	}
 	active := session
 	if active.ID != id || !want.Usable(active, time.Now()) {
@@ -246,6 +269,10 @@ func (s *Selection) settle(ctx context.Context, session *wsapi.WorkSession, wait
 	}
 	if err := s.ac.SaveActiveWorkSession(active.ID); err != nil {
 		s.ios.Warning("Could not set WorkSession %s active for this workspace: %s", id, err)
+		return false, nil
+	}
+	if ctx.Err() != nil { // the save can wait on the config lock
+		s.ios.Warning("Stopped; WorkSession %s is now the active session for workspace %s, but the request was not sent again.", id, utils.SanitizeTerminalText(s.ac.WorkspaceName))
 		return false, nil
 	}
 	s.id = active.ID

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -20,6 +21,7 @@ import (
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/filelock"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -284,7 +286,7 @@ func TestMissingCurrentUserIDStopsBeforeSessionList(t *testing.T) {
 	ios, _, _ := utils.TestIOStreams()
 	selection := &Selection{need: Need{Operation: Command, Server: "web-1"}, ios: ios, ac: ac}
 
-	_, _, err := selection.reusableSessions()
+	_, _, err := selection.reusableSessions(context.Background())
 
 	require.Error(t, err)
 	assert.Equal(t, "/api/iam/users/-/\n", paths.String())
@@ -900,6 +902,7 @@ func TestCtrlCAtTheOfferPromptDeclinesWithoutCreating(t *testing.T) {
 	originalStdin := os.Stdin
 	os.Stdin = read
 	var creates atomic.Int32
+	ctx, cancel := context.WithCancel(context.Background())
 	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, WorkspaceName: "ws", HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
 		switch {
 		case r.URL.Path == "/api/iam/users/-/":
@@ -910,14 +913,13 @@ func TestCtrlCAtTheOfferPromptDeclinesWithoutCreating(t *testing.T) {
 			creates.Add(1)
 			return http.StatusInternalServerError, `{}`
 		default:
+			time.AfterFunc(50*time.Millisecond, cancel) // Ctrl+C arrives while the prompt waits
 			return http.StatusOK, `{"count":0,"results":[]}`
 		}
 	})}
 	ios, _, stderr := utils.TestIOStreams()
 	selection := &Selection{id: "old-session", source: SourceConfig, need: Need{Operation: Transfer, Server: "web-1"}, ios: ios, ac: ac, interrupt: func() (context.Context, context.CancelFunc) {
 		assert.Empty(t, stderr.String(), "Ctrl+C must be handled before anything is asked")
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel() // Ctrl+C arrives while the prompt waits
 		return ctx, cancel
 	}}
 	t.Cleanup(func() { _ = write.Close(); selection.reads.Wait(); os.Stdin = originalStdin })
@@ -928,7 +930,7 @@ func TestCtrlCAtTheOfferPromptDeclinesWithoutCreating(t *testing.T) {
 	require.NoError(t, failure)
 	assert.Zero(t, creates.Load())
 	assert.Equal(t, "old-session", selection.ID())
-	assert.Contains(t, stderr.String(), "Stopped at the prompt; no WorkSession was selected.")
+	assert.Contains(t, stderr.String(), "Stopped; no WorkSession was selected.")
 }
 
 func TestOfferAccountGuidanceNamesTheOperationsCommand(t *testing.T) {
@@ -966,6 +968,126 @@ func TestOfferAccountGuidanceNamesTheOperationsCommand(t *testing.T) {
 			}
 		})
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestCtrlCDuringAnOfferRequestEndsItWithoutSavingOrResending(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		stall  bool
+		input  string
+		want   string
+	}{
+		{name: "current user stalls", method: http.MethodGet, path: "/api/iam/users/-/", stall: true, want: "Stopped; no WorkSession was selected."},
+		{name: "server lookup stalls", method: http.MethodGet, path: "/api/servers/servers/", stall: true, want: "Stopped; no WorkSession was selected."},
+		{name: "session list stalls", method: http.MethodGet, path: "/api/work-sessions/sessions/", stall: true, want: "Stopped; no WorkSession was selected."},
+		{name: "session list answers", method: http.MethodGet, path: "/api/work-sessions/sessions/", want: "Stopped; no WorkSession was selected."},
+		{name: "verification stalls", method: http.MethodGet, path: "/api/work-sessions/sessions/reuse-session/", stall: true, input: "y\n", want: "Stopped before WorkSession reuse-session was selected."},
+		{name: "verification answers", method: http.MethodGet, path: "/api/work-sessions/sessions/reuse-session/", input: "y\n", want: "Stopped before WorkSession reuse-session was selected."},
+		{name: "create stalls", method: http.MethodPost, path: "/api/work-sessions/sessions/", stall: true, input: "n\ny\nfix\n1h\n", want: "it may have been created"},
+		{name: "create answers", method: http.MethodPost, path: "/api/work-sessions/sessions/", input: "n\ny\nfix\n1h\n", want: "Stopped before WorkSession reuse-session was selected."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupTmpConfig(t)
+			read := replaceStdin(t, tt.input)
+			defer func() { _ = read.Close() }()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			session, err := json.Marshal(activeServerSession("reuse-session", time.Now().UTC()))
+			require.NoError(t, err)
+			answers := map[string]string{
+				"GET /api/iam/users/-/":                          `{"id":"user-1"}`,
+				"GET /api/servers/servers/":                      `{"count":1,"results":[{"id":"server-1","name":"web-1"}]}`,
+				"GET /api/work-sessions/sessions/":               `{"count":1,"results":[` + string(session) + `]}`,
+				"GET /api/work-sessions/sessions/reuse-session/": string(session),
+				"POST /api/work-sessions/sessions/":              string(session),
+			}
+			ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, WorkspaceName: "ws", HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.Method == tt.method && r.URL.Path == tt.path {
+					cancel() // Ctrl+C lands while this request is in flight
+					if tt.stall {
+						select {
+						case <-r.Context().Done():
+							return nil, r.Context().Err()
+						case <-time.After(5 * time.Second):
+							t.Errorf("%s %s ignored Ctrl+C", r.Method, r.URL.Path)
+						}
+					}
+				}
+				recorder := httptest.NewRecorder()
+				recorder.Header().Set("Content-Type", "application/json")
+				_, _ = recorder.WriteString(answers[r.Method+" "+r.URL.Path])
+				return recorder.Result(), nil
+			})}}
+			ios, _, stderr := utils.TestIOStreams()
+			selection := &Selection{id: "old-session", source: SourceConfig, need: Need{Operation: Command, Server: "web-1"}, ios: ios, ac: ac, interrupt: func() (context.Context, context.CancelFunc) { return ctx, cancel }}
+
+			resend, failure := selection.handleRefusal("web-1", selectionCodedError{code: utils.WorkSessionRequired})
+
+			assert.False(t, resend)
+			require.NoError(t, failure)
+			assert.Equal(t, "old-session", selection.ID())
+			assert.Contains(t, stderr.String(), tt.want)
+			stored, err := config.GetActiveWorkSessionFor("ws")
+			require.NoError(t, err)
+			assert.Empty(t, stored)
+		})
+	}
+}
+
+// answeredContext has ended by the time its Done is read, and by then the prompt has answered too.
+type answeredContext struct {
+	context.Context
+	answered func()
+}
+
+func (c answeredContext) Done() <-chan struct{} { c.answered(); return c.Context.Done() }
+
+func TestCtrlCWinsOverAnAnswerThatArrivesWithIt(t *testing.T) {
+	t.Parallel()
+	ended, cancel := context.WithCancel(context.Background())
+	cancel()
+	for range 50 { // select picks at random between the two
+		ios, _, _ := utils.TestIOStreams()
+		selection := &Selection{ios: ios}
+
+		_, err := selection.read(answeredContext{Context: ended, answered: selection.reads.Wait}, func() (string, error) { return "y", nil })
+
+		require.ErrorIs(t, err, errPromptInterrupted)
+	}
+}
+
+func TestCtrlCDuringTheConfigSaveDoesNotResend(t *testing.T) {
+	setupTmpConfig(t)
+	active := activeServerSession("new-session", time.Now().UTC())
+	body, err := json.Marshal(active)
+	require.NoError(t, err)
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	held, err := filelock.Acquire(filepath.Join(home, ".alpacon", "config.json.lock"), 0644)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, WorkspaceName: "ws", HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+		time.AfterFunc(300*time.Millisecond, func() { cancel(); _ = held.Release() }) // the save is waiting by now
+		return http.StatusOK, string(body)
+	})}
+	ios, _, stderr := utils.TestIOStreams()
+	selection := &Selection{id: "old-session", source: SourceConfig, ios: ios, ac: ac}
+	want := Want{ServerID: "server-1", AssignedUser: "user-1", RequesterType: "user", Scopes: []string{"command"}}
+
+	resend, failure := selection.settle(ctx, &active, false, want, "")
+
+	assert.False(t, resend)
+	require.NoError(t, failure)
+	assert.Equal(t, "old-session", selection.ID())
+	assert.Contains(t, stderr.String(), "the request was not sent again")
 }
 
 func TestSettleDoesNotSaveIntoALoginMadeWhileItWaited(t *testing.T) {

@@ -125,7 +125,12 @@ func (f SessionFilter) params() map[string]string {
 
 // ListWorkSessions returns whole work sessions, optionally narrowed to one server or cluster.
 func ListWorkSessions(ac *client.AlpaconClient, filter SessionFilter) ([]WorkSession, error) {
-	sessions, err := api.FetchAllPages[WorkSession](ac, workSessionURL, filter.params())
+	return ListWorkSessionsWithContext(context.Background(), ac, filter)
+}
+
+// ListWorkSessionsWithContext is ListWorkSessions ended early by ctx.
+func ListWorkSessionsWithContext(ctx context.Context, ac *client.AlpaconClient, filter SessionFilter) ([]WorkSession, error) {
+	sessions, err := api.FetchAllPagesWithContext[WorkSession](ctx, ac, workSessionURL, filter.params())
 	if err != nil {
 		return nil, err
 	}
@@ -150,8 +155,14 @@ func FormatDuration(d time.Duration) string {
 }
 
 func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (*WorkSession, error) {
+	return CreateWorkSessionWithContext(context.Background(), ac, req)
+}
+
+// CreateWorkSessionWithContext is CreateWorkSession ended early by ctx; a request cut off without an
+// answer may still have created the session.
+func CreateWorkSessionWithContext(ctx context.Context, ac *client.AlpaconClient, req WorkSessionCreateRequest) (*WorkSession, error) {
 	req.SudoPolicies = sudoPoliciesForRequest(req.SudoPolicies)
-	body, err := ac.SendPostRequest(workSessionURL, req)
+	body, err := ac.SendPostRequestWithContext(ctx, workSessionURL, req)
 	if err != nil {
 		return nil, err
 	}
