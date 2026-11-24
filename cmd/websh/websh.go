@@ -276,13 +276,7 @@ func runWebsh(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient
 		return utils.NewUsageExitError("The --share flag cannot be used with remote commands. Use --share for interactive sessions only.")
 	}
 
-	if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
-		sshTarget := utils.ParseSSHTarget(serverName)
-		if username == "" && sshTarget.User != "" {
-			username = sshTarget.User
-		}
-		serverName = sshTarget.Host
-	}
+	serverName, username = utils.ParseServerTarget(serverName, username)
 
 	// Command mode is an alias for exec: delegate to the shared runner so the
 	// pending-approval exit code, sudo-denial hints, and JSON buffering match
