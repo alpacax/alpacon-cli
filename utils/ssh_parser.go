@@ -36,6 +36,20 @@ func ParseSSHTarget(target string) SSHTarget {
 	return result
 }
 
+// ParseServerTarget splits user@host into host and user; a non-empty username wins over the
+// inline one. A target holding a colon is returned untouched.
+func ParseServerTarget(server, username string) (host, user string) {
+	if strings.Contains(server, ":") {
+		return server, username
+	}
+	target := ParseSSHTarget(server)
+	user = username
+	if user == "" {
+		user = target.User
+	}
+	return target.Host, user
+}
+
 // IsRemoteTarget reports whether target holds a colon and is not spelled as a local path:
 // a ./, ../, .\, ..\, \\ or / prefix, C:\x, or C:/x on Windows.
 func IsRemoteTarget(target string) bool {

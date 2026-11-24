@@ -210,42 +210,6 @@ func TestCommandParsing(t *testing.T) {
 			expectCommandArgs: []string{"ls; cat /etc/passwd"},
 		},
 		{
-			testName:          "UserAtHostSyntax",
-			args:              []string{"root@prod-docker"},
-			expectUsername:    "root",
-			expectGroupname:   "",
-			expectEnv:         map[string]string{},
-			expectServerName:  "prod-docker",
-			expectCommandArgs: nil,
-		},
-		{
-			testName:          "UserAtHostWithCommand",
-			args:              []string{"admin@web-server", "docker", "ps"},
-			expectUsername:    "admin",
-			expectGroupname:   "",
-			expectEnv:         map[string]string{},
-			expectServerName:  "web-server",
-			expectCommandArgs: []string{"docker", "ps"},
-		},
-		{
-			testName:          "UserFlagOverridesUserAtHost",
-			args:              []string{"-u", "override", "root@prod-docker", "ls"},
-			expectUsername:    "override",
-			expectGroupname:   "",
-			expectEnv:         map[string]string{},
-			expectServerName:  "prod-docker",
-			expectCommandArgs: []string{"ls"},
-		},
-		{
-			testName:          "ComplexHostnameWithUser",
-			args:              []string{"deploy@web-server-01.example.com", "uptime"},
-			expectUsername:    "deploy",
-			expectGroupname:   "",
-			expectEnv:         map[string]string{},
-			expectServerName:  "web-server-01.example.com",
-			expectCommandArgs: []string{"uptime"},
-		},
-		{
 			testName:          "DashSAfterCommandNotParsedAsShare",
 			args:              []string{"my-server", "ls", "-s"},
 			expectServerName:  "my-server",
@@ -309,20 +273,7 @@ func executeTestCommand(t *testing.T, args []string) (string, string, string, []
 			parsed.Share, parsed.ReadOnly, parsed.Env
 	}
 	require.NoError(t, err)
-
-	username := parsed.Username
-	serverName := parsed.ServerName
-
-	// Same user@host parsing as Run.
-	if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
-		sshTarget := utils.ParseSSHTarget(serverName)
-		if username == "" && sshTarget.User != "" {
-			username = sshTarget.User
-		}
-		serverName = sshTarget.Host
-	}
-
-	return username, parsed.Groupname, serverName, parsed.CommandArgs, parsed.Share, parsed.ReadOnly, parsed.Env
+	return parsed.Username, parsed.Groupname, parsed.ServerName, parsed.CommandArgs, parsed.Share, parsed.ReadOnly, parsed.Env
 }
 
 func TestParseWebshArgs_WorkSessionFlag(t *testing.T) {
