@@ -70,10 +70,11 @@ Pass --wait to block until the session is approved, for 5 minutes by default.
 --wait-approval DURATION does the same with a different timeout and implies --wait.
 Both work for user and agent sessions alike.
 
-Pass --use to also set the new session as the workspace's active session, so
-subsequent exec/websh/cp/tunnel commands attach to it without --work-session. With
---wait, --use waits until the session reaches the active state, then attaches it.
---use is for user sessions only.
+Pass --use to set the new session as the workspace's active session. On its own,
+--use attaches only sessions that are already active. Add --wait or
+--wait-approval DURATION to wait for the active state and then attach the session.
+Subsequent exec/websh/cp/tunnel commands use the attached session without
+--work-session. --use is for user sessions only.
 
 If the work needs sudo, pre-declare the command patterns with --sudo. This attaches
 session-authorized sudo policies so a non-interactive caller (e.g. an AI agent
