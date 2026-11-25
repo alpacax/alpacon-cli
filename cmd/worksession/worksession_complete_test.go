@@ -248,3 +248,24 @@ func TestWorkSessionCompleteCmd_InvalidSessionIDIsRefusedBeforeAnyRequest(t *tes
 		})
 	}
 }
+
+func TestEndingPendingSessionNamesCancel(t *testing.T) {
+	t.Parallel()
+	for _, tc := range endSessionCommands {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.Method == http.MethodGet {
+					_, _ = w.Write([]byte(`{"status":"pending"}`))
+					return
+				}
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"code":"work_session_not_active"}`))
+			}))
+			t.Cleanup(ts.Close)
+			_, err := tc.run(utils.Stdio, newTestClient(ts), "session")
+			require.ErrorContains(t, err, "is pending approval")
+			assert.ErrorContains(t, err, "alpacon work-session cancel session")
+		})
+	}
+}

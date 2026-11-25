@@ -105,7 +105,7 @@ func TestApplyWorkSessionUpdate_PreservesExistingSudoPolicies(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := applyWorkSessionUpdate(ac, "ses-1", wsapi.WorkSessionUpdateRequest{}, []wsapi.SudoPolicyInline{
+	_, _, err := applyWorkSessionUpdate(ac, "ses-1", wsapi.WorkSessionUpdateRequest{}, []wsapi.SudoPolicyInline{
 		{Commands: []string{"systemctl reload nginx"}, SessionAuthorized: true},
 	}, utils.Stdio)
 	require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestApplyWorkSessionUpdate_PendingSessionAbortsBeforePATCH(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := applyWorkSessionUpdate(ac, "ses-pending", wsapi.WorkSessionUpdateRequest{},
+	_, _, err := applyWorkSessionUpdate(ac, "ses-pending", wsapi.WorkSessionUpdateRequest{},
 		[]wsapi.SudoPolicyInline{{Commands: []string{"x"}, SessionAuthorized: true}}, utils.Stdio)
 	require.Error(t, err)
 	assert.False(t, patchCalled, "PATCH must not be issued when the validator rejects")
@@ -162,7 +162,7 @@ func TestApplyWorkSessionUpdate_FieldsOnlySkipsGet(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := applyWorkSessionUpdate(ac, "ses-1", wsapi.WorkSessionUpdateRequest{
+	_, _, err := applyWorkSessionUpdate(ac, "ses-1", wsapi.WorkSessionUpdateRequest{
 		Title:   "deploy v2",
 		Servers: []string{"srv-1", "srv-2"},
 	}, nil, utils.Stdio)
@@ -295,7 +295,7 @@ func TestApplyWorkSessionUpdate_TimeFields(t *testing.T) {
 			defer ts.Close()
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			_, err := applyWorkSessionUpdate(ac, "ses-1", tt.req, nil, utils.Stdio)
+			_, _, err := applyWorkSessionUpdate(ac, "ses-1", tt.req, nil, utils.Stdio)
 
 			assert.Equal(t, tt.wantPatch, patchCalled)
 			if len(tt.wantErr) == 0 {
@@ -334,7 +334,7 @@ func TestApplyWorkSessionUpdate_SudoPlusFields(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := applyWorkSessionUpdate(ac, "ses-1",
+	_, _, err := applyWorkSessionUpdate(ac, "ses-1",
 		wsapi.WorkSessionUpdateRequest{Description: "rollout"},
 		[]wsapi.SudoPolicyInline{{Commands: []string{"systemctl reload nginx"}, SessionAuthorized: true}}, utils.Stdio)
 	require.NoError(t, err)
@@ -384,4 +384,22 @@ func TestUpdateTargetSession_PicksTheArgumentOrTheClientWorkspaceSession(t *test
 			assert.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func TestUpdateReportsPendingScopes(t *testing.T) {
+	t.Parallel()
+	session := &wsapi.WorkSession{ID: "session", Status: "active", Scopes: []string{"command"}, ApprovalRequestID: "original", PendingModificationRequest: &wsapi.PendingModificationRequest{ID: "change"}}
+	req := wsapi.WorkSessionUpdateRequest{Scopes: []string{"command", "sudo"}}
+	output := newWorkSessionUpdateOutput(session, http.StatusAccepted, req, false)
+	assert.True(t, output.PendingApproval)
+	assert.Equal(t, "change", output.ApprovalRequestID)
+	assert.Contains(t, output.Message, "requested scopes (command, sudo) pending approval (request change)")
+	assert.Contains(t, output.Message, "Current scopes: command.")
+	session.PendingModificationRequest.Changes = json.RawMessage(`{"servers":["web"]}`)
+	targets := newWorkSessionUpdateOutput(session, http.StatusAccepted, req, false)
+	assert.Contains(t, targets.Message, "target servers pending approval")
+	assert.NotContains(t, targets.Message, "requested scopes")
+	immediate := newWorkSessionUpdateOutput(session, http.StatusOK, req, false)
+	assert.False(t, immediate.PendingApproval)
+	assert.Equal(t, "Work session session updated (status: active).", immediate.Message)
 }

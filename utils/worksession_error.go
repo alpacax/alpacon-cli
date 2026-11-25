@@ -64,7 +64,7 @@ var workSessionReasonMap = map[string]string{
 	WorkSessionNotUsable:            "session is no longer usable",
 	WorkSessionNotActive:            "selected session is not active",
 	WorkSessionExpired:              "selected session has expired",
-	WorkSessionScopeNotAllowed:      "session does not include this scope",
+	WorkSessionScopeNotAllowed:      "session does not include this scope. If the scope change is pending, wait for its approval",
 	WorkSessionServerNotAllowed:     "target server is not in this session",
 	WorkSessionClusterNotAllowed:    "target cluster is not in this session",
 	WorkSessionAssigneeMismatch:     "this session is assigned to another principal",

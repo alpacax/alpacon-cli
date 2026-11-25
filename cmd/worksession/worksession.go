@@ -1,6 +1,9 @@
 package worksession
 
 import (
+	"fmt"
+
+	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -100,6 +103,11 @@ Run 'alpacon whoami' to check your WorkSession requirement and active session.`,
 // The error is the server's alone; a failed clear only warns. Reports whether it cleared.
 func endSession(ios *utils.IOStreams, ac *client.AlpaconClient, id string, end func(*client.AlpaconClient, string) error) (bool, error) {
 	if err := end(ac, id); err != nil {
+		if utils.StructuredErrorCode(err) == utils.WorkSessionNotActive {
+			if session, lookupErr := wsapi.GetWorkSession(ac, id); lookupErr == nil && session.Status == wsapi.StatusPending {
+				return false, fmt.Errorf("work session %s is pending approval. To cancel it, run 'alpacon work-session cancel %s': %w", id, id, err)
+			}
+		}
 		return false, err
 	}
 	cleared, err := config.ClearActiveWorkSessionFor(ac.WorkspaceName, id)

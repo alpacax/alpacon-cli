@@ -130,7 +130,7 @@ var sudoDenialHints = []struct {
 		guidance: "sudo was denied: your work session does not include the 'sudo' scope, the ceiling checked before any policy.\n" +
 			"Add it and re-run (--scope replaces the whole list, so name every scope you keep; omit SESSION_ID to use the active session):\n" +
 			"  alpacon work-session update [SESSION_ID] --scope command,sudo\n" +
-			"Adding a scope may require approval before it takes effect. A new session created with --sudo gets the scope on its own.\n",
+			"If this scope change is already pending, wait for its approval before rerunning the command. A new session created with --sudo gets the scope on its own.\n",
 	},
 	{
 		// A command with no requesting user, i.e. a service-token submission, which this deployment
