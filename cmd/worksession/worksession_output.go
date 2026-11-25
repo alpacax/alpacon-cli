@@ -111,6 +111,7 @@ func newWorkSessionUpdateOutput(session *wsapi.WorkSession, status int, req wsap
 		return output
 	}
 	output.PendingApproval = true
+	description := req.Description != ""
 	scopes := req.Scopes
 	servers := len(req.Servers) > 0
 	if pending := session.PendingModificationRequest; pending != nil {
@@ -122,11 +123,15 @@ func newWorkSessionUpdateOutput(session *wsapi.WorkSession, status int, req wsap
 					scopes = req.Scopes
 				}
 			}
+			_, description = fields["description"]
 			_, servers = fields["servers"]
 			_, sudo = fields["sudo_policies"]
 		}
 	}
 	var changes []string
+	if description {
+		changes = append(changes, "description")
+	}
 	if len(scopes) > 0 {
 		changes = append(changes, "requested scopes ("+joinOrNone(scopes)+")")
 	}

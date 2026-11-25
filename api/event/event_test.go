@@ -1740,6 +1740,36 @@ func TestStreamApprovedCommand_UsesRemainingWait(t *testing.T) {
 	}
 }
 
+func TestStreamApprovedCommand_RunningGetsFullExecutionTimeout(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "11s")
+	synctest.Test(t, func(t *testing.T) {
+		cfg := streamingServerConfig{
+			cmdID: "cmd-uuid", serverID: "srv-uuid",
+			firstDetailDelay: 2 * time.Second, heldPolls: 1, runningPolls: 1,
+			terminal: EventDetails{Status: "completed", Success: new(true), Result: "finished"},
+		}
+		ac := newStreamingServers(t, cfg)
+		var out bytes.Buffer
+		require.NoError(t, StreamApprovedCommand(ac, cfg.cmdID, &out, 11*time.Second))
+		assert.Equal(t, "finished", out.String())
+	})
+}
+
+func TestStreamApprovedCommand_SetupReturnsCompletedResult(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		cfg := streamingServerConfig{
+			cmdID: "cmd-uuid", serverID: "srv-uuid",
+			firstDetailDelay: 2 * time.Second, completedBeforeSubscription: true,
+			terminal: EventDetails{Status: "completed", Success: new(true), Result: "finished"},
+		}
+		ac := newStreamingServers(t, cfg)
+		var out bytes.Buffer
+		require.NoError(t, StreamApprovedCommand(ac, cfg.cmdID, &out, 2*time.Second))
+		assert.Equal(t, "finished", out.String())
+	})
+}
+
 func TestStreamPollError_RunningCommandKeepsClientTimeout(t *testing.T) {
 	t.Parallel()
 	timeout := &ClientTimeoutError{}
@@ -2183,7 +2213,8 @@ type streamingServerConfig struct {
 	// subscription; a reconnect stays open and sends nothing.
 	dropAfter time.Duration
 	// firstDetailDelay holds the first detail response that long before answering it.
-	firstDetailDelay time.Duration
+	firstDetailDelay            time.Duration
+	completedBeforeSubscription bool
 	// firstDetailRetryAfter, when set, answers the first detail request 429 with it.
 	firstDetailRetryAfter string
 }
@@ -2206,7 +2237,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		if wsConns.Add(1) > 1 && cfg.dropAfter > 0 {
+		if (wsConns.Add(1) > 1 && cfg.dropAfter > 0) || cfg.completedBeforeSubscription {
 			for {
 				if _, _, err := conn.ReadMessage(); err != nil {
 					return
@@ -2379,7 +2410,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"running","server":{"id":"` + cfg.serverID + `"}}`))
 				return
 			}
-			if cfg.sessionStatus == 0 { // a refused session never opens the WS
+			if cfg.sessionStatus == 0 && !cfg.completedBeforeSubscription { // wait for any live output
 				select {
 				case <-delivered:
 				case <-wsGone:

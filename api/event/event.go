@@ -71,7 +71,8 @@ type commandSubmitter func() (CommandResponse, error)
 // it by an in-flight request, and a test swapping a var would swap it under a
 // loop still running.
 type pollSeams struct {
-	cancel <-chan struct{}
+	initialDeadline time.Time // setup may have spent part of the initial wait
+	cancel          <-chan struct{}
 	// finAtRisk, for a poll beside a stream, closes once that stream may have lost
 	// the fin. Until then the poll reads every finDeliverablePollTick.
 	finAtRisk <-chan struct{}
@@ -395,7 +396,10 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 	var response EventDetails
 
 	started := seams.Now()
-	deadline := started.Add(timeout)
+	deadline := seams.initialDeadline
+	if deadline.IsZero() {
+		deadline = started.Add(timeout)
+	}
 	finAtRisk := seams.finAtRisk // nil once closed, so a wait never selects it again
 	// pace returns the next wait and the signal that cuts it short, nil when none should.
 	pace := func() (time.Duration, <-chan struct{}) {
@@ -414,7 +418,7 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 		delay, lost = 0, nil
 	}
 	failures, throttles := 0, 0
-	budget := utils.NewThrottleBudget(timeout)
+	budget := utils.NewThrottleBudget(deadline.Sub(started))
 	lastRefusalHint := ""
 
 	for {
@@ -596,7 +600,16 @@ func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer
 	}
 	// The fin event targets the server, which only the command itself names here.
 	// A failed read just skips the subscription; the poll still ends the run.
-	details, _ := getCommandByPathID(ac, pathID)
+	details, readErr := getCommandByPathID(ac, pathID)
+	if readErr == nil && details.Status != "" {
+		if !isPollWaitStatus(details.Status, true) {
+			listener.Stop()
+			return writePolledResult(ac, pathID, out, details)
+		}
+		if IsRunningStatus(details.Status) {
+			deadline = time.Now().Add(execTimeout())
+		}
+	}
 	return streamSubscribed(ac, listener, pathID, details.Server.ID, out, time.Until(deadline), &details)
 }
 
@@ -646,8 +659,8 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 	go func() {
 		// The fin subscription went in after the submit, so a command that finished
 		// first sent its fin before anyone listened: read once at the start.
-		details, err := pollCommandExecution(ac, cmdID, time.Until(deadline), streamPollTick, waitApproval,
-			pollSeams{cancel: pollCancel, uncapped: true, readFirst: true, finAtRisk: listener.FinAtRisk()})
+		details, err := pollCommandExecution(ac, cmdID, execTimeout(), streamPollTick, waitApproval,
+			pollSeams{initialDeadline: deadline, cancel: pollCancel, uncapped: true, readFirst: true, finAtRisk: listener.FinAtRisk()})
 		switch {
 		case errors.Is(err, errPollCancelled): // the stream is gone; nobody reads these
 		case err != nil:
@@ -922,10 +935,14 @@ func runCommandFallback(ac *client.AlpaconClient, submit commandSubmitter, out i
 // the poll waiting through approval and preserves the latest detail from setup.
 func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID api.PathID, out io.Writer, timeout, tick time.Duration, approvalDetail *EventDetails, cause error) error {
 	utils.CliWarning("real-time output unavailable (%v); falling back to polling", cause)
-	details, err := pollCommandExecution(ac, cmdID, timeout, tick, approvalDetail != nil, pollSeams{})
+	details, err := pollCommandExecution(ac, cmdID, execTimeout(), tick, approvalDetail != nil, pollSeams{initialDeadline: time.Now().Add(timeout)})
 	if err != nil {
 		return streamPollError(cmdID, details, err, approvalDetail)
 	}
+	return writePolledResult(ac, cmdID, out, details)
+}
+
+func writePolledResult(ac *client.AlpaconClient, cmdID api.PathID, out io.Writer, details EventDetails) error {
 	if IsDeniedStatus(details.Status) {
 		return errorFromDetails(cmdID, details)
 	}
