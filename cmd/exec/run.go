@@ -584,9 +584,8 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 		}
 	}()
 
-	// Status-hold: the server parked this job at awaiting_approval (it never ran).
-	// With --wait, resubscribe to the same job and stream once approved instead of
-	// re-submitting; without --wait, surface it for pendingApprovalFailure.
+	// A status hold never ran. Follow the same job with --wait to avoid submitting
+	// it twice; without --wait, let pendingApprovalFailure report it.
 	var pendingErr *event.PendingApprovalError
 	if errors.As(err, &pendingErr) {
 		if waitTimeout <= 0 {
@@ -598,7 +597,13 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 		if pendingErr.AssigneeConfirms() {
 			waiting = "Waiting for your confirmation in the Alpacon web console (output streams once confirmed)..."
 		}
-		if worksession.IsEndedStatus(pendingErr.WorkSessionStatus) {
+		if pendingErr.WorkSessionStatus == worksession.StatusPaused {
+			action := "approval"
+			if pendingErr.AssigneeConfirms() {
+				action = "your confirmation"
+			}
+			waiting = fmt.Sprintf("Waiting for %s in the Alpacon web console; an authorized person must also use Resume on the paused work session...", action)
+		} else if worksession.IsEndedStatus(pendingErr.WorkSessionStatus) {
 			waiting = "Waiting for the command's final status; its work session has ended and the command cannot run in that session..."
 		}
 		spinner := utils.NewSpinner(waiting)

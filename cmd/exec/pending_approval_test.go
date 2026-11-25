@@ -272,6 +272,39 @@ func TestCurrentPauseGuidanceDoesNotRequireATrigger(t *testing.T) {
 	}
 }
 
+func TestApprovalWaitProgressUsesCurrentSessionStatus(t *testing.T) {
+	for _, status := range []string{"paused", "active"} {
+		for _, lane := range []string{"single_approver", "assignee"} {
+			t.Run(status+"/"+lane, func(t *testing.T) {
+				ts := newHeldCommandServer(t, fmt.Sprintf(`,"approval_lane":%q,"work_session":{"id":%q,"status":%q}`, lane, assigneeJobID, status))
+				stdout, stderr, code := runExecHelper(t, ts.URL, "--output", "json", "--wait-approval", "1ms", "prod", "--", "uptime")
+				assert.Equal(t, utils.ExitCodePendingApproval, code)
+				assert.NotContains(t, stdout, `"work_session_paused"`)
+				var progress []string
+				for line := range strings.SplitSeq(stderr, "\n") {
+					if strings.HasPrefix(line, "Waiting for ") {
+						progress = append(progress, line)
+					}
+				}
+				require.Len(t, progress, 1, "stderr: %s", stderr)
+				waiting := "Waiting for approval"
+				if lane == "assignee" {
+					waiting = "Waiting for your confirmation"
+				}
+				assert.Contains(t, progress[0], waiting)
+				if status == "paused" {
+					assert.Contains(t, progress[0], "authorized person")
+					assert.Contains(t, progress[0], "Resume")
+					assert.NotContains(t, progress[0], "output streams once")
+				} else {
+					assert.Contains(t, progress[0], "output streams once")
+					assert.NotContains(t, progress[0], "Resume")
+				}
+			})
+		}
+	}
+}
+
 func TestEndedSessionApprovalDoesNotPromiseExecution(t *testing.T) {
 	for _, status := range []string{"completed", "expired", "revoked", "rejected", "cancelled"} {
 		for _, surface := range []string{"exec", "logs", "wait"} {
