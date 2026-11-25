@@ -93,7 +93,15 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 	// A local, not utils.OutputFormat: binding the global would write its default each time a tree is built.
 	root.PersistentFlags().StringVar(&output, "output", utils.OutputFormatTable, "Output format: table or json")
 	root.Flags().BoolVarP(&showVersion, "version", "v", false, versionCmd.Short)
+	defaultHelp := root.HelpFunc()
+	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		if ios.IsJSON() || output == utils.OutputFormatJSON { // exec and websh parse --output into ios themselves
+			cmd.SetOut(cmd.ErrOrStderr())
+		}
+		defaultHelp(cmd, args)
+	})
 	root.AddCommand(
+		newOutputHelpCmd(),
 		versionCmd,
 		newUpdateCmd(ios),
 		newLoginCmd(newClient, ios),
@@ -134,11 +142,12 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 func Execute() {
 	utils.LocalSignalConsoleOrigin = localSignalConsoleOrigin
 	root := newRootCmd(client.NewAlpaconAPIClient, utils.Stdio)
-	kube.ApplySurfaceGate(root, kubernetesSurfaceEnabled())
+	kube.ApplySurfaceGate(root, utils.Stdio, kubernetesSurfaceEnabled())
 	root.InitDefaultCompletionCmd()
 	rejectUnknownSubcommands(root)
 	utils.MarkHookErrors(root)
 	keepWithOwnParser(root, os.Args[1:])
+	utils.CommandName = commandName(root, os.Args[1:])
 	cmd, err := root.ExecuteC()
 	exitErr, isExitErr := errors.AsType[*utils.ExitError](err)
 	switch {
@@ -149,12 +158,21 @@ func Execute() {
 		utils.PrintExitError(exitErr)
 		utils.Exit(exitErr.Code)
 	case !utils.IsHookError(err):
-		utils.CliParseErrorWithExit(cmd, utils.OutputFormatIn(os.Args[1:]), err.Error())
+		format, _, _ := utils.OutputFormatIn(cmd, os.Args[1:])
+		utils.CliParseErrorWithExit(cmd, format, err.Error())
 	case utils.IsUsageError(err):
 		utils.CliUsageErrorWithExit("%s", err)
 	default:
 		utils.CliErrorWithExit("While executing the command: %s", err)
 	}
+}
+
+func commandName(root *cobra.Command, args []string) string {
+	cmd, _, err := root.Find(args)
+	if err != nil || cmd == root {
+		return ""
+	}
+	return strings.TrimPrefix(cmd.CommandPath(), root.Name()+" ")
 }
 
 // keepWithOwnParser detaches the subcommands of a command that parses its own flags when a flag Cobra

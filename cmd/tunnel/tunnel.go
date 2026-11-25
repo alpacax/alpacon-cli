@@ -172,7 +172,13 @@ func tunnelExitError(exitCode int, err error) error {
 		return utils.NewExitError("%s", err)
 	}
 	if exitCode != 0 {
-		return utils.NewSilentExitError(exitCode) // the local command already reported its failure
+		failure := utils.Failure{
+			ExitCode:  exitCode,
+			ErrorCode: utils.ErrorCodeLocalCommandFailed,
+			Message:   fmt.Sprintf("the local command failed, so tunnel exits with status %d", exitCode), // a signal or forced kill also lands on 1
+			Operation: "tunnel",
+		}
+		return utils.NewFailureExitError(failure, nil /* table: the local command already reported its failure */)
 	}
 	return nil
 }

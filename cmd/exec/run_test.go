@@ -41,9 +41,9 @@ func TestAsPhasedError(t *testing.T) {
 		wantNil bool
 	}{
 		{name: "nil_returns_false", err: nil, wantOk: false, wantNil: true},
-		{name: "remote_command_error", err: &event.RemoteCommandError{ExitCode: 23}, wantOk: true},
+		{name: "remote_command_error", err: &event.RemoteCommandError{ReportedExitCode: new(23)}, wantOk: true},
 		{name: "client_timeout", err: &event.ClientTimeoutError{}, wantOk: true},
-		{name: "wrapped_remote_command_error", err: fmt.Errorf("wrap: %w", &event.RemoteCommandError{ExitCode: 1}), wantOk: true},
+		{name: "wrapped_remote_command_error", err: fmt.Errorf("wrap: %w", &event.RemoteCommandError{ReportedExitCode: new(1)}), wantOk: true},
 		{name: "wrapped_client_timeout", err: fmt.Errorf("wrap: %w", &event.ClientTimeoutError{}), wantOk: true},
 		{name: "plain_error", err: errors.New("nope"), wantOk: false},
 	}
@@ -66,53 +66,46 @@ func TestRemoteCommandOutcome(t *testing.T) {
 		remoteErr        *event.RemoteCommandError
 		wantStderrEmpty  bool
 		wantStderrPhrase string
-		wantExitCode     int
 	}{
 		{
 			name: "phase_propagates_exit_124",
 			remoteErr: &event.RemoteCommandError{
-				Output:     "command timed out",
-				ExitCode:   124,
-				ErrorPhase: "remote_command_exceeded_timeout",
+				Output:           "command timed out",
+				ReportedExitCode: new(124),
+				ErrorPhase:       "remote_command_exceeded_timeout",
 			},
 			wantStderrPhrase: "remote_command_exceeded_timeout",
-			wantExitCode:     124,
 		},
 		{
 			name: "non_zero_exit_without_phase_skips_stderr_line",
 			remoteErr: &event.RemoteCommandError{
-				Output:     "rsync: some files vanished",
-				ExitCode:   23,
-				ErrorPhase: "",
+				Output:           "rsync: some files vanished",
+				ReportedExitCode: new(23),
+				ErrorPhase:       "",
 			},
 			wantStderrEmpty: true,
-			wantExitCode:    23,
 		},
 		{
 			name: "phase_still_emits_stderr",
 			remoteErr: &event.RemoteCommandError{
-				ExitCode:   1,
-				ErrorPhase: "agent_timeout",
+				ReportedExitCode: new(1),
+				ErrorPhase:       "agent_timeout",
 			},
 			wantStderrPhrase: "agent_timeout",
-			wantExitCode:     1,
 		},
 		{
 			name: "exit_1_no_phase",
 			remoteErr: &event.RemoteCommandError{
-				ExitCode:   1,
-				ErrorPhase: "",
+				ReportedExitCode: new(1),
+				ErrorPhase:       "",
 			},
 			wantStderrEmpty: true,
-			wantExitCode:    1,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			stderrLine, exitCode := remoteCommandOutcome(utils.Stdio, tt.remoteErr)
-
-			assert.Equal(t, tt.wantExitCode, exitCode, "exit code should match")
+			stderrLine := remoteCommandOutcome(utils.Stdio, tt.remoteErr)
 
 			if tt.wantStderrEmpty {
 				assert.Empty(t, stderrLine, "stderr line should be empty when no phase")
@@ -153,12 +146,11 @@ func TestRemoteCommandOutcomeSanitizesPhase(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			stderrLine, exitCode := remoteCommandOutcome(utils.Stdio, &event.RemoteCommandError{
-				ExitCode:   1,
-				ErrorPhase: tt.phase,
+			stderrLine := remoteCommandOutcome(utils.Stdio, &event.RemoteCommandError{
+				ReportedExitCode: new(1),
+				ErrorPhase:       tt.phase,
 			})
 
-			assert.Equal(t, 1, exitCode)
 			assert.Equal(t, tt.wantStderr, stderrLine)
 		})
 	}
@@ -191,7 +183,7 @@ func stubApprovalWaitSeams(t *testing.T, interval time.Duration, code string) *e
 		runPresenceStepUp, streamApprovedCommand, approvalWaitPollInterval, getCommandByID = origStepUp, origStream, origInterval, origGetCommand
 	})
 	approvalWaitPollInterval = interval
-	return &event.RemoteCommandError{Output: denialLine(code), ExitCode: 1, CommandID: "cmd-1"}
+	return &event.RemoteCommandError{Output: denialLine(code), ReportedExitCode: new(1), CommandID: "cmd-1"}
 }
 
 func TestRunExecWithApprovalWait_NullHeldAfterCancelDoesNotEndTheWait(t *testing.T) {
@@ -510,7 +502,7 @@ func TestIsPollFailure(t *testing.T) {
 		want bool
 	}{
 		{name: "no error is not a failure", err: nil},
-		{name: "the command ran and was denied", err: &event.RemoteCommandError{ExitCode: 1}},
+		{name: "the command ran and was denied", err: &event.RemoteCommandError{ReportedExitCode: new(1)}},
 		{name: "a tick that spent a whole command timeout", err: &event.ClientTimeoutError{}},
 		{name: "a reviewer rejected the command", err: &event.CommandRejectedError{}},
 		{name: "a wrapped rejection stays an answer", err: fmt.Errorf("failed to execute command on 'srv' server: %w", &event.CommandRejectedError{})},
@@ -1068,11 +1060,10 @@ func TestRemoteCommandOutcomeHomeDirectoryConflict(t *testing.T) {
 	t.Parallel()
 
 	ios, _, _ := utils.TestIOStreams()
-	stderrLine, exitCode := remoteCommandOutcome(ios, &event.RemoteCommandError{
-		ExitCode:   1,
-		ErrorPhase: "system_home_conflict",
+	stderrLine := remoteCommandOutcome(ios, &event.RemoteCommandError{
+		ReportedExitCode: new(1),
+		ErrorPhase:       "system_home_conflict",
 	})
-	assert.Equal(t, 1, exitCode)
 	assert.Equal(t, "Error: [system_home_conflict] the account could not be created because its home directory already belongs to another account\n"+
 		"Hint: Ask a server administrator to archive or clean up that directory.\n", stderrLine)
 }
@@ -1080,11 +1071,10 @@ func TestRemoteCommandOutcomeHomeDirectoryConflict(t *testing.T) {
 func TestRemoteCommandOutcomeFilePhaseHint(t *testing.T) {
 	t.Parallel()
 
-	stderrLine, exitCode := remoteCommandOutcome(utils.Stdio, &event.RemoteCommandError{
-		ExitCode:   1,
-		ErrorPhase: "file_hash_mismatch",
+	stderrLine := remoteCommandOutcome(utils.Stdio, &event.RemoteCommandError{
+		ReportedExitCode: new(1),
+		ErrorPhase:       "file_hash_mismatch",
 	})
-	assert.Equal(t, 1, exitCode)
 	assert.Equal(t, 1, strings.Count(stderrLine, "file_hash_mismatch"),
 		"the code must appear once, in brackets: %q", stderrLine)
 	assert.Contains(t, stderrLine, event.DescribePhase("file_hash_mismatch"))
@@ -1092,9 +1082,9 @@ func TestRemoteCommandOutcomeFilePhaseHint(t *testing.T) {
 	assert.Contains(t, stderrLine, "alpacon exec --file")
 
 	// A phase with no hint gets no hint line.
-	stderrLine, _ = remoteCommandOutcome(utils.Stdio, &event.RemoteCommandError{
-		ExitCode:   1,
-		ErrorPhase: "agent_timeout",
+	stderrLine = remoteCommandOutcome(utils.Stdio, &event.RemoteCommandError{
+		ReportedExitCode: new(1),
+		ErrorPhase:       "agent_timeout",
 	})
 	assert.Equal(t, utils.Red("Error")+": [agent_timeout] "+event.DescribePhase("agent_timeout")+"\n", stderrLine)
 }
@@ -1162,6 +1152,141 @@ func TestExecUserRefusal(t *testing.T) {
 			if tt.parsed.InvokedAs == WebshInvocation {
 				assert.NotContains(t, hint, "alpacon exec")
 			}
+		})
+	}
+}
+
+func TestCommandResultFailureReportsClientTimeoutInJSON(t *testing.T) {
+	t.Parallel()
+	ios, out, errOut := utils.TestIOStreams()
+	require.NoError(t, ios.SetOutputFormat(utils.OutputFormatJSON))
+
+	err := commandResultFailure(ios, errOut, &event.ClientTimeoutError{}, ExecInvocation)
+
+	var exitErr *utils.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
+	ios.FprintExitError(errOut, exitErr)
+	assert.Empty(t, out.String())
+	assert.JSONEq(t, `{"ok":false,"exit_code":1,"error_code":"cli_error","message":"[client_timeout] CLI gave up waiting for the server to report a result","context":{"operation":"command"}}`, errOut.String())
+}
+
+func TestCommandResultFailureReportsAStatusOnlyFailureInJSON(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, wantJSON string
+		err            error
+	}{
+		{
+			name:     "wrapped status",
+			err:      fmt.Errorf("failed to execute command on 'srv' server: %w", &event.CommandStatusError{Status: "stuck"}),
+			wantJSON: `{"ok":false,"exit_code":1,"error_code":"remote_command_failed","message":"the command failed with status stuck","context":{"operation":"command"}}`,
+		},
+		{
+			name:     "status beside an exit code",
+			err:      &event.CommandStatusError{Status: "cancelled", ReportedExitCode: new(23)},
+			wantJSON: `{"ok":false,"exit_code":1,"error_code":"remote_command_failed","message":"the command failed with status cancelled","context":{"operation":"command"},"remote_exit_code":23}`,
+		},
+		{
+			name:     "status beside a phase",
+			err:      &event.CommandStatusError{Status: "stuck", ErrorPhase: "agent_timeout"},
+			wantJSON: `{"ok":false,"exit_code":1,"error_code":"remote_command_failed","message":"[agent_timeout] agent acknowledged the command but did not return a result in time (status=stuck)","context":{"operation":"command"}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ios, out, errOut := utils.TestIOStreams()
+			require.NoError(t, ios.SetOutputFormat(utils.OutputFormatJSON))
+
+			err := commandResultFailure(ios, errOut, tt.err, ExecInvocation)
+
+			var exitErr *utils.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
+			ios.FprintExitError(errOut, exitErr)
+			assert.Empty(t, out.String())
+			assert.JSONEq(t, tt.wantJSON, errOut.String())
+		})
+	}
+}
+
+func TestCommandResultFailureReportsInTable(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		err        error
+		wantCode   int
+		wantStderr string
+	}{
+		{
+			name:       "client timeout",
+			err:        &event.ClientTimeoutError{},
+			wantCode:   utils.ExitCodeGeneralError,
+			wantStderr: "Error: [client_timeout] CLI gave up waiting for the server to report a result\n",
+		},
+		{
+			name:       "remote failure with a phase",
+			err:        &event.RemoteCommandError{ReportedExitCode: new(23), ErrorPhase: "agent_timeout"},
+			wantCode:   23,
+			wantStderr: "Error: [agent_timeout] agent acknowledged the command but did not return a result in time\n",
+		},
+		{
+			name:     "remote failure with no exit code",
+			err:      &event.RemoteCommandError{},
+			wantCode: utils.ExitCodeGeneralError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ios, out, errOut := utils.TestIOStreams()
+
+			err := commandResultFailure(ios, errOut, tt.err, ExecInvocation)
+
+			var exitErr *utils.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, tt.wantCode, exitErr.Code)
+			ios.FprintExitError(errOut, exitErr)
+			assert.Empty(t, out.String())
+			assert.Equal(t, tt.wantStderr, errOut.String())
+		})
+	}
+}
+
+func TestCommandResultFailureReportsRemoteStatus(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, phase, output, wantJSON string
+		reportedExit                  *int
+		wantCode                      int
+	}{
+		{name: "no exit code reported", wantCode: 1, wantJSON: `{"ok":false,"exit_code":1,"error_code":"remote_command_failed","message":"the remote command failed","context":{"operation":"command"}}`},
+		{name: "remote failure", reportedExit: new(23), wantCode: 23, wantJSON: `{"ok":false,"exit_code":23,"error_code":"remote_command_failed","message":"the remote command exited with status 23","context":{"operation":"command"},"remote_exit_code":23}`},
+		{name: "failure reported with exit code zero", reportedExit: new(0), wantCode: 1, wantJSON: `{"ok":false,"exit_code":1,"error_code":"remote_command_failed","message":"the remote command failed","context":{"operation":"command"},"remote_exit_code":0}`},
+		{name: "sanitized phase", reportedExit: new(23), wantCode: 23, phase: "bad\x1b[31mphase", wantJSON: `{"ok":false,"exit_code":23,"error_code":"remote_command_failed","message":"[badphase] badphase","context":{"operation":"command"},"remote_exit_code":23}`},
+		{name: "phase hint precedes sudo guidance", reportedExit: new(23), wantCode: 23, phase: "system_home_conflict", output: "Alpacon denied this sudo command (SUDO_NO_WORKSESSION_POLICY).", wantJSON: `{"ok":false,"exit_code":23,"error_code":"remote_command_failed","message":"[system_home_conflict] the account could not be created because its home directory already belongs to another account","context":{"operation":"command"},"remote_exit_code":23,"next_actions":[{"description":"Ask a server administrator to archive or clean up that directory."},{"description":"sudo was denied: this command is not covered by a session-authorized sudo policy in your work session. Add it and re-run (omit SESSION_ID to use the active session): alpacon work-session update [SESSION_ID] --sudo \"<command>\" The addition may require approval before it takes effect."}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ios, out, errOut := utils.TestIOStreams()
+			require.NoError(t, ios.SetOutputFormat(utils.OutputFormatJSON))
+			ios.ColorEnabled = true
+			remoteErr := &event.RemoteCommandError{
+				ReportedExitCode: tt.reportedExit,
+				ErrorPhase:       tt.phase,
+				Output:           tt.output,
+			}
+
+			err := commandResultFailure(ios, errOut, remoteErr, ExecInvocation)
+
+			var exitErr *utils.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, tt.wantCode, exitErr.Code)
+			ios.FprintExitError(errOut, exitErr)
+			assert.Empty(t, out.String())
+			assert.JSONEq(t, tt.wantJSON, errOut.String())
 		})
 	}
 }

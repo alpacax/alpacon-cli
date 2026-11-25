@@ -12,6 +12,9 @@ import (
 const PurposeDemandLead = "Purpose required—the verification gate held this command and is asking what it is for. " +
 	"No approver has been notified: state the purpose and it is judged again, once, with that in hand."
 
+// commandPurposeNotDemandedCode is the server's refusal of an answer no open demand is waiting for.
+const commandPurposeNotDemandedCode = "command_purpose_not_demanded"
+
 // purposeGuidance says what makes a purpose worth stating. It travels in the
 // response rather than living only in help text: an agent reads the answer to
 // its own call far more reliably than documentation that context compaction may
@@ -183,8 +186,13 @@ func (s *IOStreams) PrintPurposeRefused(commandID string, cause error) {
 	// The server's hint, when the refusal carries one, says why in place of the
 	// local guess, and leads the follow-ups.
 	actions := RefusalNextActions(cause)
-	if RefusalHint(cause) != "" {
+	refused := isPurposeRefusal(cause)
+	if RefusalHint(cause) != "" || !refused {
 		message = fmt.Sprintf("failed to state the purpose for %s: %s.", commandID, cause)
+	}
+	errorCode := "" // classified from cause
+	if refused {
+		errorCode = ErrorCodePurposeRefused
 	}
 	next := NextAction{
 		Command:     fmt.Sprintf("alpacon exec logs %s", commandID),
@@ -193,17 +201,14 @@ func (s *IOStreams) PrintPurposeRefused(commandID string, cause error) {
 	actions = append(actions, next)
 
 	if s.IsJSON() {
-		envelope := purposeAnswerJSON{
-			OK:          false,
-			Status:      "purpose_refused",
+		FprintFailureJSON(s.ErrOut, Failure{
 			ExitCode:    ExitCodeGeneralError,
-			Message:     message,
-			CommandID:   commandID,
+			ErrorCode:   errorCode,
+			Operation:   "command",
+			Err:         cause,
+			Message:     SanitizeTerminalText(message),
 			NextActions: actions,
-		}
-		if err := PrintJSONValue(s.Out, envelope); err != nil {
-			_, _ = fmt.Fprintf(s.Out, `{"ok":false,"status":"purpose_refused"}`+"\n")
-		}
+		})
 		return
 	}
 
@@ -211,4 +216,10 @@ func (s *IOStreams) PrintPurposeRefused(commandID string, cause error) {
 	for _, action := range actions {
 		fmt.Fprintf(s.ErrOut, "  %s\n", action.PlainText())
 	}
+}
+
+// isPurposeRefusal reports the server's refusal of the answer itself; a settled demand and another
+// principal's answer share this one code. Any other failure keeps its own code.
+func isPurposeRefusal(cause error) bool {
+	return ClassifyError(cause) == commandPurposeNotDemandedCode
 }

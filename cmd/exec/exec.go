@@ -259,8 +259,8 @@ This is client guidance; personal-token enforcement depends on the server versio
 			parsed := ParseRemoteExecArgs(ios, args)
 
 			if parsed.ShowHelp {
-				_ = cmd.Help()
-				return nil
+				_ = ios.SetOutputFormat(parsed.OutputFormat) // help prints whatever the format, as under Cobra
+				return cmd.Help()
 			}
 			if parsed.Err != "" {
 				return ios.NewParseExitError(cmd, parsed.OutputFormat, parsed.Err)
