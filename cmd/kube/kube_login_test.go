@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
-	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
@@ -52,6 +51,15 @@ func TestParseKubeScopes(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestChooseWorkSessionRejectsAnEmptyClusterID(t *testing.T) {
+	t.Parallel()
+
+	choice, err := chooseWorkSession(&utils.IOStreams{}, nil, kubeLoginInput{}, " \t", nil)
+
+	require.EqualError(t, err, "cluster ID is required")
+	assert.Empty(t, choice)
 }
 
 func TestReadKubeLoginInput(t *testing.T) {
@@ -148,93 +156,6 @@ func TestReadKubeLoginInput(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, "prod-east", in.cluster)
 			tt.check(t, in)
-		})
-	}
-}
-
-func clusterSession(id, status string, mutate func(*wsapi.WorkSession)) wsapi.WorkSession {
-	ws := wsapi.WorkSession{
-		ID:            id,
-		Status:        status,
-		RequesterType: "user",
-		Scopes:        []string{"kube"},
-		Clusters:      []types.ClusterSummary{{ID: "c-1", Name: "prod-east"}},
-		ExpiresAt:     time.Date(2026, 10, 21, 18, 0, 0, 0, time.UTC),
-	}
-	if mutate != nil {
-		mutate(&ws)
-	}
-	return ws
-}
-
-func TestSessionWantUsable(t *testing.T) {
-	t.Parallel()
-	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
-	future := now.Add(time.Hour)
-	want := sessionWant{clusterID: "c-1", requesterType: "user"}
-	tests := []struct {
-		name string
-		ws   wsapi.WorkSession
-		want sessionWant
-		ok   bool
-	}{
-		{name: "active cluster session", ws: clusterSession("a", "active", nil), want: want, ok: true},
-		{name: "cluster ID compared without case", ws: clusterSession("a", "active", func(ws *wsapi.WorkSession) { ws.Clusters[0].ID = "C-1" }), want: want, ok: true},
-		{name: "server session", ws: clusterSession("a", "active", func(ws *wsapi.WorkSession) {
-			ws.Clusters = nil
-			ws.Scopes = []string{"command"}
-			ws.Servers = []types.ServerSummary{{ID: "s-1", Name: "web-01"}}
-		}), want: want},
-		{name: "another cluster", ws: clusterSession("a", "active", func(ws *wsapi.WorkSession) { ws.Clusters[0].ID = "c-2" }), want: want},
-		{name: "pending", ws: clusterSession("a", "pending", nil), want: want},
-		{name: "expired by time", ws: clusterSession("a", "active", func(ws *wsapi.WorkSession) { ws.ExpiresAt = now.Add(-time.Minute) }), want: want},
-		{name: "starts later", ws: clusterSession("a", "active", func(ws *wsapi.WorkSession) { ws.StartsAt = &future }), want: want},
-		{name: "agent session for a person", ws: clusterSession("a", "active", func(ws *wsapi.WorkSession) { ws.RequesterType = "agent" }), want: want},
-		{name: "missing a wanted scope", ws: clusterSession("a", "active", nil), want: sessionWant{clusterID: "c-1", requesterType: "user", scopes: []string{"kube", "kube_exec"}}},
-		{name: "holding the wanted scopes", ws: clusterSession("a", "active", func(ws *wsapi.WorkSession) { ws.Scopes = []string{"kube", "kube_exec"} }), want: sessionWant{clusterID: "c-1", requesterType: "user", scopes: []string{"kube", "kube_exec"}}, ok: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.ok, tt.want.usable(&tt.ws, now))
-		})
-	}
-}
-
-func TestPickClusterSession(t *testing.T) {
-	t.Parallel()
-	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
-	want := sessionWant{clusterID: "c-1", requesterType: "user"}
-	older := clusterSession("old", "pending", func(ws *wsapi.WorkSession) { ws.AddedAt = now.Add(-2 * time.Hour) })
-	newer := clusterSession("new", "approved", func(ws *wsapi.WorkSession) { ws.AddedAt = now.Add(-time.Hour) })
-	active := clusterSession("act", "active", nil)
-	ended := clusterSession("end", "rejected", nil)
-	durationBased := clusterSession("dur", "pending", func(ws *wsapi.WorkSession) { ws.ExpiresAt = time.Time{} })
-
-	tests := []struct {
-		name     string
-		sessions []wsapi.WorkSession
-		wantID   string
-		wantWait bool
-	}{
-		{name: "none", sessions: nil},
-		{name: "only ended", sessions: []wsapi.WorkSession{ended}},
-		{name: "usable wins over waiting", sessions: []wsapi.WorkSession{older, active}, wantID: "act"},
-		{name: "newest waiting", sessions: []wsapi.WorkSession{older, newer}, wantID: "new", wantWait: true},
-		{name: "no expiry before activation", sessions: []wsapi.WorkSession{durationBased}, wantID: "dur", wantWait: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			ws, wait := pickClusterSession(tt.sessions, want, now)
-			if tt.wantID == "" {
-				assert.Nil(t, ws)
-				assert.False(t, wait)
-				return
-			}
-			require.NotNil(t, ws)
-			assert.Equal(t, tt.wantID, ws.ID)
-			assert.Equal(t, tt.wantWait, wait)
 		})
 	}
 }

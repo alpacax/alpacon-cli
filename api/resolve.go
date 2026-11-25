@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -52,12 +53,17 @@ func RequireName(name, blankMsg string) (string, error) {
 // ResolveByName looks up a single resource through a server-side, exact-match name filter.
 // A blank name is refused up front—an empty filter comes back as the whole list, not "found".
 func ResolveByName[T any](ac *client.AlpaconClient, opts ResolveByNameOptions) (*T, error) {
+	return ResolveByNameWithContext[T](context.Background(), ac, opts)
+}
+
+// ResolveByNameWithContext is ResolveByName ended early by ctx.
+func ResolveByNameWithContext[T any](ctx context.Context, ac *client.AlpaconClient, opts ResolveByNameOptions) (*T, error) {
 	name, err := RequireName(opts.Name, opts.BlankMsg)
 	if err != nil {
 		return nil, err
 	}
 
-	results, err := FetchPagesUpTo[T](ac, opts.Endpoint, map[string]string{opts.FilterKey: name}, 1)
+	results, _, err := walkPageNumberPages[T](ctx, ac, opts.Endpoint, map[string]string{opts.FilterKey: name}, 1)
 	if err != nil {
 		return nil, err
 	}

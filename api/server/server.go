@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -98,7 +99,12 @@ func RequestServerAction(ac *client.AlpaconClient, serverName, action string, fo
 }
 
 func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, error) {
-	pathID, err := serverPathIDByName(ac, serverName)
+	return GetServerIDByNameWithContext(context.Background(), ac, serverName)
+}
+
+// GetServerIDByNameWithContext is GetServerIDByName ended early by ctx.
+func GetServerIDByNameWithContext(ctx context.Context, ac *client.AlpaconClient, serverName string) (string, error) {
+	pathID, _, err := resolveServer(ctx, ac, serverName)
 	if err != nil {
 		return "", err
 	}
@@ -107,7 +113,7 @@ func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, err
 
 // GetServerByName resolves a server's ID and platform in one request.
 func GetServerByName(ac *client.AlpaconClient, serverName string) (ServerRef, error) {
-	pathID, result, err := resolveServer(ac, serverName)
+	pathID, result, err := resolveServer(context.Background(), ac, serverName)
 	if err != nil {
 		return ServerRef{}, err
 	}
@@ -115,12 +121,12 @@ func GetServerByName(ac *client.AlpaconClient, serverName string) (ServerRef, er
 }
 
 func serverPathIDByName(ac *client.AlpaconClient, serverName string) (api.PathID, error) {
-	pathID, _, err := resolveServer(ac, serverName)
+	pathID, _, err := resolveServer(context.Background(), ac, serverName)
 	return pathID, err
 }
 
-func resolveServer(ac *client.AlpaconClient, serverName string) (api.PathID, ServerDetails, error) {
-	result, err := api.ResolveByName[ServerDetails](ac, api.ResolveByNameOptions{
+func resolveServer(ctx context.Context, ac *client.AlpaconClient, serverName string) (api.PathID, ServerDetails, error) {
+	result, err := api.ResolveByNameWithContext[ServerDetails](ctx, ac, api.ResolveByNameOptions{
 		Endpoint:    serverURL,
 		FilterKey:   "name",
 		Name:        serverName,

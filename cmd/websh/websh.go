@@ -21,6 +21,9 @@ import (
 // errHelpRequested signals that -h/--help was seen during parsing.
 var errHelpRequested = errors.New("help requested")
 
+var selectWorkSession = worksession.Select
+var createWebshSession = websh.CreateWebshSession
+
 type WebshArgs struct {
 	Username      string
 	Groupname     string
@@ -334,24 +337,24 @@ func runWebsh(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient
 		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 
-	workSessionID, err := worksession.Resolve(alpaconClient, parsed.WorkSessionID)
+	sel, err := selectWorkSession(ios, alpaconClient, parsed.WorkSessionID, worksession.Need{Operation: worksession.Websh, Server: serverName, Account: username})
 	if err != nil {
 		return utils.NewExitError("%s", err)
 	}
 
-	session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
+	session, err := createWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, sel.ID())
 
 	if err != nil {
-		err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(alpaconClient, func() error {
-			session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
+		err = utils.HandleCommonErrors(err, serverName, sel.Offer(mfa.ErrorCallbacks(alpaconClient, func() error {
+			session, err = createWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, sel.ID())
 			return err
-		}))
+		})))
 
 		if err != nil {
 			if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
 				return exitErr
 			}
-			if gateErr := utils.WorkSessionExitError(err, utils.OperationWebsh, serverName, authMethod, workSessionID); gateErr != nil {
+			if gateErr := utils.WorkSessionExitError(err, utils.OperationWebsh, serverName, authMethod, sel.ID()); gateErr != nil {
 				return gateErr
 			}
 			return utils.NewExitError("Failed to create websh session for '%s' server: %s.", serverName, utils.InteractiveOnly(err, "open an interactive Websh terminal"))

@@ -1,6 +1,7 @@
 package iam
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -430,7 +431,12 @@ func diffEditedUser(original []byte, edited any) (*UserEdit, error) {
 }
 
 func GetCurrentUser(ac *client.AlpaconClient) (*CurrentUserResponse, error) {
-	responseBody, err := getCurrentUserRaw(ac)
+	return GetCurrentUserWithContext(context.Background(), ac)
+}
+
+// GetCurrentUserWithContext is GetCurrentUser ended early by ctx.
+func GetCurrentUserWithContext(ctx context.Context, ac *client.AlpaconClient) (*CurrentUserResponse, error) {
+	responseBody, err := getCurrentUserRaw(ctx, ac)
 	if err != nil {
 		return nil, err
 	}
@@ -447,7 +453,7 @@ func GetCurrentUser(ac *client.AlpaconClient) (*CurrentUserResponse, error) {
 // CurrentUsernameUnset reports whether the caller's account has a null
 // username. An empty string or a missing field reads as not unset.
 func CurrentUsernameUnset(ac *client.AlpaconClient) (bool, error) {
-	body, err := getCurrentUserRaw(ac)
+	body, err := getCurrentUserRaw(context.Background(), ac)
 	if err != nil {
 		return false, err
 	}
@@ -460,12 +466,12 @@ func CurrentUsernameUnset(ac *client.AlpaconClient) (bool, error) {
 	return string(user.Username) == "null", nil
 }
 
-func getCurrentUserRaw(ac *client.AlpaconClient) ([]byte, error) {
+func getCurrentUserRaw(ctx context.Context, ac *client.AlpaconClient) ([]byte, error) {
 	meURL, err := utils.BuildURL(userURL, "-", nil)
 	if err != nil {
 		return nil, err
 	}
-	return ac.SendGetRequest(meURL)
+	return ac.SendGetRequestWithContext(ctx, meURL)
 }
 
 func GetUserMemberships(ac *client.AlpaconClient, userID string) ([]GroupMembership, error) {

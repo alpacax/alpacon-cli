@@ -124,7 +124,7 @@ func RunUseSession(ac *client.AlpaconClient, uuid string) (*wsapi.WorkSession, e
 			ErrClusterSessionNotAttachable, ws.ID)
 	}
 	// Store the server's canonical ID rather than the raw argument, matching the printed JSON.
-	if err := config.SetActiveWorkSessionFor(ac.WorkspaceName, ws.ID); err != nil {
+	if err := ac.SaveActiveWorkSession(ws.ID); err != nil {
 		return nil, err
 	}
 	return ws, nil

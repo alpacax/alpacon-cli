@@ -13,6 +13,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -209,6 +210,14 @@ type approvalPoll struct {
 // builds the closure, and a re-run after MFA or approval is the same
 // closure called again.
 type commandRun func() error
+
+type commandStream interface {
+	RunCommand(serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error
+	RunFileCommand(serverName string, file event.FileExecution, username, groupname, workSessionID, purpose string, out io.Writer) error
+	Close()
+}
+
+var newCommandStream = func(ac *client.AlpaconClient) commandStream { return event.NewCommandStream(ac) }
 
 // approvalOutcomeOf reads a command detail's sudo grant status into a decision
 // the wait loop can switch on. authorized is the only grant; rejected and
@@ -452,9 +461,9 @@ func credentialInlineHint(ios *utils.IOStreams, invokedAs Invocation) string {
 // and retries once. A non-interactive caller gets the verification link to complete out of band
 // and the denial unchanged, so commandResultFailure prints the static hint. Interactive websh keeps
 // its own sudo MFA flow.
-func RunExecWithPresenceStepUp(ios *utils.IOStreams, ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
+func RunExecWithPresenceStepUp(ios *utils.IOStreams, ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, selection *worksession.Selection, purpose string, out io.Writer) error {
 	return runWithPresenceStepUp(ios, ac, serverName, func() error {
-		return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+		return RunCommandWithRetry(ac, serverName, command, username, groupname, env, selection, purpose, out)
 	})
 }
 
@@ -547,9 +556,9 @@ func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalPoll, err
 //
 // The poll reads sudo_grant_status rather than re-submitting the command, which would file a
 // fresh approval request on every tick.
-func RunExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
+func RunExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, selection *worksession.Selection, purpose string, waitTimeout time.Duration, out io.Writer) error {
 	return runWithApprovalWait(ios, ac, func() error {
-		return utils.WithSignalFields(runPresenceStepUp(ios, ac, serverName, command, username, groupname, env, workSessionID, purpose, out), localsignal.Fields{Argv0: localsignal.Argv0(command), Server: serverName, Account: username, Session: workSessionID})
+		return utils.WithSignalFields(runPresenceStepUp(ios, ac, serverName, command, username, groupname, env, selection, purpose, out), localsignal.Fields{Argv0: localsignal.Argv0(command), Server: serverName, Account: username, Session: selection.ID()})
 	}, waitTimeout, out)
 }
 
@@ -557,17 +566,17 @@ func RunExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, ser
 // lane. Only the submission differs—the file object in place of a command
 // line—so the presence step-up, the approval wait and the re-run after a grant
 // are the same layers the generic lane runs through.
-func RunFileExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, serverName string, file event.FileExecution, username, groupname, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
+func RunFileExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, serverName string, file event.FileExecution, username, groupname string, selection *worksession.Selection, purpose string, waitTimeout time.Duration, out io.Writer) error {
 	return runWithApprovalWait(ios, ac, func() error {
 		err := runWithPresenceStepUp(ios, ac, serverName, func() error {
-			// One stream for the attempt and its MFA retries; see RunCommandWithRetry.
-			stream := event.NewCommandStream(ac)
+			// Attempts share one stream: an MFA wait resubmits every second, and a stream each would open an event session and WebSocket each time.
+			stream := newCommandStream(ac)
 			defer stream.Close()
-			return runWithRetry(ac, serverName, func() error {
-				return stream.RunFileCommand(serverName, file, username, groupname, workSessionID, purpose, out)
+			return runWithRetry(ac, serverName, selection, func() error {
+				return stream.RunFileCommand(serverName, file, username, groupname, selection.ID(), purpose, out)
 			})
 		})
-		return utils.WithSignalFields(err, localsignal.Fields{Argv0: localsignal.Argv0(file.Path), Server: serverName, Account: username, Session: workSessionID})
+		return utils.WithSignalFields(err, localsignal.Fields{Argv0: localsignal.Argv0(file.Path), Server: serverName, Account: username, Session: selection.ID()})
 	}, waitTimeout, out)
 }
 
@@ -578,7 +587,7 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 	err = utils.WithSignalFields(err, utils.SignalFields(err), ac)
 	announced := false
 	defer func() {
-		if _, mfaFailed := errors.AsType[*utils.ExitError](result); mfaFailed { // its cause is the MFA lookup's, not a refusal of this command
+		if _, recoveryFailed := errors.AsType[*utils.ExitError](result); recoveryFailed { // Recovery failed; not a refusal of this request.
 			return
 		}
 		fields := utils.SignalFields(err)
@@ -869,30 +878,25 @@ func pendingApprovalFailure(ios *utils.IOStreams, stderr io.Writer, err error, p
 	return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 }
 
-// RunCommandWithRetry executes a remote command with MFA/username-required error
-// handling and retry logic, streaming output to out.
-// workSessionID is forwarded as the work_session field; pass "" to omit it.
-//
-// The attempt and its retries share one output stream: the MFA wait retries a
-// refused submission once a second for minutes, and a stream per attempt would
-// open an event session and a WebSocket each time.
-func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
-	stream := event.NewCommandStream(ac)
+// RunCommandWithRetry streams a command and handles submission retries on one event stream.
+// It reads selection before every attempt so a settled WorkSession reaches the resend.
+func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, selection *worksession.Selection, purpose string, out io.Writer) error {
+	stream := newCommandStream(ac)
 	defer stream.Close()
-	return runWithRetry(ac, serverName, func() error {
-		return stream.RunCommand(serverName, command, username, groupname, env, workSessionID, purpose, out)
+	return runWithRetry(ac, serverName, selection, func() error {
+		return stream.RunCommand(serverName, command, username, groupname, env, selection.ID(), purpose, out)
 	})
 }
 
-// runWithRetry is RunCommandWithRetry over a commandRun; the MFA retry is the
-// same closure called again.
-func runWithRetry(ac *client.AlpaconClient, serverName string, run commandRun) error {
+// runWithRetry is RunCommandWithRetry over a commandRun.
+// Attempts share one stream so retries do not open another event session and WebSocket.
+func runWithRetry(ac *client.AlpaconClient, serverName string, selection *worksession.Selection, run commandRun) error {
 	err := run()
 	if propagated, ok := propagateCommandError(err); ok {
 		return propagated
 	}
 	if err != nil {
-		err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(ac, run))
+		err = utils.HandleCommonErrors(err, serverName, selection.Offer(mfa.ErrorCallbacks(ac, run)))
 		// RetryOperation may surface a propagated error; re-check after HandleCommonErrors.
 		if propagated, ok := propagateCommandError(err); ok {
 			return propagated
