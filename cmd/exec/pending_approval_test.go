@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,9 +12,13 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/localsignal"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -436,57 +441,70 @@ func TestPausedApprovalSurvivesFailedTimeoutRefresh(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		initialPause bool
-		wait         string
+		wait         time.Duration
 	}{
-		{"initial hold", true, "1ms"},
-		{"later poll", false, "1s"},
+		{"initial hold", true, time.Millisecond},
+		{"later poll", false, time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var reads atomic.Int32
-			var failedRead atomic.Bool
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				switch r.URL.Path {
-				case "/api/servers/servers/":
-					_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
-				case "/api/events/commands/":
-					_, _ = w.Write([]byte(`[{"id":"cmd-1"}]`))
-				case "/api/events/commands/cmd-1/":
-					n := reads.Add(1)
-					if n == 1 || (n == 2 && !tc.initialPause) {
-						_, _ = fmt.Fprintf(w, `{"id":"cmd-1","status":"awaiting_approval","work_session_paused":%t,"work_session_id":"550e8400-e29b-41d4-a716-446655440000","console_url":"https://alpacon.io/acme/commands/cmd-1"}`, tc.initialPause || n == 2)
+			t.Setenv("HOME", t.TempDir())
+			synctest.Test(t, func(t *testing.T) {
+				const sessionID = "550e8400-e29b-41d4-a716-446655440000"
+				const consoleURL = "https://alpacon.io/acme/commands/cmd-1"
+				var reads atomic.Int32
+				var finalRefresh atomic.Bool
+				pollEnded := make(chan struct{})
+				ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/api/events/commands/cmd-1/" {
+						http.NotFound(w, r)
 						return
 					}
-					failedRead.Store(true)
-					if n == 3 && !tc.initialPause {
-						select {
-						case <-r.Context().Done():
-						case <-time.After(2 * time.Second):
+					w.Header().Set("Content-Type", "application/json")
+					if !tc.initialPause {
+						switch reads.Add(1) {
+						case 1:
+							_, _ = fmt.Fprintf(w, `{"id":"cmd-1","status":"awaiting_approval","work_session_paused":true,"work_session_id":%q,"console_url":%q}`, sessionID, consoleURL)
+							return
+						case 2:
+							select {
+							case <-r.Context().Done():
+							case <-time.After(2 * tc.wait):
+							}
+							close(pollEnded)
 							w.WriteHeader(http.StatusServiceUnavailable)
+							return
+						default:
+							<-pollEnded
 						}
-						return
 					}
+					finalRefresh.Store(true)
 					w.WriteHeader(http.StatusServiceUnavailable)
-					_, _ = w.Write([]byte(`{"detail":"temporarily unavailable"}`))
-				default:
-					http.NotFound(w, r)
+				}))
+				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+				originalTick := event.CommandPollTick
+				t.Cleanup(func() { event.CommandPollTick = originalTick })
+				event.CommandPollTick = 10 * time.Millisecond
+				initial := &event.PendingApprovalError{CommandID: "cmd-1", WorkSessionPaused: tc.initialPause, WorkSessionID: sessionID, ConsoleURL: consoleURL}
+				ios, stdout, _ := utils.TestIOStreams()
+				require.NoError(t, ios.SetOutputFormat(utils.OutputFormatJSON))
+				err := runWithApprovalWait(ios, ac, func() error { return initial }, tc.wait, io.Discard)
+				assert.True(t, finalRefresh.Load(), "the final refresh must run after the approval wait")
+				result := pendingApprovalFailure(ios, io.Discard, err, RemoteExecArgs{})
+				var exitErr *utils.ExitError
+				require.ErrorAs(t, result, &exitErr)
+				assert.Equal(t, utils.ExitCodePendingApproval, exitErr.Code)
+				var got struct {
+					Message string         `json:"message"`
+					Server  map[string]any `json:"server"`
 				}
-			}))
-			t.Cleanup(ts.Close)
-			stdout, _, code := runExecHelper(t, ts.URL, "--output", "json", "--wait-approval", tc.wait, "prod", "--", "sudo", "reboot")
-			assert.Equal(t, utils.ExitCodePendingApproval, code)
-			assert.True(t, failedRead.Load(), "the fixture must exercise an unavailable status read")
-			var got struct {
-				Message string         `json:"message"`
-				Server  map[string]any `json:"server"`
-			}
-			require.NoError(t, json.Unmarshal([]byte(stdout), &got))
-			assert.Equal(t, map[string]any{
-				"work_session_paused": true,
-				"work_session_id":     "550e8400-e29b-41d4-a716-446655440000",
-				"console_url":         "https://alpacon.io/acme/commands/cmd-1",
-			}, got.Server)
-			assert.Contains(t, got.Message, "Resume")
+				require.NoError(t, json.Unmarshal(stdout.Bytes(), &got))
+				assert.Equal(t, map[string]any{
+					"work_session_paused": true,
+					"work_session_id":     sessionID,
+					"console_url":         consoleURL,
+				}, got.Server)
+				assert.Contains(t, got.Message, "Resume")
+			})
 		})
 	}
 }
