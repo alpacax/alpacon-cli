@@ -332,6 +332,33 @@ func TestReusePromptNamesStatusPurposeExpiryAndUncheckedAccountOnOneLine(t *test
 	assert.Contains(t, reusePrompt(&active, false, ""), "status: active")
 }
 
+func TestReusePromptNamesTheAccountTheSessionDeclares(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 23, 1, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name, declared, requested, want, absent string
+	}{
+		{"declared_and_requested_match", "root", "root", "declared account: root", "requested account"},
+		{"declared_differs_from_requested", "deploy", "root", "declared account: deploy; requested account: root", "cannot be checked"},
+		{"declared_without_request", "deploy", "", "declared account: deploy", "requested account"},
+		{"declared_with_control_characters", "dep\x1b[31mloy\nx", "", "declared account: deployx", "\x1b"},
+		{"none_declared_none_requested", "", "", "status: active", "account"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			session := serverSession("session-1", wsapi.StatusActive, now)
+			session.TargetAccountUsername = tt.declared
+
+			prompt := reusePrompt(&session, false, tt.requested)
+
+			assert.Contains(t, prompt, tt.want)
+			assert.NotContains(t, prompt, tt.absent)
+			assert.NotContains(t, prompt, "\n")
+		})
+	}
+}
+
 func TestOfferInvalidDurationRepromptsAndKeepsPurpose(t *testing.T) {
 	setupTmpConfig(t)
 	read := replaceStdin(t, "y\nrelease investigation\ninvalid\n2h\n")

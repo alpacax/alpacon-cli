@@ -220,15 +220,21 @@ func reusePrompt(session *wsapi.WorkSession, wait bool, account string) string {
 	if !session.ExpiresAt.IsZero() {
 		details = append(details, "expires: "+session.ExpiresAt.UTC().Format(time.RFC3339))
 	}
-	if account != "" {
-		accountLine, _ := utils.SanitizeTerminalLine(account)
-		details = append(details, "approved account cannot be checked; requested account: "+accountLine)
+	requested, _ := utils.SanitizeTerminalLine(account)
+	declared, _ := utils.SanitizeTerminalLine(session.TargetAccountUsername)
+	switch {
+	case declared != "" && requested != "" && requested != declared:
+		details = append(details, "declared account: "+declared+"; requested account: "+requested)
+	case declared != "":
+		details = append(details, "declared account: "+declared)
+	case requested != "":
+		details = append(details, "approved account cannot be checked; requested account: "+requested)
 	}
 	return fmt.Sprintf("Use WorkSession %s (%s)?", id, strings.Join(details, "; "))
 }
 
 // settle makes session the one the operation sends. createdFor is the account it was created for,
-// empty for a reused session, whose account the server does not report.
+// empty for a reused session, whose declared account the server does not enforce for a user.
 func (s *Selection) settle(ctx context.Context, session *wsapi.WorkSession, wait bool, want Want, createdFor string) (bool, error) {
 	if !safeResumeID(session.ID) {
 		s.ios.Warning("The offered WorkSession has an unsafe ID and cannot be selected.")
