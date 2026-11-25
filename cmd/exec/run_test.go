@@ -1106,7 +1106,7 @@ func TestRunWithApprovalWait_DeadlineReachedDuringHeldRerun(t *testing.T) {
 
 func TestRunWithApprovalWait_PreservesDetailsWhenStreamTimesOutBeforeReading(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		stubApprovalWaitSeams(t, time.Second, "SUDO_APPROVAL_REQUIRED")
+		_ = stubApprovalWaitSeams(t, time.Second, "SUDO_APPROVAL_REQUIRED")
 		pending := &event.PendingApprovalError{CommandID: "held", Username: "alice", FileSuggestion: &event.FileExecutionSuggestion{Path: "/example"}}
 		streamApprovedCommand = func(_ *client.AlpaconClient, id string, _ io.Writer, remaining time.Duration) error {
 			time.Sleep(remaining)
