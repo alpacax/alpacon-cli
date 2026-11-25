@@ -1700,6 +1700,26 @@ func TestStreamSubscribed_WaitTimeoutCarriesTheFileSuggestion(t *testing.T) {
 	})
 }
 
+func TestPollingFallback_HeldCommandUsesRemainingWait(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		reads := 0
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reads++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"status":"awaiting_approval","username":"alice"}`)
+		}))
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		started := time.Now()
+		err := runCommandFallbackFromID(ac, testPathID(t, "held-1"), io.Discard, 1500*time.Millisecond, time.Second, true, errors.New("no stream"))
+		var pending *PendingApprovalError
+		require.ErrorAs(t, err, &pending)
+		assert.Equal(t, "alice", pending.Username)
+		assert.Equal(t, 1500*time.Millisecond, time.Since(started))
+		assert.Equal(t, 1, reads)
+	})
+}
+
 // The same timed-out wait carries the script body suggestion too.
 func TestStreamSubscribed_WaitTimeoutCarriesTheScriptBodySuggestion(t *testing.T) {
 	t.Parallel()
@@ -3013,7 +3033,7 @@ func TestRunCommandFallbackFromID_ChunkFetchFailure(t *testing.T) {
 				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 				var out bytes.Buffer
-				err := runCommandFallbackFromID(ac, testPathID(t, cmdID), &out, CommandPollTick, false, fmt.Errorf("websocket dial failed"))
+				err := runCommandFallbackFromID(ac, testPathID(t, cmdID), &out, execTimeout(), CommandPollTick, false, fmt.Errorf("websocket dial failed"))
 
 				assert.Equal(t, tt.wantOut, out.String())
 				switch {
@@ -3049,7 +3069,7 @@ func TestRunCommandFallbackFromIDNamesTheCheckedIDWhenTheServerEchoesAnUnusableO
 		}))
 		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-		err := runCommandFallbackFromID(ac, testPathID(t, cmdID), io.Discard, CommandPollTick, false, fmt.Errorf("websocket dial failed"))
+		err := runCommandFallbackFromID(ac, testPathID(t, cmdID), io.Discard, execTimeout(), CommandPollTick, false, fmt.Errorf("websocket dial failed"))
 
 		var rejected *CommandRejectedError
 		require.ErrorAs(t, err, &rejected)
@@ -3273,7 +3293,7 @@ func TestSuccessfulCommandWithPendingSudoApprovalSignals(t *testing.T) {
 					}))
 					ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 					for range 2 {
-						require.NoError(t, runCommandFallbackFromID(ac, testPathID(t, "cmd-1"), &out, time.Millisecond, false, errors.New("no stream")))
+						require.NoError(t, runCommandFallbackFromID(ac, testPathID(t, "cmd-1"), &out, execTimeout(), time.Millisecond, false, errors.New("no stream")))
 					}
 				})
 			})

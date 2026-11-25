@@ -1020,39 +1020,37 @@ func TestPrintPresenceStepUpLink(t *testing.T) {
 	})
 }
 
-// A status hold after approval is the other shape of "the grant did not carry
-// this run". It warns too, but with the sentence that shape needs: the held job
-// runs on its own once approved, so the re-run advice a repeated denial gets
-// would contradict the pending text printed right after it.
-func TestRunExecWithApprovalWait_StatusHoldAfterApprovalWarnsWithoutReentering(t *testing.T) {
-	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
-	held := &event.PendingApprovalError{CommandID: "cmd-2"}
-
-	submits := 0
-	runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
-		submits++
-		if submits == 1 {
-			return denial
+func TestRunWithApprovalWait_HeldThenSudoThenHeld(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		denial := stubApprovalWaitSeams(t, time.Second, "SUDO_APPROVAL_REQUIRED")
+		sent := 0
+		run := func() error {
+			sent++
+			return &event.PendingApprovalError{CommandID: fmt.Sprintf("held-%d", sent)}
 		}
-		return held
-	}
-	polls := 0
-	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
-		polls++
-		status := "authorized"
-		return event.EventDetails{SudoGrantStatus: &status}, nil
-	}
+		polls := 0
+		getCommandByID = func(_ *client.AlpaconClient, id string) (event.EventDetails, error) {
+			assert.Equal(t, denial.CommandID, id)
+			polls++
+			return event.EventDetails{SudoGrantStatus: new("authorized")}, nil
+		}
+		var streamed []string
+		streamApprovedCommand = func(_ *client.AlpaconClient, id string, _ io.Writer, remaining time.Duration) error {
+			streamed = append(streamed, id)
+			if id == "held-1" {
+				assert.Equal(t, 10*time.Second, remaining)
+				time.Sleep(4 * time.Second)
+				return denial
+			}
+			assert.Equal(t, 5*time.Second, remaining)
+			return nil
+		}
 
-	stderr := captureStderr(t, func() {
-		err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "cmd", "", "", nil, "", "", time.Minute, io.Discard)
-		assert.ErrorIs(t, err, held)
+		require.NoError(t, runWithApprovalWait(utils.Stdio, nil, run, 10*time.Second, io.Discard))
+		assert.Equal(t, 2, sent)
+		assert.Equal(t, 1, polls)
+		assert.Equal(t, []string{"held-1", "held-2"}, streamed)
 	})
-
-	assert.Equal(t, 2, submits, "the wait must not re-enter after the post-approval run")
-	assert.Equal(t, 1, polls)
-	assert.Contains(t, stderr, "holding the command for a fresh approval")
-	assert.NotContains(t, stderr, "Re-run the command",
-		"a held job needs no re-run, and the pending text that follows says so")
 }
 
 func TestRemoteCommandOutcomeHomeDirectoryConflict(t *testing.T) {
