@@ -49,7 +49,7 @@ func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 		case args[i] == "-s" || args[i] == "--share":
 			res.Share = true
 		case args[i] == "-h" || args[i] == "--help":
-			if later := helpOutputFormat(args[i+1:], res.ServerName != ""); later != "" {
+			if later := helpOutputFormat(args[i+1:]); later != "" {
 				res.OutputFormat = later
 			}
 			return res, errHelpRequested
@@ -120,8 +120,8 @@ func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 }
 
 // helpOutputFormat is the last --output value among the flags after --help, valid or not; it stops at the
-// remote command, the first word after the server that is not a flag websh reads.
-func helpOutputFormat(args []string, serverSeen bool) string {
+// server name, since ParseWebshArgs hands every word after it to the remote command.
+func helpOutputFormat(args []string) string {
 	var format string
 	for i := 0; i < len(args); i++ {
 		switch {
@@ -139,10 +139,8 @@ func helpOutputFormat(args []string, serverSeen bool) string {
 			}
 		case isFlag(args[i], "--read-only", "--env"):
 		case args[i] == "-s" || args[i] == "--share" || args[i] == "-h" || args[i] == "--help":
-		case serverSeen:
-			return format
 		case !strings.HasPrefix(args[i], "-"):
-			serverSeen = true
+			return format
 		}
 	}
 	return format

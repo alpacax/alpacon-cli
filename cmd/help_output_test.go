@@ -29,9 +29,7 @@ func TestHelpUnderJSONGoesToStderr(t *testing.T) {
 		{name: "exec output after an invalid flag", args: []string{"exec", "--help", "--bogus", "--output", "json"}},
 		{name: "websh output after an invalid flag", args: []string{"websh", "--help", "--bogus", "--output", "json"}},
 		{name: "exec output after two invalid flags", args: []string{"exec", "-h", "--bogus", "--wait=x", "--output=json"}},
-		{name: "websh output after server", args: []string{"websh", "-h", "my-server", "--output", "json"}},
 		{name: "websh flag", args: []string{"websh", "--help", "--output", "json"}},
-		{name: "websh output after read-only and a server", args: []string{"websh", "-h", "--read-only", "false", "my-server", "--output", "json"}},
 		{name: "output before a flag whose value names table", args: []string{"api", "--output", "json", "--help", "-f", "--output=table"}},
 		{name: "group flag", args: []string{"token", "--help", "--output", "json"}},
 		{name: "leaf flag", args: []string{"token", "ls", "--help", "--output", "json"}},
@@ -69,6 +67,8 @@ func TestHelpUnderTableGoesToStdout(t *testing.T) {
 		{name: "exec remote command output flag after an invalid flag", args: []string{"exec", "-h", "--bogus", "my-server", "cmd", "--output", "json"}, wantStdout: "--output"},
 		{name: "websh remote command output flag after an empty work session", args: []string{"websh", "-h", "my-server", "--work-session=", "cmd", "--output", "json"}, wantStdout: "--output"},
 		{name: "websh remote command output flag", args: []string{"websh", "-h", "my-server", "cmd", "--output", "json"}, wantStdout: "--output"},
+		{name: "websh output after server", args: []string{"websh", "-h", "my-server", "--output", "json"}, wantStdout: "--output"},
+		{name: "websh output after read-only and a server", args: []string{"websh", "-h", "--read-only", "false", "my-server", "--output", "json"}, wantStdout: "--output"},
 		{name: "output topic", args: []string{"help", "output"}, wantStdout: "Stdout carries data only"},
 	}
 	for _, tt := range tests {

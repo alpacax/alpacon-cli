@@ -622,7 +622,7 @@ func TestHelpOutputFormatSkipsTheValueOfEveryDocumentedFlag(t *testing.T) {
 		t.Run(flag, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Empty(t, helpOutputFormat([]string{flag, "--output=json"}, false), "%s takes a value, so the next word is not --output", flag)
+			assert.Empty(t, helpOutputFormat([]string{flag, "--output=json"}), "%s takes a value, so the next word is not --output", flag)
 		})
 	}
 	require.NotZero(t, checked, "no value flag found in the help; the pattern matched nothing")
