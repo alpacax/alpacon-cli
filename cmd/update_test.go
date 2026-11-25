@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/selfupdate"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -272,4 +273,33 @@ func TestUpdateFailureMessageSaysWhyTheBinaryWasLeftAlone(t *testing.T) {
 	assert.Contains(t, message, "left alone")
 	assert.Contains(t, message, "package manager")
 	assert.NotContains(t, message, "sudo alpacon update", "a stalled rpm query is not a permission problem")
+}
+
+func TestUpdateCheckJSONPrintsVersionDataWithoutInfoLines(t *testing.T) {
+	tests := []struct {
+		name     string
+		latest   string
+		wantCode int
+		wantJSON string
+	}{
+		{name: "new release", latest: "1.4.0", wantCode: utils.ExitCodeUpdateAvailable, wantJSON: `{"version":"1.3.0","latest":"1.4.0","update_available":true,"release_url":"https://example.test/releases"}`},
+		{name: "already current", latest: "1.3.0", wantJSON: `{"version":"1.3.0","latest":"1.3.0","update_available":false,"release_url":"https://example.test/releases"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprintf(w, `{"tag_name":"v%s","html_url":"https://example.test/releases"}`, tt.latest)
+			}))
+			t.Cleanup(ts.Close)
+			oldURL, oldVersion := selfupdate.DefaultReleaseAPIURL, utils.Version
+			selfupdate.DefaultReleaseAPIURL, utils.Version = ts.URL, "1.3.0"
+			t.Cleanup(func() { selfupdate.DefaultReleaseAPIURL, utils.Version = oldURL, oldVersion })
+
+			stdout, stderr, code := cmdtest.RunJSON(newUpdateCmd, "--check")
+
+			assert.Equal(t, tt.wantCode, code)
+			assert.JSONEq(t, tt.wantJSON, stdout)
+			assert.Empty(t, stderr)
+		})
+	}
 }

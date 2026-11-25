@@ -7,7 +7,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -169,4 +171,17 @@ func TestExecLogsShowsTheStatedPurpose(t *testing.T) {
 	// stdout stays the command's own output.
 	assert.Contains(t, stdout, "ok")
 	assert.NotContains(t, stdout, "Stated purpose")
+}
+
+func TestExecPurposeJSONReportsARefusalInOneEnvelope(t *testing.T) {
+	t.Parallel()
+	server := cmdtest.Server(t, map[string]cmdtest.Reply{
+		"POST /api/events/commands/" + purposeJobID + "/purpose/": {Status: http.StatusBadRequest, Body: `{"code":"command_purpose_not_demanded"}`},
+	})
+
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command { return newPurposeCommand(server.Factory(), ios) }, purposeJobID, "chronyd drifted 40s.")
+
+	assert.Equal(t, utils.ExitCodeGeneralError, code)
+	assert.Empty(t, stdout)
+	assert.JSONEq(t, `{"ok":false,"exit_code":1,"error_code":"purpose_refused","message":"failed to state the purpose for a1b2c3d4-5678-abcd-ef01-234567890abc: request failed (code: command_purpose_not_demanded). The demand may have expired, it may already have been answered, or this credential may not be the one that submitted the command.","context":{"operation":"command"},"http_status":400,"next_actions":[{"command":"alpacon exec logs a1b2c3d4-5678-abcd-ef01-234567890abc","description":"Read the command's state; do not re-submit it, which would create a second command"}]}`, stderr)
 }

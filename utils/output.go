@@ -11,6 +11,8 @@ import (
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
+
+	"github.com/spf13/cobra"
 )
 
 // Valid values for the --output persistent flag.
@@ -29,21 +31,55 @@ func invalidOutputFormat(value string) error {
 	return MarkUsageError(fmt.Errorf("invalid --output value %q (expected %q or %q)", value, OutputFormatTable, OutputFormatJSON))
 }
 
-// OutputFormatIn is the last --output value before any "--" in args, for a command line
-// whose parse stopped before reaching it.
-func OutputFormatIn(args []string) string {
-	var format string
-	for i, arg := range args {
+// OutputFormatIn is the last --output value before any "--" in args, skipping the values of cmd's other
+// flags, for a command line whose parse stopped before reaching it; given reports whether one was read, and
+// missing whether a final --output had no value, which leaves an earlier value in force.
+func OutputFormatIn(cmd *cobra.Command, args []string) (format string, given, missing bool) {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		if arg == "--" {
 			break
 		}
-		if value, ok := strings.CutPrefix(arg, "--output="); ok {
-			format = value
-		} else if arg == "--output" && i+1 < len(args) {
-			format = args[i+1]
+		value, inline := strings.CutPrefix(arg, "--output=")
+		switch {
+		case inline:
+			format, given = value, true
+		case arg == "--output":
+			i++
+			if i == len(args) {
+				return format, given, true
+			}
+			format, given = args[i], true
+		case takesNextArg(cmd, arg):
+			i++
 		}
 	}
-	return format
+	return format, given, false
+}
+
+// takesNextArg reports whether arg is a flag of cmd whose value is the next argument, as pflag reads it.
+func takesNextArg(cmd *cobra.Command, arg string) bool {
+	if name, ok := strings.CutPrefix(arg, "--"); ok {
+		flag := cmd.Flag(name) // a name=value form matches no flag and takes nothing
+		return flag != nil && flag.NoOptDefVal == ""
+	}
+	if !strings.HasPrefix(arg, "-") {
+		return false
+	}
+	inherited := cmd.InheritedFlags()
+	for i := 1; i < len(arg); i++ {
+		flag := cmd.Flags().ShorthandLookup(arg[i : i+1])
+		if flag == nil {
+			flag = inherited.ShorthandLookup(arg[i : i+1])
+		}
+		if flag == nil {
+			return false
+		}
+		if flag.NoOptDefVal == "" {
+			return i == len(arg)-1
+		}
+	}
+	return false
 }
 
 type PartialInfo struct {
@@ -239,20 +275,24 @@ func (s *IOStreams) PrintTable(slice any) error {
 	return nil
 }
 
-// PartialTableExitError prints the reason to stderr and rows to stdout, then returns a silent
-// ExitCodeGeneralError, since the warning is the failure line, or PrintTable's failure when rows do not print.
-// It does not check for empty rows: a caller with none to show returns an ordinary failure instead.
+// PartialTableExitError prints rows to stdout and the reason to stderr (an envelope under --output json),
+// then returns exit 1, or PrintTable's failure when rows do not print. It does not check for empty rows.
 func PartialTableExitError(rows any, msg string, args ...any) error {
 	return Stdio.PartialTableExitError(rows, msg, args...)
 }
 
 // PartialTableExitError is the package-level PartialTableExitError on s.
 func (s *IOStreams) PartialTableExitError(rows any, msg string, args ...any) error {
-	s.Warning(msg, args...)
+	if !s.IsJSON() {
+		s.Warning(msg, args...)
+	}
 	if err := s.PrintTable(rows); err != nil {
 		return err
 	}
-	return NewSilentExitError(ExitCodeGeneralError)
+	failure := envelopeFailure(ExitCodeGeneralError, "", msg, args)
+	failure.Message = SanitizeTerminalText(failure.Message)
+	failure.Partial = &PartialInfo{Count: reflect.ValueOf(rows).Len()}
+	return NewFailureExitError(failure, nil /* table */)
 }
 
 // PrintList prints a list a paginated read returned with err. On a nil err it is PrintTable; otherwise

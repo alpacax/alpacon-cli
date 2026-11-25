@@ -168,7 +168,13 @@ func runWait(ios *utils.IOStreams, cmd *cobra.Command, newClient func() (*client
 	}
 
 	if outcome == eventapi.OutcomeFailed {
-		return utils.NewSilentExitError(utils.ExitCodeNotApproved)
+		failure := utils.Failure{
+			ExitCode:  utils.ExitCodeNotApproved,
+			ErrorCode: utils.ErrorCodeNotApproved,
+			Message:   fmt.Sprintf("the wait ended on a %s event in its failure set", displayType),
+			Operation: opWait,
+		}
+		return utils.NewFailureExitError(failure, nil /* table: the event line on stdout carries the outcome */)
 	}
 	return nil
 }

@@ -2,11 +2,13 @@ package apicmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -16,7 +18,9 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -924,6 +928,36 @@ func TestRunAPI_MFAWaitEndingWithoutAResponsePrintsNoStaleResponse(t *testing.T)
 	assert.Equal(t, int32(1+utils.MaxConsecutivePollFailures), calls.Load())
 }
 
+func runAPICommandUntilMFATimesOut(t *testing.T, run func(cmdtest.Build, ...string) (string, string, int)) (stdout, stderr string, code int) {
+	t.Helper()
+	ac, _ := mfaTestServer(t, func(int) (int, string, string) {
+		return http.StatusForbidden, "application/json", `{"code":"auth_mfa_required"}`
+	})
+	build := func(*utils.IOStreams) *cobra.Command {
+		return NewApiCmd(func() (*client.AlpaconClient, error) { return ac, nil })
+	}
+	synctest.Test(t, func(*testing.T) {
+		stdout, stderr, code = run(build, "/x")
+	})
+	return stdout, stderr, code
+}
+
+func TestAPICommandJSONReportsAnMFATimeoutInOneEnvelope(t *testing.T) {
+	stdout, stderr, code := runAPICommandUntilMFATimesOut(t, cmdtest.RunJSON)
+
+	assert.Equal(t, 1, code)
+	assert.JSONEq(t, `{"code":"auth_mfa_required"}`, stdout)
+	assert.JSONEq(t, `{"ok":false,"exit_code":1,"error_code":"auth_mfa_required","message":"MFA authentication timed out after 3m0s","context":{"operation":"api"},"http_status":403}`, stderr)
+}
+
+func TestAPICommandTableReportsAnMFATimeoutUnderTheStatusLine(t *testing.T) {
+	stdout, stderr, code := runAPICommandUntilMFATimesOut(t, cmdtest.RunCaptured)
+
+	assert.Equal(t, 1, code)
+	assert.JSONEq(t, `{"code":"auth_mfa_required"}`, stdout)
+	assert.Equal(t, "HTTP 403\nError: MFA authentication timed out after 3m0s\n", stderr)
+}
+
 func TestRunAPI_CallerAuthorizationHeaderSkipsMFA(t *testing.T) {
 	ac, calls := mfaTestServer(t, func(int) (int, string, string) {
 		return http.StatusUnauthorized, "application/json", `{"code":"auth_mfa_required"}`
@@ -990,4 +1024,49 @@ func TestRunAPI_MFAWaitHonorsRetryAfterOn429(t *testing.T) {
 
 	assert.Equal(t, int32(3), calls.Load())
 	assert.GreaterOrEqual(t, elapsed, 8*time.Second, "one interval before the retry that is throttled, then its Retry-After")
+}
+
+func TestAPICommandJSONReportsHTTPFailureAndPreservesTheBody(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		status     int
+		body       string
+		location   string
+		retryAfter string
+		errorCode  string
+		message    string
+		extra      string
+	}{
+		{name: "coded object", status: 403, body: `{"code":"permission_denied","detail":"refused"}`, errorCode: "permission_denied", message: "HTTP 403"},
+		{name: "plain body", status: 500, body: "unavailable", errorCode: "http_500", message: "HTTP 500"},
+		{name: "malformed code", status: 502, body: `{"code":"Bad Gateway"}`, errorCode: "http_502", message: "HTTP 502"},
+		{name: "redirect", status: 302, body: "moved", location: "https://other.example/\u202ex", errorCode: "http_302", message: "HTTP 302; redirect to https://other.example/x not followed"},
+		{name: "retry after", status: 429, body: `{"code":"throttled"}`, retryAfter: "12", errorCode: "throttled", message: "HTTP 429", extra: `,"retry_after":12`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Location", tt.location)
+				w.Header().Set("Retry-After", tt.retryAfter)
+				w.WriteHeader(tt.status)
+				_, _ = io.WriteString(w, tt.body)
+			}))
+			t.Cleanup(ts.Close)
+			factory := cmdtest.ClientFactory(ts)
+			build := func(_ *utils.IOStreams) *cobra.Command { return NewApiCmd(factory) }
+
+			stdout, stderr, code := cmdtest.RunJSON(build, "/x")
+
+			assert.Equal(t, 1, code)
+			if json.Valid([]byte(tt.body)) {
+				assert.JSONEq(t, tt.body, stdout)
+			} else {
+				assert.Equal(t, tt.body, stdout)
+			}
+			assert.JSONEq(t, fmt.Sprintf(`{"ok":false,"exit_code":1,"error_code":%q,"message":%q,"context":{"operation":"api"},"http_status":%d%s}`, tt.errorCode, tt.message, tt.status, tt.extra), stderr)
+		})
+	}
 }

@@ -26,6 +26,9 @@ const (
 	ErrorCodeNotApproved          = "not_approved"
 	ErrorCodeMFARequired          = "mfa_required"
 	ErrorCodeCLI                  = "cli_error"
+	ErrorCodeRemoteCommandFailed  = "remote_command_failed" // a remote command ended in failure
+	ErrorCodeLocalCommandFailed   = "local_command_failed"  // tunnel's local command exited non-zero
+	ErrorCodePurposeRefused       = "purpose_refused"
 )
 
 // ErrNotLoggedIn marks a missing config file; a malformed or unreadable one stays cli_error.
@@ -71,6 +74,9 @@ func usageErrorIn(args []any) bool {
 
 var serverCodeShape = regexp.MustCompile(`^[a-z0-9_]+$`)
 
+// IsServerErrorCode reports whether code has the shape accepted for a server error code.
+func IsServerErrorCode(code string) bool { return serverCodeShape.MatchString(code) }
+
 // HTTPErrorCode is the synthetic code for a server or proxy answer that carried none.
 func HTTPErrorCode(status int) string {
 	return fmt.Sprintf("http_%d", status)
@@ -82,7 +88,7 @@ func ClassifyError(err error) string {
 	if code := StructuredErrorCode(err); code != "" {
 		return code
 	}
-	if code, _ := ParseErrorResponse(err); serverCodeShape.MatchString(code) {
+	if code, _ := ParseErrorResponse(err); IsServerErrorCode(code) {
 		return code
 	}
 	if errors.Is(err, ErrNotLoggedIn) {

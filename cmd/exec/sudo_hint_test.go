@@ -403,7 +403,7 @@ func TestSudoDenialHintCodelessDenial(t *testing.T) {
 
 func TestIsApprovalDenial(t *testing.T) {
 	t.Parallel()
-	approvalDenial := &event.RemoteCommandError{ExitCode: 1, Output: denialLine("SUDO_APPROVAL_REQUIRED")}
+	approvalDenial := &event.RemoteCommandError{ReportedExitCode: new(1), Output: denialLine("SUDO_APPROVAL_REQUIRED")}
 
 	tests := []struct {
 		name string
@@ -414,7 +414,7 @@ func TestIsApprovalDenial(t *testing.T) {
 		{"wrapped RemoteCommandError", fmt.Errorf("failed to execute command: %w", approvalDenial), true},
 		{
 			name: "an intent-deviation denial",
-			err:  &event.RemoteCommandError{ExitCode: 1, Output: denialLine("SUDO_INTENT_DEVIATION")},
+			err:  &event.RemoteCommandError{ReportedExitCode: new(1), Output: denialLine("SUDO_INTENT_DEVIATION")},
 			want: true,
 		},
 		{
@@ -426,7 +426,7 @@ func TestIsApprovalDenial(t *testing.T) {
 		},
 		{
 			name: "a non-approval denial",
-			err:  &event.RemoteCommandError{ExitCode: 1, Output: denialLine("SUDO_RISK_DENIED")},
+			err:  &event.RemoteCommandError{ReportedExitCode: new(1), Output: denialLine("SUDO_RISK_DENIED")},
 			want: false,
 		},
 		{"a plain error without the denial line", errors.New("nope"), false},
@@ -607,9 +607,8 @@ func TestRemoteFailureReportDefersToTheServerHint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			report, exitCode := remoteFailureReport(utils.Stdio, &event.RemoteCommandError{ExitCode: 1, Output: tt.output})
+			report := remoteFailureReport(utils.Stdio, &event.RemoteCommandError{ReportedExitCode: new(1), Output: tt.output})
 
-			assert.Equal(t, 1, exitCode)
 			if tt.wantLocal {
 				assert.Contains(t, report, "work-session update [SESSION_ID] --sudo")
 				return

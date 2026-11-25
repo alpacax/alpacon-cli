@@ -43,10 +43,17 @@ never has to parse prose:
 					return utils.NewExitError("Could not check for updates: %s", err)
 				}
 				message, code := checkOutcome(utils.Version, release.Version)
-				ios.Info("%s", message)
+				if ios.IsJSON() {
+					if err := utils.PrintJSONValue(ios.Out, newVersionOutput(utils.Version, release)); err != nil {
+						return utils.NewExitError("Failed to print the version: %s", err)
+					}
+				} else {
+					ios.Info("%s", message)
+					if code != 0 { // A successful check reports the update action without an error label.
+						ios.Info("%s", checkAction(installKind()))
+					}
+				}
 				if code != 0 {
-					// The check succeeded; "Error" would contradict the exit code scripts read.
-					ios.Info("%s", checkAction(installKind()))
 					return utils.NewSilentExitError(code)
 				}
 				return nil
