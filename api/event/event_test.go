@@ -381,7 +381,8 @@ func TestErrorFromDetails_PropagatesExitCode(t *testing.T) {
 			var remoteErr *RemoteCommandError
 			require.ErrorAs(t, err, &remoteErr)
 			assert.Equal(t, tt.wantOutput, remoteErr.Output)
-			assert.Equal(t, tt.wantExitCode, remoteErr.ExitCode)
+			assert.Equal(t, tt.respExitCode, remoteErr.ReportedExitCode)
+			assert.Equal(t, tt.wantExitCode, remoteErr.ExitCode())
 			assert.Equal(t, tt.wantErrorPhase, remoteErr.ErrorPhase)
 		})
 	}
@@ -2013,7 +2014,7 @@ func TestRunCommandStreaming_FailedStatusPropagatesExitCode(t *testing.T) {
 		require.Error(t, err)
 		var remoteErr *RemoteCommandError
 		require.ErrorAs(t, err, &remoteErr)
-		assert.Equal(t, 23, remoteErr.ExitCode)
+		assert.Equal(t, 23, remoteErr.ExitCode())
 		assert.Equal(t, "before-exit\n", stdoutBuf.String())
 	})
 }
@@ -2558,7 +2559,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 				t.Helper()
 				var re *RemoteCommandError
 				require.ErrorAs(t, err, &re)
-				assert.Equal(t, 7, re.ExitCode)
+				assert.Equal(t, 7, re.ExitCode())
 			},
 		},
 		{
@@ -3656,4 +3657,14 @@ func TestGetEventList_JSONKeepsCommandIDAndFailureDetail(t *testing.T) {
 		{"id":"550e8400-e29b-41d4-a716-446655440000","server":"","shell":"","command":"uptime","result":"","status":"false","exit_code":127,"error_phase":"exec","operator":"","requested_at":null},
 		{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","server":"","shell":"","command":"uptime","result":"","status":"null","exit_code":null,"error_phase":null,"operator":"","requested_at":null}
 	]`, string(body))
+}
+
+func TestErrorFromDetails_StatusOnlyKeepsTheReportedExitCode(t *testing.T) {
+	t.Parallel()
+
+	err := errorFromDetails(testPathID(t, "cmd-9"), EventDetails{Status: "cancelled", ExitCode: new(23), Result: "partial"})
+
+	var statusErr *CommandStatusError
+	require.ErrorAs(t, err, &statusErr)
+	assert.Equal(t, &CommandStatusError{Status: "cancelled", Output: "partial", ReportedExitCode: new(23)}, statusErr)
 }

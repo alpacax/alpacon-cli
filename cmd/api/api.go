@@ -40,8 +40,11 @@ type options struct {
 }
 
 type httpStatusError struct {
-	status   int
-	location string
+	status     int
+	location   string
+	body       []byte
+	retryAfter time.Duration
+	cause      error // an MFA wait that ended on this response
 }
 
 type mfaRequiredError struct{}
@@ -68,7 +71,62 @@ type preparedRequest struct {
 	Headers http.Header
 }
 
+func newHTTPStatusError(response *client.RawResponse) *httpStatusError {
+	statusErr := &httpStatusError{
+		status:     response.StatusCode,
+		body:       response.Body,
+		retryAfter: utils.RetryAfterFromHeader(response.Header),
+	}
+	if response.StatusCode >= http.StatusMultipleChoices && response.StatusCode < http.StatusBadRequest {
+		statusErr.location = response.Header.Get("Location")
+	}
+	return statusErr
+}
+
 func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.status) }
+
+func (e *httpStatusError) exitError() error {
+	return utils.NewFailureExitErrorFunc(utils.ExitCodeGeneralError, e.failure, e.printTable)
+}
+
+func (e *httpStatusError) errorCode() string {
+	var body map[string]any
+	if json.Unmarshal(e.body, &body) == nil {
+		if code, ok := body["code"].(string); ok && utils.IsServerErrorCode(code) {
+			return code
+		}
+	}
+	return utils.HTTPErrorCode(e.status)
+}
+
+func (e *httpStatusError) failure() utils.Failure {
+	message := e.Error()
+	if e.location != "" {
+		message += "; redirect to " + safeTerminal(e.location) + " not followed"
+	}
+	if e.cause != nil {
+		message = e.cause.Error()
+	}
+	return utils.Failure{
+		ErrorCode:  e.errorCode(),
+		Message:    message,
+		Operation:  "api",
+		HTTPStatus: e.status,
+		RetryAfter: e.retryAfter,
+	}
+}
+
+func (e *httpStatusError) printTable(w io.Writer, s *utils.IOStreams) {
+	_, _ = fmt.Fprintf(w, "HTTP %d\n", e.status)
+	if e.location != "" {
+		_, _ = fmt.Fprintf(w, "redirect to %s not followed\n", safeTerminal(e.location))
+	}
+	if e.cause == nil {
+		return
+	}
+	causeErr, _ := utils.NewExitErrorWithCode(utils.ExitCodeGeneralError, "%s", e.cause).(*utils.ExitError)
+	s.FprintExitError(w, causeErr)
+}
 
 func (e unprocessedResponseError) Error() string       { return fmt.Sprintf("HTTP %d", e.status) }
 func (e unprocessedResponseError) HTTPStatusCode() int { return e.status }
@@ -94,8 +152,9 @@ func NewApiCmd(newAPIClient func() (*client.AlpaconClient, error)) *cobra.Comman
 		Short: "Send a request to the Alpacon API",
 		Long: "Send a request to the Alpacon API. ENDPOINT is a path on the current workspace—an absolute URL is refused.\n" +
 			"Fields (-f/-F) go to the query string for GET, and to a JSON body otherwise. A non-2xx response's body is still printed\n" +
-			"to stdout, while `HTTP <code>` goes to stderr and the command exits 1. An MFA-required response opens the workspace\n" +
-			"MFA link and retries once MFA completes, like other commands—unless the request carries its own -H Authorization header.",
+			"to stdout, while `HTTP <code>` (an error envelope under --output json) goes to stderr and the command exits 1.\n" +
+			"An MFA-required response opens the workspace MFA link and retries once MFA completes, like other commands—unless\n" +
+			"the request carries its own -H Authorization header.",
 		Example: "  alpacon api /api/iam/users/\n  alpacon api -X POST -F name=my-server /api/servers/servers/\n  alpacon api -i /api/iam/users/-/",
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
@@ -116,21 +175,10 @@ func NewApiCmd(newAPIClient func() (*client.AlpaconClient, error)) *cobra.Comman
 				if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
 					return exitErr
 				}
-				if statusErr, ok := err.(*httpStatusError); ok {
-					if _, writeErr := fmt.Fprintf(cmd.ErrOrStderr(), "HTTP %d\n", statusErr.status); writeErr != nil {
-						return utils.NewExitErrorWithCode(utils.ExitCodeGeneralError, "%s", writeErr)
-					}
-					if statusErr.location != "" {
-						if _, writeErr := fmt.Fprintf(cmd.ErrOrStderr(), "redirect to %s not followed\n", safeTerminal(statusErr.location)); writeErr != nil {
-							return utils.NewExitErrorWithCode(utils.ExitCodeGeneralError, "%s", writeErr)
-						}
-					}
-					return utils.NewSilentExitError(utils.ExitCodeGeneralError)
+				if statusErr, ok := errors.AsType[*httpStatusError](err); ok {
+					return statusErr.exitError()
 				}
 				return utils.NewExitErrorWithCode(code, "%s", err)
-			}
-			if code != 0 {
-				return utils.NewSilentExitError(code)
 			}
 			return nil
 		}),
@@ -274,18 +322,16 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 		}
 		// A wait that ended on the server's own 429 or 503 reports that response
 		// the way any other non-2xx answer is reported, below.
-		var unprocessed unprocessedResponseError
 		if handleErr != nil && noResponse {
 			return utils.ExitCodeGeneralError, handleErr
 		}
-		if handleErr != nil && !errors.As(handleErr, &unprocessed) {
+		if _, unprocessed := errors.AsType[unprocessedResponseError](handleErr); handleErr != nil && !unprocessed {
 			if writeErr := writeAPIResponse(opts, response, stdout); writeErr != nil {
 				return utils.ExitCodeGeneralError, writeErr
 			}
-			if _, statusErr := fmt.Fprintf(stderr, "HTTP %d\n", response.StatusCode); statusErr != nil {
-				return utils.ExitCodeGeneralError, statusErr
-			}
-			return utils.ExitCodeGeneralError, handleErr
+			statusErr := newHTTPStatusError(response)
+			statusErr.cause = handleErr
+			return utils.ExitCodeGeneralError, statusErr
 		}
 	}
 
@@ -294,11 +340,7 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 		return utils.ExitCodeGeneralError, err
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		statusErr := &httpStatusError{status: response.StatusCode}
-		if response.StatusCode >= http.StatusMultipleChoices && response.StatusCode < http.StatusBadRequest {
-			statusErr.location = response.Header.Get("Location")
-		}
-		return utils.ExitCodeGeneralError, statusErr
+		return utils.ExitCodeGeneralError, newHTTPStatusError(response)
 	}
 	return 0, nil
 }

@@ -386,6 +386,40 @@ func TestDeleteConfig_KeepsAnotherAPIKeyLoginToTheSameServer(t *testing.T) {
 	assert.Equal(t, "key-2", loadedConfig(t).Token)
 }
 
+func TestSetActiveWorkSessionFor_ChecksTheLogin(t *testing.T) {
+	tests := []struct {
+		name    string
+		change  func(started Config) error
+		wantErr error
+		want    string
+	}{
+		{name: "same login", change: func(Config) error { return nil }, want: "uuid"},
+		{name: "workspace switched under the same login", want: "uuid", change: func(started Config) error {
+			return SwitchWorkspace(started, "https://ws2.us1.alpacon.io", "ws2", false, nil)
+		}},
+		{name: "token refreshed", want: "uuid", change: func(Config) error { return saveTestRefreshedToken("refresh", "token-2", 3600) }},
+		{name: "logged in again to the same workspace", wantErr: ErrLoginChanged, change: func(Config) error {
+			return CreateConfig("https://ws1.us1.alpacon.io", "ws1", "", "", "token-b", "refresh-b", "alpacon.io", 3600, false)
+		}},
+		{name: "another API key", wantErr: ErrLoginChanged, change: func(Config) error {
+			return CreateConfig("https://ws1.us1.alpacon.io", "ws1", "key", "", "", "", "", 0, false)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupTestConfig(t)
+			require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "", "", "token", "refresh", "alpacon.io", 3600, false))
+			started := loadedConfig(t)
+			require.NoError(t, tt.change(started))
+
+			err := SetActiveWorkSessionFor(&started, "ws1", "uuid")
+
+			require.ErrorIs(t, err, tt.wantErr)
+			assert.Equal(t, tt.want, loadedConfig(t).ActiveWorkSessions["ws1"])
+		})
+	}
+}
+
 func TestDeleteConfig_AlreadyGoneIsNotAnError(t *testing.T) {
 	setupTestConfig(t)
 

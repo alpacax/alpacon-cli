@@ -21,6 +21,9 @@ import (
 // errHelpRequested signals that -h/--help was seen during parsing.
 var errHelpRequested = errors.New("help requested")
 
+var selectWorkSession = worksession.Select
+var createWebshSession = websh.CreateWebshSession
+
 type WebshArgs struct {
 	Username      string
 	Groupname     string
@@ -34,25 +37,37 @@ type WebshArgs struct {
 }
 
 // ParseWebshArgs parses raw CLI args for `alpacon websh` (DisableFlagParsing mode), returning
-// errHelpRequested when -h/--help is seen.
+// errHelpRequested when -h/--help is seen before the server name.
+// Every word after the server name, a websh flag included, is the remote command.
 //
-// NOTE: every named flag must be matched before the unknown-flag case.
+// NOTE: every named flag must be matched before the unknown-flag case, and in helpOutputFormat too.
 func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 	res := WebshArgs{Env: map[string]string{}}
+	var envArgs []string
 	for i := 0; i < len(args); i++ {
 		switch {
+		case res.ServerName != "":
+			res.CommandArgs = append(res.CommandArgs, args[i:]...)
+			i = len(args)
 		case args[i] == "-s" || args[i] == "--share":
 			res.Share = true
 		case args[i] == "-h" || args[i] == "--help":
+			if later := helpOutputFormat(args[i+1:]); later != "" {
+				res.OutputFormat = later
+			}
 			return res, errHelpRequested
 		case isFlag(args[i], "-u", "--username"):
 			res.Username, i = extractValue(args, i)
+			if res.Username == "" {
+				return res, errors.New("--username requires a value")
+			}
 		case isFlag(args[i], "-g", "--groupname"):
 			res.Groupname, i = extractValue(args, i)
-		case args[i] == "--env" || strings.HasPrefix(args[i], "--env="):
-			if errMsg := execCmd.ParseEnvArg(ios, args[i], res.Env); errMsg != "" {
-				return res, errors.New(errMsg)
+			if res.Groupname == "" {
+				return res, errors.New("--groupname requires a value")
 			}
+		case args[i] == "--env" || strings.HasPrefix(args[i], "--env="):
+			envArgs = append(envArgs, args[i]) // read once the line is known not to ask for help
 		case isFlag(args[i], "--read-only"):
 			if strings.Contains(args[i], "=") {
 				parts := strings.SplitN(args[i], "=", 2)
@@ -63,7 +78,7 @@ func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 				case "false":
 					res.ReadOnly = false
 				default:
-					return res, fmt.Errorf("the --read-only value must be either 'true' or 'false'")
+					return res, errors.New("the --read-only value must be either 'true' or 'false'")
 				}
 			} else {
 				// Without "=", take the next word only if it is "true" or "false"; otherwise true.
@@ -82,29 +97,56 @@ func ParseWebshArgs(ios *utils.IOStreams, args []string) (WebshArgs, error) {
 		case args[i] == "--work-session" || strings.HasPrefix(args[i], "--work-session="):
 			ws, newI := extractValue(args, i)
 			if ws == "" {
-				return res, fmt.Errorf("--work-session requires a value")
+				return res, errors.New("--work-session requires a value")
 			}
 			res.WorkSessionID = ws
 			i = newI
 		case args[i] == "--output" || strings.HasPrefix(args[i], "--output="):
 			val, newI := extractValue(args, i)
 			if val == "" {
-				return res, fmt.Errorf("--output requires a value (table|json)")
+				return res, errors.New("--output requires a value (table|json)")
 			}
 			res.OutputFormat = val
 			i = newI
-		case res.ServerName == "" && strings.HasPrefix(args[i], "-"):
+		case strings.HasPrefix(args[i], "-"):
 			return res, fmt.Errorf("unknown flag: %s", args[i])
 		default:
-			if res.ServerName == "" {
-				res.ServerName = args[i]
-			} else {
-				res.CommandArgs = append(res.CommandArgs, args[i:]...)
-				i = len(args)
-			}
+			res.ServerName = args[i]
+		}
+	}
+	for _, arg := range envArgs {
+		if errMsg := execCmd.ParseEnvArg(ios, arg, res.Env); errMsg != "" {
+			return res, errors.New(errMsg)
 		}
 	}
 	return res, nil
+}
+
+// helpOutputFormat is the last --output value among the flags after --help, valid or not; it stops at the
+// server name, since ParseWebshArgs hands every word after it to the remote command.
+func helpOutputFormat(args []string) string {
+	var format string
+	for i := 0; i < len(args); i++ {
+		switch {
+		case isFlag(args[i], "--output"):
+			if value, newI := extractValue(args, i); value != "" {
+				format, i = value, newI
+			}
+		case isFlag(args[i], "-u", "--username", "-g", "--groupname", "--work-session"):
+			_, i = extractValue(args, i)
+		case args[i] == "--read-only":
+			if i+1 < len(args) {
+				if next := strings.TrimSpace(strings.ToLower(args[i+1])); next == "true" || next == "false" {
+					i++
+				}
+			}
+		case isFlag(args[i], "--read-only", "--env"):
+		case args[i] == "-s" || args[i] == "--share" || args[i] == "-h" || args[i] == "--help":
+		case !strings.HasPrefix(args[i], "-"):
+			return format
+		}
+	}
+	return format
 }
 
 // buildRemoteExecArgs assembles the shared-runner args for websh command mode.
@@ -245,8 +287,8 @@ Note: All flags must be placed before the server name.
 func runWebsh(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient clientFactory) error {
 	parsed, err := ParseWebshArgs(ios, args)
 	if errors.Is(err, errHelpRequested) {
-		_ = cmd.Help()
-		return nil
+		_ = ios.SetOutputFormat(parsed.OutputFormat) // help prints whatever the format, as under Cobra
+		return cmd.Help()
 	}
 	if err != nil {
 		return ios.NewParseExitError(cmd, parsed.OutputFormat, err.Error())
@@ -273,13 +315,7 @@ func runWebsh(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient
 		return utils.NewUsageExitError("The --share flag cannot be used with remote commands. Use --share for interactive sessions only.")
 	}
 
-	if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
-		sshTarget := utils.ParseSSHTarget(serverName)
-		if username == "" && sshTarget.User != "" {
-			username = sshTarget.User
-		}
-		serverName = sshTarget.Host
-	}
+	serverName, username = utils.ParseServerTarget(serverName, username)
 
 	// Command mode is an alias for exec: delegate to the shared runner so the
 	// pending-approval exit code, sudo-denial hints, and JSON buffering match
@@ -301,24 +337,24 @@ func runWebsh(ios *utils.IOStreams, cmd *cobra.Command, args []string, newClient
 		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 
-	workSessionID, err := worksession.Resolve(alpaconClient, parsed.WorkSessionID)
+	sel, err := selectWorkSession(ios, alpaconClient, parsed.WorkSessionID, worksession.Need{Operation: worksession.Websh, Server: serverName, Account: username})
 	if err != nil {
 		return utils.NewExitError("%s", err)
 	}
 
-	session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
+	session, err := createWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, sel.ID())
 
 	if err != nil {
-		err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(alpaconClient, func() error {
-			session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
+		err = utils.HandleCommonErrors(err, serverName, sel.Offer(mfa.ErrorCallbacks(alpaconClient, func() error {
+			session, err = createWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, sel.ID())
 			return err
-		}))
+		})))
 
 		if err != nil {
 			if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
 				return exitErr
 			}
-			if gateErr := utils.WorkSessionExitError(err, utils.OperationWebsh, serverName, authMethod, workSessionID); gateErr != nil {
+			if gateErr := utils.WorkSessionExitError(err, utils.OperationWebsh, serverName, authMethod, sel.ID()); gateErr != nil {
 				return gateErr
 			}
 			return utils.NewExitError("Failed to create websh session for '%s' server: %s.", serverName, utils.InteractiveOnly(err, "open an interactive Websh terminal"))

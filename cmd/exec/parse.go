@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	pathpkg "path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +49,13 @@ func checkReuseDays(raw string) (int, string) {
 		return 0, fmt.Sprintf("--reuse-days must be %d to %d days: %d", reuseDaysMin, reuseDaysMax, days)
 	}
 	return days, ""
+}
+
+// valueFlags are the flags ParseRemoteExecArgs reads a value for, which helpOutputFormat skips; a new one
+// goes in both.
+var valueFlags = []string{
+	"-u", "--username", "-g", "--groupname", "--work-session", "--purpose", "--output", "--file",
+	"--file-from", "--interpreter", "--reuse-days", "--wait-approval",
 }
 
 // RemoteExecArgs holds parsed arguments for remote command execution.
@@ -99,17 +107,20 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 		purpose                                                  string
 		filePath, fileFrom, interpreter, waitApprovalRaw         string
 		reuseDays                                                int
-		commandParts                                             []string
+		commandParts, envArgs                                    []string
 		detach                                                   bool
 		upload, overwrite, fromServer                            bool
 		wait                                                     bool
 		separated                                                bool
+		i                                                        int
 		waitApproval                                             time.Duration
 	)
 	env := map[string]string{}
-	fail := func(msg string) RemoteExecArgs { return RemoteExecArgs{Err: msg, OutputFormat: outputFormat} }
+	fail := func(msg string) RemoteExecArgs {
+		return RemoteExecArgs{Err: msg, OutputFormat: outputFormat}
+	}
 
-	for i := 0; i < len(args); i++ {
+	for ; i < len(args); i++ {
 		arg := args[i]
 
 		if arg == "--" {
@@ -135,12 +146,18 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 
 		switch {
 		case arg == "-h" || arg == "--help":
-			return RemoteExecArgs{ShowHelp: true}
+			if later := helpOutputFormat(args[i+1:]); later != "" {
+				outputFormat = later
+			}
+			return RemoteExecArgs{ShowHelp: true, OutputFormat: outputFormat}
 		case matchShortOrLongFlag(arg, "-u", "--username"):
 			var errMsg string
 			username, i, errMsg = extractFlagValue(args, i, "-u")
 			if errMsg != "" {
 				return fail(errMsg)
+			}
+			if username == "" {
+				return fail("--username requires a value")
 			}
 		case matchShortOrLongFlag(arg, "-g", "--groupname"):
 			var errMsg string
@@ -148,12 +165,18 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 			if errMsg != "" {
 				return fail(errMsg)
 			}
+			if groupname == "" {
+				return fail("--groupname requires a value")
+			}
 		case arg == "--work-session" || strings.HasPrefix(arg, "--work-session="):
 			var errMsg string
 			// No short form: pass the long name as sentinel to disable attached-value parsing.
 			workSessionID, i, errMsg = extractFlagValue(args, i, "--work-session")
 			if errMsg != "" {
 				return fail(errMsg)
+			}
+			if workSessionID == "" {
+				return fail("--work-session requires a value")
 			}
 		case arg == "--purpose" || strings.HasPrefix(arg, "--purpose="):
 			var errMsg string
@@ -167,18 +190,16 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 				return fail(msg)
 			}
 		case arg == "--output" || strings.HasPrefix(arg, "--output="):
-			var errMsg string
-			outputFormat, i, errMsg = extractFlagValue(args, i, "--output")
+			value, next, errMsg := extractFlagValue(args, i, "--output")
 			if errMsg != "" {
-				return fail(errMsg)
+				return fail(errMsg) // a value read earlier still sets the refusal's format
 			}
+			outputFormat, i = value, next
 			if outputFormat == "" {
 				return fail("--output requires a value (table|json)")
 			}
 		case arg == "--env" || strings.HasPrefix(arg, "--env="):
-			if errMsg := ParseEnvArg(ios, arg, env); errMsg != "" {
-				return fail(errMsg)
-			}
+			envArgs = append(envArgs, arg) // read once the line is known not to ask for help
 		case arg == "--file" || strings.HasPrefix(arg, "--file="):
 			var errMsg string
 			filePath, i, errMsg = extractFlagValue(args, i, "--file")
@@ -260,6 +281,12 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 		}
 	}
 
+	for _, arg := range envArgs {
+		if errMsg := ParseEnvArg(ios, arg, env); errMsg != "" {
+			return fail(errMsg)
+		}
+	}
+
 	if detach && wait {
 		return fail("--wait and --detach cannot be combined; --detach returns immediately and would ignore --wait")
 	}
@@ -305,13 +332,7 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 		}
 	}
 
-	if server != "" && strings.Contains(server, "@") && !strings.Contains(server, ":") {
-		sshTarget := utils.ParseSSHTarget(server)
-		if username == "" && sshTarget.User != "" {
-			username = sshTarget.User
-		}
-		server = sshTarget.Host
-	}
+	server, username = utils.ParseServerTarget(server, username)
 
 	parsed := RemoteExecArgs{
 		Username:        username,
@@ -341,6 +362,30 @@ func ParseRemoteExecArgs(ios *utils.IOStreams, args []string) RemoteExecArgs {
 	}
 	parsed.Command = ShellJoin(commandParts)
 	return parsed
+}
+
+// helpOutputFormat is the last --output value among the flags after --help, valid or not; it stops where
+// the remote command line starts.
+func helpOutputFormat(args []string) string {
+	var format string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" || !strings.HasPrefix(arg, "-") {
+			break
+		}
+		if value, ok := strings.CutPrefix(arg, "--output="); ok {
+			format = value
+			continue
+		}
+		if !slices.Contains(valueFlags, arg) {
+			continue
+		}
+		i++
+		if arg == "--output" && i < len(args) {
+			format = args[i]
+		}
+	}
+	return format
 }
 
 // ParseEnvArg parses a --env token into env. A bare KEY reads the shell value,

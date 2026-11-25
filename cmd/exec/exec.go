@@ -25,6 +25,13 @@ import (
 // own server.
 type clientFactory = func() (*client.AlpaconClient, error)
 
+var selectWorkSession = worksession.Select
+
+var (
+	submitCommand     = event.SubmitCommand
+	submitFileCommand = event.SubmitFileCommand
+)
+
 func NewExecCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "exec [flags] [USER@]SERVER [--] [COMMAND...]", // [flags] stays first: words after SERVER go to the remote command
@@ -252,8 +259,8 @@ This is client guidance; personal-token enforcement depends on the server versio
 			parsed := ParseRemoteExecArgs(ios, args)
 
 			if parsed.ShowHelp {
-				_ = cmd.Help()
-				return nil
+				_ = ios.SetOutputFormat(parsed.OutputFormat) // help prints whatever the format, as under Cobra
+				return cmd.Help()
 			}
 			if parsed.Err != "" {
 				return ios.NewParseExitError(cmd, parsed.OutputFormat, parsed.Err)
@@ -301,18 +308,27 @@ func RemoteExec(ios *utils.IOStreams, newClient clientFactory, stdout, stderr io
 		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 
-	workSessionID, err := worksession.Resolve(alpaconClient, parsed.WorkSessionID)
+	operation := worksession.Command
+	if parsed.File != nil && (parsed.File.Upload || parsed.File.FromServer) {
+		operation = worksession.FileCommand
+	}
+	selection, err := selectWorkSession(ios, alpaconClient, parsed.WorkSessionID, worksession.Need{
+		Operation: operation,
+		Server:    parsed.Server,
+		Account:   parsed.Username,
+	})
 	if err != nil {
 		return utils.NewExitError("%s", err)
 	}
 
 	if file != nil && parsed.File.Upload {
-		if err := uploadFile(ios, stderr, alpaconClient, parsed, *file, workSessionID, authMethod); err != nil {
+		if err := uploadFile(ios, stderr, alpaconClient, parsed, *file, selection, authMethod); err != nil {
 			return err
 		}
+		selection.ResumeWith("re-run this command without --upload and --overwrite, since the script is already on the server")
 	}
 	if parsed.File != nil && parsed.File.FromServer {
-		loaded, err := downloadFile(ios, stderr, alpaconClient, parsed, workSessionID, authMethod)
+		loaded, err := downloadFile(ios, stderr, alpaconClient, parsed, selection, authMethod)
 		if err != nil {
 			return err
 		}
@@ -324,29 +340,29 @@ func RemoteExec(ios *utils.IOStreams, newClient clientFactory, stdout, stderr io
 	if parsed.Detach {
 		submit := func() (event.CommandResponse, error) {
 			if file != nil {
-				return event.SubmitFileCommand(alpaconClient, parsed.Server, *file, parsed.Username, parsed.Groupname, workSessionID, parsed.Purpose)
+				return submitFileCommand(alpaconClient, parsed.Server, *file, parsed.Username, parsed.Groupname, selection.ID(), parsed.Purpose)
 			}
-			return event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose)
+			return submitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, selection.ID(), parsed.Purpose)
 		}
 		resp, err := submit()
 		if err != nil {
-			err = utils.HandleCommonErrors(err, parsed.Server, mfa.ErrorCallbacks(alpaconClient, func() error {
+			err = utils.HandleCommonErrors(err, parsed.Server, selection.Offer(mfa.ErrorCallbacks(alpaconClient, func() error {
 				resp, err = submit()
 				return err
-			}))
+			})))
 		}
 		if err != nil {
 			if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
 				return exitErr
 			}
 			signalArgs := parsed
-			signalArgs.WorkSessionID = workSessionID
+			signalArgs.WorkSessionID = selection.ID()
 			err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), alpaconClient)
 			utils.SignalRefusal(err)
 			if file == nil && isLineTooLong(err) {
 				return lineTooLongFailure(ios, stderr, err, parsed)
 			}
-			if failure := utils.WorkSessionExitError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID); failure != nil {
+			if failure := utils.WorkSessionExitError(err, utils.OperationCommand, parsed.Server, authMethod, selection.ID()); failure != nil {
 				return failure
 			}
 			if failure := submitFailure(ios, stderr, err, parsed, file != nil); failure != nil {
@@ -377,17 +393,17 @@ func RemoteExec(ios *utils.IOStreams, newClient clientFactory, stdout, stderr io
 	}
 
 	if file != nil {
-		err = RunFileExecWithApprovalWait(ios, alpaconClient, parsed.Server, *file, parsed.Username, parsed.Groupname, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
+		err = RunFileExecWithApprovalWait(ios, alpaconClient, parsed.Server, *file, parsed.Username, parsed.Groupname, selection, parsed.Purpose, parsed.WaitTimeout(), out)
 	} else {
-		err = RunExecWithApprovalWait(ios, alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
+		err = RunExecWithApprovalWait(ios, alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, selection, parsed.Purpose, parsed.WaitTimeout(), out)
 	}
 	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
-		return exitErr // the MFA failure carries the lookup's error, which the classifiers below would read as a refusal
+		return exitErr // Recovery failed; not a refusal of this request.
 	}
 	if file == nil && isLineTooLong(err) {
 		return lineTooLongFailure(ios, stderr, err, parsed)
 	}
-	if failure := utils.WorkSessionExitError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID); failure != nil {
+	if failure := utils.WorkSessionExitError(err, utils.OperationCommand, parsed.Server, authMethod, selection.ID()); failure != nil {
 		return failure
 	}
 	// A purpose demand has no approval request yet, so it is reported before the pending-approval

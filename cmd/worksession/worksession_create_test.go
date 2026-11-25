@@ -1121,3 +1121,45 @@ func TestWaitExitErrorReturnsTheExitInsteadOfTakingIt(t *testing.T) {
 		})
 	}
 }
+
+type stalledTransport struct{}
+
+func (stalledTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	<-r.Context().Done()
+	return nil, r.Context().Err()
+}
+
+func TestApprovalWaitBoundsAStalledStatusRequestByItsDeadline(t *testing.T) {
+	t.Parallel()
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: &http.Client{Transport: stalledTransport{}}}
+	ios, _, _ := utils.TestIOStreams()
+	var err error
+	var waited time.Duration
+
+	synctest.Test(t, func(*testing.T) {
+		start := time.Now()
+		_, err = WaitForApproval(ios, ac, "ws-1", true, time.Second, 5*time.Minute)
+		waited = time.Since(start)
+	})
+
+	var pending *pendingWaitError
+	require.ErrorAs(t, err, &pending)
+	assert.Equal(t, 5*time.Minute, waited)
+}
+
+func TestApprovalWaitRefusesAnAnswerForAnotherSession(t *testing.T) {
+	t.Parallel()
+	var events atomic.Int32
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+		events.Add(1)
+		return http.StatusOK, `{"id":"other-session","status":"rejected","console_url":"https://example.com/other"}`
+	})}
+	ios, _, _ := utils.TestIOStreams()
+
+	_, err := WaitForApproval(ios, ac, "ws-1", true, time.Millisecond, time.Second)
+
+	require.EqualError(t, err, "polling failed: the server answered for a different work session")
+	var terminal *terminalWaitError
+	assert.NotErrorAs(t, err, &terminal)
+	assert.Equal(t, int32(1), events.Load())
+}

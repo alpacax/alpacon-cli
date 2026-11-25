@@ -303,6 +303,33 @@ func TestExecuteEmitsOneEnvelopeForACobraParseErrorUnderJSONOutput(t *testing.T)
 	}
 }
 
+func TestExecuteKeepsAnEarlierJSONOutputWhenATrailingOutputHasNoValue(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"api", "--output=json", "--output"},
+		{"server", "ls", "--output", "json", "--output"},
+		{"exec", "--output=json", "--output"},
+	} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			t.Parallel()
+
+			_, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, args,
+				exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir())
+
+			assert.Equal(t, utils.ExitCodeUsageError, exitCode)
+			var envelope struct {
+				ExitCode  int    `json:"exit_code"`
+				ErrorCode string `json:"error_code"`
+				Message   string `json:"message"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), "stderr must be one envelope: %s", stderr)
+			assert.Equal(t, utils.ExitCodeUsageError, envelope.ExitCode)
+			assert.Equal(t, utils.ErrorCodeUsage, envelope.ErrorCode)
+			assert.Equal(t, "flag needs an argument: --output", envelope.Message)
+		})
+	}
+}
+
 func TestExecuteExitsTwoWhenTheCommandLineIsMalformed(t *testing.T) {
 	t.Parallel()
 	const usage = utils.ExitCodeUsageError

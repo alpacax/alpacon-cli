@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -569,26 +570,48 @@ func TestPartialListOutputHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-func TestOutputFormatInReadsTheLastOutputFlagBeforeTheSeparator(t *testing.T) {
+func TestOutputFormatInReadsTheLastOutputValueBeforeTheSeparator(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		args []string
-		want string
+		name        string
+		args        []string
+		want        string
+		wantGiven   bool
+		wantMissing bool
 	}{
 		{name: "no output flag", args: []string{"server", "ls", "--bogus"}},
-		{name: "separate value", args: []string{"server", "ls", "--bogus", "--output", "json"}, want: "json"},
-		{name: "equals form", args: []string{"server", "ls", "--bogus", "--output=json"}, want: "json"},
-		{name: "last one wins", args: []string{"--output", "json", "server", "ls", "--output=table"}, want: "table"},
-		{name: "flag without a value", args: []string{"server", "ls", "--output"}},
+		{name: "separate value", args: []string{"server", "ls", "--bogus", "--output", "json"}, want: "json", wantGiven: true},
+		{name: "equals form", args: []string{"server", "ls", "--bogus", "--output=json"}, want: "json", wantGiven: true},
+		{name: "last one wins", args: []string{"--output", "json", "server", "ls", "--output=table"}, want: "table", wantGiven: true},
+		{name: "flag without a value", args: []string{"server", "ls", "--output"}, wantMissing: true},
+		{name: "flag without a value after a set one", args: []string{"--output=json", "server", "ls", "--output"}, want: "json", wantGiven: true, wantMissing: true},
+		{name: "empty value after a set one", args: []string{"--output=json", "--output="}, wantGiven: true},
+		{name: "separator taken as the value", args: []string{"--output", "--", "--output", "json"}, want: "json", wantGiven: true},
+		{name: "value of a long flag", args: []string{"--field", "--output=json"}},
+		{name: "value of a short flag", args: []string{"-f", "--output=json"}},
+		{name: "value of a short flag behind a bool one", args: []string{"-vf", "--output=json"}},
+		{name: "short flag with its value attached", args: []string{"-fx", "--output=json"}, want: "json", wantGiven: true},
+		{name: "long flag with its value attached", args: []string{"--field=x", "--output=json"}, want: "json", wantGiven: true},
+		{name: "after a bool flag", args: []string{"-v", "--verbose", "--output=json"}, want: "json", wantGiven: true},
+		{name: "value of a flag the parent defines", args: []string{"--region", "--output=json"}},
 		{name: "after the separator", args: []string{"tunnel", "my-server", "--", "tool", "--output", "json"}},
-		{name: "before the separator", args: []string{"tunnel", "--output=json", "my-server", "--", "tool", "--output", "table"}, want: "json"},
+		{name: "before the separator", args: []string{"tunnel", "--output=json", "my-server", "--", "tool", "--output", "table"}, want: "json", wantGiven: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tt.want, OutputFormatIn(tt.args))
+			root, cmd := &cobra.Command{Use: "root"}, &cobra.Command{Use: "leaf"}
+			root.AddCommand(cmd)
+			root.PersistentFlags().String("region", "", "")
+			cmd.Flags().StringP("field", "f", "", "")
+			cmd.Flags().BoolP("verbose", "v", false, "")
+
+			format, given, missing := OutputFormatIn(cmd, tt.args)
+
+			assert.Equal(t, tt.want, format)
+			assert.Equal(t, tt.wantGiven, given)
+			assert.Equal(t, tt.wantMissing, missing)
 		})
 	}
 }
@@ -616,6 +639,43 @@ func TestSetOutputFormatRefusesAnyOtherValueAsAUsageError(t *testing.T) {
 				assert.True(t, IsUsageError(err), "err: %v", err)
 				assert.Equal(t, OutputFormatTable, OutputFormat)
 			})
+		})
+	}
+}
+
+func TestPrintListTo_JSONReportsPartialRowsInOneEnvelope(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		cause      error
+		wantStderr string
+	}{
+		{
+			name:       "plain error",
+			cause:      errors.New("\x1b[31mboom\x1b[0m"),
+			wantStderr: `{"ok":false,"exit_code":1,"error_code":"cli_error","message":"Showing only the 1 entries read before the request failed: boom.","context":{"operation":""},"partial":{"count":1}}`,
+		},
+		{
+			name:       "refusal keeps its metadata",
+			cause:      &statusWrap{err: &hintedError{code: "rbac_permission_required", hint: "Ask an admin."}, status: 403},
+			wantStderr: `{"ok":false,"exit_code":1,"error_code":"rbac_permission_required","message":"Showing only the 1 entries read before the request failed: permission denied.","context":{"operation":""},"http_status":403,"partial":{"count":1},"next_actions":[{"description":"Ask an admin."}]}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ios, out, errOut := TestIOStreams()
+			require.NoError(t, ios.SetOutputFormat(OutputFormatJSON))
+			rows := []outputTestItem{{Name: "alpha", ID: 1}}
+
+			err := PrintListTo(ios, rows, tt.cause, "Failed to get logs")
+
+			var exitErr *ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, ExitCodeGeneralError, exitErr.Code)
+			ios.PrintExitError(exitErr)
+			assert.JSONEq(t, `[{"name":"alpha","id":1}]`, out.String())
+			assert.JSONEq(t, tt.wantStderr, errOut.String())
 		})
 	}
 }

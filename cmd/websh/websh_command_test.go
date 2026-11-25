@@ -1,11 +1,13 @@
 package websh
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api/websh"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -159,6 +161,57 @@ func TestWebshCommandRefusedByTheWorkSessionGateExits3WithTheDiagnostic(t *testi
 	assert.Equal(t, utils.ExitCodeWorkSessionDenied, code)
 	assert.Contains(t, stderr, "  target server : my-server\n")
 	assert.Contains(t, banner, "whoami on my-server was refused by the work_session gate and did not run.")
+}
+
+// Serial: HOME points at an empty directory so no real config is read, and
+// TerminalSize is pinned so the interactive path reaches its session create.
+func TestWebshSplitsTheInlineUserOffTheServer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ALPACON_WORK_SESSION", "")
+	original := websh.TerminalSize
+	websh.TerminalSize = func() (int, int, error) { return 24, 80, nil }
+	t.Cleanup(func() { websh.TerminalSize = original })
+	tests := []struct {
+		name       string
+		args       []string
+		wantServer string
+		wantUser   string
+	}{
+		{name: "interactive", args: []string{"root@prod-docker"}, wantServer: "prod-docker", wantUser: "root"},
+		{name: "username flag wins interactive", args: []string{"-u", "override", "root@prod-docker"}, wantServer: "prod-docker", wantUser: "override"},
+		{name: "command", args: []string{"admin@web-server", "docker", "ps"}, wantServer: "web-server", wantUser: "admin"},
+		{name: "username flag wins", args: []string{"-u", "override", "root@prod-docker", "ls"}, wantServer: "prod-docker", wantUser: "override"},
+		{name: "dotted host", args: []string{"deploy@web-server-01.example.com", "uptime"}, wantServer: "web-server-01.example.com", wantUser: "deploy"},
+		{name: "colon left untouched", args: []string{"user@host:8080", "ls"}, wantServer: "user@host:8080"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var (
+				lookedUp  string
+				submitted struct {
+					Username string `json:"username"`
+				}
+			)
+			newClient := stubClient(func(req *http.Request) (int, string) {
+				switch {
+				case req.Method == http.MethodGet && req.URL.Path == "/api/servers/servers/":
+					lookedUp = req.URL.Query().Get("name")
+					return http.StatusOK, `{"count":1,"results":[{"id":"3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47","name":"my-server"}]}`
+				case req.Method == http.MethodPost && (req.URL.Path == "/api/events/commands/" || req.URL.Path == "/api/websh/sessions/"):
+					assert.NoError(t, json.NewDecoder(req.Body).Decode(&submitted))
+					return http.StatusBadRequest, `{"detail": "boom"}` // refused, so no terminal or WebSocket is opened
+				default: // the output stream is refused
+					return http.StatusNotFound, `{}`
+				}
+			})
+
+			_, code := executeWebsh(newClient, tt.args...)
+
+			assert.Equal(t, utils.ExitCodeGeneralError, code)
+			assert.Equal(t, tt.wantServer, lookedUp)
+			assert.Equal(t, tt.wantUser, submitted.Username)
+		})
+	}
 }
 
 func TestWebshRecordsShowsTheRecordsReadBeforeAFailureAndExits1WithNoErrorLine(t *testing.T) {

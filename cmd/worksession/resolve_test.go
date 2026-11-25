@@ -5,25 +5,27 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestResolve_Priority(t *testing.T) {
+func TestSelectPriority(t *testing.T) {
 	tests := []struct {
 		name     string
 		flag     string
 		envUUID  string
 		cfgUUID  string
 		expected string
+		source   Source
 	}{
-		{"all empty", "", "", "", ""},
-		{"only config", "", "", "uuid-cfg", "uuid-cfg"},
-		{"only env", "", "uuid-env", "", "uuid-env"},
-		{"only flag", "uuid-flag", "", "", "uuid-flag"},
-		{"env wins over config", "", "uuid-env", "uuid-cfg", "uuid-env"},
-		{"flag wins over env", "uuid-flag", "uuid-env", "", "uuid-flag"},
-		{"flag wins over env and config", "uuid-flag", "uuid-env", "uuid-cfg", "uuid-flag"},
+		{"all empty", "", "", "", "", SourceNone},
+		{"only config", "", "", "uuid-cfg", "uuid-cfg", SourceConfig},
+		{"only env", "", "uuid-env", "", "uuid-env", SourceEnv},
+		{"only flag", "uuid-flag", "", "", "uuid-flag", SourceFlag},
+		{"env wins over config", "", "uuid-env", "uuid-cfg", "uuid-env", SourceEnv},
+		{"flag wins over env", "uuid-flag", "uuid-env", "", "uuid-flag", SourceFlag},
+		{"flag wins over env and config", "uuid-flag", "uuid-env", "uuid-cfg", "uuid-flag", SourceFlag},
 	}
 
 	for _, tt := range tests {
@@ -36,9 +38,11 @@ func TestResolve_Priority(t *testing.T) {
 				require.NoError(t, config.SetActiveWorkSession(tt.cfgUUID))
 			}
 
-			got, err := Resolve(&client.AlpaconClient{WorkspaceName: "ws"}, tt.flag)
+			ios, _, _ := utils.TestIOStreams()
+			got, err := Select(ios, &client.AlpaconClient{WorkspaceName: "ws"}, tt.flag, Need{})
 			require.NoError(t, err)
-			assert.Equal(t, tt.expected, got)
+			assert.Equal(t, tt.expected, got.ID())
+			assert.Equal(t, tt.source, got.source)
 		})
 	}
 }
@@ -52,17 +56,18 @@ func switchConfigToWorkspace(t *testing.T, name, session string) {
 	require.NoError(t, config.SetActiveWorkSession(session))
 }
 
-func TestResolve_UsesClientWorkspaceWhenConfigSwitchedAfterClientBuilt(t *testing.T) {
+func TestSelectUsesClientWorkspaceWhenConfigSwitchedAfterClientBuilt(t *testing.T) {
 	setupTmpConfig(t)
 	t.Setenv(WorkSessionEnvVar, "")
 	require.NoError(t, config.SetActiveWorkSession("ses-a"))
 	ac := &client.AlpaconClient{WorkspaceName: "ws"}
 	switchConfigToWorkspace(t, "other", "ses-other")
 
-	got, err := Resolve(ac, "")
+	ios, _, _ := utils.TestIOStreams()
+	got, err := Select(ios, ac, "", Need{})
 
 	require.NoError(t, err)
-	assert.Equal(t, "ses-a", got)
+	assert.Equal(t, "ses-a", got.ID())
 }
 
 func TestSessionResolvableBeforeClient(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	ftpapi "github.com/alpacax/alpacon-cli/api/ftp"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
@@ -101,6 +102,11 @@ var fileExecRefusals = []struct {
 	},
 }
 
+var (
+	uploadContentAs     = ftpapi.UploadContentAs
+	downloadFileContent = ftpapi.DownloadFileContent
+)
+
 // FileExecArgs is the file lane as given on the command line: --file, --file-from, --interpreter,
 // --reuse-days, --upload, --overwrite, --from-server and the arguments after --. From and
 // Interpreter stay empty when their flag was not given, so a re-run hint repeats only what the
@@ -165,14 +171,14 @@ func newFileExecution(spec FileExecArgs, content string) event.FileExecution {
 // uploadFile writes file.Content to its --file path on the server as the run-as account and group,
 // so what lands there is what the reviewer sees. It returns the failure's exit, since a script that
 // was not written must not be submitted.
-func uploadFile(ios *utils.IOStreams, stderr io.Writer, ac *client.AlpaconClient, parsed RemoteExecArgs, file event.FileExecution, workSessionID, authMethod string) error {
+func uploadFile(ios *utils.IOStreams, stderr io.Writer, ac *client.AlpaconClient, parsed RemoteExecArgs, file event.FileExecution, selection *worksession.Selection, authMethod string) error {
 	upload := func() error {
-		return ftpapi.UploadContentAs(ac, parsed.Server, file.Path, []byte(file.Content),
-			parsed.Username, parsed.Groupname, workSessionID, parsed.File.Overwrite)
+		return uploadContentAs(ac, parsed.Server, file.Path, []byte(file.Content),
+			parsed.Username, parsed.Groupname, selection.ID(), parsed.File.Overwrite)
 	}
 	err := upload()
 	if err != nil {
-		err = utils.HandleCommonErrors(err, parsed.Server, mfa.ErrorCallbacks(ac, upload))
+		err = utils.HandleCommonErrors(err, parsed.Server, selection.Offer(mfa.ErrorCallbacks(ac, upload)))
 	}
 	if err == nil {
 		return nil
@@ -181,10 +187,10 @@ func uploadFile(ios *utils.IOStreams, stderr io.Writer, ac *client.AlpaconClient
 		return exitErr
 	}
 	signalArgs := parsed
-	signalArgs.WorkSessionID = workSessionID
+	signalArgs.WorkSessionID = selection.ID()
 	err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), ac)
 	utils.SignalRefusal(err)
-	if wsErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID); wsErr != nil {
+	if wsErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, parsed.Server, authMethod, selection.ID()); wsErr != nil {
 		return wsErr
 	}
 	var hint string
@@ -201,18 +207,18 @@ func uploadFile(ios *utils.IOStreams, stderr io.Writer, ac *client.AlpaconClient
 // downloadFile reads the script from its --file path on the server as the run-as account and
 // group, and builds the submission from those bytes. It returns the failure's exit, since a script
 // that could not be read must not be submitted.
-func downloadFile(ios *utils.IOStreams, stderr io.Writer, ac *client.AlpaconClient, parsed RemoteExecArgs, workSessionID, authMethod string) (event.FileExecution, error) {
+func downloadFile(ios *utils.IOStreams, stderr io.Writer, ac *client.AlpaconClient, parsed RemoteExecArgs, selection *worksession.Selection, authMethod string) (event.FileExecution, error) {
 	label := parsed.Server + ":" + parsed.File.Path
-	content, msg, err := fetchServerScript(ac, parsed, label, workSessionID)
+	content, msg, err := fetchServerScript(ac, parsed, label, selection)
 	if err != nil {
 		if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
 			return event.FileExecution{}, exitErr
 		}
 		signalArgs := parsed
-		signalArgs.WorkSessionID = workSessionID
+		signalArgs.WorkSessionID = selection.ID()
 		err = utils.WithSignalFields(err, commandSignalFields(err, signalArgs), ac)
 		utils.SignalRefusal(err)
-		if wsErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID); wsErr != nil {
+		if wsErr := utils.WorkSessionExitError(err, utils.OperationWebFTP, parsed.Server, authMethod, selection.ID()); wsErr != nil {
 			return event.FileExecution{}, wsErr
 		}
 		var rejected *event.CommandRejectedError
@@ -234,15 +240,15 @@ func downloadFile(ios *utils.IOStreams, stderr io.Writer, ac *client.AlpaconClie
 // most FileContentMaxBytes+1 bytes of it, and checks it as readFileContent
 // checks a local script. err is a failed download; msg is a copy the file lane
 // cannot take.
-func fetchServerScript(ac *client.AlpaconClient, parsed RemoteExecArgs, label, workSessionID string) (content, msg string, err error) {
+func fetchServerScript(ac *client.AlpaconClient, parsed RemoteExecArgs, label string, selection *worksession.Selection) (content, msg string, err error) {
 	var data []byte
 	download := func() (err error) {
-		data, err = ftpapi.DownloadFileContent(ac, parsed.Server, parsed.File.Path,
-			parsed.Username, parsed.Groupname, workSessionID, FileContentMaxBytes+1)
+		data, err = downloadFileContent(ac, parsed.Server, parsed.File.Path,
+			parsed.Username, parsed.Groupname, selection.ID(), FileContentMaxBytes+1)
 		return err
 	}
 	if err = download(); err != nil {
-		err = utils.HandleCommonErrors(err, parsed.Server, mfa.ErrorCallbacks(ac, download))
+		err = utils.HandleCommonErrors(err, parsed.Server, selection.Offer(mfa.ErrorCallbacks(ac, download)))
 	}
 	if err != nil {
 		return "", "", err

@@ -1,11 +1,15 @@
 package exec
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseRemoteExecArgs(t *testing.T) {
@@ -889,6 +893,21 @@ func TestParseRemoteExecArgs_Errors(t *testing.T) {
 			expectedErr: "flag needs an argument: --groupname",
 		},
 		{
+			name:        "empty username",
+			args:        []string{"--username=", "server", "ls"},
+			expectedErr: "--username requires a value",
+		},
+		{
+			name:        "empty short groupname",
+			args:        []string{"-g", "", "server", "ls"},
+			expectedErr: "--groupname requires a value",
+		},
+		{
+			name:        "empty work session",
+			args:        []string{"--work-session=", "server", "ls"},
+			expectedErr: "--work-session requires a value",
+		},
+		{
 			name:        "--detach=VALUE equals-form is rejected",
 			args:        []string{"--detach=true", "server", "apt", "upgrade"},
 			expectedErr: "--detach does not accept a value; use --detach alone",
@@ -972,6 +991,7 @@ func TestParseRemoteExecArgsRefusalCarriesTheOutputReadBeforeIt(t *testing.T) {
 		{name: "output ahead of an unknown flag", args: []string{"--output", "json", "--bogus", "my-server"}, want: "json"},
 		{name: "output joined by equals ahead of an unknown flag", args: []string{"--output=json", "--bogus", "my-server"}, want: "json"},
 		{name: "output after an unknown flag", args: []string{"--bogus", "--output", "json", "my-server"}},
+		{name: "output without a value after a set one", args: []string{"--output=json", "--output"}, want: "json"},
 		{name: "remote output after an attached short value and an unknown flag", args: []string{"-uroot", "--bogus", "my-server", "--output", "json"}},
 		{name: "output ahead of a refused file with a remote output after the separator", args: []string{"--output", "json", "--file", "relative", "my-server", "--", "echo", "--output", "table"}, want: "json"},
 	}
@@ -985,4 +1005,31 @@ func TestParseRemoteExecArgsRefusalCarriesTheOutputReadBeforeIt(t *testing.T) {
 			assert.Equal(t, tt.want, parsed.OutputFormat)
 		})
 	}
+}
+
+// documentedFlags matches a flag name anywhere in the help text.
+var documentedFlags = regexp.MustCompile(`--?[a-z][a-z-]*`)
+
+func TestHelpOutputFormatSkipsTheValueOfEveryDocumentedFlag(t *testing.T) {
+	t.Parallel()
+	cmd := NewExecCmd(cmdtest.NoClient, utils.Stdio)
+	help := cmd.Long + cmd.Example
+	checked := 0
+	seen := map[string]bool{"--output": true} // it reads the next word itself
+	for _, flag := range documentedFlags.FindAllString(help, -1) {
+		if seen[flag] {
+			continue
+		}
+		seen[flag] = true
+		if err := ParseRemoteExecArgs(utils.Stdio, []string{flag}).Err; !strings.HasPrefix(err, "flag needs an argument") {
+			continue // takes no value
+		}
+		checked++
+		t.Run(flag, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Empty(t, helpOutputFormat([]string{flag, "--output=json"}), "%s takes a value, so the next word is not --output", flag)
+		})
+	}
+	require.NotZero(t, checked, "no value flag found in the help; the pattern matched nothing")
 }

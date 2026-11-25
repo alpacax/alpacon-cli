@@ -3,7 +3,6 @@ package worksession
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -16,17 +15,7 @@ import (
 const workSessionURL = "/api/work-sessions/sessions/"
 
 func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType, assignedUser string) ([]WorkSessionAttributes, error) {
-	params := map[string]string{}
-	if status != "" {
-		params["status"] = status
-	}
-	if requesterType != "" {
-		params["requester_type"] = requesterType
-	}
-	if assignedUser != "" {
-		params["assigned_user"] = assignedUser
-	}
-
+	params := SessionFilter{Status: status, RequesterType: requesterType, AssignedUser: assignedUser}.params()
 	sessions, err := api.FetchAllPages[WorkSession](ac, workSessionURL, params)
 	if err != nil {
 		return nil, err
@@ -108,32 +97,40 @@ func TargetsCluster(ws *WorkSession, clusterID string) bool {
 	return false
 }
 
-// ClusterSessionFilter narrows GetClusterWorkSessions. Empty fields are not
-// sent; Status takes several statuses separated by commas.
-type ClusterSessionFilter struct {
+// SessionFilter narrows a work session list. Empty fields are not sent; Status takes several
+// statuses separated by commas. A server that ignores a filter still answers, so callers check targets locally.
+type SessionFilter struct {
 	ClusterID     string
+	ServerID      string
 	Status        string
 	RequesterType string
 	AssignedUser  string
 }
 
-// GetClusterWorkSessions returns, whole, the work sessions that target one
-// cluster, through the server's cluster filter.
-func GetClusterWorkSessions(ac *client.AlpaconClient, filter ClusterSessionFilter) ([]WorkSession, error) {
-	if strings.TrimSpace(filter.ClusterID) == "" {
-		return nil, errors.New("cluster ID is required")
+func (f SessionFilter) params() map[string]string {
+	params := map[string]string{}
+	for key, value := range map[string]string{
+		"cluster":        strings.TrimSpace(f.ClusterID),
+		"server":         strings.TrimSpace(f.ServerID),
+		"status":         f.Status,
+		"requester_type": f.RequesterType,
+		"assigned_user":  f.AssignedUser,
+	} {
+		if value != "" {
+			params[key] = value
+		}
 	}
-	params := map[string]string{"cluster": filter.ClusterID}
-	if filter.Status != "" {
-		params["status"] = filter.Status
-	}
-	if filter.RequesterType != "" {
-		params["requester_type"] = filter.RequesterType
-	}
-	if filter.AssignedUser != "" {
-		params["assigned_user"] = filter.AssignedUser
-	}
-	sessions, err := api.FetchAllPages[WorkSession](ac, workSessionURL, params)
+	return params
+}
+
+// ListWorkSessions returns whole work sessions, optionally narrowed to one server or cluster.
+func ListWorkSessions(ac *client.AlpaconClient, filter SessionFilter) ([]WorkSession, error) {
+	return ListWorkSessionsWithContext(context.Background(), ac, filter)
+}
+
+// ListWorkSessionsWithContext is ListWorkSessions ended early by ctx.
+func ListWorkSessionsWithContext(ctx context.Context, ac *client.AlpaconClient, filter SessionFilter) ([]WorkSession, error) {
+	sessions, err := api.FetchAllPagesWithContext[WorkSession](ctx, ac, workSessionURL, filter.params())
 	if err != nil {
 		return nil, err
 	}
@@ -158,8 +155,14 @@ func FormatDuration(d time.Duration) string {
 }
 
 func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (*WorkSession, error) {
+	return CreateWorkSessionWithContext(context.Background(), ac, req)
+}
+
+// CreateWorkSessionWithContext is CreateWorkSession ended early by ctx; a request cut off without an
+// answer may still have created the session.
+func CreateWorkSessionWithContext(ctx context.Context, ac *client.AlpaconClient, req WorkSessionCreateRequest) (*WorkSession, error) {
 	req.SudoPolicies = sudoPoliciesForRequest(req.SudoPolicies)
-	body, err := ac.SendPostRequest(workSessionURL, req)
+	body, err := ac.SendPostRequestWithContext(ctx, workSessionURL, req)
 	if err != nil {
 		return nil, err
 	}

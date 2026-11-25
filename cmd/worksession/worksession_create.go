@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/api/server"
@@ -66,10 +68,15 @@ should pass --purpose with each command, which skips the purpose demand entirely
 Set the session lifetime with --expires-in (relative, e.g. 2h) or --expires-at
 (absolute RFC3339); one is required in non-interactive mode.
 
-Pass --use to set the new session as the workspace's active session, so subsequent
-exec/websh/cp/tunnel commands attach to it without --work-session. When approval is
-required, combine --use with --wait. The session is attached once it reaches the
-active state. Use --wait-approval DURATION to wait longer than the default 5 minutes.
+Pass --wait to block until the session is approved, for 5 minutes by default.
+--wait-approval DURATION does the same with a different timeout and implies --wait.
+Both work for user and agent sessions alike.
+
+Pass --use to set the new session as the workspace's active session. On its own,
+--use attaches only sessions that are already active. Add --wait or
+--wait-approval DURATION to wait for the active state and then attach the session.
+Subsequent exec/websh/cp/tunnel commands use the attached session without
+--work-session. --use is for user sessions only.
 
 If the work needs sudo, pre-declare the command patterns with --sudo. This attaches
 session-authorized sudo policies so a non-interactive caller (e.g. an AI agent
@@ -88,7 +95,7 @@ detected.
 
 An agent session refuses --use and the websh scope, so pass --work-session SESSION_ID
 before the server on each command instead, as in 'alpacon exec --work-session
-SESSION_ID web-01 -- uptime'. --wait still waits for approval.
+SESSION_ID web-01 -- uptime'.
 
 Pass --account to name the account the work runs as on the servers (for example
 root), so the approver sees it with the request. The session runs only as that
@@ -290,7 +297,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 			if approvalSignaled {
 				utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: session.ID, ConsoleURL: session.ConsoleURL}, ac)
 			}
-			afterApproval := afterApprovalAction(sessionRequesterType, session.ID, account)
+			afterApproval := afterApprovalAction(sessionRequesterType, session.ID, "exec", account)
 			if clusterName != "" {
 				afterApproval = KubeLoginAction(clusterName, session.ID)
 			}
@@ -356,7 +363,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 			}
 
 			// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
-			finalSession, err := waitForApproval(ios, ac, session.ID, useAfterCreate, ApprovalPollInterval, waitTimeout, approvalSignaled)
+			finalSession, err := waitForApproval(context.Background(), ios, ac, session.ID, useAfterCreate, ApprovalPollInterval, waitTimeout, approvalSignaled)
 			if err != nil {
 				return WaitExitError(ios, opCreate, session, afterApproval, err, createUpdateNextActions(clusterName, session)...)
 			}
@@ -638,15 +645,39 @@ func resolveRequesterType(flagValue string, flagSet bool, detected aiagent.Detec
 // afterApprovalAction is the follow-up for a session still waiting on approval.
 // A user session is attached with 'work-session use'; an agent session cannot
 // be, so its ID goes to each subsequent command with --work-session instead.
-func afterApprovalAction(requesterType, id, account string) utils.NextAction {
-	asAccount := ""
-	if account != "" {
-		asAccount = fmt.Sprintf("; run exec with -u %s, the account the session was created for", account)
+func afterApprovalAction(requesterType, id, command, account string) utils.NextAction {
+	asAccount := accountRunGuidance(command, account)
+	if asAccount != "" {
+		asAccount = "; " + asAccount
 	}
 	if requesterType == "agent" {
 		return utils.NextAction{Description: fmt.Sprintf("after approval, pass --work-session %s to each subsequent command (exec, cp, tunnel)%s", id, asAccount)}
 	}
 	return utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", id), Description: "after approval" + asAccount}
+}
+
+// accountRunGuidance tells the user to run command as the account a session was created for.
+func accountRunGuidance(command, account string) string {
+	quoted, ok := ShellWord(account)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("run %s with -u %s, the account the session was created for", command, quoted)
+}
+
+// ShellWord returns value as one word a shell reads back unchanged, quoting it when needed; ok is
+// false for an empty value or one with control characters.
+func ShellWord(value string) (quoted string, ok bool) {
+	clean, altered := utils.SanitizeTerminalLine(value)
+	if altered || clean == "" {
+		return "", false
+	}
+	if !strings.ContainsFunc(clean, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("_.@-", r)
+	}) {
+		return clean, true
+	}
+	return "'" + strings.ReplaceAll(clean, "'", "'\"'\"'") + "'", true
 }
 
 // KubeLoginAction is the follow-up for a cluster session: 'kube login' opens
@@ -740,10 +771,11 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 // other transient failures end it at MaxConsecutivePollFailures; 429s are bounded by the throttle
 // budget and the deadline instead.
 func WaitForApproval(ios *utils.IOStreams, ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration) (*wsapi.WorkSession, error) {
-	return waitForApproval(ios, ac, id, untilActive, interval, timeout, false)
+	return waitForApproval(context.Background(), ios, ac, id, untilActive, interval, timeout, false)
 }
 
-func waitForApproval(ios *utils.IOStreams, ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration, signaled bool) (*wsapi.WorkSession, error) {
+// waitForApproval is WaitForApproval ended early by ctx, which leaves the outcome open.
+func waitForApproval(ctx context.Context, ios *utils.IOStreams, ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration, signaled bool) (*wsapi.WorkSession, error) {
 	start := time.Now()
 	deadline := start.Add(timeout)
 	// lastRefusal is the refusal (a 429 in practice) the latest poll got, if it
@@ -751,6 +783,9 @@ func waitForApproval(ios *utils.IOStreams, ac *client.AlpaconClient, id string, 
 	// hint still reaches the output.
 	var lastRefusal error
 	timedOut := func() error {
+		if ctx.Err() != nil {
+			return &pendingWaitError{message: "stopped waiting for approval"}
+		}
 		return &pendingWaitError{message: fmt.Sprintf("timed out waiting for approval after %s", timeout), hint: utils.RefusalHint(lastRefusal)}
 	}
 	failures := 0
@@ -758,7 +793,15 @@ func waitForApproval(ios *utils.IOStreams, ac *client.AlpaconClient, id string, 
 	budget := utils.NewThrottleBudget(timeout)
 	lastStatus := ""
 	for {
-		s, err := wsapi.GetWorkSession(ac, id)
+		requestCtx, cancel := context.WithDeadline(ctx, deadline) // a stalled response cannot outlast the wait
+		s, err := wsapi.GetWorkSessionWithContext(requestCtx, ac, id)
+		cancel()
+		if ctx.Err() != nil || err != nil && !time.Now().Before(deadline) {
+			return nil, timedOut()
+		}
+		if err == nil && s.ID != id {
+			return nil, errors.New("polling failed: the server answered for a different work session")
+		}
 		lastRefusal = nil
 		if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
 			lastRefusal = err
@@ -777,7 +820,7 @@ func waitForApproval(ios *utils.IOStreams, ac *client.AlpaconClient, id string, 
 				if newDeadline, extended := budget.Extend(deadline, delay); extended {
 					deadline = newDeadline
 				}
-				if !pollSleep(deadline, delay) {
+				if !pollSleep(ctx, deadline, delay) {
 					return nil, timedOut()
 				}
 				continue
@@ -795,7 +838,7 @@ func waitForApproval(ios *utils.IOStreams, ac *client.AlpaconClient, id string, 
 				return nil, &pendingWaitError{message: fmt.Sprintf("gave up after %d failed polls", failures)}
 			}
 			ios.Warning("Poll failed (%s); still waiting.", err)
-			if !pollSleep(deadline, utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err))) {
+			if !pollSleep(ctx, deadline, utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err))) {
 				return nil, timedOut()
 			}
 			continue
@@ -836,15 +879,15 @@ func waitForApproval(ios *utils.IOStreams, ac *client.AlpaconClient, id string, 
 		elapsed := time.Since(start)
 		window := elapsed + time.Until(deadline)
 		ios.Info("%s (%s elapsed of %s)", waitMsg, elapsed.Round(time.Second), window.Round(time.Second))
-		if !pollSleep(deadline, utils.NextPollTick(interval, elapsed)) {
+		if !pollSleep(ctx, deadline, utils.NextPollTick(interval, elapsed)) {
 			return nil, timedOut()
 		}
 	}
 }
 
 // pollSleep waits want, capped at the time left before deadline, and reports whether the wait may
-// go on; false means the window closed. A non-positive want sleeps the whole remainder.
-func pollSleep(deadline time.Time, want time.Duration) bool {
+// go on; false means the window closed or ctx ended. A non-positive want sleeps the whole remainder.
+func pollSleep(ctx context.Context, deadline time.Time, want time.Duration) bool {
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
 		return false
@@ -853,6 +896,12 @@ func pollSleep(deadline time.Time, want time.Duration) bool {
 	if step <= 0 {
 		step = remaining
 	}
-	time.Sleep(step)
-	return true
+	timer := time.NewTimer(step)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }

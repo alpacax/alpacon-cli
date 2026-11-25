@@ -696,7 +696,7 @@ func TestProjectAttributesShowsTheCluster(t *testing.T) {
 	assert.Equal(t, "kube, kube_exec", row.Scopes)
 }
 
-func TestGetClusterWorkSessions(t *testing.T) {
+func TestListWorkSessions(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/work-sessions/sessions/", r.URL.Path)
@@ -710,14 +710,27 @@ func TestGetClusterWorkSessions(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	sessions, err := GetClusterWorkSessions(newTestClient(ts), ClusterSessionFilter{ClusterID: "c-1", RequesterType: "user", AssignedUser: "u-1"})
+	sessions, err := ListWorkSessions(newTestClient(ts), SessionFilter{ClusterID: "c-1", RequesterType: "user", AssignedUser: "u-1"})
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
 	assert.True(t, TargetsCluster(&sessions[0], "C-1"), "clusters %v", sessions[0].Clusters)
 	assert.False(t, TargetsCluster(&sessions[0], "c-2"), "clusters %v", sessions[0].Clusters)
 
-	_, err = GetClusterWorkSessions(newTestClient(ts), ClusterSessionFilter{})
-	require.Error(t, err, "without a cluster the list would be every session")
+}
+
+func TestListWorkSessionsOmitsAnEmptyCluster(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.False(t, r.URL.Query().Has("cluster"), "an empty optional cluster filter must not be sent")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
+	}))
+	defer ts.Close()
+
+	sessions, err := ListWorkSessions(newTestClient(ts), SessionFilter{ClusterID: " \t"})
+
+	require.NoError(t, err)
+	assert.Empty(t, sessions)
 }
 
 func TestFormatDuration(t *testing.T) {
@@ -740,7 +753,7 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
-func TestGetClusterWorkSessionsRefusesAnUnusableID(t *testing.T) {
+func TestListWorkSessionsRefusesAnUnusableID(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -748,7 +761,7 @@ func TestGetClusterWorkSessionsRefusesAnUnusableID(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	_, err := GetClusterWorkSessions(newTestClient(ts), ClusterSessionFilter{ClusterID: "c-1"})
+	_, err := ListWorkSessions(newTestClient(ts), SessionFilter{ClusterID: "c-1"})
 
 	require.ErrorIs(t, err, api.ErrUnusableID)
 }

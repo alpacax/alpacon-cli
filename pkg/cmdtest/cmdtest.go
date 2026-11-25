@@ -83,7 +83,7 @@ func Run(cmd *cobra.Command, args ...string) (failure string, code int) {
 	ios, _, _ := utils.TestIOStreams() // formats the failure without touching the global format
 	_ = ios.SetOutputFormat(utils.OutputFormat)
 	var out strings.Builder
-	code = run(cmd, args, ios, &out, utils.OutputFormatIn(args))
+	code = run(cmd, args, ios, &out)
 	return out.String(), code
 }
 
@@ -108,14 +108,14 @@ func runOn(ios *utils.IOStreams, out, errOut *bytes.Buffer, build Build, args []
 	cmd := build(ios)
 	cmd.SetOut(ios.Out) // Cobra's own output, help included
 	cmd.SetErr(ios.ErrOut)
-	code := run(cmd, args, ios, errOut, utils.OutputFormatIn(args))
+	code := run(cmd, args, ios, errOut)
 	return out.String(), errOut.String(), code
 }
 
 // run executes cmd as cmd.Execute does and prints its failure to w in ios's format, turning an
-// error that is not an ExitError into the one cmd.Execute prints. A parse error applies format,
-// the --output its arguments carry, as cmd.Execute does.
-func run(cmd *cobra.Command, args []string, ios *utils.IOStreams, w io.Writer, format string) int {
+// error that is not an ExitError into the one cmd.Execute prints. A parse error applies the
+// --output its arguments carry, as cmd.Execute does.
+func run(cmd *cobra.Command, args []string, ios *utils.IOStreams, w io.Writer) int {
 	cmd.SilenceErrors, cmd.SilenceUsage = true, true // as the root is
 	cmd.SetArgs(append([]string{}, args...))         // never nil, or Cobra reads os.Args[1:]
 	restore := utils.MarkHookErrors(cmd)             // as cmd.Execute does, to tell a hook's failure from a parse error
@@ -128,6 +128,7 @@ func run(cmd *cobra.Command, args []string, ios *utils.IOStreams, w io.Writer, f
 	switch {
 	case ok:
 	case !utils.IsHookError(err):
+		format, _, _ := utils.OutputFormatIn(failed, args)
 		exitErr, _ = errors.AsType[*utils.ExitError](ios.NewParseExitError(failed, format, err.Error()))
 	case utils.IsUsageError(err):
 		exitErr, _ = errors.AsType[*utils.ExitError](utils.NewUsageExitError("%s", err))

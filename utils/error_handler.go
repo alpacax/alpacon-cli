@@ -17,23 +17,45 @@ type ErrorHandlerCallbacks struct {
 
 	OnUsernameRequired func() error
 
+	// OnWorkSessionRefused settles a WorkSession gate refusal, at most once. resend runs RetryOperation again;
+	// failure replaces the refusal, and neither leaves the refusal as the result.
+	OnWorkSessionRefused func(serverName string, err error) (resend bool, failure error)
+
 	// RetryOperation re-runs the failed operation. After an MFA prompt it runs until it stops
 	// failing with auth_mfa_required, so its refusal is what tells the wait MFA is not done yet.
 	RetryOperation func() error
 }
 
-// HandleCommonErrors handles an MFA or username-required refusal through callbacks and retries the
-// operation, returning nil once it succeeds. Only the tagged error of the operation's
-// side-effecting request (MarkSubmission) is handled; any other error came after the operation
-// took effect and is returned as is. The error it returns carries no tag.
+// HandleCommonErrors settles a tagged submission refusal (MarkSubmission) through callbacks and retries, returning nil on success.
+// Any other error came after the operation took effect and is returned as is; the returned error carries no tag.
 func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCallbacks) error {
 	if !IsSubmissionError(err) {
 		return err
 	}
-	return endSubmission(handleSubmissionError(err, serverName, callbacks))
+	return endSubmission(handleSubmissionError(err, serverName, callbacks, nil))
 }
 
-func handleSubmissionError(err error, serverName string, callbacks ErrorHandlerCallbacks) error {
+func handleSubmissionError(err error, serverName string, callbacks ErrorHandlerCallbacks, restoreMFA func(string) error) error {
+	if !IsSubmissionError(err) {
+		return err
+	}
+	if isWorkSessionCode(StructuredErrorCode(err)) {
+		if callbacks.OnWorkSessionRefused == nil || callbacks.RetryOperation == nil {
+			return err
+		}
+		resend, failure := callbacks.OnWorkSessionRefused(serverName, err)
+		if failure != nil {
+			return failure
+		}
+		if !resend {
+			return err
+		}
+		callbacks.OnWorkSessionRefused = nil
+		if callbacks.OnMFARequired == nil {
+			callbacks.OnMFARequired = restoreMFA
+		}
+		return handleSubmissionError(callbacks.RetryOperation(), serverName, callbacks, nil)
+	}
 	code, _ := ParseErrorResponse(err)
 
 	switch code {
@@ -49,7 +71,10 @@ func handleSubmissionError(err error, serverName string, callbacks ErrorHandlerC
 		if callbacks.RetryOperation == nil {
 			return err
 		}
-		return retryUntilMFAAccepted(callbacks.RetryOperation)
+		next := retryUntilMFAAccepted(callbacks.RetryOperation)
+		mfa := callbacks.OnMFARequired
+		callbacks.OnMFARequired = nil
+		return handleSubmissionError(next, serverName, callbacks, mfa)
 
 	case UsernameRequired:
 		if callbacks.OnUsernameRequired == nil {
@@ -61,7 +86,8 @@ func handleSubmissionError(err error, serverName string, callbacks ErrorHandlerC
 		}
 
 		if callbacks.RetryOperation != nil {
-			return callbacks.RetryOperation()
+			callbacks.OnUsernameRequired = nil
+			return handleSubmissionError(callbacks.RetryOperation(), serverName, callbacks, restoreMFA)
 		}
 		return nil
 
