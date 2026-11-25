@@ -1053,6 +1053,88 @@ func TestRunWithApprovalWait_HeldThenSudoThenHeld(t *testing.T) {
 	})
 }
 
+func TestRunWithApprovalWait_HeldRerunDenialEndsTheWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		denial := stubApprovalWaitSeams(t, time.Second, "SUDO_APPROVAL_REQUIRED")
+		submits := 0
+		run := func() error {
+			submits++
+			if submits == 1 {
+				return denial
+			}
+			return &event.PendingApprovalError{CommandID: "held-rerun"}
+		}
+		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+			return event.EventDetails{SudoGrantStatus: new("authorized")}, nil
+		}
+		streamApprovedCommand = func(_ *client.AlpaconClient, id string, _ io.Writer, remaining time.Duration) error {
+			assert.Equal(t, "held-rerun", id)
+			assert.Equal(t, 4*time.Second, remaining)
+			return denial
+		}
+		err := runWithApprovalWait(utils.Stdio, nil, run, 5*time.Second, io.Discard)
+		require.ErrorIs(t, err, denial)
+		assert.Equal(t, 2, submits)
+	})
+}
+
+func TestRunWithApprovalWait_DeadlineReachedDuringHeldRerun(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		denial := stubApprovalWaitSeams(t, time.Second, "SUDO_APPROVAL_REQUIRED")
+		pending := &event.PendingApprovalError{CommandID: "held-rerun"}
+		submits := 0
+		run := func() error {
+			submits++
+			if submits == 1 {
+				return denial
+			}
+			time.Sleep(4 * time.Second)
+			return pending
+		}
+		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+			return event.EventDetails{SudoGrantStatus: new("authorized")}, nil
+		}
+		streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+			t.Fatal("the rerun used the remaining wait")
+			return nil
+		}
+		err := runWithApprovalWait(utils.Stdio, nil, run, 5*time.Second, io.Discard)
+		require.ErrorIs(t, err, pending)
+		assert.Equal(t, 2, submits)
+	})
+}
+
+func TestRunWithApprovalWait_PreservesDetailsWhenStreamTimesOutBeforeReading(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stubApprovalWaitSeams(t, time.Second, "SUDO_APPROVAL_REQUIRED")
+		pending := &event.PendingApprovalError{CommandID: "held", Username: "alice", FileSuggestion: &event.FileExecutionSuggestion{Path: "/example"}}
+		streamApprovedCommand = func(_ *client.AlpaconClient, id string, _ io.Writer, remaining time.Duration) error {
+			time.Sleep(remaining)
+			return &event.PendingApprovalError{CommandID: id}
+		}
+		err := runWithApprovalWait(utils.Stdio, nil, func() error { return pending }, time.Second, io.Discard)
+		require.ErrorIs(t, err, pending)
+	})
+}
+
+func TestRunWithApprovalWait_ReportsElapsedGrantWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		denial := stubApprovalWaitSeams(t, time.Second, "SUDO_APPROVAL_REQUIRED")
+		run := func() error { return &event.PendingApprovalError{CommandID: "held"} }
+		streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+			time.Sleep(3 * time.Second)
+			return denial
+		}
+		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+			return event.EventDetails{SudoGrantStatus: new("pending_approval")}, nil
+		}
+		ios, _, stderr := utils.TestIOStreams()
+		err := runWithApprovalWait(ios, nil, run, 5*time.Second, io.Discard)
+		require.ErrorIs(t, err, denial)
+		assert.Contains(t, stderr.String(), "Approval wait timed out after 2s")
+	})
+}
+
 func TestRemoteCommandOutcomeHomeDirectoryConflict(t *testing.T) {
 	t.Parallel()
 

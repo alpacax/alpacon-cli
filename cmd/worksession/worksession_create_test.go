@@ -1104,3 +1104,10 @@ func TestWaitExitErrorReturnsTheExitInsteadOfTakingIt(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateSudoFlagDescribesCompoundCommands(t *testing.T) {
+	t.Parallel()
+	ios, _, _ := utils.TestIOStreams()
+	cmd := newWorkSessionCreateCmd(nil, ios)
+	assert.Contains(t, cmd.Flags().Lookup("sudo").Usage, "Each part of a compound command must match a pattern.")
+}

@@ -594,27 +594,25 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 	}
 	deadline := time.Now().Add(waitTimeout)
 	budget := utils.NewThrottleBudget(waitTimeout)
-	current := err
-	for {
-		if pending, ok := errors.AsType[*event.PendingApprovalError](current); ok {
-			if time.Until(deadline) <= 0 {
-				return current
-			}
-			utils.SignalApprovalPending(current, utils.SignalFields(err))
-			announced = true
-			current = waitForHeldCommand(ac, pending, out, deadline)
-		}
-		denial, ok := errors.AsType[*event.RemoteCommandError](current)
-		if !ok || denial.CommandID == "" || !isApprovalDenial(ios, current) || time.Until(deadline) <= 0 {
+	waitIfHeld := func(current error) error {
+		pending, ok := errors.AsType[*event.PendingApprovalError](current)
+		if !ok || time.Until(deadline) <= 0 {
 			return current
 		}
 		utils.SignalApprovalPending(current, utils.SignalFields(err))
 		announced = true
-		current = waitForSudoGrant(ios, ac, run, current, denial, waitTimeout, &deadline, budget)
-		if _, held := errors.AsType[*event.PendingApprovalError](current); !held {
-			return current
-		}
+		return waitForHeldCommand(ac, pending, out, deadline)
 	}
+
+	current := waitIfHeld(err)
+	denial, ok := errors.AsType[*event.RemoteCommandError](current)
+	if !ok || denial.CommandID == "" || !isApprovalDenial(ios, current) || time.Until(deadline) <= 0 {
+		return current
+	}
+	utils.SignalApprovalPending(current, utils.SignalFields(err))
+	announced = true
+	current = waitForSudoGrant(ios, ac, run, current, denial, &deadline, budget)
+	return waitIfHeld(current)
 }
 
 func waitForHeldCommand(ac *client.AlpaconClient, pending *event.PendingApprovalError, out io.Writer, deadline time.Time) error {
@@ -629,10 +627,15 @@ func waitForHeldCommand(ac *client.AlpaconClient, pending *event.PendingApproval
 	if remaining <= 0 {
 		return pending
 	}
-	return streamApprovedCommand(ac, pending.CommandID, spinner.StopWriter(out), remaining)
+	err := streamApprovedCommand(ac, pending.CommandID, spinner.StopWriter(out), remaining)
+	// Connecting can consume the deadline before the first detail read.
+	if timeout, ok := err.(*event.PendingApprovalError); ok && *timeout == (event.PendingApprovalError{CommandID: pending.CommandID}) {
+		return pending
+	}
+	return err
 }
 
-func waitForSudoGrant(ios *utils.IOStreams, ac *client.AlpaconClient, run commandRun, pendingDenial error, denialErr *event.RemoteCommandError, waitTimeout time.Duration, deadline *time.Time, budget *utils.ThrottleBudget) error {
+func waitForSudoGrant(ios *utils.IOStreams, ac *client.AlpaconClient, run commandRun, pendingDenial error, denialErr *event.RemoteCommandError, deadline *time.Time, budget *utils.ThrottleBudget) error {
 	spinner := utils.NewSpinner(approvalWaitMessage)
 	spinner.Start()
 	// Every return below stops the spinner before it writes, for output ordering; this backstops
@@ -659,7 +662,7 @@ func waitForSudoGrant(ios *utils.IOStreams, ac *client.AlpaconClient, run comman
 		case <-timer.C:
 			spinner.Stop()
 			// Report only the timeout; the caller's pending-approval message already names --wait-approval.
-			ios.Warning("%s", utils.HintOnly(fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", waitTimeout), lastRefusal))
+			ios.Warning("%s", utils.HintOnly(fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", time.Since(started)), lastRefusal))
 			return pendingWithApprovalDetails(pendingDenial, lastRequestID, lastHeld)
 		case <-poll.C:
 			read, err := pollApprovalOnce(ac, denialErr.CommandID)

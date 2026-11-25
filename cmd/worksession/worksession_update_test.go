@@ -392,7 +392,12 @@ func TestUpdateReportsPendingScopes(t *testing.T) {
 	req := wsapi.WorkSessionUpdateRequest{Scopes: []string{"command", "sudo"}}
 	output := newWorkSessionUpdateOutput(session, http.StatusAccepted, req, false)
 	assert.True(t, output.PendingApproval)
-	assert.Equal(t, "change", output.ApprovalRequestID)
+	encoded, err := json.Marshal(output)
+	require.NoError(t, err)
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(encoded, &fields))
+	assert.JSONEq(t, `"original"`, string(fields["approval_request_id"]))
+	assert.JSONEq(t, `"change"`, string(fields["pending_request_id"]))
 	assert.Contains(t, output.Message, "requested scopes (command, sudo) pending approval (request change)")
 	assert.Contains(t, output.Message, "Current scopes: command.")
 	session.PendingModificationRequest.Changes = json.RawMessage(`{"servers":["web"]}`)
@@ -401,5 +406,8 @@ func TestUpdateReportsPendingScopes(t *testing.T) {
 	assert.NotContains(t, targets.Message, "requested scopes")
 	immediate := newWorkSessionUpdateOutput(session, http.StatusOK, req, false)
 	assert.False(t, immediate.PendingApproval)
+	encoded, err = json.Marshal(immediate)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), `"pending_request_id"`)
 	assert.Equal(t, "Work session session updated (status: active).", immediate.Message)
 }

@@ -21,6 +21,7 @@ type workSessionMutationOutput struct {
 	Status            string             `json:"status,omitempty"`
 	ExpiresAt         string             `json:"expires_at,omitempty"`
 	ApprovalRequestID string             `json:"approval_request_id,omitempty"`
+	PendingRequestID  string             `json:"pending_request_id,omitempty"`
 	ActiveWorksession *string            `json:"active_worksession"`
 	WorkSession       *wsapi.WorkSession `json:"work_session,omitempty"`
 }
@@ -110,7 +111,6 @@ func newWorkSessionUpdateOutput(session *wsapi.WorkSession, status int, req wsap
 		return output
 	}
 	output.PendingApproval = true
-	output.ApprovalRequestID = ""
 	scopes := req.Scopes
 	servers := len(req.Servers) > 0
 	if pending := session.PendingModificationRequest; pending != nil {
@@ -142,7 +142,7 @@ func newWorkSessionUpdateOutput(session *wsapi.WorkSession, status int, req wsap
 	}
 	request := ""
 	if pending := session.PendingModificationRequest; pending != nil && pending.ID != "" {
-		output.ApprovalRequestID = pending.ID
+		output.PendingRequestID = pending.ID
 		request = " (request " + utils.SanitizeTerminalText(pending.ID) + ")"
 	}
 	output.Message = fmt.Sprintf("Work session %s: %s pending approval%s. Current scopes: %s.", utils.SanitizeTerminalText(session.ID), change, request, joinOrNone(session.Scopes))
