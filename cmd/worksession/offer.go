@@ -81,7 +81,9 @@ func (s *Selection) handleRefusal(serverName string, refusal error) (bool, error
 			return false, nil
 		}
 		if reuse {
-			return s.settle(ctx, candidate, wait, want, "")
+			return s.settle(ctx, candidate, wait, want, func(command string) string {
+				return declaredAccountGuidance(command, candidate.TargetAccountUsername, s.need.Account)
+			})
 		}
 	}
 
@@ -130,7 +132,7 @@ func (s *Selection) handleRefusal(serverName string, refusal error) (bool, error
 	if !safeResumeID(created.ID) {
 		return false, utils.NewEnvelopeExitError(opCreate, api.ErrUnusableID, "The server created the WorkSession, but its ID is unusable; check for it before creating another.")
 	}
-	return s.settle(ctx, created, created.Status != wsapi.StatusActive, want, s.need.Account)
+	return s.settle(ctx, created, created.Status != wsapi.StatusActive, want, func(command string) string { return accountRunGuidance(command, s.need.Account) })
 }
 
 var errPromptInterrupted = errors.New("interrupted")
@@ -240,19 +242,43 @@ func promptAccount(account string) string {
 	return "(cannot be shown)"
 }
 
-// settle makes session the one the operation sends. createdFor is the account it was created for,
-// empty for a reused session, whose declared account the server does not enforce for a user.
-func (s *Selection) settle(ctx context.Context, session *wsapi.WorkSession, wait bool, want Want, createdFor string) (bool, error) {
+// declaredAccountGuidance names the account a reused session declares, which a user session is not
+// held to; empty when the session declares none or requested is that account.
+func declaredAccountGuidance(command, declared, requested string) string {
+	if declared == "" || requested == declared {
+		return ""
+	}
+	quoted, ok := ShellWord(declared)
+	shown := declared
+	if !ok {
+		shown = "an account that cannot be shown"
+	}
+	switch {
+	case requested == "" && ok:
+		return fmt.Sprintf("the session declares %s, so pass -u %s to run %s as it", shown, quoted, command)
+	case requested == "":
+		return fmt.Sprintf("the session declares %s, and %s does not use it", shown, command)
+	}
+	if asked, ok := ShellWord(requested); ok {
+		return fmt.Sprintf("the session declares %s, but %s uses %s", shown, command, asked)
+	}
+	return fmt.Sprintf("the session declares %s, not the account %s uses", shown, command)
+}
+
+// settle selects the session for the retry. accountGuidance supplies text for the
+// resume command before a wait and for the retried command on success.
+func (s *Selection) settle(ctx context.Context, session *wsapi.WorkSession, wait bool, want Want, accountGuidance func(command string) string) (bool, error) {
 	if !safeResumeID(session.ID) {
 		s.ios.Warning("The offered WorkSession has an unsafe ID and cannot be selected.")
 		return false, nil
 	}
 	id := utils.SanitizeTerminalText(session.ID)
 	if wait {
-		resumeAction := afterApprovalAction("user", id, s.resumeCommand(), createdFor)
+		resumeGuidance := accountGuidance(s.resumeCommand())
+		resumeAction := afterApprovalAction("user", id, resumeGuidance)
 		guidance := ""
-		if account := accountRunGuidance(s.resumeCommand(), createdFor); account != "" {
-			guidance = " (" + account + ")"
+		if resumeGuidance != "" {
+			guidance = " (" + resumeGuidance + ")"
 		}
 		s.ios.Info("To stop and come back later, press Ctrl+C; after approval, run '%s', then %s%s.", resumeAction.Command, s.resumeStep(), guidance)
 		final, err := waitForApproval(ctx, s.ios, s.ac, session.ID, true, ApprovalPollInterval, utils.DefaultApprovalWaitTimeout, false)
@@ -291,7 +317,7 @@ func (s *Selection) settle(ctx context.Context, session *wsapi.WorkSession, wait
 	s.id = active.ID
 	s.source = SourceConfig
 	success := fmt.Sprintf("WorkSession %s is now the active session for workspace %s", utils.SanitizeTerminalText(active.ID), utils.SanitizeTerminalText(s.ac.WorkspaceName))
-	if guidance := accountRunGuidance(s.need.command(), createdFor); guidance != "" {
+	if guidance := accountGuidance(s.need.command()); guidance != "" {
 		success += "; " + guidance
 	}
 	s.ios.Success("%s.", success)

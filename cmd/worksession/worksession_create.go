@@ -297,7 +297,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 			if approvalSignaled {
 				utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: session.ID, ConsoleURL: session.ConsoleURL}, ac)
 			}
-			afterApproval := afterApprovalAction(sessionRequesterType, session.ID, "exec", account)
+			afterApproval := afterApprovalAction(sessionRequesterType, session.ID, accountRunGuidance("exec", account))
 			if clusterName != "" {
 				afterApproval = KubeLoginAction(clusterName, session.ID)
 			}
@@ -645,15 +645,14 @@ func resolveRequesterType(flagValue string, flagSet bool, detected aiagent.Detec
 // afterApprovalAction is the follow-up for a session still waiting on approval.
 // A user session is attached with 'work-session use'; an agent session cannot
 // be, so its ID goes to each subsequent command with --work-session instead.
-func afterApprovalAction(requesterType, id, command, account string) utils.NextAction {
-	asAccount := accountRunGuidance(command, account)
-	if asAccount != "" {
-		asAccount = "; " + asAccount
+func afterApprovalAction(requesterType, id, accountGuidance string) utils.NextAction {
+	if accountGuidance != "" {
+		accountGuidance = "; " + accountGuidance
 	}
 	if requesterType == "agent" {
-		return utils.NextAction{Description: fmt.Sprintf("after approval, pass --work-session %s to each subsequent command (exec, cp, tunnel)%s", id, asAccount)}
+		return utils.NextAction{Description: fmt.Sprintf("after approval, pass --work-session %s to each subsequent command (exec, cp, tunnel)%s", id, accountGuidance)}
 	}
-	return utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", id), Description: "after approval" + asAccount}
+	return utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", id), Description: "after approval" + accountGuidance}
 }
 
 // accountRunGuidance tells the user to run command as the account a session was created for.
