@@ -964,97 +964,111 @@ func TestCtrlCAtTheOfferPromptDeclinesWithoutCreating(t *testing.T) {
 	assert.Contains(t, stderr.String(), "Stopped; no WorkSession was selected.")
 }
 
-func TestOfferAccountGuidanceNamesTheOperationsCommand(t *testing.T) {
+// settleWaitOutput settles selection on a session still pending approval and returns what it printed.
+func settleWaitOutput(t *testing.T, selection *Selection, accountGuidance func(command string) string) string {
+	t.Helper()
+	pending := wsapi.WorkSession{ID: "pending-session", Status: wsapi.StatusPending, RequesterType: "user"}
+	body, err := json.Marshal(pending)
+	require.NoError(t, err)
+	ios, _, stderr := utils.TestIOStreams()
+	selection.ios = ios
+	selection.ac = &client.AlpaconClient{BaseURL: testutil.StubBaseURL, WorkspaceName: "ws", HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+		return http.StatusOK, string(body)
+	})}
+
+	synctest.Test(t, func(*testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_, _ = selection.settle(ctx, &pending, true, Want{}, accountGuidance)
+	})
+	return stderr.String()
+}
+
+func TestCreatedSessionWaitGuidanceNamesTheOperationsCommand(t *testing.T) {
 	t.Parallel()
-	const createdForRoot = "the account the session was created for"
 	tests := []struct {
-		name                                     string
-		operation                                Operation
-		command, createdFor, declared, requested string
-		resumeStep, resumeCommand                string
-		guidance                                 string // empty when none is expected
+		name      string
+		operation Operation
+		command   string
+		named     string // the command the guidance names
 	}{
-		{name: "created_edit", operation: Transfer, command: "edit", createdFor: "root", guidance: "run edit with -u root, " + createdForRoot},
-		{name: "reused_edit_declared_without_requested_account", operation: Transfer, command: "edit", declared: "ubuntu", guidance: "the session declares ubuntu, so pass -u ubuntu to run edit as it"},
-		{name: "reused_edit_upload_resumes_with_cp", operation: Transfer, command: "edit", resumeStep: "upload the edited copy", resumeCommand: "cp", declared: "ubuntu", guidance: "the session declares ubuntu, so pass -u ubuntu to run cp as it"},
-		{name: "reused_websh_command_mode_declared_without_requested_account", operation: Command, command: "websh", declared: "ubuntu", guidance: "the session declares ubuntu, so pass -u ubuntu to run websh as it"},
-		{name: "created_command", operation: Command, createdFor: "root", guidance: "run exec with -u root, " + createdForRoot},
-		{name: "created_websh", operation: Websh, createdFor: "root", guidance: "run websh with -u root, " + createdForRoot},
-		{name: "created_transfer", operation: Transfer, createdFor: "root", guidance: "run cp with -u root, " + createdForRoot},
-		{name: "created_tunnel", operation: Tunnel, createdFor: "root", guidance: "run tunnel with -u root, " + createdForRoot},
-		{name: "reused_command_declared_without_requested_account", operation: Command, declared: "ubuntu", guidance: "the session declares ubuntu, so pass -u ubuntu to run exec as it"},
-		{name: "reused_command_declared_differs_from_requested_account", operation: Command, declared: "ubuntu", requested: "root", guidance: "the session declares ubuntu, but exec uses root"},
-		{name: "reused_websh_declared_without_requested_account", operation: Websh, declared: "ubuntu", guidance: "the session declares ubuntu, so pass -u ubuntu to run websh as it"},
-		{name: "reused_transfer_declared_without_requested_account", operation: Transfer, declared: "ubuntu", guidance: "the session declares ubuntu, so pass -u ubuntu to run cp as it"},
-		{name: "reused_tunnel_declared_without_requested_account", operation: Tunnel, declared: "ubuntu", guidance: "the session declares ubuntu, so pass -u ubuntu to run tunnel as it"},
-		{name: "reused_command_declared_equals_requested_account", operation: Command, declared: "ubuntu", requested: "ubuntu"},
-		{name: "reused_command_none_declared", operation: Command},
+		{name: "command", operation: Command, named: "exec"},
+		{name: "websh", operation: Websh, named: "websh"},
+		{name: "transfer", operation: Transfer, named: "cp"},
+		{name: "tunnel", operation: Tunnel, named: "tunnel"},
+		{name: "edit", operation: Transfer, command: "edit", named: "edit"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			pending := wsapi.WorkSession{ID: "pending-session", Status: wsapi.StatusPending, RequesterType: "user", TargetAccountUsername: tt.declared}
-			body, err := json.Marshal(pending)
-			require.NoError(t, err)
-			ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, WorkspaceName: "ws", HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
-				return http.StatusOK, string(body)
-			})}
-			ios, _, stderr := utils.TestIOStreams()
-			selection := &Selection{need: Need{Operation: tt.operation, Account: tt.requested, Command: tt.command}, ios: ios, ac: ac}
-			if tt.resumeStep != "" {
-				selection.ResumeWithCommand(tt.resumeStep, tt.resumeCommand)
-			}
-			accountGuidance := func(command string) string { return declaredAccountGuidance(command, tt.declared, tt.requested) }
-			if tt.createdFor != "" { // the create path, as handleRefusal builds it
-				accountGuidance = func(command string) string { return accountRunGuidance(command, tt.createdFor) }
-			}
+			selection := &Selection{need: Need{Operation: tt.operation, Account: "root", Command: tt.command}}
 
-			synctest.Test(t, func(*testing.T) {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-				defer cancel()
-				_, _ = selection.settle(ctx, &pending, true, Want{}, accountGuidance)
-			})
+			stderr := settleWaitOutput(t, selection, func(command string) string { return accountRunGuidance(command, "root") })
 
-			step := "re-run this command"
-			if tt.resumeStep != "" {
-				step = tt.resumeStep
-			}
-			notice, exit := "then "+step+".\n", "# set this session active, then "+step+"\n"
-			if tt.guidance != "" {
-				notice, exit = "then "+step+" ("+tt.guidance+").\n", "# set this session active, then "+step+"; "+tt.guidance+"\n"
-			}
-			assert.Contains(t, stderr.String(), notice)
-			assert.Contains(t, stderr.String(), exit)
+			guidance := "run " + tt.named + " with -u root, the account the session was created for"
+			assert.Contains(t, stderr, "then re-run this command ("+guidance+").\n")
+			assert.Contains(t, stderr, "# set this session active, then re-run this command; "+guidance+"\n")
 		})
 	}
 }
 
-func TestResumeWithNamesTheCommandItsStepRunsAndKeepsTheResend(t *testing.T) {
+func TestReusedSessionWaitGuidanceNamesTheDeclaredAccount(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		resume     func(*Selection)
-		wantResume string
+		name                         string
+		operation                    Operation
+		command, requested, guidance string
 	}{
-		{name: "no_resume_step", resume: func(*Selection) {}, wantResume: "edit"},
-		{name: "step_that_keeps_the_command", resume: func(s *Selection) { s.ResumeWith("re-run this command without --upload") }, wantResume: "edit"},
-		{name: "step_that_runs_another_command", resume: func(s *Selection) { s.ResumeWithCommand("upload the edited copy", "cp") }, wantResume: "cp"},
-		{name: "later_step_that_keeps_the_command_drops_the_other", resume: func(s *Selection) {
-			s.ResumeWithCommand("upload the edited copy", "cp")
-			s.ResumeWith("re-run this command without --upload")
-		}, wantResume: "edit"},
+		{name: "command_without_requested_account", operation: Command, guidance: "the session declares ubuntu, so pass -u ubuntu to run exec as it"},
+		{name: "command_with_another_requested_account", operation: Command, requested: "root", guidance: "the session declares ubuntu, but exec uses root"},
+		{name: "edit", operation: Transfer, command: "edit", guidance: "the session declares ubuntu, so pass -u ubuntu to run edit as it"},
+		{name: "websh_command_mode", operation: Command, command: "websh", guidance: "the session declares ubuntu, so pass -u ubuntu to run websh as it"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			selection := &Selection{need: Need{Operation: Transfer, Command: "edit"}}
+			selection := &Selection{need: Need{Operation: tt.operation, Account: tt.requested, Command: tt.command}}
 
-			tt.resume(selection)
+			stderr := settleWaitOutput(t, selection, func(command string) string { return declaredAccountGuidance(command, "ubuntu", tt.requested) })
 
-			assert.Equal(t, tt.wantResume, selection.resumeCommand())
-			assert.Equal(t, "edit", selection.need.command(), "the resend is still the command the user ran")
+			assert.Contains(t, stderr, "then re-run this command ("+tt.guidance+").\n")
+			assert.Contains(t, stderr, "# set this session active, then re-run this command; "+tt.guidance+"\n")
 		})
 	}
+}
+
+func TestReusedSessionWaitGuidanceAddsNothingWhenTheAccountMatchesOrNoneIsDeclared(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, declared, requested string
+	}{
+		{name: "declared_equals_requested_account", declared: "ubuntu", requested: "ubuntu"},
+		{name: "none_declared"},
+		{name: "none_declared_with_requested_account", requested: "root"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			selection := &Selection{need: Need{Operation: Command, Account: tt.requested}}
+
+			stderr := settleWaitOutput(t, selection, func(command string) string { return declaredAccountGuidance(command, tt.declared, tt.requested) })
+
+			assert.Contains(t, stderr, "then re-run this command.\n")
+			assert.Contains(t, stderr, "# set this session active, then re-run this command\n")
+		})
+	}
+}
+
+func TestReusedSessionWaitGuidanceNamesTheCommandTheResumeStepRuns(t *testing.T) {
+	t.Parallel()
+	selection := &Selection{need: Need{Operation: Transfer, Command: "edit"}}
+	selection.ResumeWithCommand("upload the edited copy", "cp")
+
+	stderr := settleWaitOutput(t, selection, func(command string) string { return declaredAccountGuidance(command, "ubuntu", "") })
+
+	guidance := "the session declares ubuntu, so pass -u ubuntu to run cp as it"
+	assert.Contains(t, stderr, "then upload the edited copy ("+guidance+").\n")
+	assert.Contains(t, stderr, "# set this session active, then upload the edited copy; "+guidance+"\n")
 }
 
 func TestDeclaredAccountGuidanceNamesTheAccountOnlyWhenTheRequestDoesNot(t *testing.T) {
@@ -1087,81 +1101,98 @@ func TestDeclaredAccountGuidanceNamesTheAccountOnlyWhenTheRequestDoesNot(t *test
 	}
 }
 
+// offerReusedSession runs the refusal path for selection, reusing a session that declares declared and
+// is still pending approval when pending, and returns what the offer printed.
+func offerReusedSession(t *testing.T, selection *Selection, declared string, pending bool) string {
+	t.Helper()
+	setupTmpConfig(t)
+	read := replaceStdin(t, "y\n")
+	defer func() { _ = read.Close() }()
+	now := time.Now().UTC()
+	active := activeServerSession("reuse-session", now)
+	active.TargetAccountUsername = declared
+	active.Scopes = selection.need.scopes()
+	candidate := active
+	if pending {
+		candidate.Status, candidate.ApprovalRequestID, candidate.ExpiresAt = wsapi.StatusPending, "approval-1", time.Time{}
+	}
+	list, err := json.Marshal(map[string]any{"count": 1, "results": []wsapi.WorkSession{candidate}})
+	require.NoError(t, err)
+	detail, err := json.Marshal(active)
+	require.NoError(t, err)
+	ios, _, stderr := utils.TestIOStreams()
+	selection.need.Server, selection.canOffer, selection.ios, selection.interrupt = "web-1", true, ios, noInterrupt
+	selection.ac = &client.AlpaconClient{BaseURL: testutil.StubBaseURL, WorkspaceName: "ws", HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
+		switch r.URL.Path {
+		case "/api/iam/users/-/":
+			return http.StatusOK, `{"id":"user-1"}`
+		case "/api/servers/servers/":
+			return http.StatusOK, `{"count":1,"results":[{"id":"server-1","name":"web-1"}]}`
+		case "/api/work-sessions/sessions/":
+			return http.StatusOK, string(list)
+		case "/api/work-sessions/sessions/reuse-session/":
+			return http.StatusOK, string(detail)
+		default:
+			return http.StatusNotFound, `{}`
+		}
+	})}
+	var failure error
+
+	synctest.Test(t, func(*testing.T) {
+		failure = utils.HandleCommonErrors(utils.MarkSubmission(selectionCodedError{code: utils.WorkSessionRequired}), "web-1", selection.Offer(utils.ErrorHandlerCallbacks{RetryOperation: func() error { return nil }}))
+	})
+	require.NoError(t, failure)
+	return stderr.String()
+}
+
+const reusedSuccessLine = "Success: WorkSession reuse-session is now the active session for workspace ws"
+
 func TestReusedSessionSuccessLineNamesTheDeclaredAccount(t *testing.T) {
-	const passUbuntu = "the session declares ubuntu, so pass -u ubuntu to run exec as it"
 	tests := []struct {
-		name                                        string
-		operation                                   Operation
-		command, resumeCommand, declared, requested string
-		guidance                                    string // empty when none is expected
-		pending                                     bool
+		name                         string
+		operation                    Operation
+		command, declared, requested string
+		tail                         string // what follows the success line's workspace
 	}{
-		{name: "declared_without_requested_account", declared: "ubuntu", guidance: passUbuntu},
-		{name: "declared_differs_from_requested_account", declared: "ubuntu", requested: "root", guidance: "the session declares ubuntu, but exec uses root"},
+		{name: "declared_without_requested_account", declared: "ubuntu", tail: "; the session declares ubuntu, so pass -u ubuntu to run exec as it"},
+		{name: "declared_differs_from_requested_account", declared: "ubuntu", requested: "root", tail: "; the session declares ubuntu, but exec uses root"},
 		{name: "declared_equals_requested_account", declared: "ubuntu", requested: "ubuntu"},
 		{name: "none_declared"},
-		{name: "pending_session_declared_without_requested_account", declared: "ubuntu", pending: true, guidance: passUbuntu},
-		{name: "websh_declared_without_requested_account", operation: Websh, declared: "ubuntu", guidance: "the session declares ubuntu, so pass -u ubuntu to run websh as it"},
-		{name: "transfer_declared_without_requested_account", operation: Transfer, declared: "ubuntu", guidance: "the session declares ubuntu, so pass -u ubuntu to run cp as it"},
-		{name: "edit_declared_without_requested_account", operation: Transfer, command: "edit", declared: "ubuntu", guidance: "the session declares ubuntu, so pass -u ubuntu to run edit as it"},
-		{name: "edit_upload_declared_without_requested_account", operation: Transfer, command: "edit", resumeCommand: "cp", declared: "ubuntu", guidance: "the session declares ubuntu, so pass -u ubuntu to run edit as it"},
-		{name: "websh_command_mode_declared_without_requested_account", operation: Command, command: "websh", declared: "ubuntu", guidance: "the session declares ubuntu, so pass -u ubuntu to run websh as it"},
-		{name: "tunnel_declared_without_requested_account", operation: Tunnel, declared: "ubuntu", guidance: "the session declares ubuntu, so pass -u ubuntu to run tunnel as it"},
+		{name: "websh_declared_without_requested_account", operation: Websh, declared: "ubuntu", tail: "; the session declares ubuntu, so pass -u ubuntu to run websh as it"},
+		{name: "transfer_declared_without_requested_account", operation: Transfer, declared: "ubuntu", tail: "; the session declares ubuntu, so pass -u ubuntu to run cp as it"},
+		{name: "edit_declared_without_requested_account", operation: Transfer, command: "edit", declared: "ubuntu", tail: "; the session declares ubuntu, so pass -u ubuntu to run edit as it"},
+		{name: "websh_command_mode_declared_without_requested_account", operation: Command, command: "websh", declared: "ubuntu", tail: "; the session declares ubuntu, so pass -u ubuntu to run websh as it"},
+		{name: "tunnel_declared_without_requested_account", operation: Tunnel, declared: "ubuntu", tail: "; the session declares ubuntu, so pass -u ubuntu to run tunnel as it"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setupTmpConfig(t)
-			read := replaceStdin(t, "y\n")
-			defer func() { _ = read.Close() }()
-			now := time.Now().UTC()
-			active := activeServerSession("reuse-session", now)
-			active.TargetAccountUsername = tt.declared
-			active.Scopes = Need{Operation: tt.operation}.scopes()
-			candidate := active
-			if tt.pending {
-				candidate.Status, candidate.ApprovalRequestID, candidate.ExpiresAt = wsapi.StatusPending, "approval-1", time.Time{}
-			}
-			list, err := json.Marshal(map[string]any{"count": 1, "results": []wsapi.WorkSession{candidate}})
-			require.NoError(t, err)
-			detail, err := json.Marshal(active)
-			require.NoError(t, err)
-			ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, WorkspaceName: "ws", HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
-				switch r.URL.Path {
-				case "/api/iam/users/-/":
-					return http.StatusOK, `{"id":"user-1"}`
-				case "/api/servers/servers/":
-					return http.StatusOK, `{"count":1,"results":[{"id":"server-1","name":"web-1"}]}`
-				case "/api/work-sessions/sessions/":
-					return http.StatusOK, string(list)
-				case "/api/work-sessions/sessions/reuse-session/":
-					return http.StatusOK, string(detail)
-				default:
-					return http.StatusNotFound, `{}`
-				}
-			})}
-			ios, _, stderr := utils.TestIOStreams()
-			selection := &Selection{canOffer: true, need: Need{Operation: tt.operation, Server: "web-1", Account: tt.requested, Command: tt.command}, ios: ios, ac: ac, interrupt: noInterrupt}
-			if tt.resumeCommand != "" { // the resend is still this command; only a later resume runs another
-				selection.ResumeWithCommand("upload the edited copy", tt.resumeCommand)
-			}
-			var failure error
+			selection := &Selection{need: Need{Operation: tt.operation, Account: tt.requested, Command: tt.command}}
 
-			synctest.Test(t, func(*testing.T) {
-				failure = utils.HandleCommonErrors(utils.MarkSubmission(selectionCodedError{code: utils.WorkSessionRequired}), "web-1", selection.Offer(utils.ErrorHandlerCallbacks{RetryOperation: func() error { return nil }}))
-			})
+			stderr := offerReusedSession(t, selection, tt.declared, false)
 
-			require.NoError(t, failure)
-			success := "Success: WorkSession reuse-session is now the active session for workspace ws"
-			if tt.guidance != "" {
-				success += "; " + tt.guidance
-			}
-			assert.Contains(t, stderr.String(), success+".\n")
-			if tt.pending {
-				assert.Contains(t, stderr.String(), "then re-run this command ("+tt.guidance+").\n")
-			}
-			assert.NotContains(t, stderr.String(), "the account the session was created for")
+			assert.Contains(t, stderr, reusedSuccessLine+tt.tail+".\n")
+			assert.NotContains(t, stderr, "the account the session was created for")
 		})
 	}
+}
+
+func TestReusedPendingSessionNamesTheDeclaredAccountBeforeAndAfterTheWait(t *testing.T) {
+	selection := &Selection{need: Need{Operation: Command}}
+
+	stderr := offerReusedSession(t, selection, "ubuntu", true)
+
+	guidance := "the session declares ubuntu, so pass -u ubuntu to run exec as it"
+	assert.Contains(t, stderr, "then re-run this command ("+guidance+").\n")
+	assert.Contains(t, stderr, reusedSuccessLine+"; "+guidance+".\n")
+}
+
+func TestReusedSessionSuccessLineNamesEditWhileItsUploadResumesWithCp(t *testing.T) {
+	selection := &Selection{need: Need{Operation: Transfer, Command: "edit"}}
+	selection.ResumeWithCommand("upload the edited copy", "cp")
+
+	stderr := offerReusedSession(t, selection, "ubuntu", false)
+
+	assert.Contains(t, stderr, reusedSuccessLine+"; the session declares ubuntu, so pass -u ubuntu to run edit as it.\n")
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

@@ -37,7 +37,7 @@ type Need struct {
 	Command   string // the alpacon command the user ran, when Operation names another
 }
 
-// command names the alpacon command that resumes the operation.
+// command names the alpacon command the user ran for the operation, which the resend repeats.
 func (n Need) command() string {
 	if n.Command != "" {
 		return n.Command

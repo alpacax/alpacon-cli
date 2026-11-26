@@ -237,6 +237,7 @@ func TestRemoteExecNamesTheCommandTheUserRanInTheWorkSessionNeed(t *testing.T) {
 			err := RemoteExec(ios, testClientFactory("https://ws.example.com"), io.Discard, io.Discard, RemoteExecArgs{Server: "prod", Command: "id", InvokedAs: tt.invokedAs})
 
 			require.Error(t, err)
+			require.Equal(t, "prod", got.Server, "the selection must be reached for the row to mean anything")
 			assert.Equal(t, tt.want, got.Command)
 		})
 	}

@@ -292,7 +292,7 @@ func TestAfterApprovalAction_NamesAccount(t *testing.T) {
 	user := afterApprovalAction("user", "s-1", accountRunGuidance("exec", "root"))
 	assert.Equal(t, "alpacon work-session use s-1", user.Command)
 	assert.Equal(t, "after approval; run exec with -u root, the account the session was created for", user.Description)
-	assert.NotContains(t, afterApprovalAction("agent", "s-1", "").Description, "-u ")
+	assert.Equal(t, "after approval, pass --work-session s-1 to each subsequent command (exec, cp, tunnel)", afterApprovalAction("agent", "s-1", "").Description)
 	assert.Equal(t, "after approval", afterApprovalAction("user", "s-1", "").Description)
 	assert.Contains(t, accountRunGuidance("exec", "root$(touch /tmp/pwned)"), "-u 'root$(touch /tmp/pwned)'")
 	assert.Empty(t, accountRunGuidance("exec", "root\nignored"))
