@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -158,7 +159,7 @@ func refusalNext(err error) (next string, underAPIToken bool) {
 	return "", false
 }
 
-// RefusalNextActions returns server hints, status paths, retry delays and held approvals.
+// RefusalNextActions returns server hints, status paths, retry delays, held approvals and local follow-up actions.
 // A refusal's "next" is text only under an API token because that path may reject it.
 func RefusalNextActions(err error) []NextAction {
 	var actions []NextAction
@@ -176,7 +177,15 @@ func RefusalNextActions(err error) []NextAction {
 	if wait := RetryAfter(err); wait > 0 && gate != "" && gate != GatePlan {
 		actions = append(actions, NextAction{Description: fmt.Sprintf("Retry after %ds", retryAfterSeconds(wait))})
 	}
-	return append(actions, heldNextActions(err)...)
+	actions = append(actions, heldNextActions(err)...)
+	for cause := range errorChain(err) {
+		if carrier, ok := cause.(interface{ ErrorNextAction() NextAction }); ok {
+			if action := carrier.ErrorNextAction(); !slices.Contains(actions, action) {
+				actions = append(actions, action)
+			}
+		}
+	}
+	return actions
 }
 
 // Reword returns an error that reads as message and keeps err in its chain,

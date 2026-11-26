@@ -440,7 +440,7 @@ func TestRunExecWithApprovalWait_EntersLoopOnIntentDeviation(t *testing.T) {
 			}
 			return event.EventDetails{SudoGrantStatus: &status}, nil
 		}
-		streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
 			t.Fatal("a denial-code wait polls the command detail; it never resumes a held job")
 			return nil
 		}
@@ -464,7 +464,7 @@ func TestRunExecWithApprovalWait_TimesOutAfterWindow(t *testing.T) {
 			status := "pending_approval"
 			return event.EventDetails{SudoGrantStatus: &status}, nil
 		}
-		streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
 			t.Fatal("stream must not run when approval never lands")
 			return nil
 		}
@@ -576,7 +576,7 @@ func TestRunExecWithApprovalWait_TransientPollFailureKeepsWaiting(t *testing.T) 
 			status := "authorized"
 			return event.EventDetails{SudoGrantStatus: &status}, nil
 		}
-		streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
 			t.Fatal("a denial-code wait polls the command detail; it never resumes a held job")
 			return nil
 		}
@@ -607,7 +607,7 @@ func TestRunExecWithApprovalWait_TimeoutReportsThePendingDenial(t *testing.T) {
 			status := "pending_approval"
 			return event.EventDetails{SudoGrantStatus: &status}, nil
 		}
-		streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
 			t.Fatal("stream must not run when approval never lands")
 			return nil
 		}
@@ -628,7 +628,7 @@ func TestRunExecWithApprovalWait_GivesUpAfterConsecutivePollFailures(t *testing.
 		polls++
 		return event.EventDetails{}, &statusError{status: http.StatusBadGateway}
 	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+	streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
 		t.Fatal("stream must not run when approval never lands")
 		return nil
 	}
@@ -656,7 +656,7 @@ func TestRunExecWithApprovalWait_GiveUpWarningSanitizesServerText(t *testing.T) 
 	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 		return event.EventDetails{}, fmt.Errorf("\x1b[2Kbad gateway page: %w", &statusError{status: http.StatusBadGateway})
 	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+	streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
 		t.Fatal("stream must not run when approval never lands")
 		return nil
 	}
@@ -679,7 +679,7 @@ func TestRunExecWithApprovalWait_FatalClientErrorEndsTheWaitOnThePendingContract
 		polls++
 		return event.EventDetails{}, &statusError{status: http.StatusUnauthorized}
 	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+	streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
 		t.Fatal("stream must not run when approval never lands")
 		return nil
 	}
@@ -723,7 +723,7 @@ func TestRunExecWithApprovalWait_ThrottleExtendsTheDeadline(t *testing.T) {
 		status := "authorized"
 		return event.EventDetails{SudoGrantStatus: &status}, nil
 	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+	streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
 		t.Fatal("a denial-code wait polls the command detail; it never resumes a held job")
 		return nil
 	}
@@ -764,7 +764,7 @@ func TestRunExecWithApprovalWait_SustainedThrottleDoesNotTripTheFailureCap(t *te
 		status := "authorized"
 		return event.EventDetails{SudoGrantStatus: &status}, nil
 	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+	streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
 		t.Fatal("a denial-code wait polls the command detail; it never resumes a held job")
 		return nil
 	}
@@ -802,7 +802,7 @@ func TestRunExecWithApprovalWait_ThrottleWarnsOnce(t *testing.T) {
 		status := "authorized"
 		return event.EventDetails{SudoGrantStatus: &status}, nil
 	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+	streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
 		t.Fatal("a denial-code wait polls the command detail; it never resumes a held job")
 		return nil
 	}
@@ -834,7 +834,7 @@ func TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait(t *testing.T) {
 		status := "rejected"
 		return event.EventDetails{SudoGrantStatus: &status, CommandRejection: event.CommandRejection{RejectionGate: types.SentString{Value: "approval", Sent: true}}, ConsoleURL: "https://console.example/commands/1"}, nil
 	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+	streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
 		t.Fatal("stream must not run for a rejected command")
 		return nil
 	}
@@ -965,7 +965,7 @@ func TestRunExecWithApprovalWait_APendingReadDoesNotRefillTheThrottleBudget(t *t
 		status := "pending_approval"
 		return event.EventDetails{SudoGrantStatus: &status}, nil
 	}
-	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+	streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
 		t.Fatal("stream must not run when approval never lands")
 		return nil
 	}
@@ -1035,9 +1035,9 @@ func TestRunWithApprovalWait_HeldThenSudoThenHeld(t *testing.T) {
 			return event.EventDetails{SudoGrantStatus: new("authorized")}, nil
 		}
 		var streamed []string
-		streamApprovedCommand = func(_ *client.AlpaconClient, id string, _ io.Writer, remaining time.Duration) error {
-			streamed = append(streamed, id)
-			if id == "held-1" {
+		streamApprovedCommand = func(_ *client.AlpaconClient, held *event.PendingApprovalError, _ io.Writer, remaining time.Duration) error {
+			streamed = append(streamed, held.CommandID)
+			if held.CommandID == "held-1" {
 				assert.Equal(t, 10*time.Second, remaining)
 				time.Sleep(4 * time.Second)
 				return denial
@@ -1067,8 +1067,8 @@ func TestRunWithApprovalWait_HeldRerunDenialEndsTheWait(t *testing.T) {
 		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 			return event.EventDetails{SudoGrantStatus: new("authorized")}, nil
 		}
-		streamApprovedCommand = func(_ *client.AlpaconClient, id string, _ io.Writer, remaining time.Duration) error {
-			assert.Equal(t, "held-rerun", id)
+		streamApprovedCommand = func(_ *client.AlpaconClient, held *event.PendingApprovalError, _ io.Writer, remaining time.Duration) error {
+			assert.Equal(t, "held-rerun", held.CommandID)
 			assert.Equal(t, 4*time.Second, remaining)
 			return denial
 		}
@@ -1094,7 +1094,7 @@ func TestRunWithApprovalWait_DeadlineReachedDuringHeldRerun(t *testing.T) {
 		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
 			return event.EventDetails{SudoGrantStatus: new("authorized")}, nil
 		}
-		streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
 			t.Fatal("the rerun used the remaining wait")
 			return nil
 		}
@@ -1108,20 +1108,45 @@ func TestRunWithApprovalWait_PreservesDetailsWhenStreamTimesOutBeforeReading(t *
 	synctest.Test(t, func(t *testing.T) {
 		_ = stubApprovalWaitSeams(t, time.Second, "SUDO_APPROVAL_REQUIRED")
 		pending := &event.PendingApprovalError{CommandID: "held", Username: "alice", FileSuggestion: &event.FileExecutionSuggestion{Path: "/example"}}
-		streamApprovedCommand = func(_ *client.AlpaconClient, id string, _ io.Writer, remaining time.Duration) error {
+		calls := 0
+		streamApprovedCommand = func(_ *client.AlpaconClient, held *event.PendingApprovalError, _ io.Writer, remaining time.Duration) error {
+			calls++
+			assert.Same(t, pending, held)
+			assert.Equal(t, time.Second, remaining)
 			time.Sleep(remaining)
-			return &event.PendingApprovalError{CommandID: id}
+			return held
 		}
 		err := runWithApprovalWait(utils.Stdio, nil, func() error { return pending }, time.Second, io.Discard)
 		require.ErrorIs(t, err, pending)
+		assert.Equal(t, 1, calls)
 	})
 }
 
-func TestRunWithApprovalWait_ReportsElapsedGrantWait(t *testing.T) {
+func TestRunWithApprovalWait_AuthorizedReadFinishesAfterDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		denial := stubApprovalWaitSeams(t, time.Second, "SUDO_APPROVAL_REQUIRED")
+		submits := 0
+		run := func() error {
+			submits++
+			if submits == 1 {
+				return denial
+			}
+			return nil
+		}
+		getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+			time.Sleep(time.Second + time.Millisecond)
+			return event.EventDetails{SudoGrantStatus: new("authorized")}, nil
+		}
+		require.NoError(t, runWithApprovalWait(utils.Stdio, nil, run, 2*time.Second, io.Discard))
+		assert.Equal(t, 2, submits)
+	})
+}
+
+func TestRunWithApprovalWait_ReportsRoundedElapsedWait(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		denial := stubApprovalWaitSeams(t, time.Second, "SUDO_APPROVAL_REQUIRED")
 		run := func() error { return &event.PendingApprovalError{CommandID: "held"} }
-		streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
 			time.Sleep(3 * time.Second)
 			return denial
 		}
@@ -1129,9 +1154,9 @@ func TestRunWithApprovalWait_ReportsElapsedGrantWait(t *testing.T) {
 			return event.EventDetails{SudoGrantStatus: new("pending_approval")}, nil
 		}
 		ios, _, stderr := utils.TestIOStreams()
-		err := runWithApprovalWait(ios, nil, run, 5*time.Second, io.Discard)
+		err := runWithApprovalWait(ios, nil, run, 4900*time.Millisecond, io.Discard)
 		require.ErrorIs(t, err, denial)
-		assert.Contains(t, stderr.String(), "Approval wait timed out after 2s")
+		assert.Contains(t, stderr.String(), "Approval wait timed out after 5s")
 	})
 }
 

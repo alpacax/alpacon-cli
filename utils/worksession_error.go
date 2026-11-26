@@ -64,7 +64,7 @@ var workSessionReasonMap = map[string]string{
 	WorkSessionNotUsable:            "session is no longer usable",
 	WorkSessionNotActive:            "selected session is not active",
 	WorkSessionExpired:              "selected session has expired",
-	WorkSessionScopeNotAllowed:      "session does not include this scope. If the scope change is pending, wait for its approval",
+	WorkSessionScopeNotAllowed:      "session does not include this scope",
 	WorkSessionServerNotAllowed:     "target server is not in this session",
 	WorkSessionClusterNotAllowed:    "target cluster is not in this session",
 	WorkSessionAssigneeMismatch:     "this session is assigned to another principal",
@@ -217,6 +217,9 @@ func buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS
 func workSessionGuidance(code, operation, target, activeWS, hint string) []NextAction {
 	actions := workSessionNextActions(code, operation, target, activeWS)
 	if hint == "" {
+		if code == WorkSessionScopeNotAllowed {
+			return append([]NextAction{{Description: "If the scope change is pending, wait for its approval."}}, actions...)
+		}
 		return actions
 	}
 	for i := range actions {

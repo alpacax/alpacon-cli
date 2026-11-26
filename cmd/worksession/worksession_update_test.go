@@ -11,7 +11,9 @@ import (
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -386,31 +388,62 @@ func TestUpdateTargetSession_PicksTheArgumentOrTheClientWorkspaceSession(t *test
 	}
 }
 
-func TestUpdateReportsPendingScopes(t *testing.T) {
+func TestWorkSessionUpdateOutput(t *testing.T) {
 	t.Parallel()
-	session := &wsapi.WorkSession{ID: "session", Status: "active", Scopes: []string{"command"}, ApprovalRequestID: "original", PendingModificationRequest: &wsapi.PendingModificationRequest{ID: "change"}}
-	req := wsapi.WorkSessionUpdateRequest{Scopes: []string{"command", "sudo"}}
-	output := newWorkSessionUpdateOutput(session, http.StatusAccepted, req, false)
+	for _, tt := range []struct {
+		name    string
+		status  int
+		changes string
+		req     wsapi.WorkSessionUpdateRequest
+		want    string
+		omit    string
+	}{
+		{"scopes", http.StatusAccepted, `{"scopes":["command","sudo"]}`, wsapi.WorkSessionUpdateRequest{}, "requested scopes (command, sudo) pending approval (request change)", ""},
+		{"servers", http.StatusAccepted, `{"servers":["web"]}`, wsapi.WorkSessionUpdateRequest{Scopes: []string{"command", "sudo"}}, "target servers pending approval", "requested scopes"},
+		{"description", http.StatusAccepted, `{"description":"updated"}`, wsapi.WorkSessionUpdateRequest{}, "description pending approval", ""},
+		{"immediate", http.StatusOK, `{"description":"updated"}`, wsapi.WorkSessionUpdateRequest{}, "Work session session updated (status: active).", "pending approval"},
+		{"no changes", http.StatusAccepted, "", wsapi.WorkSessionUpdateRequest{Scopes: []string{"command", "sudo"}}, "requested scopes (command, sudo) pending approval", ""},
+		{"title", http.StatusAccepted, `{"title":"updated"}`, wsapi.WorkSessionUpdateRequest{}, "title pending approval", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			session := &wsapi.WorkSession{ID: "session", Status: "active", Scopes: []string{"command"}, ApprovalRequestID: "original", PendingModificationRequest: &wsapi.PendingModificationRequest{ID: "change", Changes: json.RawMessage(tt.changes)}}
+			output := newWorkSessionUpdateOutput(session, tt.status, tt.req, false)
+			assert.Contains(t, output.Message, tt.want)
+			if tt.omit != "" {
+				assert.NotContains(t, output.Message, tt.omit)
+			}
+			assert.Equal(t, "original", output.ApprovalRequestID)
+			if tt.status == http.StatusAccepted {
+				assert.True(t, output.PendingApproval)
+				assert.Equal(t, "change", output.PendingRequestID)
+				assert.Contains(t, output.Message, "Current scopes: command.")
+			} else {
+				assert.False(t, output.PendingApproval)
+				assert.Empty(t, output.PendingRequestID)
+			}
+		})
+	}
+}
+
+func TestWorkSessionUpdateCmd_ReportsPendingApproval(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/work-sessions/sessions/session/", r.URL.Path)
+		assert.Equal(t, http.MethodPatch, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"id":"session","status":"active","scopes":["command"],"pending_modification_request":{"id":"change"}}`))
+	}))
+	t.Cleanup(ts.Close)
+	stdout, stderr, code := cmdtest.RunJSON(func(ios *utils.IOStreams) *cobra.Command {
+		return newWorkSessionUpdateCmd(func() (*client.AlpaconClient, error) { return newTestClient(ts), nil }, ios)
+	}, "session", "--title", "Updated")
+	assert.Zero(t, code)
+	assert.Empty(t, stderr)
+	var output workSessionMutationOutput
+	require.NoError(t, json.Unmarshal([]byte(stdout), &output))
 	assert.True(t, output.PendingApproval)
-	encoded, err := json.Marshal(output)
-	require.NoError(t, err)
-	var fields map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(encoded, &fields))
-	assert.JSONEq(t, `"original"`, string(fields["approval_request_id"]))
-	assert.JSONEq(t, `"change"`, string(fields["pending_request_id"]))
-	assert.Contains(t, output.Message, "requested scopes (command, sudo) pending approval (request change)")
-	assert.Contains(t, output.Message, "Current scopes: command.")
-	session.PendingModificationRequest.Changes = json.RawMessage(`{"servers":["web"]}`)
-	targets := newWorkSessionUpdateOutput(session, http.StatusAccepted, req, false)
-	assert.Contains(t, targets.Message, "target servers pending approval")
-	assert.NotContains(t, targets.Message, "requested scopes")
-	session.PendingModificationRequest.Changes = json.RawMessage(`{"description":"updated"}`)
-	description := newWorkSessionUpdateOutput(session, http.StatusAccepted, req, false)
-	assert.Contains(t, description.Message, "description pending approval")
-	immediate := newWorkSessionUpdateOutput(session, http.StatusOK, req, false)
-	assert.False(t, immediate.PendingApproval)
-	encoded, err = json.Marshal(immediate)
-	require.NoError(t, err)
-	assert.NotContains(t, string(encoded), `"pending_request_id"`)
-	assert.Equal(t, "Work session session updated (status: active).", immediate.Message)
+	assert.Equal(t, "change", output.PendingRequestID)
+	assert.Contains(t, output.Message, "title pending approval")
 }

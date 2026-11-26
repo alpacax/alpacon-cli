@@ -6,12 +6,15 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -249,23 +252,67 @@ func TestWorkSessionCompleteCmd_InvalidSessionIDIsRefusedBeforeAnyRequest(t *tes
 	}
 }
 
-func TestEndingPendingSessionNamesCancel(t *testing.T) {
+func TestEndSessionCancelGuidance(t *testing.T) {
 	t.Parallel()
-	for _, tc := range endSessionCommands {
-		t.Run(tc.name, func(t *testing.T) {
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				if r.Method == http.MethodGet {
-					_, _ = w.Write([]byte(`{"status":"pending"}`))
-					return
-				}
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = w.Write([]byte(`{"code":"work_session_not_active"}`))
-			}))
-			t.Cleanup(ts.Close)
-			_, err := tc.run(utils.Stdio, newTestClient(ts), "session")
-			require.ErrorContains(t, err, "is pending approval")
-			assert.ErrorContains(t, err, "alpacon work-session cancel session")
+	for _, command := range endSessionCommands {
+		t.Run(command.name, func(t *testing.T) {
+			t.Parallel()
+			for _, tt := range []struct {
+				name         string
+				lookupStatus int
+				session      string
+				refusal      string
+				wantLookups  int32
+				wantAction   utils.NextAction
+			}{
+				{"pending", http.StatusOK, `{"status":"pending"}`, `{"code":"work_session_not_active"}`, 1, utils.NextAction{Command: "alpacon work-session cancel session", Description: "cancel the pending work session"}},
+				{"closed", http.StatusOK, `{"status":"completed"}`, `{"code":"work_session_not_active"}`, 1, utils.NextAction{}},
+				{"failed lookup", http.StatusNotFound, `{}`, `{"code":"work_session_not_active"}`, 1, utils.NextAction{}},
+				{"server hint", http.StatusOK, `{"status":"pending"}`, `{"code":"work_session_not_active","hint":"Review the session in the console."}`, 0, utils.NextAction{Description: "Review the session in the console."}},
+			} {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
+					var lookups atomic.Int32
+					ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						switch {
+						case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/session/":
+							lookups.Add(1)
+							w.WriteHeader(tt.lookupStatus)
+							_, _ = w.Write([]byte(tt.session))
+						case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/session/"+command.action+"/":
+							w.WriteHeader(http.StatusForbidden)
+							_, _ = w.Write([]byte(tt.refusal))
+						default:
+							t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+							http.NotFound(w, r)
+						}
+					}))
+					t.Cleanup(ts.Close)
+					build := func(ios *utils.IOStreams) *cobra.Command {
+						factory := func() (*client.AlpaconClient, error) { return newTestClient(ts), nil }
+						if command.name == "revoke" {
+							return newWorkSessionRevokeCmd(factory, ios)
+						}
+						return newWorkSessionCompleteCmd(factory, ios)
+					}
+					stdout, stderr, code := cmdtest.RunJSON(build, "session")
+					assert.Empty(t, stdout)
+					assert.Equal(t, tt.wantLookups, lookups.Load())
+					assert.Equal(t, utils.ExitCodeGeneralError, code)
+					var result utils.JSONErrorEnvelope[json.RawMessage]
+					require.NoError(t, json.Unmarshal([]byte(stderr), &result))
+					assert.Equal(t, utils.WorkSessionNotActive, result.ErrorCode)
+					if tt.wantAction == (utils.NextAction{}) {
+						assert.Empty(t, result.NextActions)
+					} else {
+						assert.Equal(t, []utils.NextAction{tt.wantAction}, result.NextActions)
+					}
+					if tt.name == "pending" {
+						assert.Regexp(t, "Failed to .* work session: .+\\. Work session session is pending approval", result.Message)
+					}
+				})
+			}
 		})
 	}
 }

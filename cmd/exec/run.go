@@ -574,6 +574,7 @@ func RunFileExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient,
 // runWithApprovalWait is RunExecWithApprovalWait over a commandRun: run is the
 // first attempt and, once a reviewer grants the request, the re-run.
 func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run commandRun, waitTimeout time.Duration, out io.Writer) (result error) {
+	started := time.Now()
 	err := run()
 	err = utils.WithSignalFields(err, utils.SignalFields(err), ac)
 	announced := false
@@ -611,7 +612,7 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 	}
 	utils.SignalApprovalPending(current, utils.SignalFields(err))
 	announced = true
-	current = waitForSudoGrant(ios, ac, run, current, denial, &deadline, budget)
+	current = waitForSudoGrant(ios, ac, run, current, denial, started, &deadline, budget)
 	return waitIfHeld(current)
 }
 
@@ -627,15 +628,10 @@ func waitForHeldCommand(ac *client.AlpaconClient, pending *event.PendingApproval
 	if remaining <= 0 {
 		return pending
 	}
-	err := streamApprovedCommand(ac, pending.CommandID, spinner.StopWriter(out), remaining)
-	// Connecting can consume the deadline before the first detail read.
-	if timeout, ok := err.(*event.PendingApprovalError); ok && *timeout == (event.PendingApprovalError{CommandID: pending.CommandID}) {
-		return pending
-	}
-	return err
+	return streamApprovedCommand(ac, pending, spinner.StopWriter(out), remaining)
 }
 
-func waitForSudoGrant(ios *utils.IOStreams, ac *client.AlpaconClient, run commandRun, pendingDenial error, denialErr *event.RemoteCommandError, deadline *time.Time, budget *utils.ThrottleBudget) error {
+func waitForSudoGrant(ios *utils.IOStreams, ac *client.AlpaconClient, run commandRun, pendingDenial error, denialErr *event.RemoteCommandError, waitStarted time.Time, deadline *time.Time, budget *utils.ThrottleBudget) error {
 	spinner := utils.NewSpinner(approvalWaitMessage)
 	spinner.Start()
 	// Every return below stops the spinner before it writes, for output ordering; this backstops
@@ -662,7 +658,7 @@ func waitForSudoGrant(ios *utils.IOStreams, ac *client.AlpaconClient, run comman
 		case <-timer.C:
 			spinner.Stop()
 			// Report only the timeout; the caller's pending-approval message already names --wait-approval.
-			ios.Warning("%s", utils.HintOnly(fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", time.Since(started)), lastRefusal))
+			ios.Warning("%s", utils.HintOnly(fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", time.Since(waitStarted).Round(time.Second)), lastRefusal))
 			return pendingWithApprovalDetails(pendingDenial, lastRequestID, lastHeld)
 		case <-poll.C:
 			read, err := pollApprovalOnce(ac, denialErr.CommandID)
@@ -721,9 +717,6 @@ func waitForSudoGrant(ios *utils.IOStreams, ac *client.AlpaconClient, run comman
 			switch read.outcome {
 			case outcomeApproved:
 				spinner.Stop()
-				if !time.Now().Before(*deadline) {
-					return pendingWithApprovalDetails(pendingDenial, lastRequestID, lastHeld)
-				}
 				return runAfterApproval(ios, run, lastDeadline)
 			case outcomeRejected, outcomeExpired:
 				spinner.Stop()

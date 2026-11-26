@@ -111,6 +111,7 @@ func newWorkSessionUpdateOutput(session *wsapi.WorkSession, status int, req wsap
 		return output
 	}
 	output.PendingApproval = true
+	title := req.Title != ""
 	description := req.Description != ""
 	scopes := req.Scopes
 	servers := len(req.Servers) > 0
@@ -123,12 +124,16 @@ func newWorkSessionUpdateOutput(session *wsapi.WorkSession, status int, req wsap
 					scopes = req.Scopes
 				}
 			}
+			_, title = fields["title"]
 			_, description = fields["description"]
 			_, servers = fields["servers"]
 			_, sudo = fields["sudo_policies"]
 		}
 	}
 	var changes []string
+	if title {
+		changes = append(changes, "title")
+	}
 	if description {
 		changes = append(changes, "description")
 	}

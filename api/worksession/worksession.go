@@ -175,15 +175,8 @@ func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (
 	return &session, nil
 }
 
-// UpdateWorkSession PATCHes a work session. The server may queue the change for approval, in
-// which case it takes effect only once approved.
-func UpdateWorkSession(ac *client.AlpaconClient, id string, req WorkSessionUpdateRequest) (*WorkSession, error) {
-	session, _, err := UpdateWorkSessionWithStatus(ac, id, req)
-	return session, err
-}
-
-// UpdateWorkSessionWithStatus returns the status of this PATCH. A 200 can still include a pending
-// modification from an earlier request.
+// UpdateWorkSessionWithStatus patches a work session and returns the HTTP status.
+// A 200 can still include a pending modification from an earlier request.
 func UpdateWorkSessionWithStatus(ac *client.AlpaconClient, id string, req WorkSessionUpdateRequest) (*WorkSession, int, error) {
 	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
