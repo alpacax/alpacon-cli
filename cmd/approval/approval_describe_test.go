@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	approvalapi "github.com/alpacax/alpacon-cli/api/approval"
 	"github.com/alpacax/alpacon-cli/client"
@@ -767,4 +769,235 @@ func TestApprovalDescribePrintsTheWarningWithoutColor(t *testing.T) {
 
 	assert.Contains(t, stdout, fmt.Sprintf("\n\nWarning: %s\nScript (%d bytes):\necho red\n\n", scriptAlteredWarning, len(content)))
 	assert.NotContains(t, stdout, "\x1b")
+}
+
+const kubeApprovalID = "550e8400-e29b-41d4-a716-446655440000"
+
+const kubeApprovalFixture = `{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "request_type": "kube_mutation",
+  "request_data": "patch deployments/web (scale) in default",
+  "status": "pending",
+  "requested_by": {"name": "deploy-agent"},
+  "requester_kind": "agent",
+  "added_at": "2030-01-01T09:00:00Z",
+  "decision_deadline": "2030-01-01T09:10:00Z",
+  "metadata": {
+    "work_session": {"id": "3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47", "title": "Scale web", "status": "active"},
+    "intent": "Handle higher traffic"
+  },
+  "kube_request": {
+    "session_id": "7d0e44e4-906c-4c19-8e8c-6ebb871f9514",
+    "cluster": {"id": "cf7ffe64-89f1-4022-821e-c36e2a49f8f1", "name": "my-cluster"},
+    "verb": "patch",
+    "api_group": "apps",
+    "api_version": "v1",
+    "resource": "deployments",
+    "subresource": "scale",
+    "namespace": "default",
+    "name": "web",
+    "query": {"fieldValidation":["Strict"], "dryRun":["All","Other"]},
+    "content_type": "application/merge-patch+json",
+    "is_change": true,
+    "body": %s,
+    "grant_expires_at": "2030-01-01T09:15:00Z"
+  }
+}`
+
+func TestDescribeKubeRequestRows(t *testing.T) {
+	t.Parallel()
+	req := decodeFixture(t, fmt.Sprintf(kubeApprovalFixture, `"{\"spec\":{\"replicas\":3}}"`))
+	rows := describeRows(req, nil)
+	fields := rowMap(rows)
+
+	localTime := func(minute int) string {
+		return time.Date(2030, time.January, 1, 9, minute, 0, 0, time.UTC).Local().Format("2006-01-02 15:04")
+	}
+	assert.Equal(t, "deploy-agent (agent)", fields["Requested by"])
+	assert.Equal(t, "Scale web (active, 3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47)", fields["Work session"])
+	assert.Equal(t, "Handle higher traffic", fields["Session purpose"])
+	addedAt := slices.IndexFunc(rows, func(row describeRow) bool { return row.Field == "Added at" })
+	require.GreaterOrEqual(t, addedAt, 0)
+	require.Greater(t, len(rows), addedAt+1)
+	assert.Equal(t, describeRow{"Expires at", localTime(10)}, rows[addedAt+1])
+
+	heading := slices.Index(rows, describeRow{"Kubernetes request", ""})
+	require.GreaterOrEqual(t, heading, 0)
+	assert.Equal(t, []describeRow{
+		{"  Cluster", "my-cluster (cf7ffe64-89f1-4022-821e-c36e2a49f8f1)"},
+		{"  Namespace", "default"},
+		{"  Action", "patch (scale)"},
+		{"  Target", "deployments.apps/web/scale"},
+		{"  API version", "apps/v1"},
+		{"  Query", "dryRun=All&dryRun=Other&fieldValidation=Strict"},
+		{"  Content type", "application/merge-patch+json"},
+		{"  Body kind", "change set (not the object after the change)"},
+		{"  Grant expires at", localTime(15)},
+		{"  Kube session", "7d0e44e4-906c-4c19-8e8c-6ebb871f9514"},
+	}, rows[heading+1:])
+}
+
+func TestDescribePartialKubeRequestRows(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		kube string
+		rows []describeRow
+	}{
+		{
+			name: "collection with unknown body kind",
+			kube: `{"resource":"nodes","api_version":"v1","verb":"delete","cluster":{"id":"cluster-id"}}`,
+			rows: []describeRow{{"  Cluster", "cluster-id"}, {"  Namespace", "(none)"}, {"  Action", "delete"}, {"  Target", "nodes (collection)"}, {"  API version", "v1"}},
+		},
+		{
+			name: "whole object and sanitized cluster name",
+			kube: `{"cluster":{"name":"my-\u001b[31mcluster"},"is_change":false}`,
+			rows: []describeRow{{"  Cluster", "my-cluster"}, {"  Body kind", "whole object"}},
+		},
+		{
+			name: "query delimiters are escaped",
+			kube: `{"query":{"fieldManager":["x&dryRun=All"]}}`,
+			rows: []describeRow{{"  Query", "fieldManager=x%26dryRun%3DAll"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			req := decodeFixture(t, `{"kube_request":`+tt.kube+`}`)
+
+			assert.Equal(t, append([]describeRow{{"Kubernetes request", ""}}, tt.rows...), kubeRequestRows(req.KubeRequest))
+		})
+	}
+}
+
+func TestDescribeRequesterKindsAndDeadline(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		kind string
+		want string
+	}{
+		{kind: "user", want: "requester"},
+		{kind: "token", want: "requester (token)"},
+		{kind: "service", want: "requester"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.kind, func(t *testing.T) {
+			t.Parallel()
+			req := decodeFixture(t, fmt.Sprintf(`{"request_type":"sudo","requester_kind":%q,"requested_by":{"name":"requester"},"reviewed_by":{"name":"re\u001b[31mviewer"},"decision_deadline":"2030-01-01T09:10:00Z"}`, tt.kind))
+
+			fields := rowMap(describeRows(req, nil))
+			assert.Equal(t, tt.want, fields["Requested by"])
+			assert.Equal(t, "reviewer", fields["Reviewed by"])
+			assert.Equal(t, time.Date(2030, time.January, 1, 9, 10, 0, 0, time.UTC).Local().Format("2006-01-02 15:04"), fields["Expires at"])
+			assert.NotContains(t, fields, "Kubernetes request")
+		})
+	}
+}
+
+func TestApprovalDescribeKubeBody(t *testing.T) {
+	t.Parallel()
+	body := `{"metadata":{"annotations":{"kubectl.kubernetes.io/last-applied-configuration":"` + strings.Repeat("x", 257) + `"}},"name\n\u001b[31m":1,"name\n\u001b[31m":2}` + " \r\n\n"
+	encodedBody, err := json.Marshal(body)
+	require.NoError(t, err)
+	response := fmt.Sprintf(kubeApprovalFixture, encodedBody)
+	nullResponse := fmt.Sprintf(kubeApprovalFixture, "null")
+	tests := []struct {
+		name     string
+		response string
+		args     []string
+		json     bool
+		wantCode int
+		failure  string
+		check    func(*testing.T, string)
+	}{
+		{
+			name: "formatted table body", response: response,
+			check: func(t *testing.T, stdout string) {
+				t.Helper()
+				assert.Contains(t, stdout, "Kubernetes request")
+				assert.Contains(t, stdout, fmt.Sprintf("\n\nWarning: the body repeats the key %q in one object; Kubernetes may apply only the last value.\nBody (change set, application/merge-patch+json, formatted, folded kubectl.kubernetes.io/last-applied-configuration, %d bytes as sent):\n", "name", len(body)))
+				assert.Contains(t, stdout, `"<folded: 257 bytes>"`)
+				assert.Contains(t, stdout, "\n}\nRun 'alpacon approval describe "+kubeApprovalID+" --body > FILE' to save the body exactly as sent.\n")
+			},
+		},
+		{
+			name: "null table body", response: nullResponse,
+			check: func(t *testing.T, stdout string) {
+				t.Helper()
+				assert.Contains(t, stdout, "Body: not included in this response. The server includes it only for readers who can decide the request or open its work session, and clears it after a while.")
+			},
+		},
+		{
+			name: "json formatted without folds", response: fmt.Sprintf(kubeApprovalFixture, `"{\"spec\":{\"replicas\":3}}"`),
+			check: func(t *testing.T, stdout string) {
+				t.Helper()
+				assert.Contains(t, stdout, "formatted, 23 bytes as sent):\n{\n  \"spec\": {\n    \"replicas\": 3\n  }\n}\n")
+				assert.NotContains(t, stdout, "folded")
+				assert.Contains(t, stdout, "to save the body exactly as sent.")
+			},
+		},
+		{
+			name: "yaml table body", response: fmt.Sprintf(kubeApprovalFixture, `"spec:\n  replicas: 3\n"`),
+			check: func(t *testing.T, stdout string) {
+				t.Helper()
+				assert.Contains(t, stdout, "bytes as sent):\nspec:\n  replicas: 3\n")
+				assert.NotContains(t, stdout, "formatted")
+				assert.NotContains(t, stdout, "--body")
+			},
+		},
+		{
+			name: "body only", response: response, args: []string{"--body"},
+			check: func(t *testing.T, stdout string) {
+				t.Helper()
+				assert.Equal(t, body, stdout)
+			},
+		},
+		{
+			name: "body only on a different type", response: `{"request_type":"sudo","kube_request":null}`, args: []string{"--body"},
+			wantCode: utils.ExitCodeGeneralError, failure: "Approval request is not a Kubernetes request (type: sudo); --body applies only to kube_mutation requests.",
+		},
+		{
+			name: "body only with null body", response: nullResponse, args: []string{"--body"},
+			wantCode: utils.ExitCodeGeneralError, failure: "The body is not included in this response. The server includes it only for readers who can decide the request or open its work session, and clears it after a while.",
+		},
+		{
+			name: "body and json flags conflict", response: response, args: []string{"--body"}, json: true,
+			wantCode: utils.ExitCodeUsageError, failure: "--body cannot be combined with --output json.",
+		},
+		{
+			name: "raw json", response: response, json: true,
+			check: func(t *testing.T, stdout string) {
+				t.Helper()
+				assert.JSONEq(t, response, stdout)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			const route = "GET /api/approvals/approvals/" + kubeApprovalID + "/"
+			ts := cmdtest.Server(t, map[string]cmdtest.Reply{route: {Status: http.StatusOK, Body: tt.response}})
+			run := cmdtest.RunCaptured
+			if tt.json {
+				run = cmdtest.RunJSON
+			}
+			stdout, stderr, code := run(func(ios *utils.IOStreams) *cobra.Command {
+				return newApprovalDescribeCmd(ts.Factory(), ios)
+			}, append([]string{kubeApprovalID}, tt.args...)...)
+
+			assert.Equal(t, tt.wantCode, code)
+			if tt.wantCode == utils.ExitCodeUsageError {
+				assert.Zero(t, ts.Hits(route))
+			} else {
+				assert.Equal(t, 1, ts.Hits(route))
+			}
+			if tt.failure != "" {
+				assert.Contains(t, stderr, tt.failure)
+				assert.Empty(t, stdout)
+				return
+			}
+			assert.Empty(t, stderr)
+			tt.check(t, stdout)
+		})
+	}
 }

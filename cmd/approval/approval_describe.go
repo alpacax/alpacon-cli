@@ -2,6 +2,7 @@ package approval
 
 import (
 	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -11,13 +12,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const describeTimeLayout = "2006-01-02 15:04"
+
 type describeRow struct {
 	Field string `table:"Field"`
 	Value string `table:"Value"`
 }
 
 func newApprovalDescribeCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
-	return &cobra.Command{
+	var bodyOnly bool
+	cmd := &cobra.Command{
 		Use:     "describe REQUEST_ID",
 		Aliases: []string{"desc"},
 		Short:   "Show details of an approval request",
@@ -29,11 +33,25 @@ requested changes. For a file execution, the AI evidence rows list each claim
 behind the AI's verdict beside the script lines it rests on (L3, L40-41); a
 claim marked Not placed could not be located in the script. When at least one
 claim is placed, the script below is printed with line numbers. Use --output
-json to print the full raw response.`,
+json to print the full raw response.
+
+For a Kubernetes request, the table identifies the target and describes the
+request. A change set describes the requested edits. The body below the
+table is indented when it is JSON. Only strings in the object's
+kubectl.kubernetes.io/last-applied-configuration annotation that exceed 256
+bytes as sent can be folded. A warning identifies repeated JSON keys.
+The server includes the body only for readers who can decide the request or
+open its work session, and clears it after a while. To save the exact bytes,
+use --body and redirect stdout to a file.`,
 		Args: cobra.ExactArgs(1),
 		Example: `  alpacon approval describe 550e8400-e29b-41d4-a716-446655440000
-  alpacon approval desc 550e8400-e29b-41d4-a716-446655440000`,
+  alpacon approval desc 550e8400-e29b-41d4-a716-446655440000
+  alpacon approval describe 550e8400-e29b-41d4-a716-446655440000 --body`,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
+			if bodyOnly && ios.IsJSON() {
+				return utils.NewUsageExitError("--body cannot be combined with --output json.")
+			}
+
 			ac, err := newClient()
 			if err != nil {
 				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -52,6 +70,19 @@ json to print the full raw response.`,
 				return utils.NewExitError("Failed to retrieve approval request: %s.", err)
 			}
 
+			if bodyOnly {
+				if req.KubeRequest == nil {
+					return utils.NewExitError("Approval request is not a Kubernetes request (type: %s); --body applies only to kube_mutation requests.", utils.SanitizeTerminalOneLine(req.RequestType))
+				}
+				if req.KubeRequest.Body == nil {
+					return utils.NewExitError("The body is not included in this response. %s.", kubeBodyUnavailableReason)
+				}
+				if err := writeKubeBody(ios, *req.KubeRequest.Body, ios.OutIsTerminal()); err != nil {
+					return utils.NewExitError("Failed to write Kubernetes request body: %s.", err)
+				}
+				return nil
+			}
+
 			fe := fileExecutionOf(req)
 			evidence, placed := evidenceRows(req)
 			rows := append(describeRows(req, fe), evidence...)
@@ -62,31 +93,35 @@ json to print the full raw response.`,
 				script, altered := fileExecutionScript(fe, placed)
 				_, _ = fmt.Fprintln(ios.Out)
 				if altered {
-					// The warning stays on Out beside the script it is about, and
-					// ColorEnabled follows ErrOut, so it is written without color.
-					plain := *ios
-					plain.ColorEnabled = false
-					plain.WarnTerminalTextAltered(ios.Out, "")
+					warnAboutAlteredDescribeText(ios)
 				}
 				_, _ = fmt.Fprintln(ios.Out, script)
+			}
+			if req.KubeRequest != nil {
+				printKubeBody(ios, req.ID, req.KubeRequest)
 			}
 			return nil
 		}),
 	}
+	cmd.Flags().BoolVar(&bodyOnly, "body", false, "Print only the Kubernetes request body; exact bytes when stdout is not a terminal")
+	return cmd
 }
 
 func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecution) []describeRow {
 	requestedBy := ""
 	if req.RequestedBy != nil {
-		requestedBy = req.RequestedBy.Name
+		requestedBy = utils.SanitizeTerminalText(req.RequestedBy.Name)
+		if requestedBy != "" && (req.RequesterKind == "agent" || req.RequesterKind == "token") {
+			requestedBy += " (" + req.RequesterKind + ")"
+		}
 	}
 	reviewedBy := ""
 	if req.ReviewedBy != nil {
-		reviewedBy = req.ReviewedBy.Name
+		reviewedBy = utils.SanitizeTerminalText(req.ReviewedBy.Name)
 	}
 	reviewedAt := ""
 	if req.ReviewedAt != nil {
-		reviewedAt = req.ReviewedAt.Local().Format("2006-01-02 15:04")
+		reviewedAt = req.ReviewedAt.Local().Format(describeTimeLayout)
 	}
 
 	rows := []describeRow{
@@ -98,16 +133,80 @@ func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecutio
 		{"Requested by", requestedBy},
 		{"Reviewed by", reviewedBy},
 		{"Reviewed at", reviewedAt},
-		{"Added at", req.AddedAt.Local().Format("2006-01-02 15:04")},
+		{"Added at", req.AddedAt.Local().Format(describeTimeLayout)},
+	}
+	if req.DecisionDeadline != nil {
+		rows = append(rows, describeRow{"Expires at", req.DecisionDeadline.Local().Format(describeTimeLayout)})
 	}
 	if note := utils.SanitizeTerminalOneLine(req.RejectionNote); note != "" {
 		// The approver's own words, stripped of terminal escapes like any server value.
 		rows = append(rows, describeRow{"Rejection reason", note})
 	}
 	rows = append(rows, contextRows(req.Metadata)...)
+	rows = append(rows, kubeRequestRows(req.KubeRequest)...)
 	if fe != nil {
 		rows = append(rows, fileExecutionRows(fe)...)
 	}
+	return rows
+}
+
+func kubeRequestRows(kr *approvalapi.KubeRequest) []describeRow {
+	if kr == nil {
+		return nil
+	}
+	rows := []describeRow{{"Kubernetes request", ""}}
+	clean := utils.SanitizeTerminalText
+	add := func(field, value string) {
+		if value != "" {
+			rows = append(rows, describeRow{"  " + field, value})
+		}
+	}
+
+	cluster, id := clean(kr.Cluster.Name), clean(kr.Cluster.ID)
+	if cluster == "" {
+		cluster = id
+	} else if id != "" {
+		cluster += " (" + id + ")"
+	}
+	add("Cluster", cluster)
+
+	namespace, resource := clean(kr.Namespace), clean(kr.Resource)
+	if namespace == "" && resource != "" {
+		namespace = "(none)"
+	}
+	add("Namespace", namespace)
+
+	action, subresource := clean(kr.Verb), clean(kr.Subresource)
+	if action != "" && subresource != "" {
+		action += " (" + subresource + ")"
+	}
+	add("Action", action)
+
+	group := clean(kr.APIGroup)
+	if resource != "" {
+		target := joinNonEmpty([]string{resource, group}, ".")
+		if name := clean(kr.Name); name != "" {
+			target = joinNonEmpty([]string{target, name, subresource}, "/")
+		} else {
+			target += " (collection)"
+		}
+		add("Target", target)
+	}
+	if version := clean(kr.APIVersion); version != "" {
+		add("API version", joinNonEmpty([]string{group, version}, "/"))
+	}
+
+	add("Query", utils.SanitizeTerminalOneLine(url.Values(kr.Query).Encode()))
+	add("Content type", utils.SanitizeTerminalOneLine(kr.ContentType))
+	kind := kubeBodyKind(kr.IsChange)
+	if kr.IsChange != nil && *kr.IsChange {
+		kind += " (not the object after the change)"
+	}
+	add("Body kind", kind)
+	if kr.GrantExpiresAt != nil {
+		add("Grant expires at", kr.GrantExpiresAt.Local().Format(describeTimeLayout))
+	}
+	add("Kube session", clean(kr.SessionID))
 	return rows
 }
 
@@ -216,6 +315,14 @@ func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (script s
 		body = strings.Join(lines, "\n")
 	}
 	return fmt.Sprintf("Script (%d bytes):\n%s", len(*fe.Content), body), altered
+}
+
+func warnAboutAlteredDescribeText(ios *utils.IOStreams) {
+	// The warning stays on Out beside the text it is about, and
+	// ColorEnabled follows ErrOut, so it is written without color.
+	plain := *ios
+	plain.ColorEnabled = false
+	plain.WarnTerminalTextAltered(ios.Out, "")
 }
 
 // sanitizeScript keeps tabs, since they are part of the script the request
