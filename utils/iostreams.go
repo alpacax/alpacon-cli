@@ -51,6 +51,12 @@ func (s *IOStreams) OutputFormat() string { return *s.format }
 // IsJSON reports whether these streams print --output json.
 func (s *IOStreams) IsJSON() bool { return *s.format == OutputFormatJSON }
 
+// OutIsTerminal reports whether Out writes to a terminal.
+func (s *IOStreams) OutIsTerminal() bool {
+	_, ok := s.Out.(stdoutWriter)
+	return ok && term.IsTerminal(int(os.Stdout.Fd()))
+}
+
 // SetOutputFormat applies an --output value, refusing anything but table or json as a usage error.
 func (s *IOStreams) SetOutputFormat(value string) error {
 	if value != OutputFormatTable && value != OutputFormatJSON {
