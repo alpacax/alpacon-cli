@@ -298,4 +298,6 @@ func TestAfterApprovalAction_NamesAccount(t *testing.T) {
 	assert.Equal(t, "run exec with -u set to the account the session was created for", accountRunGuidance("exec", "root\nignored"))
 	assert.Equal(t, "run exec with -u set to the account the session was created for", accountRunGuidance("exec", `dev"ops`))
 	assert.Empty(t, accountRunGuidance("exec", ""))
+	assert.Equal(t, "run exec with -u root, the account the session was created for; the approver can change the account", pendingAccountRunGuidance("exec", "root"))
+	assert.Empty(t, pendingAccountRunGuidance("exec", ""))
 }

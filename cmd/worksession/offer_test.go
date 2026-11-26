@@ -153,13 +153,13 @@ func TestOfferWaitTimeoutReturnsPendingExitAndResumeAction(t *testing.T) {
 		return http.StatusOK, string(body)
 	})}
 	ios, _, stderr := utils.TestIOStreams()
-	selection := &Selection{id: "old-session", ios: ios, ac: ac}
+	selection := &Selection{id: "old-session", ios: ios, ac: ac, need: Need{Account: "root"}}
 	want := Want{ServerID: "server-1", AssignedUser: "user-1", RequesterType: "user", Scopes: []string{"command"}}
 	var resend bool
 	var failure error
 
 	synctest.Test(t, func(*testing.T) {
-		resend, failure = selection.settle(context.Background(), &pending, true, want, func(command string) string { return accountRunGuidance(command, "root") })
+		resend, failure = selection.settle(context.Background(), &pending, true, want, selection.createdAccountGuidance)
 	})
 
 	assert.False(t, resend)
@@ -176,7 +176,9 @@ func noInterrupt() (context.Context, context.CancelFunc) {
 	return context.WithCancel(context.Background())
 }
 
-func noAccountGuidance(string) string { return "" }
+func noAccountGuidance(string, string) string { return "" }
+
+const approverCanChangeAccount = "The approver can change the account the session declares.\n"
 
 func TestOfferWaitInterruptReturnsPendingExitWithoutResend(t *testing.T) {
 	setupTmpConfig(t)
@@ -964,10 +966,11 @@ func TestCtrlCAtTheOfferPromptDeclinesWithoutCreating(t *testing.T) {
 	assert.Contains(t, stderr.String(), "Stopped; no WorkSession was selected.")
 }
 
-// settleWaitOutput settles selection on a session still pending approval and returns what it printed.
-func settleWaitOutput(t *testing.T, selection *Selection, accountGuidance func(command string) string) string {
+// settleWaitOutput settles selection on a session that declares declared and is still pending approval,
+// and returns what it printed.
+func settleWaitOutput(t *testing.T, selection *Selection, declared string, accountGuidance func(command, declared string) string) string {
 	t.Helper()
-	pending := wsapi.WorkSession{ID: "pending-session", Status: wsapi.StatusPending, RequesterType: "user"}
+	pending := wsapi.WorkSession{ID: "pending-session", Status: wsapi.StatusPending, RequesterType: "user", TargetAccountUsername: declared}
 	body, err := json.Marshal(pending)
 	require.NoError(t, err)
 	ios, _, stderr := utils.TestIOStreams()
@@ -1003,10 +1006,11 @@ func TestCreatedSessionWaitGuidanceNamesTheOperationsCommand(t *testing.T) {
 			t.Parallel()
 			selection := &Selection{need: Need{Operation: tt.operation, Account: "root", Command: tt.command}}
 
-			stderr := settleWaitOutput(t, selection, func(command string) string { return accountRunGuidance(command, "root") })
+			stderr := settleWaitOutput(t, selection, "root", selection.createdAccountGuidance)
 
 			guidance := "run " + tt.named + " with -u root, the account the session was created for"
 			assert.Contains(t, stderr, "then re-run this command ("+guidance+").\n")
+			assert.Contains(t, stderr, approverCanChangeAccount)
 			assert.Contains(t, stderr, "# set this session active, then re-run this command; "+guidance+"\n")
 		})
 	}
@@ -1029,7 +1033,7 @@ func TestReusedSessionWaitGuidanceNamesTheDeclaredAccount(t *testing.T) {
 			t.Parallel()
 			selection := &Selection{need: Need{Operation: tt.operation, Account: tt.requested, Command: tt.command}}
 
-			stderr := settleWaitOutput(t, selection, func(command string) string { return declaredAccountGuidance(command, "ubuntu", tt.requested) })
+			stderr := settleWaitOutput(t, selection, "ubuntu", selection.reusedAccountGuidance)
 
 			assert.Contains(t, stderr, "then re-run this command ("+tt.guidance+").\n")
 			assert.Contains(t, stderr, "# set this session active, then re-run this command; "+tt.guidance+"\n")
@@ -1051,10 +1055,15 @@ func TestReusedSessionWaitGuidanceAddsNothingWhenTheAccountMatchesOrNoneIsDeclar
 			t.Parallel()
 			selection := &Selection{need: Need{Operation: Command, Account: tt.requested}}
 
-			stderr := settleWaitOutput(t, selection, func(command string) string { return declaredAccountGuidance(command, tt.declared, tt.requested) })
+			stderr := settleWaitOutput(t, selection, tt.declared, selection.reusedAccountGuidance)
 
 			assert.Contains(t, stderr, "then re-run this command.\n")
 			assert.Contains(t, stderr, "# set this session active, then re-run this command\n")
+			if tt.declared == "" && tt.requested == "" {
+				assert.NotContains(t, stderr, approverCanChangeAccount)
+			} else {
+				assert.Contains(t, stderr, approverCanChangeAccount)
+			}
 		})
 	}
 }
@@ -1064,7 +1073,7 @@ func TestReusedSessionWaitGuidanceNamesTheCommandTheResumeStepRuns(t *testing.T)
 	selection := &Selection{need: Need{Operation: Transfer, Command: "edit"}}
 	selection.ResumeWithCommand("upload the edited copy", "cp")
 
-	stderr := settleWaitOutput(t, selection, func(command string) string { return declaredAccountGuidance(command, "ubuntu", "") })
+	stderr := settleWaitOutput(t, selection, "ubuntu", selection.reusedAccountGuidance)
 
 	guidance := "the session declares ubuntu, so pass -u ubuntu to run cp as it"
 	assert.Contains(t, stderr, "then upload the edited copy ("+guidance+").\n")
@@ -1101,18 +1110,18 @@ func TestDeclaredAccountGuidanceNamesTheAccountOnlyWhenTheRequestDoesNot(t *test
 	}
 }
 
-// offerReusedSession runs the refusal path for selection, reusing a session that declares declared and
-// is still pending approval when pending, and returns what the offer printed.
-func offerReusedSession(t *testing.T, selection *Selection, declared string, pending bool) string {
+// offerReusedSession runs the refusal path for selection, reusing a session listed as declaring listed
+// that declares approved once settled, still pending approval when pending, and returns what it printed.
+func offerReusedSession(t *testing.T, selection *Selection, listed, approved string, pending bool) string {
 	t.Helper()
 	setupTmpConfig(t)
 	read := replaceStdin(t, "y\n")
 	defer func() { _ = read.Close() }()
 	now := time.Now().UTC()
 	active := activeServerSession("reuse-session", now)
-	active.TargetAccountUsername = declared
 	active.Scopes = selection.need.scopes()
 	candidate := active
+	active.TargetAccountUsername, candidate.TargetAccountUsername = approved, listed
 	if pending {
 		candidate.Status, candidate.ApprovalRequestID, candidate.ExpiresAt = wsapi.StatusPending, "approval-1", time.Time{}
 	}
@@ -1168,7 +1177,7 @@ func TestReusedSessionSuccessLineNamesTheDeclaredAccount(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			selection := &Selection{need: Need{Operation: tt.operation, Account: tt.requested, Command: tt.command}}
 
-			stderr := offerReusedSession(t, selection, tt.declared, false)
+			stderr := offerReusedSession(t, selection, tt.declared, tt.declared, false)
 
 			assert.Contains(t, stderr, reusedSuccessLine+tt.tail+".\n")
 			assert.NotContains(t, stderr, "the account the session was created for")
@@ -1179,19 +1188,65 @@ func TestReusedSessionSuccessLineNamesTheDeclaredAccount(t *testing.T) {
 func TestReusedPendingSessionNamesTheDeclaredAccountBeforeAndAfterTheWait(t *testing.T) {
 	selection := &Selection{need: Need{Operation: Command}}
 
-	stderr := offerReusedSession(t, selection, "ubuntu", true)
+	stderr := offerReusedSession(t, selection, "ubuntu", "ubuntu", true)
 
 	guidance := "the session declares ubuntu, so pass -u ubuntu to run exec as it"
 	assert.Contains(t, stderr, "then re-run this command ("+guidance+").\n")
+	assert.Contains(t, stderr, approverCanChangeAccount)
 	assert.Contains(t, stderr, reusedSuccessLine+"; "+guidance+".\n")
+}
+
+func TestReusedPendingSessionSuccessLineNamesTheAccountTheApproverDeclared(t *testing.T) {
+	selection := &Selection{need: Need{Operation: Command}}
+
+	stderr := offerReusedSession(t, selection, "ubuntu", "deploy", true)
+
+	assert.Contains(t, stderr, "then re-run this command (the session declares ubuntu, so pass -u ubuntu to run exec as it).\n")
+	assert.Contains(t, stderr, reusedSuccessLine+"; the session declares deploy, so pass -u deploy to run exec as it.\n")
+}
+
+func TestCreatedSessionSuccessLineNamesTheAccountTheApproverDeclared(t *testing.T) {
+	tests := []struct {
+		name, approved, tail string
+	}{
+		{name: "approved_as_requested", approved: "root", tail: "; run exec with -u root, the account the session was created for"},
+		{name: "approver_changed_the_account", approved: "deploy", tail: "; the session declares deploy, but exec uses root"},
+		{name: "older_server_sends_no_account", tail: "; run exec with -u root, the account the session was created for"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupTmpConfig(t)
+			pending := wsapi.WorkSession{ID: "new-session", Status: wsapi.StatusPending, RequesterType: "user", TargetAccountUsername: "root"}
+			approved := activeServerSession("new-session", time.Now().UTC())
+			approved.TargetAccountUsername = tt.approved
+			body, err := json.Marshal(approved)
+			require.NoError(t, err)
+			ios, _, stderr := utils.TestIOStreams()
+			selection := &Selection{need: Need{Operation: Command, Account: "root"}, ios: ios, ac: &client.AlpaconClient{BaseURL: testutil.StubBaseURL, WorkspaceName: "ws", HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+				return http.StatusOK, string(body)
+			})}}
+			want := Want{ServerID: "server-1", AssignedUser: "user-1", RequesterType: "user", Scopes: []string{"command"}}
+			var resend bool
+
+			synctest.Test(t, func(*testing.T) {
+				resend, err = selection.settle(context.Background(), &pending, true, want, selection.createdAccountGuidance)
+			})
+
+			require.NoError(t, err)
+			assert.True(t, resend)
+			assert.Contains(t, stderr.String(), approverCanChangeAccount)
+			assert.Contains(t, stderr.String(), "Success: WorkSession new-session is now the active session for workspace ws"+tt.tail+".\n")
+		})
+	}
 }
 
 func TestReusedSessionSuccessLineNamesEditWhileItsUploadResumesWithCp(t *testing.T) {
 	selection := &Selection{need: Need{Operation: Transfer, Command: "edit"}}
 	selection.ResumeWithCommand("upload the edited copy", "cp")
 
-	stderr := offerReusedSession(t, selection, "ubuntu", false)
+	stderr := offerReusedSession(t, selection, "ubuntu", "ubuntu", true)
 
+	assert.Contains(t, stderr, "then upload the edited copy (the session declares ubuntu, so pass -u ubuntu to run cp as it).\n")
 	assert.Contains(t, stderr, reusedSuccessLine+"; the session declares ubuntu, so pass -u ubuntu to run edit as it.\n")
 }
 

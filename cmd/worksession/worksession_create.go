@@ -99,9 +99,10 @@ before the server on each command instead, as in 'alpacon exec --work-session
 SESSION_ID web-01 -- uptime'.
 
 Pass --account to name the account the work runs as on the servers (for example
-root), so the approver sees it with the request. The session runs only as that
-account, so pass it to later commands with -u <account> (for example 'alpacon exec
--u root web-01 -- uptime').
+root), so the approver sees it with the request; the approver can change it. An
+agent session runs only as that account. A user session runs as it only when a
+later command names it with -u <account> (for example 'alpacon exec -u root
+web-01 -- uptime').
 
 To reach a Kubernetes cluster, target it with --cluster instead of --server. A
 cluster session holds the kube scope, and kube_exec on top of it for exec,
@@ -298,7 +299,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 			if approvalSignaled {
 				utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: session.ID, ConsoleURL: session.ConsoleURL}, ac)
 			}
-			afterApproval := afterApprovalAction(sessionRequesterType, session.ID, accountRunGuidance("exec", account))
+			afterApproval := afterApprovalAction(sessionRequesterType, session.ID, pendingAccountRunGuidance("exec", account))
 			if clusterName != "" {
 				afterApproval = KubeLoginAction(clusterName, session.ID)
 			}
@@ -409,7 +410,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 	cmd.Flags().BoolVar(&useAfterCreate, "use", false, "Set the created session as the workspace's active session (requires status to reach 'active'; combine with --wait when approval is needed; refused with --requester-type agent)")
 	cmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns to run without interactive MFA (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed; literal commas inside a pattern are not supported — pass the flag again for each policy that needs them). Required for non-interactive sudo via 'exec' (e.g. AI agents). Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
 	cmd.Flags().StringVar(&createSudoReason, "sudo-reason", "", "Justification applied to the sudo policies created via --sudo")
-	cmd.Flags().StringVar(&createAccount, "account", "", "Account the work runs as on the servers (e.g. root); the approver sees it with the request. Pass the same account to later commands with -u <account> (e.g. exec -u root)")
+	cmd.Flags().StringVar(&createAccount, "account", "", "Account the work runs as on the servers (e.g. root); the approver sees it with the request and can change it. Name the approved account in later commands with -u <account> (e.g. exec -u root)")
 	cmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
 	cmd.MarkFlagsMutuallyExclusive("server", "cluster")
 	return cmd
@@ -667,6 +668,15 @@ func accountRunGuidance(command, account string) string {
 		return fmt.Sprintf("run %s with -u set to the account the session was created for", command)
 	}
 	return fmt.Sprintf("run %s with -u %s, the account the session was created for", command, quoted)
+}
+
+// pendingAccountRunGuidance is accountRunGuidance for a session not yet approved, whose account can change.
+func pendingAccountRunGuidance(command, account string) string {
+	guidance := accountRunGuidance(command, account)
+	if guidance == "" {
+		return ""
+	}
+	return guidance + "; the approver can change the account"
 }
 
 // printableASCII reports whether value is printable ASCII, which every terminal shows as written.
