@@ -326,7 +326,7 @@ func RemoteExec(ios *utils.IOStreams, newClient clientFactory, stdout, stderr io
 		if err := uploadFile(ios, stderr, alpaconClient, parsed, *file, selection, authMethod); err != nil {
 			return err
 		}
-		selection.ResumeWith("re-run this command without --upload and --overwrite, since the script is already on the server", "")
+		selection.ResumeWith("re-run this command without --upload and --overwrite, since the script is already on the server")
 	}
 	if parsed.File != nil && parsed.File.FromServer {
 		loaded, err := downloadFile(ios, stderr, alpaconClient, parsed, selection, authMethod)

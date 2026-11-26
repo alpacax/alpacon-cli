@@ -867,7 +867,7 @@ func TestOfferWaitNamesTheOperationsResumeStep(t *testing.T) {
 	})}
 	ios, _, stderr := utils.TestIOStreams()
 	selection := &Selection{ios: ios, ac: ac}
-	selection.ResumeWith("upload the edited copy", "")
+	selection.ResumeWith("upload the edited copy")
 
 	synctest.Test(t, func(*testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -1002,7 +1002,7 @@ func TestOfferAccountGuidanceNamesTheOperationsCommand(t *testing.T) {
 			ios, _, stderr := utils.TestIOStreams()
 			selection := &Selection{need: Need{Operation: tt.operation, Account: tt.requested, Command: tt.command}, ios: ios, ac: ac}
 			if tt.resumeStep != "" {
-				selection.ResumeWith(tt.resumeStep, tt.resumeCommand)
+				selection.ResumeWithCommand(tt.resumeStep, tt.resumeCommand)
 			}
 			accountGuidance := func(command string) string { return declaredAccountGuidance(command, tt.declared, tt.requested) }
 			if tt.createdFor != "" { // the create path, as handleRefusal builds it
@@ -1032,20 +1032,24 @@ func TestOfferAccountGuidanceNamesTheOperationsCommand(t *testing.T) {
 func TestResumeWithNamesTheCommandItsStepRunsAndKeepsTheResend(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name, step, stepCommand, wantResume string
+		name       string
+		resume     func(*Selection)
+		wantResume string
 	}{
-		{name: "no_resume_step", wantResume: "edit"},
-		{name: "step_that_keeps_the_command", step: "re-run this command without --upload", wantResume: "edit"},
-		{name: "step_that_runs_another_command", step: "upload the edited copy", stepCommand: "cp", wantResume: "cp"},
+		{name: "no_resume_step", resume: func(*Selection) {}, wantResume: "edit"},
+		{name: "step_that_keeps_the_command", resume: func(s *Selection) { s.ResumeWith("re-run this command without --upload") }, wantResume: "edit"},
+		{name: "step_that_runs_another_command", resume: func(s *Selection) { s.ResumeWithCommand("upload the edited copy", "cp") }, wantResume: "cp"},
+		{name: "later_step_that_keeps_the_command_drops_the_other", resume: func(s *Selection) {
+			s.ResumeWithCommand("upload the edited copy", "cp")
+			s.ResumeWith("re-run this command without --upload")
+		}, wantResume: "edit"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			selection := &Selection{need: Need{Operation: Transfer, Command: "edit"}}
 
-			if tt.step != "" {
-				selection.ResumeWith(tt.step, tt.stepCommand)
-			}
+			tt.resume(selection)
 
 			assert.Equal(t, tt.wantResume, selection.resumeCommand())
 			assert.Equal(t, "edit", selection.need.command(), "the resend is still the command the user ran")
@@ -1138,7 +1142,7 @@ func TestReusedSessionSuccessLineNamesTheDeclaredAccount(t *testing.T) {
 			ios, _, stderr := utils.TestIOStreams()
 			selection := &Selection{canOffer: true, need: Need{Operation: tt.operation, Server: "web-1", Account: tt.requested, Command: tt.command}, ios: ios, ac: ac, interrupt: noInterrupt}
 			if tt.resumeCommand != "" { // the resend is still this command; only a later resume runs another
-				selection.ResumeWith("upload the edited copy", tt.resumeCommand)
+				selection.ResumeWithCommand("upload the edited copy", tt.resumeCommand)
 			}
 			var failure error
 

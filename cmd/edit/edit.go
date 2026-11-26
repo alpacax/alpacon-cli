@@ -27,6 +27,8 @@ type clientFactory = func() (*client.AlpaconClient, error)
 
 const maxEditPromptSize int64 = 10 * 1024 * 1024
 
+const uploadCommand = "cp" // the alpacon command that uploads the edited copy
+
 var (
 	selectWorkSession = worksession.Select
 	downloadEditFile  = ftpapi.DownloadFileToPath
@@ -181,7 +183,7 @@ func realEditDeps(ac *client.AlpaconClient, groupname string, sel *worksession.S
 			return downloaded, err
 		},
 		upload: func(target editTarget, localPath string) error {
-			sel.ResumeWith(uploadResumeStep(target, groupname, localPath), "cp")
+			sel.ResumeWithCommand(uploadResumeStep(target, groupname, localPath), uploadCommand)
 			err := uploadEditFile(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, sel.ID())
 			if err != nil {
 				err = utils.HandleCommonErrors(err, target.Server, sel.Offer(mfa.ErrorCallbacks(ac, func() error {
@@ -215,7 +217,7 @@ func uploadResumeStep(target editTarget, groupname, localPath string) string {
 	if quoted, ok := worksession.ShellWord(groupname); ok {
 		group = " and -g " + quoted
 	}
-	return fmt.Sprintf("upload the edited copy at %s to %s with 'alpacon cp'%s instead of editing again", shownPath, shownDest, group)
+	return fmt.Sprintf("upload the edited copy at %s to %s with 'alpacon %s'%s instead of editing again", shownPath, shownDest, uploadCommand, group)
 }
 
 func parseEditTarget(arg, usernameFlag string) (editTarget, error) {

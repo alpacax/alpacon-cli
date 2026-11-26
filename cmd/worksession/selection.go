@@ -112,12 +112,18 @@ func (s *Selection) ID() string {
 }
 
 // ResumeWith replaces "re-run this command" in the resume guidance, for an operation whose earlier
-// steps a re-run would repeat; command names the alpacon command step runs, empty when unchanged.
-func (s *Selection) ResumeWith(step, command string) {
-	if s == nil {
-		return
+// steps a re-run would repeat.
+func (s *Selection) ResumeWith(step string) {
+	if s != nil {
+		s.resume, s.resumeBy = step, ""
 	}
-	s.resume, s.resumeBy = step, command
+}
+
+// ResumeWithCommand is ResumeWith for a step that runs command instead of the one the user ran.
+func (s *Selection) ResumeWithCommand(step, command string) {
+	if s != nil {
+		s.resume, s.resumeBy = step, command
+	}
 }
 
 func (s *Selection) resumeCommand() string {
