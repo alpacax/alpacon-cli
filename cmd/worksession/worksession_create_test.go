@@ -1163,3 +1163,37 @@ func TestApprovalWaitRefusesAnAnswerForAnotherSession(t *testing.T) {
 	assert.NotErrorAs(t, err, &terminal)
 	assert.Equal(t, int32(1), events.Load())
 }
+
+func TestShellWordReturnsOnlyAWordEveryShellReadsBackUnchanged(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, value, want string
+		ok                bool
+	}{
+		{name: "plain", value: "ubuntu", want: "ubuntu", ok: true},
+		{name: "at_inside", value: "alice@corp", want: "alice@corp", ok: true},
+		{name: "space", value: "dep loy", want: "'dep loy'", ok: true},
+		{name: "leading_at_splats_in_powershell", value: "@foo", want: "'@foo'", ok: true},
+		{name: "command_substitution", value: "root$(touch /tmp/pwned)", want: "'root$(touch /tmp/pwned)'", ok: true},
+		{name: "empty", value: ""},
+		{name: "single_quote_has_no_quoting_both_shells_share", value: "o'brien"},
+		{name: "curly_quote_closes_a_powershell_string", value: "a’;Write-Output INJECTED;#"},
+		{name: "invisible_letter", value: "rootㅤ"},
+		{name: "non_ascii_letter", value: "jörg"},
+		{name: "control_character", value: "root\nx"},
+		{name: "leading_dash_powershell_reads_as_its_own_token", value: "--%"},
+		{name: "leading_dash", value: "-u"},
+		{name: "double_quote_powershell_5_1_strips", value: `dev"ops`},
+		{name: "backslash_powershell_5_1_rewrites_before_a_quote", value: `dev ops\`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			quoted, ok := ShellWord(tt.value)
+
+			assert.Equal(t, tt.ok, ok)
+			assert.Equal(t, tt.want, quoted)
+		})
+	}
+}

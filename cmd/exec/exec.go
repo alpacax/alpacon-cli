@@ -316,6 +316,7 @@ func RemoteExec(ios *utils.IOStreams, newClient clientFactory, stdout, stderr io
 		Operation: operation,
 		Server:    parsed.Server,
 		Account:   parsed.Username,
+		Command:   strings.TrimPrefix(string(parsed.InvokedAs), "alpacon "), // empty for exec itself
 	})
 	if err != nil {
 		return utils.NewExitError("%s", err)

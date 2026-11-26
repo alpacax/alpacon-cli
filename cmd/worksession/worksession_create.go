@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/api/server"
@@ -37,6 +36,8 @@ const (
 	useDecisionSettled
 	useDecisionUnknownStatus
 )
+
+const bareShellChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.@-"
 
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh", ScopeKube, ScopeKubeExec}
 
@@ -98,9 +99,10 @@ before the server on each command instead, as in 'alpacon exec --work-session
 SESSION_ID web-01 -- uptime'.
 
 Pass --account to name the account the work runs as on the servers (for example
-root), so the approver sees it with the request. The session runs only as that
-account, so pass it to later commands with -u <account> (for example 'alpacon exec
--u root web-01 -- uptime').
+root), so the approver sees it with the request; the approver can change it. An
+agent session runs only as that account. A user session runs as it only when a
+later command names it with -u <account> (for example 'alpacon exec -u root
+web-01 -- uptime').
 
 To reach a Kubernetes cluster, target it with --cluster instead of --server. A
 cluster session holds the kube scope, and kube_exec on top of it for exec,
@@ -297,7 +299,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 			if approvalSignaled {
 				utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: session.ID, ConsoleURL: session.ConsoleURL}, ac)
 			}
-			afterApproval := afterApprovalAction(sessionRequesterType, session.ID, "exec", account)
+			afterApproval := afterApprovalAction(sessionRequesterType, session.ID, pendingAccountRunGuidance("exec", account))
 			if clusterName != "" {
 				afterApproval = KubeLoginAction(clusterName, session.ID)
 			}
@@ -408,7 +410,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 	cmd.Flags().BoolVar(&useAfterCreate, "use", false, "Set the created session as the workspace's active session (requires status to reach 'active'; combine with --wait when approval is needed; refused with --requester-type agent)")
 	cmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns to run without interactive MFA (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed; literal commas inside a pattern are not supported — pass the flag again for each policy that needs them). Required for non-interactive sudo via 'exec' (e.g. AI agents). Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
 	cmd.Flags().StringVar(&createSudoReason, "sudo-reason", "", "Justification applied to the sudo policies created via --sudo")
-	cmd.Flags().StringVar(&createAccount, "account", "", "Account the work runs as on the servers (e.g. root); the approver sees it with the request. Pass the same account to later commands with -u <account> (e.g. exec -u root)")
+	cmd.Flags().StringVar(&createAccount, "account", "", "Account the work runs as on the servers (e.g. root); the approver sees it with the request and can change it. Name the approved account in later commands with -u <account> (e.g. exec -u root)")
 	cmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
 	cmd.MarkFlagsMutuallyExclusive("server", "cluster")
 	return cmd
@@ -645,39 +647,53 @@ func resolveRequesterType(flagValue string, flagSet bool, detected aiagent.Detec
 // afterApprovalAction is the follow-up for a session still waiting on approval.
 // A user session is attached with 'work-session use'; an agent session cannot
 // be, so its ID goes to each subsequent command with --work-session instead.
-func afterApprovalAction(requesterType, id, command, account string) utils.NextAction {
-	asAccount := accountRunGuidance(command, account)
-	if asAccount != "" {
-		asAccount = "; " + asAccount
+func afterApprovalAction(requesterType, id, accountGuidance string) utils.NextAction {
+	if accountGuidance != "" {
+		accountGuidance = "; " + accountGuidance
 	}
 	if requesterType == "agent" {
-		return utils.NextAction{Description: fmt.Sprintf("after approval, pass --work-session %s to each subsequent command (exec, cp, tunnel)%s", id, asAccount)}
+		return utils.NextAction{Description: fmt.Sprintf("after approval, pass --work-session %s to each subsequent command (exec, cp, tunnel)%s", id, accountGuidance)}
 	}
-	return utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", id), Description: "after approval" + asAccount}
+	return utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", id), Description: "after approval" + accountGuidance}
 }
 
-// accountRunGuidance tells the user to run command as the account a session was created for.
+// accountRunGuidance tells the user to run command as the account a session was created for;
+// an account ShellWord cannot render is named by role, so the reminder survives.
 func accountRunGuidance(command, account string) string {
+	if account == "" {
+		return ""
+	}
 	quoted, ok := ShellWord(account)
 	if !ok {
-		return ""
+		return fmt.Sprintf("run %s with -u set to the account the session was created for", command)
 	}
 	return fmt.Sprintf("run %s with -u %s, the account the session was created for", command, quoted)
 }
 
-// ShellWord returns value as one word a shell reads back unchanged, quoting it when needed; ok is
-// false for an empty value or one with control characters.
+// pendingAccountRunGuidance is accountRunGuidance for a session not yet approved, whose account can change.
+func pendingAccountRunGuidance(command, account string) string {
+	guidance := accountRunGuidance(command, account)
+	if guidance == "" {
+		return ""
+	}
+	return guidance + "; the approver can change the account"
+}
+
+// printableASCII reports whether value is printable ASCII, which every terminal shows as written.
+func printableASCII(value string) bool {
+	return !strings.ContainsFunc(value, func(r rune) bool { return r < ' ' || r > '~' })
+}
+
+// ShellWord returns value as one word POSIX shells and PowerShell 5.1 and 7 all pass on unchanged; ok is
+// false for an empty or non-printable-ASCII value, a quote or backslash, and a leading dash (pwsh drops '--%').
 func ShellWord(value string) (quoted string, ok bool) {
-	clean, altered := utils.SanitizeTerminalLine(value)
-	if altered || clean == "" {
+	if value == "" || value[0] == '-' || !printableASCII(value) || strings.ContainsAny(value, `'"\`) {
 		return "", false
 	}
-	if !strings.ContainsFunc(clean, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("_.@-", r)
-	}) {
-		return clean, true
+	if value[0] != '@' && strings.Trim(value, bareShellChars) == "" { // a leading @ splats in PowerShell
+		return value, true
 	}
-	return "'" + strings.ReplaceAll(clean, "'", "'\"'\"'") + "'", true
+	return "'" + value + "'", true
 }
 
 // KubeLoginAction is the follow-up for a cluster session: 'kube login' opens

@@ -81,7 +81,7 @@ func (s *Selection) handleRefusal(serverName string, refusal error) (bool, error
 			return false, nil
 		}
 		if reuse {
-			return s.settle(ctx, candidate, wait, want, "")
+			return s.settle(ctx, candidate, wait, want, s.reusedAccountGuidance)
 		}
 	}
 
@@ -130,7 +130,7 @@ func (s *Selection) handleRefusal(serverName string, refusal error) (bool, error
 	if !safeResumeID(created.ID) {
 		return false, utils.NewEnvelopeExitError(opCreate, api.ErrUnusableID, "The server created the WorkSession, but its ID is unusable; check for it before creating another.")
 	}
-	return s.settle(ctx, created, created.Status != wsapi.StatusActive, want, s.need.Account)
+	return s.settle(ctx, created, created.Status != wsapi.StatusActive, want, s.createdAccountGuidance)
 }
 
 var errPromptInterrupted = errors.New("interrupted")
@@ -220,34 +220,82 @@ func reusePrompt(session *wsapi.WorkSession, wait bool, account string) string {
 	if !session.ExpiresAt.IsZero() {
 		details = append(details, "expires: "+session.ExpiresAt.UTC().Format(time.RFC3339))
 	}
-	requested, _ := utils.SanitizeTerminalLine(account)
-	declared, _ := utils.SanitizeTerminalLine(session.TargetAccountUsername)
+	declared := session.TargetAccountUsername
 	switch {
-	case declared != "" && requested != "" && requested != declared:
-		details = append(details, "declared account: "+declared+"; requested account: "+requested)
+	case declared != "" && account != "" && account != declared:
+		details = append(details, "declared account: "+promptAccount(declared)+"; requested account: "+promptAccount(account))
 	case declared != "":
-		details = append(details, "declared account: "+declared)
-	case requested != "":
-		details = append(details, "approved account cannot be checked; requested account: "+requested)
+		details = append(details, "declared account: "+promptAccount(declared))
+	case account != "":
+		details = append(details, "approved account cannot be checked; requested account: "+promptAccount(account))
 	}
 	return fmt.Sprintf("Use WorkSession %s (%s)?", id, strings.Join(details, "; "))
 }
 
-// settle makes session the one the operation sends. createdFor is the account it was created for,
-// empty for a reused session, whose declared account the server does not enforce for a user.
-func (s *Selection) settle(ctx context.Context, session *wsapi.WorkSession, wait bool, want Want, createdFor string) (bool, error) {
+// promptAccount shows account as it is when it is printable ASCII, or says it cannot be shown.
+func promptAccount(account string) string {
+	if printableASCII(account) {
+		return account
+	}
+	return "(cannot be shown)"
+}
+
+// reusedAccountGuidance names the account a reused session declares when the command does not use it.
+func (s *Selection) reusedAccountGuidance(command, declared string) string {
+	return declaredAccountGuidance(command, declared, s.need.Account)
+}
+
+// createdAccountGuidance reminds the user of the account a new session was created for, or, when the
+// approver declared another, names that one instead.
+func (s *Selection) createdAccountGuidance(command, declared string) string {
+	if declared != "" && declared != s.need.Account {
+		return declaredAccountGuidance(command, declared, s.need.Account)
+	}
+	return accountRunGuidance(command, s.need.Account)
+}
+
+// declaredAccountGuidance names the account a reused session declares, which a user session is not
+// held to; empty when the session declares none or requested is that account.
+func declaredAccountGuidance(command, declared, requested string) string {
+	if declared == "" || requested == declared {
+		return ""
+	}
+	quoted, ok := ShellWord(declared)
+	shown := quoted // as the -u word reads, so a space or quote shows
+	if !ok {
+		shown = "an account that cannot be shown"
+	}
+	switch {
+	case requested == "" && ok:
+		return fmt.Sprintf("the session declares %s, so pass -u %s to run %s as it", shown, quoted, command)
+	case requested == "":
+		return fmt.Sprintf("the session declares %s, so pass -u with that account to run %s as it", shown, command)
+	}
+	if asked, ok := ShellWord(requested); ok {
+		return fmt.Sprintf("the session declares %s, but %s uses %s", shown, command, asked)
+	}
+	return fmt.Sprintf("the session declares %s, not the account %s uses", shown, command)
+}
+
+// settle selects the session for the retry. accountGuidance words the account advice for a command from
+// the account the session declares, read before a wait and again after it, since approval can change it.
+func (s *Selection) settle(ctx context.Context, session *wsapi.WorkSession, wait bool, want Want, accountGuidance func(command, declared string) string) (bool, error) {
 	if !safeResumeID(session.ID) {
 		s.ios.Warning("The offered WorkSession has an unsafe ID and cannot be selected.")
 		return false, nil
 	}
 	id := utils.SanitizeTerminalText(session.ID)
 	if wait {
-		resumeAction := afterApprovalAction("user", id, s.need.command(), createdFor)
+		resumeGuidance := accountGuidance(s.resumeCommand(), session.TargetAccountUsername)
+		resumeAction := afterApprovalAction("user", id, resumeGuidance)
 		guidance := ""
-		if account := accountRunGuidance(s.need.command(), createdFor); account != "" {
-			guidance = " (" + account + ")"
+		if resumeGuidance != "" {
+			guidance = " (" + resumeGuidance + ")"
 		}
 		s.ios.Info("To stop and come back later, press Ctrl+C; after approval, run '%s', then %s%s.", resumeAction.Command, s.resumeStep(), guidance)
+		if session.TargetAccountUsername != "" || s.need.Account != "" {
+			s.ios.Info("The approver can change the account the session declares.")
+		}
 		final, err := waitForApproval(ctx, s.ios, s.ac, session.ID, true, ApprovalPollInterval, utils.DefaultApprovalWaitTimeout, false)
 		if err != nil {
 			resumeAction.Description = strings.TrimPrefix(resumeAction.Description, "after approval")
@@ -284,7 +332,7 @@ func (s *Selection) settle(ctx context.Context, session *wsapi.WorkSession, wait
 	s.id = active.ID
 	s.source = SourceConfig
 	success := fmt.Sprintf("WorkSession %s is now the active session for workspace %s", utils.SanitizeTerminalText(active.ID), utils.SanitizeTerminalText(s.ac.WorkspaceName))
-	if guidance := accountRunGuidance(s.need.command(), createdFor); guidance != "" {
+	if guidance := accountGuidance(s.need.command(), active.TargetAccountUsername); guidance != "" {
 		success += "; " + guidance
 	}
 	s.ios.Success("%s.", success)
