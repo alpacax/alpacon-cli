@@ -16,7 +16,7 @@ var validStatuses = []string{"pending", "approved", "rejected", "cancelled", "ex
 var validTypes = []string{
 	"sudo", "command_exec", "work_session", "username", "groupname", "service_token",
 	"svc_token_mod", "app_username", "work_session_mod", "sudo_policy",
-	"discovered_account_accept", "api_token_scope_expand",
+	"discovered_account_accept", "api_token_scope_expand", "kube_mutation",
 }
 
 func newApprovalListCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
