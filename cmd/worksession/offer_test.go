@@ -864,7 +864,7 @@ func TestOfferWaitNamesTheOperationsResumeStep(t *testing.T) {
 	})}
 	ios, _, stderr := utils.TestIOStreams()
 	selection := &Selection{ios: ios, ac: ac}
-	selection.ResumeWith("upload the edited copy")
+	selection.ResumeWith("upload the edited copy", "")
 
 	synctest.Test(t, func(*testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -964,14 +964,19 @@ func TestCtrlCAtTheOfferPromptDeclinesWithoutCreating(t *testing.T) {
 func TestOfferAccountGuidanceNamesTheOperationsCommand(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name      string
-		operation Operation
-		want      string
+		name                      string
+		operation                 Operation
+		command                   string
+		resumeStep, resumeCommand string
+		want                      string
 	}{
 		{name: "command", operation: Command, want: "run exec with -u root"},
 		{name: "websh", operation: Websh, want: "run websh with -u root"},
 		{name: "transfer", operation: Transfer, want: "run cp with -u root"},
 		{name: "tunnel", operation: Tunnel, want: "run tunnel with -u root"},
+		{name: "edit", operation: Transfer, command: "edit", want: "run edit with -u root"},
+		{name: "edit_upload_resumes_with_cp", operation: Transfer, command: "edit", resumeStep: "upload the edited copy", resumeCommand: "cp", want: "run cp with -u root"},
+		{name: "websh_command_mode", operation: Command, command: "websh", want: "run websh with -u root"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -982,7 +987,10 @@ func TestOfferAccountGuidanceNamesTheOperationsCommand(t *testing.T) {
 				return http.StatusOK, string(body)
 			})}
 			ios, _, stderr := utils.TestIOStreams()
-			selection := &Selection{need: Need{Operation: tt.operation}, ios: ios, ac: ac}
+			selection := &Selection{need: Need{Operation: tt.operation, Command: tt.command}, ios: ios, ac: ac}
+			if tt.resumeStep != "" {
+				selection.ResumeWith(tt.resumeStep, tt.resumeCommand)
+			}
 
 			synctest.Test(t, func(*testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -999,6 +1007,30 @@ func TestOfferAccountGuidanceNamesTheOperationsCommand(t *testing.T) {
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func TestResumeWithNamesTheCommandItsStepRunsAndKeepsTheResend(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, step, stepCommand, wantResume string
+	}{
+		{name: "no_resume_step", wantResume: "edit"},
+		{name: "step_that_keeps_the_command", step: "re-run this command without --upload", wantResume: "edit"},
+		{name: "step_that_runs_another_command", step: "upload the edited copy", stepCommand: "cp", wantResume: "cp"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			selection := &Selection{need: Need{Operation: Transfer, Command: "edit"}}
+
+			if tt.step != "" {
+				selection.ResumeWith(tt.step, tt.stepCommand)
+			}
+
+			assert.Equal(t, tt.wantResume, selection.resumeCommand())
+			assert.Equal(t, "edit", selection.need.command(), "the resend is still the command the user ran")
+		})
+	}
+}
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 

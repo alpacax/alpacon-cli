@@ -92,7 +92,7 @@ redirections, or '&&' will not work.`,
 			if err != nil {
 				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
-			sel, err := selectWorkSession(ios, alpaconClient, flagWorkSession, worksession.Need{Operation: worksession.Transfer, Server: target.Server, Account: target.Username})
+			sel, err := selectWorkSession(ios, alpaconClient, flagWorkSession, worksession.Need{Operation: worksession.Transfer, Server: target.Server, Account: target.Username, Command: "edit"})
 			if err != nil {
 				return utils.NewExitError("%s", err)
 			}
@@ -181,7 +181,7 @@ func realEditDeps(ac *client.AlpaconClient, groupname string, sel *worksession.S
 			return downloaded, err
 		},
 		upload: func(target editTarget, localPath string) error {
-			sel.ResumeWith(uploadResumeStep(target, groupname, localPath))
+			sel.ResumeWith(uploadResumeStep(target, groupname, localPath), "cp")
 			err := uploadEditFile(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, sel.ID())
 			if err != nil {
 				err = utils.HandleCommonErrors(err, target.Server, sel.Offer(mfa.ErrorCallbacks(ac, func() error {

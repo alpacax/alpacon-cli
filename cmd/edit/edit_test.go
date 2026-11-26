@@ -131,13 +131,13 @@ func TestEditUploadOfferNamesTheEditedCopyToResumeWith(t *testing.T) {
 	}
 
 	cmd := NewEditCmd(func() (*client.AlpaconClient, error) { return ac, nil }, ios)
-	cmd.SetArgs([]string{"web-1:/etc/app.conf"})
+	cmd.SetArgs([]string{"-u", "root", "web-1:/etc/app.conf"})
 	err := cmd.Execute()
 
 	var exitErr *utils.ExitError
 	require.ErrorAs(t, err, &exitErr)
 	assert.Equal(t, utils.ExitCodeNotApproved, exitErr.Code)
-	assert.Contains(t, stderr.String(), "then upload the edited copy at "+edited+" to web-1:/etc/app.conf")
+	assert.Contains(t, stderr.String(), "then upload the edited copy at "+edited+" to root@web-1:/etc/app.conf with 'alpacon cp' instead of editing again (run cp with -u root, the account the session was created for).\n")
 	assert.FileExists(t, edited)
 }
 
@@ -237,6 +237,7 @@ func setupEditOfferWithStatus(t *testing.T, create *wsapi.WorkSessionCreateReque
 	originalEditor := localEditorRunner
 	selectWorkSession = func(gotIOS *utils.IOStreams, gotAC *client.AlpaconClient, _ string, need worksession.Need) (*worksession.Selection, error) {
 		assert.Equal(t, worksession.Transfer, need.Operation)
+		assert.Equal(t, "edit", need.Command)
 		return worksession.OfferedForTest(gotIOS, gotAC, "old-session", need), nil
 	}
 	t.Cleanup(func() {

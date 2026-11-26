@@ -249,9 +249,9 @@ func (s *Selection) settle(ctx context.Context, session *wsapi.WorkSession, wait
 	}
 	id := utils.SanitizeTerminalText(session.ID)
 	if wait {
-		resumeAction := afterApprovalAction("user", id, s.need.command(), createdFor)
+		resumeAction := afterApprovalAction("user", id, s.resumeCommand(), createdFor)
 		guidance := ""
-		if account := accountRunGuidance(s.need.command(), createdFor); account != "" {
+		if account := accountRunGuidance(s.resumeCommand(), createdFor); account != "" {
 			guidance = " (" + account + ")"
 		}
 		s.ios.Info("To stop and come back later, press Ctrl+C; after approval, run '%s', then %s%s.", resumeAction.Command, s.resumeStep(), guidance)

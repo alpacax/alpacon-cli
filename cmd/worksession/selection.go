@@ -34,10 +34,14 @@ type Need struct {
 	Operation Operation
 	Server    string
 	Account   string
+	Command   string // the alpacon command the user ran, when Operation names another
 }
 
-// command names the alpacon command that resumes the operation; edit resumes with cp.
+// command names the alpacon command that resumes the operation.
 func (n Need) command() string {
+	if n.Command != "" {
+		return n.Command
+	}
 	switch n.Operation {
 	case Websh:
 		return "websh"
@@ -75,6 +79,7 @@ type Selection struct {
 	canOffer bool
 	offered  bool
 	resume   string
+	resumeBy string // the command resume runs, empty when it is need's own
 	// interrupt replaces the Ctrl+C context in a test.
 	interrupt func() (context.Context, context.CancelFunc)
 	// reads counts prompt reads still running, so a test can wait out one Ctrl+C left behind.
@@ -107,11 +112,19 @@ func (s *Selection) ID() string {
 }
 
 // ResumeWith replaces "re-run this command" in the resume guidance, for an operation whose earlier
-// steps a re-run would repeat.
-func (s *Selection) ResumeWith(step string) {
-	if s != nil {
-		s.resume = step
+// steps a re-run would repeat; command names the alpacon command step runs, empty when unchanged.
+func (s *Selection) ResumeWith(step, command string) {
+	if s == nil {
+		return
 	}
+	s.resume, s.resumeBy = step, command
+}
+
+func (s *Selection) resumeCommand() string {
+	if s.resumeBy == "" {
+		return s.need.command()
+	}
+	return s.resumeBy
 }
 
 func (s *Selection) resumeStep() string {
