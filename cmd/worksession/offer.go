@@ -220,17 +220,24 @@ func reusePrompt(session *wsapi.WorkSession, wait bool, account string) string {
 	if !session.ExpiresAt.IsZero() {
 		details = append(details, "expires: "+session.ExpiresAt.UTC().Format(time.RFC3339))
 	}
-	requested, _ := utils.SanitizeTerminalLine(account)
-	declared, _ := utils.SanitizeTerminalLine(session.TargetAccountUsername)
+	declared := session.TargetAccountUsername
 	switch {
-	case declared != "" && requested != "" && requested != declared:
-		details = append(details, "declared account: "+declared+"; requested account: "+requested)
+	case declared != "" && account != "" && account != declared:
+		details = append(details, "declared account: "+promptAccount(declared)+"; requested account: "+promptAccount(account))
 	case declared != "":
-		details = append(details, "declared account: "+declared)
-	case requested != "":
-		details = append(details, "approved account cannot be checked; requested account: "+requested)
+		details = append(details, "declared account: "+promptAccount(declared))
+	case account != "":
+		details = append(details, "approved account cannot be checked; requested account: "+promptAccount(account))
 	}
 	return fmt.Sprintf("Use WorkSession %s (%s)?", id, strings.Join(details, "; "))
+}
+
+// promptAccount shows account as it is, or says it cannot be shown when the terminal would alter it.
+func promptAccount(account string) string {
+	if clean, altered := utils.SanitizeTerminalLine(account); !altered {
+		return clean
+	}
+	return "(cannot be shown)"
 }
 
 // settle makes session the one the operation sends. createdFor is the account it was created for,

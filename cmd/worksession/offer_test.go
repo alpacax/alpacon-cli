@@ -322,7 +322,7 @@ func TestReusePromptNamesStatusPurposeExpiryAndUncheckedAccountOnOneLine(t *test
 	assert.Contains(t, prompt, "approved, not yet started")
 	assert.Contains(t, prompt, "purpose: deployproduction")
 	assert.Contains(t, prompt, "expires: "+session.ExpiresAt.UTC().Format(time.RFC3339))
-	assert.Contains(t, prompt, "approved account cannot be checked; requested account: rootignored")
+	assert.Contains(t, prompt, "approved account cannot be checked; requested account: (cannot be shown)")
 
 	pending := session
 	pending.Status = wsapi.StatusPending
@@ -341,7 +341,8 @@ func TestReusePromptNamesTheAccountTheSessionDeclares(t *testing.T) {
 		{"declared_and_requested_match", "root", "root", "declared account: root", "requested account"},
 		{"declared_differs_from_requested", "deploy", "root", "declared account: deploy; requested account: root", "cannot be checked"},
 		{"declared_without_request", "deploy", "", "declared account: deploy", "requested account"},
-		{"declared_with_control_characters", "dep\x1b[31mloy\nx", "", "declared account: deployx", "\x1b"},
+		{"declared_with_control_characters", "dep\x1b[31mloy\nx", "", "declared account: (cannot be shown)", "\x1b"},
+		{"requested_differs_only_by_a_format_character", "root", "ro\u200bot", "declared account: root; requested account: (cannot be shown)", "cannot be checked"},
 		{"none_declared_none_requested", "", "", "status: active", "account"},
 	}
 	for _, tt := range tests {
