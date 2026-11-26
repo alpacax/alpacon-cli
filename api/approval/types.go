@@ -18,9 +18,32 @@ type ApprovalRequest struct {
 	ReviewedAt  *time.Time         `json:"reviewed_at"`
 	// RejectionNote is the reason the approver wrote when rejecting; empty when
 	// they gave none, and absent on an older server.
-	RejectionNote string            `json:"rejection_note"`
-	AddedAt       time.Time         `json:"added_at"`
-	Metadata      *ApprovalMetadata `json:"metadata"`
+	RejectionNote    string            `json:"rejection_note"`
+	AddedAt          time.Time         `json:"added_at"`
+	Metadata         *ApprovalMetadata `json:"metadata"`
+	RequesterKind    string            `json:"requester_kind"`
+	DecisionDeadline *time.Time        `json:"decision_deadline"`
+	KubeRequest      *KubeRequest      `json:"kube_request"`
+}
+
+// KubeRequest describes the Kubernetes write or delete that requires approval.
+type KubeRequest struct {
+	SessionID   string               `json:"session_id"`
+	Cluster     types.ClusterSummary `json:"cluster"`
+	Verb        string               `json:"verb"`
+	APIGroup    string               `json:"api_group"`
+	APIVersion  string               `json:"api_version"`
+	Resource    string               `json:"resource"`
+	Subresource string               `json:"subresource"`
+	Namespace   string               `json:"namespace"`
+	Name        string               `json:"name"`
+	Query       map[string][]string  `json:"query"`
+	ContentType string               `json:"content_type"`
+	// IsChange identifies a change set. It is nil when the response omits the field.
+	IsChange *bool `json:"is_change"`
+	// Body holds the request text as sent. It is absent from lists and null when withheld or cleared.
+	Body           *string    `json:"body"`
+	GrantExpiresAt *time.Time `json:"grant_expires_at"`
 }
 
 // ApprovalMetadata is the part of an approval's metadata the CLI renders.
