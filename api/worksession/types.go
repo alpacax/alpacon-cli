@@ -11,9 +11,11 @@ import (
 )
 
 const (
-	StatusPending   = "pending"
-	StatusApproved  = "approved"
-	StatusActive    = "active"
+	StatusPending  = "pending"
+	StatusApproved = "approved"
+	StatusActive   = "active"
+	// StatusPaused holds an active session until a person resumes or ends it.
+	StatusPaused    = "paused"
 	StatusCompleted = "completed"
 	StatusExpired   = "expired"
 	StatusRevoked   = "revoked"
@@ -66,6 +68,9 @@ type WorkSession struct {
 	// AccountFlag is set when a target server binds the session's account to another person.
 	// A server older than 2.44.0 sends no key, so a nil flag is left out rather than invented.
 	AccountFlag *AccountFlag `json:"account_flag,omitempty"`
+
+	// TargetAccountUsername is the account the session declares; empty when it declares none.
+	TargetAccountUsername string `json:"target_account_username,omitempty"`
 }
 
 // PendingModificationRequest is a change to the session waiting on approval. Changes stays raw

@@ -14,6 +14,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -162,13 +163,13 @@ func TestRunExecWithApprovalWait_DoesNotWaitOnAPurposeDemand(t *testing.T) {
 		_ = stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 		demand := &event.AwaitingPurposeError{CommandID: "cmd-1"}
 		calls := 0
-		runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+		runPresenceStepUp = func(*utils.IOStreams, *client.AlpaconClient, string, string, string, string, map[string]string, *worksession.Selection, string, io.Writer) error {
 			calls++
 			return demand
 		}
 
 		start := time.Now()
-		err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+		err := RunExecWithApprovalWait(utils.Stdio, nil, "srv", "whoami", "", "", nil, worksession.Fixed(""), "", time.Minute, io.Discard)
 
 		require.ErrorIs(t, err, demand)
 		assert.Equal(t, 1, calls, "a purpose demand must not be retried inside the wait loop")

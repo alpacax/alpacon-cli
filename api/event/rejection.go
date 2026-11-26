@@ -30,6 +30,8 @@ type CommandRejectedError struct {
 	SudoGrant bool
 	// Note is the reason the approver wrote, empty when they gave none.
 	Note string
+	// WorkSessionPaused says this denial paused its work session.
+	WorkSessionPaused bool
 }
 
 // RejectionCauseUseFileExecution is the rejection_cause of a command line that
@@ -133,15 +135,16 @@ func (e *CommandRejectedError) ExitCode() int {
 func (d EventDetails) Rejection() *CommandRejectedError {
 	denied := IsDeniedStatus(d.Status)
 	e := &CommandRejectedError{
-		Username:      d.Username,
-		ConsoleURL:    d.ConsoleURL,
-		WorkSessionID: d.WorkSessionID(),
-		CommandID:     d.ID,
-		Denied:        denied,
-		DenialCode:    d.DenialCode,
-		Cause:         d.RejectionCause.Value,
-		Gate:          d.RejectionGate.Value,
-		Reported:      d.Reported(),
+		Username:          d.Username,
+		ConsoleURL:        d.ConsoleURL,
+		WorkSessionID:     d.WorkSessionID(),
+		CommandID:         d.ID,
+		Denied:            denied,
+		DenialCode:        d.DenialCode,
+		Cause:             d.RejectionCause.Value,
+		Gate:              d.RejectionGate.Value,
+		Reported:          d.Reported(),
+		WorkSessionPaused: d.WorkSessionPaused,
 	}
 	if denied {
 		e.Result = d.Result
@@ -264,6 +267,9 @@ func (e *CommandRejectedError) NextActions() []utils.NextAction {
 	return []utils.NextAction{e.text().next}
 }
 
+// TriggeredPause reports that this denial paused its work session.
+func (e *CommandRejectedError) TriggeredPause() bool { return e.WorkSessionPaused }
+
 // ErrorFields keeps command context and the refusal fields the server sent.
 // Denied results can hold the only recorded reason; reported fields preserve nulls.
 func (e *CommandRejectedError) ErrorFields() map[string]any {
@@ -286,6 +292,9 @@ func (e *CommandRejectedError) ErrorFields() map[string]any {
 	}
 	if e.Note != "" {
 		fields["rejection_note"] = e.Note
+	}
+	if e.WorkSessionPaused {
+		fields["work_session_paused"] = true
 	}
 	if len(fields) == 0 {
 		return nil

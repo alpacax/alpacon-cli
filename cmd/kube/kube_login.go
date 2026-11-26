@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -358,74 +357,17 @@ type workSessionChoice struct {
 	scopes  []string // as granted, when the command read the session
 }
 
-// sessionWant is what a reusable WorkSession must offer.
-type sessionWant struct {
-	clusterID     string
-	requesterType string
-	scopes        []string // nil accepts any cluster session
-}
-
-// fits reports whether ws targets the cluster for this requester with every
-// wanted scope, and is neither ended nor past its expiry.
-func (w sessionWant) fits(ws *wsapi.WorkSession, now time.Time) bool {
-	if ws.RequesterType != "" && ws.RequesterType != w.requesterType {
-		return false
-	}
-	if !wsapi.TargetsCluster(ws, w.clusterID) || !slices.Contains(ws.Scopes, worksession.ScopeKube) {
-		return false
-	}
-	for _, s := range w.scopes {
-		if !slices.Contains(ws.Scopes, s) {
-			return false
-		}
-	}
-	if wsapi.IsEndedStatus(ws.Status) {
-		return false
-	}
-	// A session created with a duration has no expiry until it activates.
-	return ws.ExpiresAt.IsZero() || ws.ExpiresAt.After(now)
-}
-
-// usable reports whether a kube session can open under ws now.
-func (w sessionWant) usable(ws *wsapi.WorkSession, now time.Time) bool {
-	if !w.fits(ws, now) || ws.Status != wsapi.StatusActive {
-		return false
-	}
-	return ws.StartsAt == nil || !ws.StartsAt.After(now)
-}
-
-// waitable reports whether ws fits and is still waiting on approval, so the
-// command waits it out instead of filing another.
-func (w sessionWant) waitable(ws *wsapi.WorkSession, now time.Time) bool {
-	return w.fits(ws, now) && (ws.Status == wsapi.StatusPending || ws.Status == wsapi.StatusApproved)
-}
-
 func chosen(ws *wsapi.WorkSession, created bool) workSessionChoice {
 	return workSessionChoice{id: ws.ID, created: created, scopes: ws.Scopes}
-}
-
-// pickClusterSession picks from the caller's sessions for the cluster: one
-// usable now first, else the newest still waiting on approval.
-func pickClusterSession(sessions []wsapi.WorkSession, want sessionWant, now time.Time) (ws *wsapi.WorkSession, wait bool) {
-	var waiting *wsapi.WorkSession
-	for i := range sessions {
-		s := &sessions[i]
-		if want.usable(s, now) {
-			return s, false
-		}
-		if want.waitable(s, now) {
-			if waiting == nil || s.AddedAt.After(waiting.AddedAt) {
-				waiting = s
-			}
-		}
-	}
-	return waiting, waiting != nil
 }
 
 // chooseWorkSession settles the WorkSession, waiting out an approval if one
 // is pending. A refusal fails with the code it carries.
 func chooseWorkSession(ios *utils.IOStreams, ac *client.AlpaconClient, in kubeLoginInput, clusterID string, previous *kubeSessionRecord) (workSessionChoice, error) {
-	want := sessionWant{clusterID: clusterID, requesterType: in.requesterType, scopes: in.scopes}
+	if strings.TrimSpace(clusterID) == "" {
+		return workSessionChoice{}, errors.New("cluster ID is required")
+	}
+	want := worksession.Want{ClusterID: clusterID, RequesterType: in.requesterType, Scopes: in.scopes}
 	now := time.Now()
 
 	// A named session is used as given, and the server judges it; one still
@@ -440,7 +382,7 @@ func chooseWorkSession(ios *utils.IOStreams, ac *client.AlpaconClient, in kubeLo
 		if err != nil {
 			return workSessionChoice{id: in.workSession}, nil
 		}
-		if want.waitable(ws, now) {
+		if want.Waitable(ws, now) {
 			return waitForWorkSession(ios, ac, in, ws, false)
 		}
 		return chosen(ws, false), nil
@@ -451,10 +393,10 @@ func chooseWorkSession(ios *utils.IOStreams, ac *client.AlpaconClient, in kubeLo
 	if in.envSession != "" {
 		ws, err := wsapi.GetWorkSession(ac, in.envSession)
 		switch {
-		case err == nil && want.usable(ws, now):
+		case err == nil && want.Usable(ws, now):
 			ios.Info("Using WorkSession %s from %s.", utils.SanitizeTerminalText(ws.ID), worksession.WorkSessionEnvVar)
 			return chosen(ws, false), nil
-		case err == nil && want.waitable(ws, now):
+		case err == nil && want.Waitable(ws, now):
 			return waitForWorkSession(ios, ac, in, ws, false)
 		default:
 			ios.Info("%s names a WorkSession that does not serve %s; looking for one that does.", worksession.WorkSessionEnvVar, utils.SanitizeTerminalText(in.cluster))
@@ -465,7 +407,7 @@ func chooseWorkSession(ios *utils.IOStreams, ac *client.AlpaconClient, in kubeLo
 	// means it is not reused. The active WorkSession is not a candidate: it
 	// can only hold a server session.
 	if previous != nil && previous.WorkSessionID != "" {
-		if ws, err := wsapi.GetWorkSession(ac, previous.WorkSessionID); err == nil && want.usable(ws, now) {
+		if ws, err := wsapi.GetWorkSession(ac, previous.WorkSessionID); err == nil && want.Usable(ws, now) {
 			ios.Info("Using WorkSession %s.", utils.SanitizeTerminalText(ws.ID))
 			return chosen(ws, false), nil
 		}
@@ -486,7 +428,7 @@ func chooseWorkSession(ios *utils.IOStreams, ac *client.AlpaconClient, in kubeLo
 // so a login cut short while its WorkSession waited on approval resumes that
 // session instead of filing a second request. A failed lookup is not fatal;
 // the command goes on to create a session.
-func findClusterSession(ios *utils.IOStreams, ac *client.AlpaconClient, want sessionWant, now time.Time) (*wsapi.WorkSession, bool) {
+func findClusterSession(ios *utils.IOStreams, ac *client.AlpaconClient, want worksession.Want, now time.Time) (*wsapi.WorkSession, bool) {
 	me, err := iam.GetCurrentUser(ac)
 	if err != nil {
 		ios.Warning("Could not look up your WorkSessions for the cluster: %s", err)
@@ -494,17 +436,17 @@ func findClusterSession(ios *utils.IOStreams, ac *client.AlpaconClient, want ses
 	}
 	// Only a session still able to run is wanted, so the ended ones a cluster
 	// gathers with every login are left on the server.
-	sessions, err := wsapi.GetClusterWorkSessions(ac, wsapi.ClusterSessionFilter{
-		ClusterID:     want.clusterID,
+	sessions, err := wsapi.ListWorkSessions(ac, wsapi.SessionFilter{
+		ClusterID:     want.ClusterID,
 		Status:        strings.Join([]string{wsapi.StatusActive, wsapi.StatusApproved, wsapi.StatusPending}, ","),
-		RequesterType: want.requesterType,
+		RequesterType: want.RequesterType,
 		AssignedUser:  me.ID,
 	})
 	if err != nil {
 		ios.Warning("Could not look up your WorkSessions for the cluster: %s", err)
 		return nil, false
 	}
-	return pickClusterSession(sessions, want, now)
+	return worksession.Pick(sessions, want, now)
 }
 
 // createClusterWorkSession files a WorkSession that targets the cluster alone

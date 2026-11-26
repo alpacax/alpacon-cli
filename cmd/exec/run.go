@@ -12,7 +12,9 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/mfa"
+	apiworksession "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -209,6 +211,14 @@ type approvalPoll struct {
 // builds the closure, and a re-run after MFA or approval is the same
 // closure called again.
 type commandRun func() error
+
+type commandStream interface {
+	RunCommand(serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error
+	RunFileCommand(serverName string, file event.FileExecution, username, groupname, workSessionID, purpose string, out io.Writer) error
+	Close()
+}
+
+var newCommandStream = func(ac *client.AlpaconClient) commandStream { return event.NewCommandStream(ac) }
 
 // approvalOutcomeOf reads a command detail's sudo grant status into a decision
 // the wait loop can switch on. authorized is the only grant; rejected and
@@ -452,9 +462,9 @@ func credentialInlineHint(ios *utils.IOStreams, invokedAs Invocation) string {
 // and retries once. A non-interactive caller gets the verification link to complete out of band
 // and the denial unchanged, so commandResultFailure prints the static hint. Interactive websh keeps
 // its own sudo MFA flow.
-func RunExecWithPresenceStepUp(ios *utils.IOStreams, ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
+func RunExecWithPresenceStepUp(ios *utils.IOStreams, ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, selection *worksession.Selection, purpose string, out io.Writer) error {
 	return runWithPresenceStepUp(ios, ac, serverName, func() error {
-		return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+		return RunCommandWithRetry(ac, serverName, command, username, groupname, env, selection, purpose, out)
 	})
 }
 
@@ -547,9 +557,9 @@ func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalPoll, err
 //
 // The poll reads sudo_grant_status rather than re-submitting the command, which would file a
 // fresh approval request on every tick.
-func RunExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
+func RunExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, selection *worksession.Selection, purpose string, waitTimeout time.Duration, out io.Writer) error {
 	return runWithApprovalWait(ios, ac, func() error {
-		return utils.WithSignalFields(runPresenceStepUp(ios, ac, serverName, command, username, groupname, env, workSessionID, purpose, out), localsignal.Fields{Argv0: localsignal.Argv0(command), Server: serverName, Account: username, Session: workSessionID})
+		return utils.WithSignalFields(runPresenceStepUp(ios, ac, serverName, command, username, groupname, env, selection, purpose, out), localsignal.Fields{Argv0: localsignal.Argv0(command), Server: serverName, Account: username, Session: selection.ID()})
 	}, waitTimeout, out)
 }
 
@@ -557,17 +567,17 @@ func RunExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, ser
 // lane. Only the submission differs—the file object in place of a command
 // line—so the presence step-up, the approval wait and the re-run after a grant
 // are the same layers the generic lane runs through.
-func RunFileExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, serverName string, file event.FileExecution, username, groupname, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
+func RunFileExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, serverName string, file event.FileExecution, username, groupname string, selection *worksession.Selection, purpose string, waitTimeout time.Duration, out io.Writer) error {
 	return runWithApprovalWait(ios, ac, func() error {
 		err := runWithPresenceStepUp(ios, ac, serverName, func() error {
-			// One stream for the attempt and its MFA retries; see RunCommandWithRetry.
-			stream := event.NewCommandStream(ac)
+			// Attempts share one stream: an MFA wait resubmits every second, and a stream each would open an event session and WebSocket each time.
+			stream := newCommandStream(ac)
 			defer stream.Close()
-			return runWithRetry(ac, serverName, func() error {
-				return stream.RunFileCommand(serverName, file, username, groupname, workSessionID, purpose, out)
+			return runWithRetry(ac, serverName, selection, func() error {
+				return stream.RunFileCommand(serverName, file, username, groupname, selection.ID(), purpose, out)
 			})
 		})
-		return utils.WithSignalFields(err, localsignal.Fields{Argv0: localsignal.Argv0(file.Path), Server: serverName, Account: username, Session: workSessionID})
+		return utils.WithSignalFields(err, localsignal.Fields{Argv0: localsignal.Argv0(file.Path), Server: serverName, Account: username, Session: selection.ID()})
 	}, waitTimeout, out)
 }
 
@@ -579,7 +589,7 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 	err = utils.WithSignalFields(err, utils.SignalFields(err), ac)
 	announced := false
 	defer func() {
-		if _, mfaFailed := errors.AsType[*utils.ExitError](result); mfaFailed { // its cause is the MFA lookup's, not a refusal of this command
+		if _, recoveryFailed := errors.AsType[*utils.ExitError](result); recoveryFailed { // Recovery failed; not a refusal of this request.
 			return
 		}
 		fields := utils.SignalFields(err)
@@ -621,6 +631,15 @@ func waitForHeldCommand(ac *client.AlpaconClient, pending *event.PendingApproval
 	if pending.AssigneeConfirms() {
 		waiting = "Waiting for your confirmation in the Alpacon web console (output streams once confirmed)..."
 	}
+	if pending.WorkSessionStatus == apiworksession.StatusPaused {
+		action := "approval"
+		if pending.AssigneeConfirms() {
+			action = "your confirmation"
+		}
+		waiting = fmt.Sprintf("Waiting for %s in the Alpacon web console; an authorized person must also use Resume on the paused work session...", action)
+	} else if apiworksession.IsEndedStatus(pending.WorkSessionStatus) {
+		waiting = "Waiting for the command's final status; its work session has ended and the command cannot run in that session..."
+	}
 	spinner := utils.NewSpinner(waiting)
 	spinner.Start()
 	defer spinner.Stop()
@@ -628,7 +647,11 @@ func waitForHeldCommand(ac *client.AlpaconClient, pending *event.PendingApproval
 	if remaining <= 0 {
 		return pending
 	}
-	return streamApprovedCommand(ac, pending, spinner.StopWriter(out), remaining)
+	streamErr := streamApprovedCommand(ac, pending, spinner.StopWriter(out), remaining)
+	if latest, ok := errors.AsType[*event.PendingApprovalError](streamErr); ok && latest != pending {
+		mergePendingApprovalMetadata(latest, pending)
+	}
+	return streamErr
 }
 
 func waitForSudoGrant(ios *utils.IOStreams, ac *client.AlpaconClient, run commandRun, pendingDenial error, denialErr *event.RemoteCommandError, waitStarted time.Time, deadline *time.Time, budget *utils.ThrottleBudget) error {
@@ -734,11 +757,14 @@ func waitForSudoGrant(ios *utils.IOStreams, ac *client.AlpaconClient, run comman
 // or been spent by another attempt.
 func runAfterApproval(ios *utils.IOStreams, run commandRun, held *utils.HeldRequest) error {
 	err := run()
+	_, pending := errors.AsType[*event.PendingApprovalError](err)
 	switch {
 	case isApprovalDenial(ios, err) && held.Expired():
 		ios.Warning("The approval deadline (%s) has passed and the command was denied again. Re-run the command to request a new approval.", held.ExpiresAt.Format(time.RFC3339))
 	case isApprovalDenial(ios, err):
 		ios.Warning("The approval was granted but the command was denied again; the grant appears already used or expired. Re-run the command to request approval again.")
+	case pending:
+		ios.Warning("The approval was granted but the grant did not carry this run; the server is holding the command for a fresh approval.")
 	}
 	return err
 }
@@ -812,7 +838,6 @@ func purposeDemandFailure(ios *utils.IOStreams, err error) error {
 // (fileSuggestionAction), or, when the server sent none and says the line carries a script
 // body, the --upload --file template (scriptBodyAction).
 func pendingApprovalFailure(ios *utils.IOStreams, stderr io.Writer, err error, parsed RemoteExecArgs) error {
-	// Status-hold: held job runs automatically once approved, so point at exec logs.
 	var pendingErr *event.PendingApprovalError
 	if errors.As(err, &pendingErr) {
 		utils.SignalApprovalPending(err, commandSignalFields(err, parsed))
@@ -832,9 +857,11 @@ func pendingApprovalFailure(ios *utils.IOStreams, stderr io.Writer, err error, p
 				"Confirm or reject it in the Alpacon web console through the console link. " +
 				"It runs automatically once confirmed; pass --wait (or --wait-approval DURATION for a longer wait) to block until then."
 		}
-		ios.PrintPendingApproval(
+		message = withSessionResumeGuidance(message, pendingErr)
+		ios.PrintPendingApprovalWithError(
 			message,
 			"", // the command detail carries no approval request id
+			pendingErr,
 			utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", pendingErr.CommandID)},
 			extra...,
 		)
@@ -868,30 +895,65 @@ func pendingApprovalFailure(ios *utils.IOStreams, stderr io.Writer, err error, p
 	return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 }
 
-// RunCommandWithRetry executes a remote command with MFA/username-required error
-// handling and retry logic, streaming output to out.
-// workSessionID is forwarded as the work_session field; pass "" to omit it.
-//
-// The attempt and its retries share one output stream: the MFA wait retries a
-// refused submission once a second for minutes, and a stream per attempt would
-// open an event session and a WebSocket each time.
-func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
-	stream := event.NewCommandStream(ac)
+func mergePendingApprovalMetadata(latest, known *event.PendingApprovalError) {
+	latest.WorkSessionPaused = latest.WorkSessionPaused || known.WorkSessionPaused
+	if latest.WorkSessionID == "" {
+		latest.WorkSessionID = known.WorkSessionID
+	}
+	if latest.WorkSessionStatus == "" {
+		latest.WorkSessionStatus = known.WorkSessionStatus
+	}
+	if latest.ConsoleURL == "" {
+		latest.ConsoleURL = known.ConsoleURL
+	}
+	if latest.ApprovalLane == "" {
+		latest.ApprovalLane = known.ApprovalLane
+	}
+	if !latest.HasCommandDetails() && latest.FileSuggestion == nil && latest.ScriptBodySuggestion == nil {
+		latest.FileSuggestion = known.FileSuggestion
+		latest.ScriptBodySuggestion = known.ScriptBodySuggestion
+	}
+}
+
+func withSessionResumeGuidance(message string, pending *event.PendingApprovalError) string {
+	status := pending.WorkSessionStatus
+	if apiworksession.IsEndedStatus(status) {
+		return fmt.Sprintf("Command held—the work session has ended (%s). This command cannot run in that session. Check the command and work session in the Alpacon web console.", status)
+	}
+	if status != "paused" && (status != "" || !pending.WorkSessionPaused) {
+		return message
+	}
+	lead := "Approval required—this command is held for human approval in the Alpacon web console. "
+	if pending.AssigneeConfirms() {
+		lead = "Confirmation required—this command is held for your own confirmation as the session's assignee, not for an approver. "
+	}
+	if status == "paused" {
+		return lead + "The work session is paused. Approval or confirmation alone will not run this command; " +
+			"an authorized person must also use Resume in the Alpacon web console."
+	}
+	return lead + "Approval or confirmation alone will not run this command while the work session is paused. " +
+		"If it is still paused, an authorized person must use Resume in the Alpacon web console."
+}
+
+// RunCommandWithRetry streams a command and handles submission retries on one event stream.
+// It reads selection before every attempt so a settled WorkSession reaches the resend.
+func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, selection *worksession.Selection, purpose string, out io.Writer) error {
+	stream := newCommandStream(ac)
 	defer stream.Close()
-	return runWithRetry(ac, serverName, func() error {
-		return stream.RunCommand(serverName, command, username, groupname, env, workSessionID, purpose, out)
+	return runWithRetry(ac, serverName, selection, func() error {
+		return stream.RunCommand(serverName, command, username, groupname, env, selection.ID(), purpose, out)
 	})
 }
 
-// runWithRetry is RunCommandWithRetry over a commandRun; the MFA retry is the
-// same closure called again.
-func runWithRetry(ac *client.AlpaconClient, serverName string, run commandRun) error {
+// runWithRetry is RunCommandWithRetry over a commandRun.
+// Attempts share one stream so retries do not open another event session and WebSocket.
+func runWithRetry(ac *client.AlpaconClient, serverName string, selection *worksession.Selection, run commandRun) error {
 	err := run()
 	if propagated, ok := propagateCommandError(err); ok {
 		return propagated
 	}
 	if err != nil {
-		err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(ac, run))
+		err = utils.HandleCommonErrors(err, serverName, selection.Offer(mfa.ErrorCallbacks(ac, run)))
 		// RetryOperation may surface a propagated error; re-check after HandleCommonErrors.
 		if propagated, ok := propagateCommandError(err); ok {
 			return propagated

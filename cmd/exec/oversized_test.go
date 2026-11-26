@@ -14,6 +14,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,7 +50,7 @@ func refusalsFrom(t *testing.T, status int, body string) (detach, stream error) 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	_, detach = event.SubmitCommand(ac, "prod", "echo hi", "", "", nil, "", "")
-	stream = RunExecWithApprovalWait(utils.Stdio, ac, "prod", "echo hi", "", "", nil, "", "", 0, io.Discard)
+	stream = RunExecWithApprovalWait(utils.Stdio, ac, "prod", "echo hi", "", "", nil, worksession.Fixed(""), "", 0, io.Discard)
 	return detach, stream
 }
 

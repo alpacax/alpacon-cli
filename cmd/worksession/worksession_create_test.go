@@ -822,6 +822,23 @@ func TestRunUseSessionRefusesASettledSession(t *testing.T) {
 	}
 }
 
+// A paused session is neither active nor ended: it waits for a person to resume
+// or end it, which the CLI cannot do, so use names that and signals the pause.
+func TestRunUseSessionRefusesAPausedSession(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ses-x","status":"paused"}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	var err error
+	_, stderr := testutil.CaptureOutput(t, func() { _, err = RunUseSession(ac, "ses-x") })
+
+	require.EqualError(t, err, "work-session ses-x is paused and cannot be used; a person must resume or end it in the Alpacon web console")
+	assert.Contains(t, stderr, "Work Session ses-x is paused after a critical denial. Open the web console for the available recovery actions.")
+}
+
 func TestPrintTerminalWaitErrorSanitizesTheSessionID(t *testing.T) {
 	t.Parallel()
 	terminal := &terminalWaitError{message: "work session was rejected", sessionID: "ses-\x1b[2Kx"}
@@ -1110,4 +1127,46 @@ func TestCreateSudoFlagDescribesCompoundCommands(t *testing.T) {
 	ios, _, _ := utils.TestIOStreams()
 	cmd := newWorkSessionCreateCmd(nil, ios)
 	assert.Contains(t, cmd.Flags().Lookup("sudo").Usage, "Each part of a compound command must match a pattern.")
+}
+
+type stalledTransport struct{}
+
+func (stalledTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	<-r.Context().Done()
+	return nil, r.Context().Err()
+}
+
+func TestApprovalWaitBoundsAStalledStatusRequestByItsDeadline(t *testing.T) {
+	t.Parallel()
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: &http.Client{Transport: stalledTransport{}}}
+	ios, _, _ := utils.TestIOStreams()
+	var err error
+	var waited time.Duration
+
+	synctest.Test(t, func(*testing.T) {
+		start := time.Now()
+		_, err = WaitForApproval(ios, ac, "ws-1", true, time.Second, 5*time.Minute)
+		waited = time.Since(start)
+	})
+
+	var pending *pendingWaitError
+	require.ErrorAs(t, err, &pending)
+	assert.Equal(t, 5*time.Minute, waited)
+}
+
+func TestApprovalWaitRefusesAnAnswerForAnotherSession(t *testing.T) {
+	t.Parallel()
+	var events atomic.Int32
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+		events.Add(1)
+		return http.StatusOK, `{"id":"other-session","status":"rejected","console_url":"https://example.com/other"}`
+	})}
+	ios, _, _ := utils.TestIOStreams()
+
+	_, err := WaitForApproval(ios, ac, "ws-1", true, time.Millisecond, time.Second)
+
+	require.EqualError(t, err, "polling failed: the server answered for a different work session")
+	var terminal *terminalWaitError
+	assert.NotErrorAs(t, err, &terminal)
+	assert.Equal(t, int32(1), events.Load())
 }

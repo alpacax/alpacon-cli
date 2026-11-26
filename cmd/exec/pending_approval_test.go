@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,9 +12,13 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/localsignal"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -151,6 +156,268 @@ func TestExecStatusAwaitingApprovalExits4WithJSONSignal(t *testing.T) {
 	assert.Equal(t, "alpacon exec logs cmd-1", got.NextActions[0].Command, "hint should point at exec logs for the held job")
 }
 
+func TestPausedApprovalOutputKeepsPauseAndResumeGuidance(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		logs bool
+		json bool
+		wait bool
+	}{
+		{name: "exec JSON", json: true},
+		{name: "exec table"},
+		{name: "exec wait JSON", json: true, wait: true},
+		{name: "logs JSON", logs: true, json: true},
+		{name: "logs table", logs: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := newHeldCommandServer(t, `,"work_session_paused":true,"work_session_id":"550e8400-e29b-41d4-a716-446655440000"`)
+			format := utils.OutputFormatTable
+			if tc.json {
+				format = utils.OutputFormatJSON
+			}
+			var stdout, stderr string
+			var exitCode int
+			jobID := "cmd-1"
+			if tc.logs {
+				jobID = assigneeJobID
+				stdout, stderr, exitCode = runExecLogsHelper(t, ts.URL, format, jobID)
+			} else {
+				args := []string{"--output", format}
+				if tc.wait {
+					args = append(args, "--wait-approval", "1ms")
+				}
+				args = append(args, "prod", "--", "sudo", "reboot")
+				stdout, stderr, exitCode = runExecHelper(t, ts.URL, args...)
+			}
+			assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
+			if !tc.json {
+				assert.Contains(t, stderr, "Approval or confirmation alone will not run this command")
+				assert.Contains(t, stderr, "Resume")
+				assert.NotContains(t, stderr, "runs automatically")
+				return
+			}
+			var got struct {
+				Status      string             `json:"status"`
+				ExitCode    int                `json:"exit_code"`
+				Message     string             `json:"message"`
+				Server      map[string]any     `json:"server"`
+				NextActions []utils.NextAction `json:"next_actions"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+			assert.Equal(t, utils.PendingApprovalStatus, got.Status)
+			assert.Equal(t, utils.ExitCodePendingApproval, got.ExitCode)
+			assert.Equal(t, map[string]any{
+				"work_session_paused": true,
+				"work_session_id":     "550e8400-e29b-41d4-a716-446655440000",
+				"console_url":         ts.URL + "/commands/" + jobID,
+			}, got.Server)
+			assert.Contains(t, got.Message, "Resume")
+			assert.NotContains(t, got.Message, "runs automatically")
+			require.Len(t, got.NextActions, 2)
+			assert.Contains(t, got.NextActions[1].Description, "Resume")
+		})
+	}
+}
+
+func TestResumedApprovalKeepsTriggerWithoutResumeGuidance(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		logs bool
+		wait bool
+	}{
+		{name: "exec"},
+		{name: "logs", logs: true},
+		{name: "wait", wait: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := newHeldCommandServer(t, `,"work_session_paused":true,"work_session_id":"550e8400-e29b-41d4-a716-446655440000","work_session":{"id":"550e8400-e29b-41d4-a716-446655440000","status":"active"}`)
+			var stdout string
+			var code int
+			if tc.logs {
+				stdout, _, code = runExecLogsHelper(t, ts.URL, utils.OutputFormatJSON, assigneeJobID)
+			} else {
+				args := []string{"--output", "json"}
+				if tc.wait {
+					args = append(args, "--wait-approval", "1ms")
+				}
+				stdout, _, code = runExecHelper(t, ts.URL, append(args, "prod", "--", "sudo", "reboot")...)
+			}
+			assert.Equal(t, utils.ExitCodePendingApproval, code)
+			var got struct {
+				Status string         `json:"status"`
+				Server map[string]any `json:"server"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+			assert.Equal(t, utils.PendingApprovalStatus, got.Status)
+			assert.Equal(t, true, got.Server["work_session_paused"])
+			assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", got.Server["work_session_id"])
+			assert.NotContains(t, stdout, "Resume")
+			assert.NotContains(t, stdout, "The work session is paused")
+			assert.Contains(t, stdout, "runs automatically once approved")
+		})
+	}
+}
+
+func TestCurrentPauseGuidanceDoesNotRequireATrigger(t *testing.T) {
+	for _, name := range []string{"exec", "logs"} {
+		t.Run(name, func(t *testing.T) {
+			ts := newHeldCommandServer(t, `,"work_session":{"id":"550e8400-e29b-41d4-a716-446655440000","status":"paused"}`)
+			var stdout string
+			var code int
+			if name == "logs" {
+				stdout, _, code = runExecLogsHelper(t, ts.URL, utils.OutputFormatJSON, assigneeJobID)
+			} else {
+				stdout, _, code = runExecHelper(t, ts.URL, "--output", "json", "prod", "--", "sudo", "reboot")
+			}
+			assert.Equal(t, utils.ExitCodePendingApproval, code)
+			assert.Contains(t, stdout, "Resume")
+			assert.NotContains(t, stdout, `"work_session_paused"`)
+			assert.NotContains(t, stdout, "runs automatically once approved")
+		})
+	}
+}
+
+func TestApprovalWaitProgressUsesCurrentSessionStatus(t *testing.T) {
+	for _, status := range []string{"paused", "active"} {
+		for _, lane := range []string{"single_approver", "assignee"} {
+			t.Run(status+"/"+lane, func(t *testing.T) {
+				ts := newHeldCommandServer(t, fmt.Sprintf(`,"approval_lane":%q,"work_session":{"id":%q,"status":%q}`, lane, assigneeJobID, status))
+				stdout, stderr, code := runExecHelper(t, ts.URL, "--output", "json", "--wait-approval", "1ms", "prod", "--", "uptime")
+				assert.Equal(t, utils.ExitCodePendingApproval, code)
+				assert.NotContains(t, stdout, `"work_session_paused"`)
+				var progress []string
+				for line := range strings.SplitSeq(stderr, "\n") {
+					if strings.HasPrefix(line, "Waiting for ") {
+						progress = append(progress, line)
+					}
+				}
+				require.Len(t, progress, 1, "stderr: %s", stderr)
+				waiting := "Waiting for approval"
+				if lane == "assignee" {
+					waiting = "Waiting for your confirmation"
+				}
+				assert.Contains(t, progress[0], waiting)
+				if status == "paused" {
+					assert.Contains(t, progress[0], "authorized person")
+					assert.Contains(t, progress[0], "Resume")
+					assert.NotContains(t, progress[0], "output streams once")
+				} else {
+					assert.Contains(t, progress[0], "output streams once")
+					assert.NotContains(t, progress[0], "Resume")
+				}
+			})
+		}
+	}
+}
+
+func TestEndedSessionApprovalDoesNotPromiseExecution(t *testing.T) {
+	for _, status := range []string{"completed", "expired", "revoked", "rejected", "cancelled"} {
+		for _, surface := range []string{"exec", "logs", "wait"} {
+			t.Run(status+"/"+surface, func(t *testing.T) {
+				ts := newHeldCommandServer(t, fmt.Sprintf(`,"work_session":{"id":%q,"status":%q}`, assigneeJobID, status))
+				var stdout, stderr string
+				var code int
+				if surface == "logs" {
+					stdout, stderr, code = runExecLogsHelper(t, ts.URL, utils.OutputFormatJSON, assigneeJobID)
+				} else {
+					args := []string{"--output", "json"}
+					if surface == "wait" {
+						args = append(args, "--wait-approval", "1ms")
+					}
+					stdout, stderr, code = runExecHelper(t, ts.URL, append(args, "prod", "--", "uptime")...)
+				}
+				assert.Equal(t, utils.ExitCodePendingApproval, code)
+				var got struct {
+					Message     string             `json:"message"`
+					NextActions []utils.NextAction `json:"next_actions"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+				assert.Contains(t, got.Message, "work session has ended")
+				assert.NotContains(t, got.Message, "runs automatically")
+				assert.NotContains(t, stdout, "Resume")
+				assert.NotContains(t, stderr, "output streams once")
+				require.Len(t, got.NextActions, 2)
+				assert.NotContains(t, got.NextActions[1].Description, "Approve it out of band")
+			})
+		}
+	}
+}
+
+func TestPausedLogsKeepAssigneeConfirmation(t *testing.T) {
+	for _, format := range []string{utils.OutputFormatJSON, utils.OutputFormatTable} {
+		t.Run(format, func(t *testing.T) {
+			ts := newHeldCommandServer(t, `,"approval_lane":"assignee","work_session":{"id":"session-1","status":"paused"}`)
+			stdout, stderr, code := runExecLogsHelper(t, ts.URL, format, assigneeJobID)
+			assert.Equal(t, utils.ExitCodePendingApproval, code)
+			text := stderr
+			if format == utils.OutputFormatJSON {
+				text = stdout
+			}
+			assert.Contains(t, text, "Confirmation required")
+			assert.Contains(t, text, "your own confirmation")
+			assert.Contains(t, text, "Resume")
+			assert.NotContains(t, text, "held for human approval")
+		})
+	}
+}
+
+func TestApprovalWaitKeepsLatestFileGuidance(t *testing.T) {
+	const fileField = `,"file_execution_suggestion":{"path":"/opt/deploy.sh","interpreter":"/bin/bash"}`
+	const clearedFields = `,"file_execution_suggestion":null,"script_body_suggestion":null`
+	for _, tc := range []struct{ name, field, refresh, want, absent string }{
+		{"file after failed refresh", fileField, "", "--file /opt/deploy.sh --from-server", ""},
+		{"script body after failed refresh", scriptBodyField, "", "--upload --file /path/to/script.sh", ""},
+		{"new script suggestion", fileField, scriptBodyField, "--upload --file /path/to/script.sh", "--from-server"},
+		{"new file suggestion", scriptBodyField, fileField, "--file /opt/deploy.sh --from-server", "--upload"},
+		{"withdrawn file suggestion", fileField, clearedFields, "", "--file"},
+		{"withdrawn script suggestion", scriptBodyField, clearedFields, "", "--file"},
+		{"omitted suggestions in a successful read", fileField, " ", "", "--file"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var reads atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/servers/servers/":
+					_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+				case "/api/events/commands/":
+					_, _ = w.Write([]byte(`[{"id":"cmd-1"}]`))
+				case "/api/events/commands/cmd-1/":
+					field := tc.refresh
+					if reads.Add(1) == 1 {
+						field = tc.field
+					}
+					if field != "" {
+						_, _ = fmt.Fprintf(w, `{"id":"cmd-1","status":"awaiting_approval"%s}`, field)
+						return
+					}
+					w.WriteHeader(http.StatusServiceUnavailable)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(ts.Close)
+			stdout, _, code := runExecHelper(t, ts.URL, "--output", "json", "--wait-approval", "50ms", "root@prod", "--", "bash", "/opt/deploy.sh")
+			assert.Equal(t, utils.ExitCodePendingApproval, code)
+			assert.GreaterOrEqual(t, reads.Load(), int32(2))
+			var got pendingApprovalSignal
+			require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+			var commands []string
+			for _, action := range got.NextActions {
+				commands = append(commands, action.Command)
+			}
+			if tc.want == "" {
+				assert.Len(t, got.NextActions, 2)
+			} else {
+				assert.Contains(t, strings.Join(commands, "\n"), tc.want)
+			}
+			if tc.absent != "" {
+				assert.NotContains(t, strings.Join(commands, "\n"), tc.absent)
+			}
+		})
+	}
+}
+
 func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
 	ts := newApprovalDenialServer(denialLine("SUDO_APPROVAL_REQUIRED"))
 	defer ts.Close()
@@ -169,6 +436,78 @@ func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
 	// The pending message already says to re-run after approval, and this code
 	// offers nothing past that wait, so printing its hint would say it twice.
 	assert.NotContains(t, stderr, "Hint:")
+}
+
+func TestPausedApprovalSurvivesFailedTimeoutRefresh(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		initialPause bool
+		wait         time.Duration
+	}{
+		{"initial hold", true, time.Millisecond},
+		{"later poll", false, time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			synctest.Test(t, func(t *testing.T) {
+				const sessionID = "550e8400-e29b-41d4-a716-446655440000"
+				const consoleURL = "https://alpacon.io/acme/commands/cmd-1"
+				var reads atomic.Int32
+				var finalRefresh atomic.Bool
+				pollEnded := make(chan struct{})
+				ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/api/events/commands/cmd-1/" {
+						http.NotFound(w, r)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					if !tc.initialPause {
+						switch reads.Add(1) {
+						case 1:
+							_, _ = fmt.Fprintf(w, `{"id":"cmd-1","status":"awaiting_approval","work_session_paused":true,"work_session_id":%q,"console_url":%q}`, sessionID, consoleURL)
+							return
+						case 2:
+							select {
+							case <-r.Context().Done():
+							case <-time.After(2 * tc.wait):
+							}
+							close(pollEnded)
+							w.WriteHeader(http.StatusServiceUnavailable)
+							return
+						default:
+							<-pollEnded
+						}
+					}
+					finalRefresh.Store(true)
+					w.WriteHeader(http.StatusServiceUnavailable)
+				}))
+				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+				originalTick := event.CommandPollTick
+				t.Cleanup(func() { event.CommandPollTick = originalTick })
+				event.CommandPollTick = 10 * time.Millisecond
+				initial := &event.PendingApprovalError{CommandID: "cmd-1", WorkSessionPaused: tc.initialPause, WorkSessionID: sessionID, ConsoleURL: consoleURL}
+				ios, stdout, _ := utils.TestIOStreams()
+				require.NoError(t, ios.SetOutputFormat(utils.OutputFormatJSON))
+				err := runWithApprovalWait(ios, ac, func() error { return initial }, tc.wait, io.Discard)
+				assert.True(t, finalRefresh.Load(), "the final refresh must run after the approval wait")
+				result := pendingApprovalFailure(ios, io.Discard, err, RemoteExecArgs{})
+				var exitErr *utils.ExitError
+				require.ErrorAs(t, result, &exitErr)
+				assert.Equal(t, utils.ExitCodePendingApproval, exitErr.Code)
+				var got struct {
+					Message string         `json:"message"`
+					Server  map[string]any `json:"server"`
+				}
+				require.NoError(t, json.Unmarshal(stdout.Bytes(), &got))
+				assert.Equal(t, map[string]any{
+					"work_session_paused": true,
+					"work_session_id":     sessionID,
+					"console_url":         consoleURL,
+				}, got.Server)
+				assert.Contains(t, got.Message, "Resume")
+			})
+		})
+	}
 }
 
 // TestExecIntentDeviationPrintsSelfServiceHint pins the denial-code hint to the

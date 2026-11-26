@@ -1302,14 +1302,14 @@ func TestOpenTerminal_AdvertisesIdleWarningAndReconnectCapabilities(t *testing.T
 		{
 			name: "an interactive session reconnects",
 			open: OpenNewTerminal,
-			want: "websocket-reconnect, idle-warning",
+			want: "websocket-reconnect, idle-warning, refusal-frame",
 		},
 		{
 			// The joiner may not open a channel on someone else's session, so
 			// claiming the reconnect capability would promise a recovery it cannot make.
 			name: "a joined session warns without reconnecting",
 			open: OpenSharedTerminal,
-			want: "idle-warning",
+			want: "idle-warning, refusal-frame",
 		},
 		{
 			name: "a watched session warns without reconnecting",

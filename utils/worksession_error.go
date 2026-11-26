@@ -72,6 +72,11 @@ var workSessionReasonMap = map[string]string{
 	WorkSessionAccountNotApproved:   "the command runs as an account the session was not approved for; a session runs only as the account named when it was created",
 }
 
+// WorkSessionReason is the diagnostic's reason line for a gate code, or "" for any other code.
+func WorkSessionReason(code string) string {
+	return workSessionReasonMap[code]
+}
+
 func isWorkSessionCode(code string) bool {
 	_, ok := workSessionReasonMap[code]
 	return ok

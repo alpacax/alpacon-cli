@@ -3,9 +3,6 @@ package tunnel
 import (
 	"errors"
 	"fmt"
-	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
@@ -23,6 +20,7 @@ type tunnelFlagValues struct {
 	groupname     string
 	verbose       bool
 	workSessionID string
+	sel           *worksession.Selection
 	authMethod    string // read once in runTunnel, not a flag
 }
 
@@ -34,6 +32,12 @@ type tunnelCommandRuntime interface {
 	Cause() error
 	Close(cause error)
 }
+
+var startTunnel = func(opts tunnelruntime.StartOptions) (tunnelCommandRuntime, error) {
+	return tunnelruntime.Start(opts)
+}
+
+var selectTunnelWorkSession = worksession.Select
 
 func NewTunnelCmd(newAPIClient func() (*client.AlpaconClient, error), ios *utils.IOStreams) *cobra.Command {
 	var flags tunnelFlagValues
@@ -115,7 +119,7 @@ func (f tunnelFlagValues) toStartOptions(ac *client.AlpaconClient, serverName st
 		Username:      f.username,
 		Groupname:     f.groupname,
 		Verbose:       f.verbose,
-		WorkSessionID: f.workSessionID,
+		WorkSessionID: f.sel.ID(),
 		Client:        ac,
 	}
 }
@@ -149,20 +153,11 @@ func runTunnel(ios *utils.IOStreams, cmd *cobra.Command, args []string, flags tu
 	if err != nil {
 		return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
-	// Resolve once: handleTunnelStartError's retry and gate report both use this UUID.
-	if flags.workSessionID, err = worksession.Resolve(ac, flags.workSessionID); err != nil {
+	if flags.sel, err = selectTunnelWorkSession(ios, ac, flags.workSessionID, worksession.Need{Operation: worksession.Tunnel, Server: args[0], Account: flags.username}); err != nil {
 		return utils.NewExitError("%s", err)
 	}
 
-	var sigChan <-chan os.Signal
-	if cmd.ArgsLenAtDash() < 0 {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(ch)
-		sigChan = ch
-	}
-
-	return tunnelExitError(executeTunnelCommand(ios, ac, flags, cmd, args, sigChan))
+	return tunnelExitError(executeTunnelCommand(ios, ac, flags, cmd, args))
 }
 
 // tunnelExitError maps a tunnel run's exit code and error to what RunE returns.
@@ -188,7 +183,7 @@ func tunnelExitError(exitCode int, err error) error {
 	return nil
 }
 
-func executeTunnelCommand(ios *utils.IOStreams, ac *client.AlpaconClient, flags tunnelFlagValues, cmd *cobra.Command, args []string, sigChan <-chan os.Signal) (int, error) {
+func executeTunnelCommand(ios *utils.IOStreams, ac *client.AlpaconClient, flags tunnelFlagValues, cmd *cobra.Command, args []string) (int, error) {
 	dashIndex := cmd.ArgsLenAtDash()
 	if dashIndex >= 0 {
 		serverName, localCommand, err := extractRunInvocation(args, dashIndex)
@@ -198,27 +193,27 @@ func executeTunnelCommand(ios *utils.IOStreams, ac *client.AlpaconClient, flags 
 		return executeTunnelRunWithInvocation(ios, ac, flags, serverName, localCommand)
 	}
 
-	return 0, executeTunnel(ios, ac, flags, args[0], sigChan)
+	return 0, executeTunnel(ios, ac, flags, args[0])
 }
 
 func handleTunnelStartError(ac *client.AlpaconClient, flags tunnelFlagValues, err error, serverName string, retry func() error) error {
-	err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(ac, retry))
+	err = utils.HandleCommonErrors(err, serverName, flags.sel.Offer(mfa.ErrorCallbacks(ac, retry)))
 	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
-		return exitErr // the MFA failure carries the lookup's error, which must not be read as a gate refusal
+		return exitErr // Recovery failed; not a refusal of this request.
 	}
 	if utils.StructuredErrorCode(err) != "" { // a code quoted in an agent's open-failure text is not a gate refusal
-		if gateErr := utils.WorkSessionExitError(err, utils.OperationTunnel, serverName, flags.authMethod, flags.workSessionID); gateErr != nil {
+		if gateErr := utils.WorkSessionExitError(err, utils.OperationTunnel, serverName, flags.authMethod, flags.sel.ID()); gateErr != nil {
 			return gateErr
 		}
 	}
 	return utils.InteractiveOnly(err, "open a tunnel")
 }
 
-func executeTunnel(ios *utils.IOStreams, ac *client.AlpaconClient, flags tunnelFlagValues, serverName string, sigChan <-chan os.Signal) error {
-	runtime, err := tunnelruntime.Start(flags.toStartOptions(ac, serverName))
+func executeTunnel(ios *utils.IOStreams, ac *client.AlpaconClient, flags tunnelFlagValues, serverName string) error {
+	runtime, err := startTunnel(flags.toStartOptions(ac, serverName))
 	if err != nil {
 		err = handleTunnelStartError(ac, flags, err, serverName, func() error {
-			runtime, err = tunnelruntime.Start(flags.toStartOptions(ac, serverName))
+			runtime, err = startTunnel(flags.toStartOptions(ac, serverName))
 			return err
 		})
 		if err != nil {
@@ -229,6 +224,8 @@ func executeTunnel(ios *utils.IOStreams, ac *client.AlpaconClient, flags tunnelF
 	if err := runtime.CheckReady(); err != nil {
 		return fmt.Errorf("failed to establish tunnel connection: %w", err)
 	}
+	sigChan, stop := tunnelSignals()
+	defer stop()
 
 	ios.Info("Tunnel ready: %s -> %s", runtime.LocalAddress(), runtime.RemoteAddress())
 	ios.Info("Waiting for connections... (Ctrl+C to exit)")

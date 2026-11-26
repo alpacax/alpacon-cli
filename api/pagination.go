@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -31,20 +32,26 @@ func copyParams(params map[string]string) map[string]string {
 
 // FetchAllPages walks every page. It is FetchPagesUpTo with no bound.
 func FetchAllPages[T any](ac *client.AlpaconClient, endpoint string, params map[string]string) ([]T, error) {
-	return FetchPagesUpTo[T](ac, endpoint, params, math.MaxInt)
+	return FetchAllPagesWithContext[T](context.Background(), ac, endpoint, params)
+}
+
+// FetchAllPagesWithContext is FetchAllPages ended early by ctx.
+func FetchAllPagesWithContext[T any](ctx context.Context, ac *client.AlpaconClient, endpoint string, params map[string]string) ([]T, error) {
+	items, _, err := walkPageNumberPages[T](ctx, ac, endpoint, params, math.MaxInt)
+	return items, err
 }
 
 // FetchPagesUpTo walks PageNumber pages until it has limit items, so a caller asking for
 // more than one page's worth is not silently cut off at the server's page cap.
 func FetchPagesUpTo[T any](ac *client.AlpaconClient, endpoint string, params map[string]string, limit int) ([]T, error) {
-	items, _, err := walkPageNumberPages[T](ac, endpoint, params, limit)
+	items, _, err := walkPageNumberPages[T](context.Background(), ac, endpoint, params, limit)
 	return items, err
 }
 
 // FetchPagesUpToWithReach is FetchPagesUpTo for an audit list whose envelope states the
 // reader's reach. The reach comes from the first page; Changed says a later page disagreed.
 func FetchPagesUpToWithReach[T any](ac *client.AlpaconClient, endpoint string, params map[string]string, limit int) ([]T, Reach, error) {
-	return walkPageNumberPages[T](ac, endpoint, params, limit)
+	return walkPageNumberPages[T](context.Background(), ac, endpoint, params, limit)
 }
 
 // pageEnvelope is one PageNumber page with the envelope keys beside results that a caller reads.
@@ -55,7 +62,7 @@ type pageEnvelope[T any] struct {
 
 // walkPageNumberPages returns the items and the first page's reach, marked Changed when a later
 // page read stated another.
-func walkPageNumberPages[T any](ac *client.AlpaconClient, endpoint string, params map[string]string, limit int) ([]T, Reach, error) {
+func walkPageNumberPages[T any](ctx context.Context, ac *client.AlpaconClient, endpoint string, params map[string]string, limit int) ([]T, Reach, error) {
 	if limit <= 0 {
 		return nil, Reach{}, nil
 	}
@@ -74,7 +81,7 @@ func walkPageNumberPages[T any](ac *client.AlpaconClient, endpoint string, param
 		if err != nil {
 			return nil, Reach{}, err
 		}
-		responseBody, err := ac.SendGetRequest(pageURL)
+		responseBody, err := ac.SendGetRequestWithContext(ctx, pageURL)
 		if err != nil {
 			return nil, Reach{}, fmt.Errorf("fetching page %d from %s: %w", page, endpoint, err)
 		}

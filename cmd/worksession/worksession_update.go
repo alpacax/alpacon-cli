@@ -182,7 +182,7 @@ func updateTargetSession(ac *client.AlpaconClient, args []string) string {
 	if len(args) == 1 {
 		return args[0]
 	}
-	resolved, err := Resolve(ac, "")
+	resolved, _, err := resolveFor(ac.WorkspaceName, "")
 	if err != nil {
 		return ""
 	}

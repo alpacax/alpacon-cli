@@ -118,7 +118,7 @@ func TestSinkURLParam_FindsTheURLOfEveryRequestSink(t *testing.T) {
 		want                int
 	}
 	sinks := []sink{
-		{apiPkgPath, "", "FetchAllPages", 1}, {apiPkgPath, "", "FetchPagesUpTo", 1}, {apiPkgPath, "", "FetchPagesUpToWithReach", 1},
+		{apiPkgPath, "", "FetchAllPages", 1}, {apiPkgPath, "", "FetchAllPagesWithContext", 2}, {apiPkgPath, "", "FetchPagesUpTo", 1}, {apiPkgPath, "", "FetchPagesUpToWithReach", 1},
 		{apiPkgPath, "", "FetchAllCursorPages", 1}, {apiPkgPath, "", "FetchCursorPages", 1},
 		{"net/http", "", "NewRequest", 1}, {"net/http", "", "NewRequestWithContext", 2},
 		{"net/http", "", "Get", 0}, {"net/http", "", "Head", 0}, {"net/http", "", "Post", 0}, {"net/http", "", "PostForm", 0},
