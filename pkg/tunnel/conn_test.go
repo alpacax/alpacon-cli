@@ -135,3 +135,38 @@ func BenchmarkWebSocketConnRead(b *testing.B) {
 		}
 	}
 }
+
+// A text frame is a control message beside smux, such as a refusal: it never
+// reaches the smux byte stream, and the text handler gets it whole.
+func TestWebSocketConnHandsTextFramesToItsHandlerAndKeepsThemOutOfTheStream(t *testing.T) {
+	t.Parallel()
+	texts := make(chan string, 2)
+	conn := NewWebSocketConnWithText(dialWebSocketServer(t, func(c *websocket.Conn) {
+		_ = c.WriteMessage(websocket.BinaryMessage, []byte("ab"))
+		_ = c.WriteMessage(websocket.TextMessage, []byte(`{"type":"refusal"}`))
+		writeMessages(t, c, []byte("cd"))
+	}), func(text []byte) { texts <- string(text) })
+
+	got, err := io.ReadAll(conn)
+	if !websocket.IsCloseError(err, websocket.CloseNormalClosure) {
+		require.NoError(t, err)
+	}
+	assert.Equal(t, "abcd", string(got))
+	require.Len(t, texts, 1)
+	assert.JSONEq(t, `{"type":"refusal"}`, <-texts)
+}
+
+// Without a handler a text frame is still dropped rather than fed to smux.
+func TestWebSocketConnDropsTextFramesWithoutAHandler(t *testing.T) {
+	t.Parallel()
+	conn := NewWebSocketConn(dialWebSocketServer(t, func(c *websocket.Conn) {
+		_ = c.WriteMessage(websocket.TextMessage, []byte(`{"type":"refusal"}`))
+		writeMessages(t, c, []byte("cd"))
+	}))
+
+	got, err := io.ReadAll(conn)
+	if !websocket.IsCloseError(err, websocket.CloseNormalClosure) {
+		require.NoError(t, err)
+	}
+	assert.Equal(t, "cd", string(got))
+}

@@ -822,6 +822,23 @@ func TestRunUseSessionRefusesASettledSession(t *testing.T) {
 	}
 }
 
+// A paused session is neither active nor ended: it waits for a person to resume
+// or end it, which the CLI cannot do, so use names that and signals the pause.
+func TestRunUseSessionRefusesAPausedSession(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ses-x","status":"paused"}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	var err error
+	_, stderr := testutil.CaptureOutput(t, func() { _, err = RunUseSession(ac, "ses-x") })
+
+	require.EqualError(t, err, "work-session ses-x is paused and cannot be used; a person must resume or end it in the Alpacon web console")
+	assert.Contains(t, stderr, "Work Session ses-x is paused after a critical denial. Open the web console for the available recovery actions.")
+}
+
 func TestPrintTerminalWaitErrorSanitizesTheSessionID(t *testing.T) {
 	t.Parallel()
 	terminal := &terminalWaitError{message: "work session was rejected", sessionID: "ses-\x1b[2Kx"}

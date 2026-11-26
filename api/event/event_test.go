@@ -437,25 +437,199 @@ func TestErrorFromDetails_UseFileExecutionCarriesCause(t *testing.T) {
 
 func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
 	t.Parallel()
-	// awaiting_approval, then the transient "error" the server emits in the
-	// approve→deliver window, then completed: waitApproval must poll through both.
-	seq := []string{"awaiting_approval", "awaiting_approval", "error", "completed"}
-	var calls atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		i := int(calls.Add(1)) - 1
-		if i >= len(seq) {
-			i = len(seq) - 1
-		}
-		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: seq[i], Success: new(true)})
-	}))
-	defer ts.Close()
+	synctest.Test(t, func(t *testing.T) {
+		// awaiting_approval, then the transient "error" the server emits in the
+		// approve→deliver window, then completed: waitApproval must poll through both.
+		seq := []string{"awaiting_approval", "awaiting_approval", "error", "completed"}
+		var calls atomic.Int32
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			i := int(calls.Add(1)) - 1
+			if i >= len(seq) {
+				i = len(seq) - 1
+			}
+			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: seq[i], Success: new(true)})
+		}))
+		defer ts.Close()
 
-	seams, _ := fakePollClock()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Second, 5*time.Millisecond, true, seams)
-	require.NoError(t, err)
-	assert.Equal(t, "completed", resp.Status)
+		seams, _ := fakePollClock()
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Second, 5*time.Millisecond, true, seams)
+		require.NoError(t, err)
+		assert.Equal(t, "completed", resp.Status)
+	})
+}
+
+func TestApprovalTimeoutRefreshHasADeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		unblock := sync.OnceFunc(func() { close(release) })
+		defer unblock()
+		cancelled := make(chan struct{})
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-r.Context().Done():
+				close(cancelled)
+			case <-release:
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}
+		}))
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		known := EventDetails{Status: "awaiting_approval", WorkSessionPaused: true, FlatWorkSessionID: "550e8400-e29b-41d4-a716-446655440000"}
+		cmdID := testPathID(t, "cmd-uuid")
+		done := make(chan error, 1)
+		go func() {
+			done <- pendingApprovalAfterTimeout(ac, cmdID, known, &ClientTimeoutError{})
+		}()
+		time.Sleep(2 * time.Second)
+		var err error
+		select {
+		case err = <-done:
+		default:
+			t.Error("the final refresh exceeded two seconds")
+			unblock()
+			err = <-done
+		}
+		synctest.Wait()
+		var pending *PendingApprovalError
+		require.ErrorAs(t, err, &pending)
+		assert.True(t, pending.WorkSessionPaused)
+		assert.Equal(t, known.FlatWorkSessionID, pending.WorkSessionID)
+		select {
+		case <-cancelled:
+		default:
+			t.Error("the stalled refresh request was not cancelled")
+		}
+	})
+}
+
+func TestApprovalTimeoutDoesNotReportAnotherStatusAsPending(t *testing.T) {
+	for _, status := range []string{"running", "completed", "rejected"} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"id":"cmd-uuid","status":%q}`, status)
+			}))
+			t.Cleanup(ts.Close)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			err := runCommandFallbackWithin(ac, testPathID(t, "cmd-uuid"), io.Discard, time.Millisecond, time.Millisecond, true, errors.New("stream unavailable"))
+			var pending *PendingApprovalError
+			require.Error(t, err)
+			assert.NotErrorAs(t, err, &pending)
+		})
+	}
+}
+
+func TestApprovalTimeoutKeepsConfirmedRejection(t *testing.T) {
+	for _, status := range []string{"denied", "rejected"} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"status":%q,"denial_code":"superseded_by_pause","work_session_paused":true}`, status)
+			}))
+			t.Cleanup(ts.Close)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			err := pendingApprovalAfterTimeout(ac, testPathID(t, "cmd-1"), EventDetails{Status: "awaiting_approval"}, &ClientTimeoutError{})
+			var rejected *CommandRejectedError
+			require.ErrorAs(t, err, &rejected)
+			assert.Equal(t, "superseded_by_pause", utils.StructuredErrorCode(err))
+			assert.Equal(t, "cmd-1", rejected.CommandID)
+			assert.True(t, rejected.WorkSessionPaused)
+			assert.Equal(t, utils.ExitCodeNotApproved, rejected.ExitCode())
+		})
+	}
+}
+
+func TestApprovalPollWithdrawsEarlierSuggestions(t *testing.T) {
+	for _, tc := range []struct{ name, field string }{
+		{"file", `,"file_execution_suggestion":{"path":"/opt/deploy.sh","interpreter":"/bin/bash"}`},
+		{"script body", `,"script_body_suggestion":{"signal":"embedded_script"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				var reads atomic.Int32
+				ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					switch reads.Add(1) {
+					case 1:
+						_, _ = fmt.Fprintf(w, `{"status":"awaiting_approval"%s}`, tc.field)
+					case 2:
+						_, _ = w.Write([]byte(`{"status":"awaiting_approval"}`))
+					default:
+						w.WriteHeader(http.StatusServiceUnavailable)
+					}
+				}))
+				t.Cleanup(ts.Close)
+				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+				seams, _ := fakePollClock()
+				id := testPathID(t, "cmd-1")
+				details, err := pollCommandExecution(ac, id, 3*time.Second, time.Second, true, seams)
+				var timeout *ClientTimeoutError
+				require.ErrorAs(t, err, &timeout)
+				err = pendingApprovalAfterTimeout(ac, id, details, err)
+				var pending *PendingApprovalError
+				require.ErrorAs(t, err, &pending)
+				assert.True(t, pending.HasCommandDetails())
+				assert.Nil(t, pending.FileSuggestion)
+				assert.Nil(t, pending.ScriptBodySuggestion)
+			})
+		})
+	}
+}
+
+func TestApprovalPollDeadlineCancelsAnInFlightRead(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		unblock := sync.OnceFunc(func() { close(release) })
+		defer unblock()
+		cancelled := make(chan struct{})
+		var reads atomic.Int32
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if reads.Add(1) == 1 {
+				_, _ = w.Write([]byte(`{"status":"awaiting_approval","work_session_paused":true}`))
+				return
+			}
+			select {
+			case <-r.Context().Done():
+				close(cancelled)
+			case <-release:
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}
+		}))
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		cmdID := testPathID(t, "cmd-1")
+		type result struct {
+			details EventDetails
+			err     error
+		}
+		done := make(chan result, 1)
+		go func() {
+			d, err := pollCommandExecution(ac, cmdID, time.Second, 100*time.Millisecond, true, pollSeams{})
+			done <- result{d, err}
+		}()
+		time.Sleep(2 * time.Second)
+		var got result
+		select {
+		case got = <-done:
+		default:
+			t.Error("the stalled poll exceeded the approval deadline")
+			unblock()
+			got = <-done
+		}
+		synctest.Wait()
+		var timeout *ClientTimeoutError
+		require.ErrorAs(t, got.err, &timeout)
+		assert.True(t, got.details.WorkSessionPaused)
+		select {
+		case <-cancelled:
+		default:
+			t.Error("the stalled poll request was not cancelled")
+		}
+	})
 }
 
 func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
@@ -528,39 +702,43 @@ func TestStreamApprovedCommand_ServerLookupFailureSkipsFinSubscription(t *testin
 
 func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 	t.Parallel()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Always fail GETs so SendGetRequest returns an error, and with a status
-		// that is not 429 so the poll loop never extends its deadline.
-		http.Error(w, "boom", http.StatusInternalServerError)
-	}))
-	defer ts.Close()
+	synctest.Test(t, func(t *testing.T) {
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Always fail GETs so SendGetRequest returns an error, and with a status
+			// that is not 429 so the poll loop never extends its deadline.
+			http.Error(w, "boom", http.StatusInternalServerError)
+		}))
+		defer ts.Close()
 
-	seams, delays := fakePollClock()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 10*time.Millisecond, false, seams)
-	require.Error(t, err)
+		seams, delays := fakePollClock()
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 10*time.Millisecond, false, seams)
+		require.Error(t, err)
 
-	var clientTimeout *ClientTimeoutError
-	require.ErrorAs(t, err, &clientTimeout, "deadline expiry must surface a client timeout")
-	assert.NotEmpty(t, delays(), "the loop must have waited on the fake clock before giving up")
+		var clientTimeout *ClientTimeoutError
+		require.ErrorAs(t, err, &clientTimeout, "deadline expiry must surface a client timeout")
+		assert.NotEmpty(t, delays(), "the loop must have waited on the fake clock before giving up")
+	})
 }
 
 func TestPollCommandExecution_StopsAfterMaxConsecutiveFailures(t *testing.T) {
 	t.Parallel()
-	var reqCount atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reqCount.Add(1)
-		http.Error(w, "boom", http.StatusInternalServerError)
-	}))
-	defer ts.Close()
-	seams, _ := fakePollClock()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	synctest.Test(t, func(t *testing.T) {
+		var reqCount atomic.Int32
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reqCount.Add(1)
+			http.Error(w, "boom", http.StatusInternalServerError)
+		}))
+		defer ts.Close()
+		seams, _ := fakePollClock()
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, 10*time.Millisecond, false, seams)
+		_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, 10*time.Millisecond, false, seams)
 
-	require.Error(t, err)
-	assert.Equal(t, int32(utils.MaxConsecutivePollFailures), reqCount.Load())
-	assert.Equal(t, http.StatusInternalServerError, utils.HTTPStatusCode(err))
+		require.Error(t, err)
+		assert.Equal(t, int32(utils.MaxConsecutivePollFailures), reqCount.Load())
+		assert.Equal(t, http.StatusInternalServerError, utils.HTTPStatusCode(err))
+	})
 }
 
 // An MFA refusal comes back typed, so a caller that runs the step-up itself can
@@ -579,23 +757,25 @@ func TestPollCommandExecution_StopsOnNonTransientError(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			var reqCount atomic.Int32
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				reqCount.Add(1)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(tc.status)
-				_, _ = w.Write([]byte(tc.body))
-			}))
-			defer ts.Close()
-			seams, _ := fakePollClock()
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			synctest.Test(t, func(t *testing.T) {
+				var reqCount atomic.Int32
+				ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					reqCount.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(tc.status)
+					_, _ = w.Write([]byte(tc.body))
+				}))
+				defer ts.Close()
+				seams, _ := fakePollClock()
+				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-			_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, 10*time.Millisecond, false, seams)
+				_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, 10*time.Millisecond, false, seams)
 
-			require.Error(t, err)
-			assert.Equal(t, int32(1), reqCount.Load())
-			assert.Equal(t, tc.status, utils.HTTPStatusCode(err))
-			assert.Equal(t, tc.code, utils.StructuredErrorCode(err))
+				require.Error(t, err)
+				assert.Equal(t, int32(1), reqCount.Load())
+				assert.Equal(t, tc.status, utils.HTTPStatusCode(err))
+				assert.Equal(t, tc.code, utils.StructuredErrorCode(err))
+			})
 		})
 	}
 }
@@ -604,63 +784,67 @@ func TestPollCommandExecution_StopsOnNonTransientError(t *testing.T) {
 // starts from the base tick, and they never count toward the failure cap.
 func TestPollCommandExecution_ThrottlesDoNotCountAsFailures(t *testing.T) {
 	t.Parallel()
-	const tick = 10 * time.Millisecond
-	reqCount := &atomic.Int32{}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		n := reqCount.Add(1)
-		switch {
-		case n <= 3:
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"detail": "Request was throttled."}`))
-		case n <= 3+utils.MaxConsecutivePollFailures-1:
-			http.Error(w, "boom", http.StatusInternalServerError)
-		default:
-			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "completed"})
-		}
-	}))
-	defer ts.Close()
-	seams, delays := fakePollClock()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	synctest.Test(t, func(t *testing.T) {
+		const tick = 10 * time.Millisecond
+		reqCount := &atomic.Int32{}
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			n := reqCount.Add(1)
+			switch {
+			case n <= 3:
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"detail": "Request was throttled."}`))
+			case n <= 3+utils.MaxConsecutivePollFailures-1:
+				http.Error(w, "boom", http.StatusInternalServerError)
+			default:
+				_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "completed"})
+			}
+		}))
+		defer ts.Close()
+		seams, delays := fakePollClock()
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, tick, false, seams)
+		resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, tick, false, seams)
 
-	require.NoError(t, err)
-	assert.Equal(t, "completed", resp.Status)
-	assert.Equal(t, []time.Duration{tick, tick, 2 * tick, 4 * tick, tick, 2 * tick, 4 * tick, 8 * tick}, delays())
+		require.NoError(t, err)
+		assert.Equal(t, "completed", resp.Status)
+		assert.Equal(t, []time.Duration{tick, tick, 2 * tick, 4 * tick, tick, 2 * tick, 4 * tick, 8 * tick}, delays())
+	})
 }
 
 // A throttle is no successful read, so it leaves a failure streak standing: a
 // reset here would let 500s and 429s alternate until the deadline.
 func TestPollCommandExecution_ThrottleKeepsTheFailureStreak(t *testing.T) {
 	t.Parallel()
-	reqCount := &atomic.Int32{}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if reqCount.Add(1)%2 == 0 {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"detail": "Request was throttled."}`))
-			return
-		}
-		http.Error(w, "boom", http.StatusInternalServerError)
-	}))
-	defer ts.Close()
-	seams, _ := fakePollClock()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	synctest.Test(t, func(t *testing.T) {
+		reqCount := &atomic.Int32{}
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if reqCount.Add(1)%2 == 0 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"detail": "Request was throttled."}`))
+				return
+			}
+			http.Error(w, "boom", http.StatusInternalServerError)
+		}))
+		defer ts.Close()
+		seams, _ := fakePollClock()
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, 10*time.Millisecond, false, seams)
+		_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, 10*time.Millisecond, false, seams)
 
-	require.Error(t, err)
-	assert.Equal(t, http.StatusInternalServerError, utils.HTTPStatusCode(err))
-	assert.Equal(t, int32(2*utils.MaxConsecutivePollFailures-1), reqCount.Load())
+		require.Error(t, err)
+		assert.Equal(t, http.StatusInternalServerError, utils.HTTPStatusCode(err))
+		assert.Equal(t, int32(2*utils.MaxConsecutivePollFailures-1), reqCount.Load())
+	})
 }
 
 // throttleServer replies 429 to the first throttled requests, then serves a
 // terminal status. The returned counter holds the requests it has seen.
-func throttleServer(t *testing.T, throttled int, retryAfter string) (*httptest.Server, *atomic.Int32) {
+func throttleServer(t *testing.T, throttled int, retryAfter string) (*testutil.PipeServer, *atomic.Int32) {
 	t.Helper()
 	reqCount := &atomic.Int32{}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if int(reqCount.Add(1)) <= throttled {
 			if retryAfter != "" {
@@ -675,21 +859,13 @@ func throttleServer(t *testing.T, throttled int, retryAfter string) (*httptest.S
 	return ts, reqCount
 }
 
-// fakePollClock returns seams that run the poll loop on a clock only its own
-// delays advance, and the delays it chose. Timing the loop instead would be flaky:
-// a slow machine stretches every wait, which makes a loop without backoff look
-// better-behaved than it is and can expire a deadline the loop meant to extend.
+// fakePollClock records waits on the synctest clock; call it only inside a bubble.
 func fakePollClock() (pollSeams, func() []time.Duration) {
-	now := time.Now()
 	var delays []time.Duration
 	seams := pollSeams{
-		now: func() time.Time { return now },
 		after: func(d time.Duration) <-chan time.Time {
 			delays = append(delays, d)
-			now = now.Add(d)
-			ch := make(chan time.Time, 1)
-			ch <- now
-			return ch
+			return time.After(d)
 		},
 	}
 	return seams, func() []time.Duration { return delays }
@@ -716,16 +892,18 @@ func TestPollCommandExecution_ThrottleBacksOff(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ts, _ := throttleServer(t, 4, tt.retryAfter)
-			defer ts.Close()
+			synctest.Test(t, func(t *testing.T) {
+				ts, _ := throttleServer(t, 4, tt.retryAfter)
+				defer ts.Close()
 
-			seams, delays := fakePollClock()
+				seams, delays := fakePollClock()
 
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, tick, false, seams)
-			require.NoError(t, err)
-			assert.Equal(t, "completed", resp.Status)
-			assert.Equal(t, tt.want, delays())
+				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+				resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, tick, false, seams)
+				require.NoError(t, err)
+				assert.Equal(t, "completed", resp.Status)
+				assert.Equal(t, tt.want, delays())
+			})
 		})
 	}
 }
@@ -734,69 +912,74 @@ func TestPollCommandExecution_ThrottleBacksOff(t *testing.T) {
 // with only its result GET throttled.
 func TestPollCommandExecution_ThrottleDoesNotStarveDeadline(t *testing.T) {
 	t.Parallel()
-	ts, reqCount := throttleServer(t, 1, "1")
-	defer ts.Close()
+	synctest.Test(t, func(t *testing.T) {
+		ts, reqCount := throttleServer(t, 1, "1")
+		defer ts.Close()
 
-	// The Retry-After wait (1s, capped to 60 ticks = 300ms) outlasts the 100ms
-	// deadline: reachable only if throttled time is not charged to it.
-	seams, delays := fakePollClock()
+		// The Retry-After wait (1s, capped to 60 ticks = 300ms) outlasts the 100ms
+		// deadline: reachable only if throttled time is not charged to it.
+		seams, delays := fakePollClock()
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 100*time.Millisecond, 5*time.Millisecond, false, seams)
-	require.NoError(t, err)
-	assert.Equal(t, "completed", resp.Status)
-	assert.Equal(t, int32(2), reqCount.Load(),
-		"the result must come from the retry after the throttled wait, not from retrying through it")
-	assert.Equal(t, []time.Duration{5 * time.Millisecond, 300 * time.Millisecond}, delays())
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 100*time.Millisecond, 5*time.Millisecond, false, seams)
+		require.NoError(t, err)
+		assert.Equal(t, "completed", resp.Status)
+		assert.Equal(t, int32(2), reqCount.Load(),
+			"the result must come from the retry after the throttled wait, not from retrying through it")
+		assert.Equal(t, []time.Duration{5 * time.Millisecond, 300 * time.Millisecond}, delays())
+	})
 }
 
 // Extending the deadline by exactly the wait keeps it ahead of the clock forever,
 // so the extension is capped: a token stuck over quota has to give up.
 func TestPollCommandExecution_ThrottleExtensionIsBoundedByDuration(t *testing.T) {
 	t.Parallel()
-	ts, reqCount := throttleServer(t, math.MaxInt, "1")
-	defer ts.Close()
+	synctest.Test(t, func(t *testing.T) {
+		ts, reqCount := throttleServer(t, math.MaxInt, "1")
+		defer ts.Close()
 
-	seams, delays := fakePollClock()
+		seams, delays := fakePollClock()
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 100*time.Millisecond, 5*time.Millisecond, false, seams)
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 100*time.Millisecond, 5*time.Millisecond, false, seams)
 
-	var clientTimeout *ClientTimeoutError
-	require.ErrorAs(t, err, &clientTimeout, "a permanently throttled poll must surface a client timeout")
-	// One 300ms extension spends the 100ms budget whole—the ceiling is the timeout plus
-	// one backoff wait, not the timeout. The second wait gets no extension and is cut
-	// to the 95ms left, so the timeout is reported at the deadline, not 300ms past it.
-	assert.Equal(t, int32(2), reqCount.Load())
-	assert.Equal(t, []time.Duration{5 * time.Millisecond, 300 * time.Millisecond, 95 * time.Millisecond}, delays())
+		var clientTimeout *ClientTimeoutError
+		require.ErrorAs(t, err, &clientTimeout, "a permanently throttled poll must surface a client timeout")
+		// The 300ms grant spends the whole budget. The next wait is capped at 95ms,
+		// so the deadline is timeout + one grant, not two full backoffs.
+		assert.Equal(t, int32(2), reqCount.Load())
+		assert.Equal(t, []time.Duration{5 * time.Millisecond, 300 * time.Millisecond, 95 * time.Millisecond}, delays())
+	})
 }
 
 // A duration budget alone is spent at the server's pace, so short mandated waits
 // would trade the whole extension for a request storm.
 func TestPollCommandExecution_ThrottleExtensionIsBoundedByCount(t *testing.T) {
 	t.Parallel()
-	ts, _ := throttleServer(t, math.MaxInt, "1")
-	defer ts.Close()
+	synctest.Test(t, func(t *testing.T) {
+		ts, _ := throttleServer(t, math.MaxInt, "1")
+		defer ts.Close()
 
-	// Retry-After 1s capped to 60 ticks = a 6ms wait, and a timeout worth 120 of them:
-	// the duration budget would grant twice what the count bound does.
-	const tick = 100 * time.Microsecond
-	const timeout = 720 * time.Millisecond
+		// Retry-After 1s capped to 60 ticks = a 6ms wait, and a timeout worth 120 of them:
+		// the duration budget would grant twice what the count bound does.
+		const tick = 100 * time.Microsecond
+		const timeout = 720 * time.Millisecond
 
-	seams, delays := fakePollClock()
+		seams, delays := fakePollClock()
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), timeout, tick, false, seams)
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), timeout, tick, false, seams)
 
-	var clientTimeout *ClientTimeoutError
-	require.ErrorAs(t, err, &clientTimeout, "a permanently throttled poll must surface a client timeout")
-	var elapsed time.Duration
-	for _, d := range delays() {
-		elapsed += d
-	}
-	// The loop never waits past its deadline, so the waits sum to it exactly.
-	assert.Equal(t, timeout+utils.PollMaxThrottleExtensions*(utils.PollMaxBackoffTick*tick), elapsed,
-		"the deadline must grow by the capped number of grants, not by the whole duration budget")
+		var clientTimeout *ClientTimeoutError
+		require.ErrorAs(t, err, &clientTimeout, "a permanently throttled poll must surface a client timeout")
+		var elapsed time.Duration
+		for _, d := range delays() {
+			elapsed += d
+		}
+		// The loop never waits past its deadline, so the waits sum to it exactly.
+		assert.Equal(t, timeout+utils.PollMaxThrottleExtensions*(utils.PollMaxBackoffTick*tick), elapsed,
+			"the deadline must grow by the capped number of grants, not by the whole duration budget")
+	})
 }
 
 // Reported progress refreshes the deadline, and the throttle allowance goes back
@@ -804,122 +987,128 @@ func TestPollCommandExecution_ThrottleExtensionIsBoundedByCount(t *testing.T) {
 // because an unrelated one early on spent the budget.
 func TestPollCommandExecution_ProgressRestoresThrottleAllowance(t *testing.T) {
 	t.Parallel()
-	reqCount := &atomic.Int32{}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch reqCount.Add(1) {
-		case 1, 3:
-			w.Header().Set("Retry-After", "1")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_ = json.NewEncoder(w).Encode(map[string]string{"detail": "Request was throttled."})
-		case 2:
-			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "running"})
-		default:
-			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "completed"})
-		}
-	}))
-	defer ts.Close()
+	synctest.Test(t, func(t *testing.T) {
+		reqCount := &atomic.Int32{}
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch reqCount.Add(1) {
+			case 1, 3:
+				w.Header().Set("Retry-After", "1")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_ = json.NewEncoder(w).Encode(map[string]string{"detail": "Request was throttled."})
+			case 2:
+				_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "running"})
+			default:
+				_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "completed"})
+			}
+		}))
+		defer ts.Close()
 
-	seams, delays := fakePollClock()
+		seams, delays := fakePollClock()
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 100*time.Millisecond, 5*time.Millisecond, false, seams)
-	require.NoError(t, err)
-	assert.Equal(t, "completed", resp.Status)
-	assert.Equal(t, int32(4), reqCount.Load())
-	assert.Equal(t, []time.Duration{
-		5 * time.Millisecond, 300 * time.Millisecond, 50 * time.Millisecond, 300 * time.Millisecond,
-	}, delays())
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 100*time.Millisecond, 5*time.Millisecond, false, seams)
+		require.NoError(t, err)
+		assert.Equal(t, "completed", resp.Status)
+		assert.Equal(t, int32(4), reqCount.Load())
+		assert.Equal(t, []time.Duration{
+			5 * time.Millisecond, 300 * time.Millisecond, 50 * time.Millisecond, 300 * time.Millisecond,
+		}, delays())
+	})
 }
 
 // The count belongs to the deadline it protects: held across a refresh, one early
 // stretch would leave a long command no grants for the next.
 func TestPollCommandExecution_ProgressRestoresThrottleExtensions(t *testing.T) {
 	t.Parallel()
-	const tick = 100 * time.Microsecond
-	// One timeout is worth exactly one round of capped grants, so a second round is
-	// only reachable through the reset.
-	const timeout = utils.PollMaxThrottleExtensions * (utils.PollMaxBackoffTick * tick)
+	synctest.Test(t, func(t *testing.T) {
+		const tick = 100 * time.Microsecond
+		// One timeout is worth exactly one round of capped grants, so a second round is
+		// only reachable through the reset.
+		const timeout = utils.PollMaxThrottleExtensions * (utils.PollMaxBackoffTick * tick)
 
-	reqCount := &atomic.Int32{}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if reqCount.Add(1) == utils.PollMaxThrottleExtensions+1 {
-			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "running"})
-			return
+		reqCount := &atomic.Int32{}
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if reqCount.Add(1) == utils.PollMaxThrottleExtensions+1 {
+				_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "running"})
+				return
+			}
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]string{"detail": "Request was throttled."})
+		}))
+		defer ts.Close()
+
+		seams, delays := fakePollClock()
+
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), timeout, tick, false, seams)
+
+		var clientTimeout *ClientTimeoutError
+		require.ErrorAs(t, err, &clientTimeout, "a permanently throttled poll must surface a client timeout")
+		var elapsed time.Duration
+		for _, d := range delays() {
+			elapsed += d
 		}
-		w.Header().Set("Retry-After", "1")
-		w.WriteHeader(http.StatusTooManyRequests)
-		_ = json.NewEncoder(w).Encode(map[string]string{"detail": "Request was throttled."})
-	}))
-	defer ts.Close()
-
-	seams, delays := fakePollClock()
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), timeout, tick, false, seams)
-
-	var clientTimeout *ClientTimeoutError
-	require.ErrorAs(t, err, &clientTimeout, "a permanently throttled poll must surface a client timeout")
-	var elapsed time.Duration
-	for _, d := range delays() {
-		elapsed += d
-	}
-	// One round of grants, then the refreshed deadline and the round it made room for:
-	// three timeouts on top of the first tick. Without the reset, two.
-	assert.Equal(t, tick+3*timeout, elapsed,
-		"the second throttled stretch must get its own grants back with the refreshed deadline")
+		// One round of grants, then the refreshed deadline and the round it made room for:
+		// three timeouts on top of the first tick. Without the reset, two.
+		assert.Equal(t, tick+3*timeout, elapsed,
+			"the second throttled stretch must get its own grants back with the refreshed deadline")
+	})
 }
 
 // The loop paces by how long the poll has been running, not by the gap since the
 // last poll—measured the latter way a command never leaves the fast window.
 func TestPollCommandExecution_PacingWidensWithPollAge(t *testing.T) {
 	t.Parallel()
-	tick := 10 * time.Millisecond
-	// The 21st request answers terminal, so the reply that earns the slow tick is
-	// still polled for.
-	const running = 20
+	synctest.Test(t, func(t *testing.T) {
+		tick := 10 * time.Millisecond
+		// The 21st request answers terminal, so the reply that earns the slow tick is
+		// still polled for.
+		const running = 20
 
-	reqCount := &atomic.Int32{}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		status := "completed"
-		if int(reqCount.Add(1)) <= running {
-			status = "running"
-		}
-		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: status})
-	}))
-	defer ts.Close()
+		reqCount := &atomic.Int32{}
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			status := "completed"
+			if int(reqCount.Add(1)) <= running {
+				status = "running"
+			}
+			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: status})
+		}))
+		defer ts.Close()
 
-	seams, delays := fakePollClock()
+		seams, delays := fakePollClock()
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Hour, tick, false, seams)
-	require.NoError(t, err)
-	assert.Equal(t, "completed", resp.Status)
-	assert.Equal(t, slices.Concat(
-		slices.Repeat([]time.Duration{tick}, 10),
-		slices.Repeat([]time.Duration{5 * tick}, 10),
-		[]time.Duration{10 * tick},
-	), delays())
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Hour, tick, false, seams)
+		require.NoError(t, err)
+		assert.Equal(t, "completed", resp.Status)
+		assert.Equal(t, slices.Concat(
+			slices.Repeat([]time.Duration{tick}, 10),
+			slices.Repeat([]time.Duration{5 * tick}, 10),
+			[]time.Duration{10 * tick},
+		), delays())
+	})
 }
 
 func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
 	t.Parallel()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "completed"})
-	}))
-	defer ts.Close()
+	synctest.Test(t, func(t *testing.T) {
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "completed"})
+		}))
+		defer ts.Close()
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	// A fake clock, or the deadline is real time: the loop sleeps a tick before it
-	// checks, and a scheduling hiccup longer than the timeout times the poll out
-	// before it ever sends a request.
-	seams, _ := fakePollClock()
-	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 5*time.Millisecond, false, seams)
-	require.NoError(t, err)
-	assert.Equal(t, "completed", resp.Status)
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		// Keep request deadlines off wall time as well as poll pacing.
+		seams, _ := fakePollClock()
+		resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 5*time.Millisecond, false, seams)
+		require.NoError(t, err)
+		assert.Equal(t, "completed", resp.Status)
+	})
 }
 
 // A cancelled poll is the stream's only way to stop one it no longer reads. A cancel

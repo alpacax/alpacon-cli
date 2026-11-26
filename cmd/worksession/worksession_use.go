@@ -103,6 +103,9 @@ func RunUseSession(ac *client.AlpaconClient, uuid string) (*wsapi.WorkSession, e
 	if err != nil {
 		return nil, err
 	}
+	if err := pausedSessionError(ac, ws); err != nil {
+		return nil, err
+	}
 	if ws.Status != wsapi.StatusActive {
 		return nil, fmt.Errorf("work-session %s is in '%s' state and cannot be used", ws.ID, ws.Status)
 	}

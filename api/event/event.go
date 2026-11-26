@@ -1,6 +1,7 @@
 package event
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +19,8 @@ import (
 )
 
 const (
-	getEventURL = "/api/events/commands/"
+	getEventURL            = "/api/events/commands/"
+	approvalRefreshTimeout = time.Second
 
 	// Base tick utils.NextPollTick widens, for the poll behind a stream that may
 	// have lost the fin.
@@ -348,7 +350,11 @@ func GetCommandByID(ac *client.AlpaconClient, cmdID string) (EventDetails, error
 }
 
 func getCommandByPathID(ac *client.AlpaconClient, pathID api.PathID) (EventDetails, error) {
-	responseBody, err := ac.SendGetRequest(api.IDURL(getEventURL, pathID, "", nil))
+	return getCommandByPathIDWithContext(context.Background(), ac, pathID)
+}
+
+func getCommandByPathIDWithContext(ctx context.Context, ac *client.AlpaconClient, pathID api.PathID) (EventDetails, error) {
+	responseBody, err := ac.SendGetRequestWithContext(ctx, api.IDURL(getEventURL, pathID, "", nil))
 	if err != nil {
 		return EventDetails{}, err
 	}
@@ -438,7 +444,13 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 			return response, &ClientTimeoutError{hint: lastRefusalHint}
 		}
 
-		responseBody, err := ac.SendGetRequest(api.IDURL(getEventURL, pathID, "", nil))
+		ctx, cancel := context.WithTimeout(context.Background(), deadline.Sub(seams.Now()))
+		responseBody, err := ac.SendGetRequestWithContext(ctx, api.IDURL(getEventURL, pathID, "", nil))
+		timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
+		cancel()
+		if err != nil && timedOut {
+			return response, &ClientTimeoutError{hint: lastRefusalHint}
+		}
 		lastRefusalHint = ""
 		switch {
 		case err != nil && !utils.IsTransientRequestError(err):
@@ -466,9 +478,11 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 			continue
 		}
 		failures, throttles = 0, 0
-		if err = json.Unmarshal(responseBody, &response); err != nil {
+		var current EventDetails
+		if err = json.Unmarshal(responseBody, &current); err != nil {
 			return response, err
 		}
+		response = current
 
 		if IsRunningStatus(response.Status) {
 			deadline = seams.Now().Add(timeout)
@@ -591,7 +605,7 @@ func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer
 	listener.Start()
 	if !listener.WaitConnected(commandOutputConnectTimeout) {
 		listener.Stop()
-		return runCommandFallbackFromID(ac, pathID, out, CommandPollTick, true, listenerFailure(listener))
+		return runCommandFallbackWithin(ac, pathID, out, timeout, CommandPollTick, true, listenerFailure(listener))
 	}
 	// The fin event targets the server, which only the command itself names here.
 	// A failed read just skips the subscription; the poll still ends the run.
@@ -618,7 +632,7 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 	commandID := cmdID.String()
 	if err := listener.subscribeTo(commandID, serverID); err != nil {
 		listener.Stop()
-		return runCommandFallbackFromID(ac, cmdID, out, CommandPollTick, waitApproval, err)
+		return runCommandFallbackWithin(ac, cmdID, out, timeout, CommandPollTick, waitApproval, err)
 	}
 
 	// Warm-fire: write chunks already persisted, advancing lastSeq only over contiguous
@@ -639,6 +653,7 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 
 	pollResult := make(chan EventDetails, 1)
 	pollErr := make(chan error, 1)
+	var polledDetails EventDetails
 	// The poll ends when this function does: an exit on the fin event would
 	// otherwise leave it polling a command that is already over.
 	pollCancel := make(chan struct{})
@@ -651,6 +666,7 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 		switch {
 		case errors.Is(err, errPollCancelled): // the stream is gone; nobody reads these
 		case err != nil:
+			polledDetails = details
 			pollErr <- err
 		default:
 			pollResult <- details
@@ -710,18 +726,7 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 			// instead of surfacing a generic client timeout.
 			var timeout *ClientTimeoutError
 			if waitApproval && errors.As(err, &timeout) {
-				pending := &PendingApprovalError{CommandID: commandID}
-				// One more read, best effort, so the timed-out wait carries the
-				// same file suggestion a run without --wait prints.
-				if details, err := getCommandByPathID(ac, cmdID); err == nil {
-					pending.Username = details.Username
-					pending.FileSuggestion = details.FileExecutionSuggestion
-					pending.ScriptBodySuggestion = details.ScriptBodySuggestion
-					pending.ConsoleURL = details.ConsoleURL
-					pending.WorkSessionID = details.WorkSessionID()
-					pending.ApprovalLane = details.ApprovalLane
-				}
-				return pending
+				return pendingApprovalAfterTimeout(ac, cmdID, polledDetails, err)
 			}
 			return commandPollError(cmdID, err)
 		}
@@ -842,7 +847,7 @@ func errorFromDetails(id api.PathID, d EventDetails) error {
 		return &AwaitingPurposeError{CommandID: id.String(), ExpiresAt: d.PurposeExpiresAt}
 	}
 	if IsAwaitingApprovalStatus(d.Status) {
-		return &PendingApprovalError{Username: d.Username, CommandID: id.String(), FileSuggestion: d.FileExecutionSuggestion, ScriptBodySuggestion: d.ScriptBodySuggestion, ConsoleURL: d.ConsoleURL, WorkSessionID: d.WorkSessionID(), ApprovalLane: d.ApprovalLane}
+		return pendingApprovalFromDetails(id, d)
 	}
 	if d.IsRejected() {
 		rejected := d.Rejection()
@@ -921,9 +926,49 @@ func runCommandFallback(ac *client.AlpaconClient, submit commandSubmitter, out i
 // resubmitting it, and writes its output to out. waitApproval keeps the poll
 // blocking through an awaiting_approval hold.
 func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID api.PathID, out io.Writer, tick time.Duration, waitApproval bool, cause error) error {
+	return runCommandFallbackWithin(ac, cmdID, out, execTimeout(), tick, waitApproval, cause)
+}
+
+func pendingApprovalAfterTimeout(ac *client.AlpaconClient, cmdID api.PathID, details EventDetails, timeout error) error {
+	known := details.Status != ""
+	ctx, cancel := context.WithTimeout(context.Background(), approvalRefreshTimeout)
+	defer cancel()
+	// Refresh the metadata even when the wait ended before its first poll.
+	if refreshed, err := getCommandByPathIDWithContext(ctx, ac, cmdID); err == nil {
+		details, known = refreshed, true
+	}
+	if known && !IsAwaitingApprovalStatus(details.Status) {
+		if details.IsRejected() {
+			return errorFromDetails(cmdID, details)
+		}
+		return commandPollError(cmdID, timeout)
+	}
+	return pendingApprovalFromDetails(cmdID, details)
+}
+
+func pendingApprovalFromDetails(cmdID api.PathID, details EventDetails) *PendingApprovalError {
+	return &PendingApprovalError{
+		CommandID:            cmdID.String(),
+		Username:             details.Username,
+		FileSuggestion:       details.FileExecutionSuggestion,
+		ScriptBodySuggestion: details.ScriptBodySuggestion,
+		ConsoleURL:           details.ConsoleURL,
+		WorkSessionID:        details.WorkSessionID(),
+		WorkSessionStatus:    details.WorkSessionStatus(),
+		ApprovalLane:         details.ApprovalLane,
+		WorkSessionPaused:    details.WorkSessionPaused,
+		commandDetailsKnown:  details.Status != "",
+	}
+}
+
+func runCommandFallbackWithin(ac *client.AlpaconClient, cmdID api.PathID, out io.Writer, timeout, tick time.Duration, waitApproval bool, cause error) error {
 	utils.CliWarning("real-time output unavailable (%v); falling back to polling", cause)
-	details, err := pollCommandExecution(ac, cmdID, execTimeout(), tick, waitApproval, pollSeams{})
+	details, err := pollCommandExecution(ac, cmdID, timeout, tick, waitApproval, pollSeams{})
 	if err != nil {
+		var timedOut *ClientTimeoutError
+		if waitApproval && errors.As(err, &timedOut) {
+			return pendingApprovalAfterTimeout(ac, cmdID, details, err)
+		}
 		return commandPollError(cmdID, err)
 	}
 	if IsDeniedStatus(details.Status) {

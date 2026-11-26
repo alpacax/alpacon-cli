@@ -12,6 +12,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/mfa"
+	apiworksession "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/pkg/localsignal"
@@ -598,9 +599,8 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 		}
 	}()
 
-	// Status-hold: the server parked this job at awaiting_approval (it never ran).
-	// With --wait, resubscribe to the same job and stream once approved instead of
-	// re-submitting; without --wait, surface it for pendingApprovalFailure.
+	// A status hold never ran. Follow the same job with --wait to avoid submitting
+	// it twice; without --wait, let pendingApprovalFailure report it.
 	var pendingErr *event.PendingApprovalError
 	if errors.As(err, &pendingErr) {
 		if waitTimeout <= 0 {
@@ -612,12 +612,26 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 		if pendingErr.AssigneeConfirms() {
 			waiting = "Waiting for your confirmation in the Alpacon web console (output streams once confirmed)..."
 		}
+		if pendingErr.WorkSessionStatus == apiworksession.StatusPaused {
+			action := "approval"
+			if pendingErr.AssigneeConfirms() {
+				action = "your confirmation"
+			}
+			waiting = fmt.Sprintf("Waiting for %s in the Alpacon web console; an authorized person must also use Resume on the paused work session...", action)
+		} else if apiworksession.IsEndedStatus(pendingErr.WorkSessionStatus) {
+			waiting = "Waiting for the command's final status; its work session has ended and the command cannot run in that session..."
+		}
 		spinner := utils.NewSpinner(waiting)
 		spinner.Start()
 		defer spinner.Stop()
 		// The wait is inside the stream call, so the spinner has to survive it—
 		// StopWriter retires it the moment the approved command's output starts.
-		return streamApprovedCommand(ac, pendingErr.CommandID, spinner.StopWriter(out), waitTimeout)
+		streamErr := streamApprovedCommand(ac, pendingErr.CommandID, spinner.StopWriter(out), waitTimeout)
+		var stillPending *event.PendingApprovalError
+		if errors.As(streamErr, &stillPending) {
+			mergePendingApprovalMetadata(stillPending, pendingErr)
+		}
+		return streamErr
 	}
 
 	if waitTimeout <= 0 || !isApprovalDenial(ios, err) {
@@ -822,7 +836,6 @@ func purposeDemandFailure(ios *utils.IOStreams, err error) error {
 // (fileSuggestionAction), or, when the server sent none and says the line carries a script
 // body, the --upload --file template (scriptBodyAction).
 func pendingApprovalFailure(ios *utils.IOStreams, stderr io.Writer, err error, parsed RemoteExecArgs) error {
-	// Status-hold: held job runs automatically once approved, so point at exec logs.
 	var pendingErr *event.PendingApprovalError
 	if errors.As(err, &pendingErr) {
 		utils.SignalApprovalPending(err, commandSignalFields(err, parsed))
@@ -842,9 +855,11 @@ func pendingApprovalFailure(ios *utils.IOStreams, stderr io.Writer, err error, p
 				"Confirm or reject it in the Alpacon web console through the console link. " +
 				"It runs automatically once confirmed; pass --wait (or --wait-approval DURATION for a longer wait) to block until then."
 		}
-		ios.PrintPendingApproval(
+		message = withSessionResumeGuidance(message, pendingErr)
+		ios.PrintPendingApprovalWithError(
 			message,
 			"", // the command detail carries no approval request id
+			pendingErr,
 			utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", pendingErr.CommandID)},
 			extra...,
 		)
@@ -876,6 +891,46 @@ func pendingApprovalFailure(ios *utils.IOStreams, stderr io.Writer, err error, p
 		utils.RefusalNextActions(err)...,
 	)
 	return utils.NewSilentExitError(utils.ExitCodePendingApproval)
+}
+
+func mergePendingApprovalMetadata(latest, known *event.PendingApprovalError) {
+	latest.WorkSessionPaused = latest.WorkSessionPaused || known.WorkSessionPaused
+	if latest.WorkSessionID == "" {
+		latest.WorkSessionID = known.WorkSessionID
+	}
+	if latest.WorkSessionStatus == "" {
+		latest.WorkSessionStatus = known.WorkSessionStatus
+	}
+	if latest.ConsoleURL == "" {
+		latest.ConsoleURL = known.ConsoleURL
+	}
+	if latest.ApprovalLane == "" {
+		latest.ApprovalLane = known.ApprovalLane
+	}
+	if !latest.HasCommandDetails() && latest.FileSuggestion == nil && latest.ScriptBodySuggestion == nil {
+		latest.FileSuggestion = known.FileSuggestion
+		latest.ScriptBodySuggestion = known.ScriptBodySuggestion
+	}
+}
+
+func withSessionResumeGuidance(message string, pending *event.PendingApprovalError) string {
+	status := pending.WorkSessionStatus
+	if apiworksession.IsEndedStatus(status) {
+		return fmt.Sprintf("Command held—the work session has ended (%s). This command cannot run in that session. Check the command and work session in the Alpacon web console.", status)
+	}
+	if status != "paused" && (status != "" || !pending.WorkSessionPaused) {
+		return message
+	}
+	lead := "Approval required—this command is held for human approval in the Alpacon web console. "
+	if pending.AssigneeConfirms() {
+		lead = "Confirmation required—this command is held for your own confirmation as the session's assignee, not for an approver. "
+	}
+	if status == "paused" {
+		return lead + "The work session is paused. Approval or confirmation alone will not run this command; " +
+			"an authorized person must also use Resume in the Alpacon web console."
+	}
+	return lead + "Approval or confirmation alone will not run this command while the work session is paused. " +
+		"If it is still paused, an authorized person must use Resume in the Alpacon web console."
 }
 
 // RunCommandWithRetry streams a command and handles submission retries on one event stream.

@@ -127,10 +127,11 @@ func (e *CommandPollError) Unwrap() error { return e.Err }
 // console before it runs. CommandID identifies the parked job so a --wait caller can
 // poll it; re-submitting would create a duplicate command and approval request.
 type PendingApprovalError struct {
-	Username      string
-	ConsoleURL    string
-	WorkSessionID string
-	CommandID     string
+	Username          string
+	ConsoleURL        string
+	WorkSessionID     string
+	WorkSessionStatus string
+	CommandID         string
 	// FileSuggestion is the server's proposal to run the held command as a
 	// verified file instead; nil when the server made none.
 	FileSuggestion *FileExecutionSuggestion
@@ -140,6 +141,9 @@ type PendingApprovalError struct {
 	// ApprovalLane is the server's approval_lane: who decides the open request.
 	// Empty on an older server.
 	ApprovalLane string
+	// WorkSessionPaused says this hold paused its work session.
+	WorkSessionPaused   bool
+	commandDetailsKnown bool
 }
 
 // ApprovalLaneAssignee is the approval_lane of a held command whose
@@ -154,6 +158,9 @@ func (e *PendingApprovalError) AssigneeConfirms() bool {
 
 // LocalSignalAssignee lets the pending-approval signal word itself for the assignee.
 func (e *PendingApprovalError) LocalSignalAssignee() bool { return e.AssigneeConfirms() }
+
+// HasCommandDetails reports whether this result includes a successful command detail read.
+func (e *PendingApprovalError) HasCommandDetails() bool { return e.commandDetailsKnown }
 
 // FileExecutionSuggestion is a held command line the server recognized as a
 // script on the target, restated as a verified file: the script's path, its
@@ -260,11 +267,18 @@ type EventDetails struct {
 	Username    string              `json:"username"`
 	Groupname   string              `json:"groupname"`
 	WorkSession *CommandWorkSession `json:"work_session"`
+	// WorkSessionPaused marks the denial or hold that paused its work session.
+	// FlatWorkSessionID is the flat work_session_id the server sends beside
+	// it. Both are absent otherwise and on an older server. Read the session
+	// through WorkSessionID, never from either session field directly.
+	WorkSessionPaused bool   `json:"work_session_paused"`
+	FlatWorkSessionID string `json:"work_session_id"`
 }
 
 // CommandWorkSession is the work session a command detail names.
 type CommandWorkSession struct {
-	ID string `json:"id"`
+	ID     string `json:"id"`
+	Status string `json:"status,omitempty"`
 }
 
 type CommandRequest struct {
@@ -471,8 +485,15 @@ func (e *CommandRejectedError) RejectedCommand() bool {
 	return !utils.IsApprovalLapse(e.ErrorCode())
 }
 func (e *CommandRejectedError) ErrorGate() string { return e.Gate }
+
+// TriggeredPause reports that this hold paused its work session.
+func (e *PendingApprovalError) TriggeredPause() bool { return e.WorkSessionPaused }
+
+// CurrentWorkSessionStatus reports the latest known state, separate from the pause trigger.
+func (e *PendingApprovalError) CurrentWorkSessionStatus() string { return e.WorkSessionStatus }
+
 func (e *PendingApprovalError) ErrorFields() map[string]any {
-	if e.ConsoleURL == "" && e.WorkSessionID == "" {
+	if e.ConsoleURL == "" && e.WorkSessionID == "" && !e.WorkSessionPaused {
 		return nil
 	}
 	fields := make(map[string]any)
@@ -482,11 +503,25 @@ func (e *PendingApprovalError) ErrorFields() map[string]any {
 	if e.WorkSessionID != "" {
 		fields["work_session_id"] = e.WorkSessionID
 	}
+	if e.WorkSessionPaused {
+		fields["work_session_paused"] = true
+	}
 	return fields
 }
+
+// WorkSessionID is the one reader of the work session a detail names: the
+// nested work_session, else the flat work_session_id of a pause trigger.
 func (d EventDetails) WorkSessionID() string {
-	if d.WorkSession != nil {
+	if d.WorkSession != nil && d.WorkSession.ID != "" {
 		return d.WorkSession.ID
+	}
+	return d.FlatWorkSessionID
+}
+
+// WorkSessionStatus reads the current session status, empty when the server sends none.
+func (d EventDetails) WorkSessionStatus() string {
+	if d.WorkSession != nil {
+		return d.WorkSession.Status
 	}
 	return ""
 }
