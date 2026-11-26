@@ -1164,6 +1164,10 @@ func TestShellWordReturnsOnlyAWordEveryShellReadsBackUnchanged(t *testing.T) {
 		{name: "invisible_letter", value: "rootㅤ"},
 		{name: "non_ascii_letter", value: "jörg"},
 		{name: "control_character", value: "root\nx"},
+		{name: "leading_dash_powershell_reads_as_its_own_token", value: "--%"},
+		{name: "leading_dash", value: "-u"},
+		{name: "double_quote_powershell_5_1_strips", value: `dev"ops`},
+		{name: "backslash_powershell_5_1_rewrites_before_a_quote", value: `dev ops\`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

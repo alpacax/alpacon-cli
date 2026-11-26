@@ -172,6 +172,7 @@ func TestUploadResumeStepKeepsTheGroupTheEditWroteAs(t *testing.T) {
 	}{
 		{name: "plain group", group: "deploy", want: " and -g deploy "},
 		{name: "group a shell would split", group: "dev ops", want: " and -g 'dev ops' "},
+		{name: "group no shell reads back unchanged", group: "développeurs", want: " and the -g group the edit used "},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

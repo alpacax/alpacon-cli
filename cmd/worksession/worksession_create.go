@@ -656,11 +656,15 @@ func afterApprovalAction(requesterType, id, accountGuidance string) utils.NextAc
 	return utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", id), Description: "after approval" + accountGuidance}
 }
 
-// accountRunGuidance tells the user to run command as the account a session was created for.
+// accountRunGuidance tells the user to run command as the account a session was created for;
+// an account ShellWord cannot render is named by role, so the reminder survives.
 func accountRunGuidance(command, account string) string {
+	if account == "" {
+		return ""
+	}
 	quoted, ok := ShellWord(account)
 	if !ok {
-		return ""
+		return fmt.Sprintf("run %s with -u set to the account the session was created for", command)
 	}
 	return fmt.Sprintf("run %s with -u %s, the account the session was created for", command, quoted)
 }
@@ -670,10 +674,10 @@ func printableASCII(value string) bool {
 	return !strings.ContainsFunc(value, func(r rune) bool { return r < ' ' || r > '~' })
 }
 
-// ShellWord returns value as one word POSIX shells and PowerShell both read back unchanged; ok is false
-// for an empty value, a single quote, or anything outside printable ASCII, which no quoting serves in both.
+// ShellWord returns value as one word POSIX shells and PowerShell 5.1 and 7 all pass on unchanged; ok is
+// false for an empty or non-printable-ASCII value, a quote or backslash, and a leading dash (pwsh drops '--%').
 func ShellWord(value string) (quoted string, ok bool) {
-	if value == "" || !printableASCII(value) || strings.ContainsRune(value, '\'') {
+	if value == "" || value[0] == '-' || !printableASCII(value) || strings.ContainsAny(value, `'"\`) {
 		return "", false
 	}
 	if value[0] != '@' && strings.Trim(value, bareShellChars) == "" { // a leading @ splats in PowerShell

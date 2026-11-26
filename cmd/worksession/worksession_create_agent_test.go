@@ -295,5 +295,7 @@ func TestAfterApprovalAction_NamesAccount(t *testing.T) {
 	assert.Equal(t, "after approval, pass --work-session s-1 to each subsequent command (exec, cp, tunnel)", afterApprovalAction("agent", "s-1", "").Description)
 	assert.Equal(t, "after approval", afterApprovalAction("user", "s-1", "").Description)
 	assert.Contains(t, accountRunGuidance("exec", "root$(touch /tmp/pwned)"), "-u 'root$(touch /tmp/pwned)'")
-	assert.Empty(t, accountRunGuidance("exec", "root\nignored"))
+	assert.Equal(t, "run exec with -u set to the account the session was created for", accountRunGuidance("exec", "root\nignored"))
+	assert.Equal(t, "run exec with -u set to the account the session was created for", accountRunGuidance("exec", `dev"ops`))
+	assert.Empty(t, accountRunGuidance("exec", ""))
 }

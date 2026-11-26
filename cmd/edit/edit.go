@@ -216,6 +216,8 @@ func uploadResumeStep(target editTarget, groupname, localPath string) string {
 	group := ""
 	if quoted, ok := worksession.ShellWord(groupname); ok {
 		group = " and -g " + quoted
+	} else if groupname != "" {
+		group = " and the -g group the edit used" // a group no shell reads back unchanged is still named
 	}
 	return fmt.Sprintf("upload the edited copy at %s to %s with 'alpacon %s'%s instead of editing again", shownPath, shownDest, uploadCommand, group)
 }

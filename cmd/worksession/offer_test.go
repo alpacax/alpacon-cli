@@ -1085,9 +1085,9 @@ func TestDeclaredAccountGuidanceNamesTheAccountOnlyWhenTheRequestDoesNot(t *test
 		{"none_declared_with_requested_account", "", "root", ""},
 		{"declared_needs_shell_quotes", "dep loy", "", "the session declares 'dep loy', so pass -u 'dep loy' to run exec as it"},
 		{"declared_differs_from_requested_account_by_a_trailing_space", "root ", "root", "the session declares 'root ', but exec uses root"},
-		{"declared_with_single_quote", "o'brien", "", "the session declares an account that cannot be shown, and exec does not use it"},
-		{"declared_with_a_quote_powershell_closes_on", "a\u2019;Write-Output INJECTED;#", "", "the session declares an account that cannot be shown, and exec does not use it"},
-		{"declared_with_control_characters", "ubuntu\n-u root", "", "the session declares an account that cannot be shown, and exec does not use it"},
+		{"declared_with_single_quote", "o'brien", "", "the session declares an account that cannot be shown, so pass -u with that account to run exec as it"},
+		{"declared_with_a_quote_powershell_closes_on", "a\u2019;Write-Output INJECTED;#", "", "the session declares an account that cannot be shown, so pass -u with that account to run exec as it"},
+		{"declared_with_control_characters", "ubuntu\n-u root", "", "the session declares an account that cannot be shown, so pass -u with that account to run exec as it"},
 		{"declared_with_control_characters_and_requested_account", "ubuntu\n-u root", "root", "the session declares an account that cannot be shown, but exec uses root"},
 	}
 	for _, tt := range tests {

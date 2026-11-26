@@ -257,7 +257,7 @@ func declaredAccountGuidance(command, declared, requested string) string {
 	case requested == "" && ok:
 		return fmt.Sprintf("the session declares %s, so pass -u %s to run %s as it", shown, quoted, command)
 	case requested == "":
-		return fmt.Sprintf("the session declares %s, and %s does not use it", shown, command)
+		return fmt.Sprintf("the session declares %s, so pass -u with that account to run %s as it", shown, command)
 	}
 	if asked, ok := ShellWord(requested); ok {
 		return fmt.Sprintf("the session declares %s, but %s uses %s", shown, command, asked)
