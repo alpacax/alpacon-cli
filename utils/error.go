@@ -238,6 +238,10 @@ const (
 	// under --output json when a command is parked awaiting its purpose.
 	PurposeRequiredStatus = "purpose_required"
 
+	// CommandRunningStatus is the stable machine-readable status string `exec logs` emits under
+	// --output json for a command that has not finished. It exits 0: nothing failed or is held.
+	CommandRunningStatus = "running"
+
 	// ExitCodeUpdateAvailable is the process exit code for `alpacon update --check` finding a newer
 	// release; a failed check exits ExitCodeGeneralError instead.
 	ExitCodeUpdateAvailable = 8
