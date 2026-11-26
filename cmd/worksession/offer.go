@@ -234,10 +234,10 @@ func reusePrompt(session *wsapi.WorkSession, wait bool, account string) string {
 	return fmt.Sprintf("Use WorkSession %s (%s)?", id, strings.Join(details, "; "))
 }
 
-// promptAccount shows account as it is, or says it cannot be shown when the terminal would alter it.
+// promptAccount shows account as it is when it is printable ASCII, or says it cannot be shown.
 func promptAccount(account string) string {
-	if clean, altered := utils.SanitizeTerminalLine(account); !altered {
-		return clean
+	if printableASCII(account) {
+		return account
 	}
 	return "(cannot be shown)"
 }
@@ -249,7 +249,7 @@ func declaredAccountGuidance(command, declared, requested string) string {
 		return ""
 	}
 	quoted, ok := ShellWord(declared)
-	shown := declared
+	shown := quoted // as the -u word reads, so a space or quote shows
 	if !ok {
 		shown = "an account that cannot be shown"
 	}

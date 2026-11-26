@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/api/server"
@@ -37,6 +36,8 @@ const (
 	useDecisionSettled
 	useDecisionUnknownStatus
 )
+
+const bareShellChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.@-"
 
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh", ScopeKube, ScopeKubeExec}
 
@@ -664,19 +665,21 @@ func accountRunGuidance(command, account string) string {
 	return fmt.Sprintf("run %s with -u %s, the account the session was created for", command, quoted)
 }
 
-// ShellWord returns value as one word a shell reads back unchanged, quoting it when needed; ok is
-// false for an empty value or one with control characters.
+// printableASCII reports whether value is printable ASCII, which every terminal shows as written.
+func printableASCII(value string) bool {
+	return !strings.ContainsFunc(value, func(r rune) bool { return r < ' ' || r > '~' })
+}
+
+// ShellWord returns value as one word POSIX shells and PowerShell both read back unchanged; ok is false
+// for an empty value, a single quote, or anything outside printable ASCII, which no quoting serves in both.
 func ShellWord(value string) (quoted string, ok bool) {
-	clean, altered := utils.SanitizeTerminalLine(value)
-	if altered || clean == "" {
+	if value == "" || !printableASCII(value) || strings.ContainsRune(value, '\'') {
 		return "", false
 	}
-	if !strings.ContainsFunc(clean, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("_.@-", r)
-	}) {
-		return clean, true
+	if value[0] != '@' && strings.Trim(value, bareShellChars) == "" { // a leading @ splats in PowerShell
+		return value, true
 	}
-	return "'" + strings.ReplaceAll(clean, "'", "'\"'\"'") + "'", true
+	return "'" + value + "'", true
 }
 
 // KubeLoginAction is the follow-up for a cluster session: 'kube login' opens

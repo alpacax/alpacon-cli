@@ -345,6 +345,7 @@ func TestReusePromptNamesTheAccountTheSessionDeclares(t *testing.T) {
 		{"declared_without_request", "deploy", "", "declared account: deploy", "requested account"},
 		{"declared_with_control_characters", "dep\x1b[31mloy\nx", "", "declared account: (cannot be shown)", "\x1b"},
 		{"requested_differs_only_by_a_format_character", "root", "ro\u200bot", "declared account: root; requested account: (cannot be shown)", "cannot be checked"},
+		{"declared_with_an_invisible_letter", "root\u3164", "", "declared account: (cannot be shown)", "\u3164"},
 		{"none_declared_none_requested", "", "", "status: active", "account"},
 	}
 	for _, tt := range tests {
@@ -1064,8 +1065,10 @@ func TestDeclaredAccountGuidanceNamesTheAccountOnlyWhenTheRequestDoesNot(t *test
 		{"requested_with_control_characters", "ubuntu", "root\nx", "the session declares ubuntu, not the account exec uses"},
 		{"none_declared", "", "", ""},
 		{"none_declared_with_requested_account", "", "root", ""},
-		{"declared_needs_shell_quotes", "dep loy", "", "the session declares dep loy, so pass -u 'dep loy' to run exec as it"},
-		{"declared_with_single_quote", "o'brien", "", `the session declares o'brien, so pass -u 'o'"'"'brien' to run exec as it`},
+		{"declared_needs_shell_quotes", "dep loy", "", "the session declares 'dep loy', so pass -u 'dep loy' to run exec as it"},
+		{"declared_differs_from_requested_account_by_a_trailing_space", "root ", "root", "the session declares 'root ', but exec uses root"},
+		{"declared_with_single_quote", "o'brien", "", "the session declares an account that cannot be shown, and exec does not use it"},
+		{"declared_with_a_quote_powershell_closes_on", "a\u2019;Write-Output INJECTED;#", "", "the session declares an account that cannot be shown, and exec does not use it"},
 		{"declared_with_control_characters", "ubuntu\n-u root", "", "the session declares an account that cannot be shown, and exec does not use it"},
 		{"declared_with_control_characters_and_requested_account", "ubuntu\n-u root", "root", "the session declares an account that cannot be shown, but exec uses root"},
 	}
