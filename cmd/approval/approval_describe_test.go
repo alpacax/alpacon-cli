@@ -814,7 +814,7 @@ func TestDescribeKubeRequestRows(t *testing.T) {
 	fields := rowMap(rows)
 
 	localTime := func(minute int) string {
-		return time.Date(2030, time.January, 1, 9, minute, 0, 0, time.UTC).Local().Format("2006-01-02 15:04")
+		return time.Date(2030, time.January, 1, 9, minute, 0, 0, time.UTC).Local().Format("2006-01-02 15:04:05 -07:00")
 	}
 	assert.Equal(t, "deploy-agent (agent)", fields["Requested by"])
 	assert.Equal(t, "Scale web (active, 3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47)", fields["Work session"])
@@ -840,6 +840,23 @@ func TestDescribeKubeRequestRows(t *testing.T) {
 	}, rows[heading+1:])
 }
 
+func TestDescribeKubeExpiryPrecision(t *testing.T) {
+	t.Parallel()
+	for _, second := range []int{1, 59} {
+		t.Run(fmt.Sprintf("second %02d", second), func(t *testing.T) {
+			t.Parallel()
+			deadline := time.Date(2030, time.January, 1, 9, 15, second, 0, time.UTC)
+			timestamp := deadline.Format(time.RFC3339)
+			req := decodeFixture(t, fmt.Sprintf(`{"decision_deadline":%q,"kube_request":{"grant_expires_at":%q}}`, timestamp, timestamp))
+
+			fields := rowMap(describeRows(req, nil))
+			want := deadline.Local().Format("2006-01-02 15:04:05 -07:00")
+			assert.Equal(t, want, fields["Expires at"])
+			assert.Equal(t, want, fields["Grant expires at"])
+		})
+	}
+}
+
 func TestDescribePartialKubeRequestRows(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -849,8 +866,18 @@ func TestDescribePartialKubeRequestRows(t *testing.T) {
 	}{
 		{
 			name: "collection with unknown body kind",
-			kube: `{"resource":"nodes","api_version":"v1","verb":"delete","cluster":{"id":"cluster-id"}}`,
+			kube: `{"resource":"nodes","api_version":"v1","verb":"delete","cluster":{"id":"cluster-id"},"namespace":"","name":""}`,
 			rows: []describeRow{{"  Cluster", "cluster-id"}, {"  Namespace", "(none)"}, {"  Action", "delete"}, {"  Target", "nodes (collection)"}, {"  API version", "v1"}},
+		},
+		{
+			name: "omitted namespace and name",
+			kube: `{"resource":"deployments","api_group":"apps"}`,
+			rows: []describeRow{{"  Target", "deployments.apps"}},
+		},
+		{
+			name: "null namespace and name",
+			kube: `{"resource":"nodes","namespace":null,"name":null}`,
+			rows: []describeRow{{"  Target", "nodes"}},
 		},
 		{
 			name: "whole object and sanitized cluster name",
@@ -891,7 +918,7 @@ func TestDescribeRequesterKindsAndDeadline(t *testing.T) {
 			fields := rowMap(describeRows(req, nil))
 			assert.Equal(t, tt.want, fields["Requested by"])
 			assert.Equal(t, "reviewer", fields["Reviewed by"])
-			assert.Equal(t, time.Date(2030, time.January, 1, 9, 10, 0, 0, time.UTC).Local().Format("2006-01-02 15:04"), fields["Expires at"])
+			assert.Equal(t, time.Date(2030, time.January, 1, 9, 10, 0, 0, time.UTC).Local().Format("2006-01-02 15:04:05 -07:00"), fields["Expires at"])
 			assert.NotContains(t, fields, "Kubernetes request")
 		})
 	}

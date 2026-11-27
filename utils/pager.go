@@ -19,7 +19,7 @@ import (
 //   - If stdout is not a terminal (e.g. piped), prints directly to stdout.
 //   - If the output fits within the terminal height, prints directly to stdout.
 //   - Otherwise, pipes through the PAGER environment variable or "less -RSX".
-//   - Falls back to direct stdout if the pager command is not available.
+//   - Falls back to direct stdout if the pager fails before reading any output.
 func WriteToPager() (io.Writer, func()) {
 	writer, flush := writeToStdoutPager()
 	return writer, func() { _ = flush() }
@@ -79,15 +79,34 @@ func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.Fil
 			cmd = exec.Command(lessPath, "-RSX")
 		}
 
-		cmd.Stdin = bytes.NewReader(output)
+		stdin, pipeWriter, err := os.Pipe()
+		if err != nil {
+			return writeDirect()
+		}
+		defer func() { _ = stdin.Close() }()
+
+		cmd.Stdin = stdin
 		cmd.Stdout = stdout
 		cmd.Stderr = StderrForChild()
 
 		if err := cmd.Start(); err != nil {
+			_ = pipeWriter.Close()
 			return writeDirect()
 		}
-		// The pager may have displayed output even if it exits nonzero.
-		_ = cmd.Wait()
+		written := make(chan int64, 1)
+		go func() {
+			n, _ := io.Copy(pipeWriter, bytes.NewReader(output))
+			_ = pipeWriter.Close()
+			written <- n
+		}()
+
+		waitErr := cmd.Wait()
+		// Drain the pipe so the writer can finish even when the pager exits
+		// early. Subtract unread bytes to count what the pager consumed.
+		unread, _ := io.Copy(io.Discard, stdin)
+		if consumed := <-written - unread; waitErr != nil && consumed == 0 {
+			return writeDirect()
+		}
 		lastOutputPaged.Store(true)
 		return nil
 	}

@@ -35,8 +35,8 @@ type KubeRequest struct {
 	APIVersion  string               `json:"api_version"`
 	Resource    string               `json:"resource"`
 	Subresource string               `json:"subresource"`
-	Namespace   string               `json:"namespace"`
-	Name        string               `json:"name"`
+	Namespace   *string              `json:"namespace"`
+	Name        *string              `json:"name"`
 	Query       map[string][]string  `json:"query"`
 	ContentType string               `json:"content_type"`
 	// IsChange identifies a change set. It is nil when the response omits the field.

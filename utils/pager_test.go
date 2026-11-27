@@ -91,8 +91,9 @@ func TestWriteToPager_RecordsWhetherAPagerRan(t *testing.T) {
 		want   bool
 	}{
 		{name: "a pager that runs", pager: "cat", height: 5, want: true},
-		// cat copies stdin before failing to read the current directory.
-		{name: "a pager that exits nonzero after printing", pager: "cat - .", height: 5, want: true},
+		// The shell expands ${IFS} inside the script passed as a single -c argument.
+		{name: "a pager that exits nonzero without reading", pager: "sh -c exit${IFS}3", height: 5, want: false},
+		{name: "a pager that exits nonzero after printing", pager: "sh -c cat;exit${IFS}3", height: 5, want: true},
 		{name: "a pager that cannot start falls back to stdout", pager: "alpacon-no-such-pager", height: 5, want: false},
 		{name: "output that fits is not paged", pager: "cat", height: 100, want: false},
 	}

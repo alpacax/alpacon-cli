@@ -13,7 +13,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const describeTimeLayout = "2006-01-02 15:04"
+const (
+	describeTimeLayout   = "2006-01-02 15:04"
+	describeExpiryLayout = "2006-01-02 15:04:05 -07:00"
+)
 
 type describeRow struct {
 	Field string `table:"Field"`
@@ -172,7 +175,7 @@ func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecutio
 		{"Added at", req.AddedAt.Local().Format(describeTimeLayout)},
 	}
 	if req.DecisionDeadline != nil {
-		rows = append(rows, describeRow{"Expires at", req.DecisionDeadline.Local().Format(describeTimeLayout)})
+		rows = append(rows, describeRow{"Expires at", req.DecisionDeadline.Local().Format(describeExpiryLayout)})
 	}
 	if note := utils.SanitizeTerminalOneLine(req.RejectionNote); note != "" {
 		// The approver's own words, stripped of terminal escapes like any server value.
@@ -206,11 +209,13 @@ func kubeRequestRows(kr *approvalapi.KubeRequest) []describeRow {
 	}
 	add("Cluster", cluster)
 
-	namespace, resource := clean(kr.Namespace), clean(kr.Resource)
-	if namespace == "" && resource != "" {
-		namespace = "(none)"
+	if kr.Namespace != nil {
+		namespace := clean(*kr.Namespace)
+		if *kr.Namespace == "" {
+			namespace = "(none)"
+		}
+		add("Namespace", namespace)
 	}
-	add("Namespace", namespace)
 
 	action, subresource := clean(kr.Verb), clean(kr.Subresource)
 	if action != "" && subresource != "" {
@@ -219,12 +224,14 @@ func kubeRequestRows(kr *approvalapi.KubeRequest) []describeRow {
 	add("Action", action)
 
 	group := clean(kr.APIGroup)
-	if resource != "" {
+	if resource := clean(kr.Resource); resource != "" {
 		target := joinNonEmpty([]string{resource, group}, ".")
-		if name := clean(kr.Name); name != "" {
-			target = joinNonEmpty([]string{target, name, subresource}, "/")
-		} else {
-			target += " (collection)"
+		if kr.Name != nil {
+			if *kr.Name == "" {
+				target += " (collection)"
+			} else if name := clean(*kr.Name); name != "" {
+				target = joinNonEmpty([]string{target, name, subresource}, "/")
+			}
 		}
 		add("Target", target)
 	}
@@ -240,7 +247,7 @@ func kubeRequestRows(kr *approvalapi.KubeRequest) []describeRow {
 	}
 	add("Body kind", kind)
 	if kr.GrantExpiresAt != nil {
-		add("Grant expires at", kr.GrantExpiresAt.Local().Format(describeTimeLayout))
+		add("Grant expires at", kr.GrantExpiresAt.Local().Format(describeExpiryLayout))
 	}
 	add("Kube session", clean(kr.SessionID))
 	return rows
