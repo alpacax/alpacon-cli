@@ -175,7 +175,7 @@ func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecutio
 		{"Added at", req.AddedAt.Local().Format(describeTimeLayout)},
 	}
 	if req.DecisionDeadline != nil {
-		rows = append(rows, describeRow{"Expires at", req.DecisionDeadline.Local().Format(describeExpiryLayout)})
+		rows = append(rows, describeRow{"Request expires at", req.DecisionDeadline.Local().Format(describeExpiryLayout)})
 	}
 	if note := utils.SanitizeTerminalOneLine(req.RejectionNote); note != "" {
 		// The approver's own words, stripped of terminal escapes like any server value.

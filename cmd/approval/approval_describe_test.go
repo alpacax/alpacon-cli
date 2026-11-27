@@ -822,7 +822,7 @@ func TestDescribeKubeRequestRows(t *testing.T) {
 	addedAt := slices.IndexFunc(rows, func(row describeRow) bool { return row.Field == "Added at" })
 	require.GreaterOrEqual(t, addedAt, 0)
 	require.Greater(t, len(rows), addedAt+1)
-	assert.Equal(t, describeRow{"Expires at", localTime(10)}, rows[addedAt+1])
+	assert.Equal(t, describeRow{"Request expires at", localTime(10)}, rows[addedAt+1])
 
 	heading := slices.Index(rows, describeRow{"Kubernetes request", ""})
 	require.GreaterOrEqual(t, heading, 0)
@@ -851,7 +851,7 @@ func TestDescribeKubeExpiryPrecision(t *testing.T) {
 
 			fields := rowMap(describeRows(req, nil))
 			want := deadline.Local().Format("2006-01-02 15:04:05 -07:00")
-			assert.Equal(t, want, fields["Expires at"])
+			assert.Equal(t, want, fields["Request expires at"])
 			assert.Equal(t, want, fields["Grant expires at"])
 		})
 	}
@@ -918,7 +918,7 @@ func TestDescribeRequesterKindsAndDeadline(t *testing.T) {
 			fields := rowMap(describeRows(req, nil))
 			assert.Equal(t, tt.want, fields["Requested by"])
 			assert.Equal(t, "reviewer", fields["Reviewed by"])
-			assert.Equal(t, time.Date(2030, time.January, 1, 9, 10, 0, 0, time.UTC).Local().Format("2006-01-02 15:04:05 -07:00"), fields["Expires at"])
+			assert.Equal(t, time.Date(2030, time.January, 1, 9, 10, 0, 0, time.UTC).Local().Format("2006-01-02 15:04:05 -07:00"), fields["Request expires at"])
 			assert.NotContains(t, fields, "Kubernetes request")
 		})
 	}
