@@ -28,10 +28,10 @@ command is still in progress, {"status":"pending_approval", ...} with exit 4,
 and {"status":"purpose_required", ...} with exit 7. So exit 0 with a running
 object means not finished, and exit 0 with anything else, an empty stdout
 included, is the finished command's output—unless that output is itself such
-an object. A command that failed with a remote exit status exits with it and ends
-stderr with an error envelope carrying remote_exit_code. One that ends stuck,
-error or cancelled, or reports no exit status, exits 1 with no
-remote_exit_code.`,
+an object. A command that failed with a remote exit status exits with it; one
+that ends stuck, error or cancelled, or reports no exit status, exits 1.
+Either way stderr ends with an error envelope, which carries remote_exit_code
+whenever the server reported an exit status.`,
 		Example: `  alpacon exec logs 550e8400-e29b-41d4-a716-446655440000`,
 		Args:    cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
