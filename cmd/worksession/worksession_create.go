@@ -63,58 +63,31 @@ func newWorkSessionCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cob
 		Short: "Create a new work session",
 		Long: `Create a new work session.
 
-The session purpose is what the assessor judges each command against. An agent
-should pass --purpose with each command, which skips the purpose demand entirely.
+Without a terminal, --purpose, --scope, --server (or --cluster) and --expires-in
+or --expires-at are required. The assessor judges each command against the
+purpose; an agent should also pass --purpose on each exec, which skips the
+purpose demand.
 
-Set the session lifetime with --expires-in (relative, e.g. 2h) or --expires-at
-(absolute RFC3339); one is required in non-interactive mode.
-
-Pass --wait to block until the session is approved, for 5 minutes by default.
---wait-approval DURATION does the same with a different timeout and implies --wait.
-Both work for user and agent sessions alike.
-
-Pass --use to set the new session as the workspace's active session. On its own,
---use attaches only sessions that are already active. Add --wait or
---wait-approval DURATION to wait for the active state and then attach the session.
-Subsequent exec/websh/cp/tunnel commands use the attached session without
---work-session. --use is for user sessions only.
-
-If the work needs sudo, pre-declare the command patterns with --sudo, each written
-without the leading sudo: "systemctl restart nginx" matches
-'sudo systemctl restart nginx', and a pattern that begins with sudo is refused. This attaches
-session-authorized sudo policies so a non-interactive caller (e.g. an AI agent
-running 'exec') can run matching sudo commands inside the approved work session
-without an MFA prompt. --sudo adds the 'sudo' scope to the scopes --scope names,
-so '--scope command --sudo ...' requests both; it does not replace --scope, which
-a run without a terminal still requires. The policies are submitted for approval
-together with the session. If a sudo command is later denied, add it to the
-session with 'alpacon work-session update <id> --sudo "<command without sudo>"'.
+--sudo pre-declares sudo command patterns, so a caller with no terminal (e.g. an
+AI agent running 'exec') can run matching sudo commands in the approved session
+without an MFA prompt. Write each without the leading sudo: "systemctl restart
+nginx" matches 'sudo systemctl restart nginx', and a pattern that begins with
+sudo is refused. --sudo adds 'sudo' to the scopes --scope names and does not
+replace --scope. If a sudo command is later denied, add it with
+'alpacon work-session update <id> --sudo "<command without sudo>"'.
 
 When an AI agent drives the CLI, the session is an agent session. The CLI detects
-Claude Code, Codex, Gemini CLI, GitHub Copilot, Cursor, Cline, and Goose from the
-environment variables they set in the shells they run, and names the agent on every
-request. For an agent the CLI does not detect (for example Aider), set
-AI_AGENT=<name> in the agent's environment. --requester-type agent opens an agent
-session without naming an agent; --requester-type user is refused while an agent is
-detected.
+Claude Code, Codex, Gemini CLI, GitHub Copilot, Cursor, Cline, and Goose; for any
+other agent, set AI_AGENT=<name>. An agent session refuses --use and the websh
+scope and runs only as the --account it names. Pass --work-session SESSION_ID
+before the server on each command: 'alpacon exec --work-session SESSION_ID
+web-01 -- uptime'.
 
-An agent session refuses --use and the websh scope, so pass --work-session SESSION_ID
-before the server on each command instead, as in 'alpacon exec --work-session
-SESSION_ID web-01 -- uptime'.
-
-Pass --account to name the account the work runs as on the servers (for example
-root), so the approver sees it with the request; the approver can change it. An
-agent session runs only as that account. A user session runs as it only when a
-later command names it with -u <account> (for example 'alpacon exec -u root
-web-01 -- uptime').
-
-To reach a Kubernetes cluster, target it with --cluster instead of --server. A
-cluster session holds the kube scope, and kube_exec on top of it for exec,
-attach and port-forward into pods; it takes no other scope, no --account and no
---sudo. Open it with 'alpacon kube login CLUSTER --work-session SESSION_ID', or
-let 'alpacon kube login CLUSTER' create the session itself. An agent session
-cannot hold kube_exec, and a cluster session is never set as the active one, so
---use is refused with --cluster.`,
+--cluster targets a Kubernetes cluster instead of servers. A cluster session takes
+only the kube and kube_exec scopes (kube_exec for exec, attach and port-forward;
+not for an agent session) and refuses --account, --sudo and --use. Open it with
+'alpacon kube login CLUSTER --work-session SESSION_ID', or let 'alpacon kube login
+CLUSTER' create the session itself.`,
 		Example: `  alpacon work-session create --scope command,websh --server web-01 --expires-in 2h --purpose "restart nginx on web-01 to clear 502s"
   alpacon work-session create --scope command --server web-01,db-01 --expires-at 2027-01-15T10:00:00Z --purpose "deploy" --wait
   alpacon work-session create --scope command --server web-01 --expires-in 1h --purpose "hotfix" --use
