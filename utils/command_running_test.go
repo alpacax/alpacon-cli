@@ -1,9 +1,11 @@
 package utils
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPrintCommandRunningWritesStatusObjectUnderJSON(t *testing.T) {
@@ -13,7 +15,7 @@ func TestPrintCommandRunningWritesStatusObjectUnderJSON(t *testing.T) {
 	_ = ios.SetOutputFormat(OutputFormatJSON)
 
 	// When
-	ios.PrintCommandRunning("job-1", "queued")
+	err := ios.PrintCommandRunning("job-1", "queued")
 
 	// Then
 	assert.JSONEq(t, `{
@@ -26,6 +28,7 @@ func TestPrintCommandRunningWritesStatusObjectUnderJSON(t *testing.T) {
 		"next_actions": [{"command": "alpacon exec logs job-1", "description": "Read the result once the command finishes; do not re-submit it"}]
 	}`, out.String())
 	assert.Empty(t, errOut.String())
+	assert.NoError(t, err)
 }
 
 func TestPrintCommandRunningStripsServerControlTextInBothFormats(t *testing.T) {
@@ -52,7 +55,7 @@ func TestPrintCommandRunningStripsServerControlTextInBothFormats(t *testing.T) {
 			_ = ios.SetOutputFormat(tt.format)
 
 			// When
-			ios.PrintCommandRunning("job-1\x1b[2K\u202e", "run\x1b[31mning")
+			err := ios.PrintCommandRunning("job-1\x1b[2K\u202e", "run\x1b[31mning")
 
 			// Then
 			if tt.wantOut == "" {
@@ -61,6 +64,27 @@ func TestPrintCommandRunningStripsServerControlTextInBothFormats(t *testing.T) {
 				assert.JSONEq(t, tt.wantOut, out.String())
 			}
 			assert.Equal(t, tt.wantErr, errOut.String())
+			assert.NoError(t, err)
 		})
 	}
+}
+
+type refusingWriter struct{}
+
+func (refusingWriter) Write([]byte) (int, error) { return 0, errors.New("stdout closed") }
+
+func TestPrintCommandRunningReportsAStdoutThatTakesNothing(t *testing.T) {
+	t.Parallel()
+	// Given
+	ios, _, errOut := TestIOStreams()
+	_ = ios.SetOutputFormat(OutputFormatJSON)
+	ios.Out = refusingWriter{}
+
+	// When
+	err := ios.PrintCommandRunning("job-1", "running")
+
+	// Then
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stdout closed")
+	assert.Empty(t, errOut.String())
 }

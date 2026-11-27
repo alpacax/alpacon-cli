@@ -142,7 +142,9 @@ an error envelope carrying remote_exit_code.`,
 			}
 
 			if event.IsRunningStatus(details.Status) {
-				ios.PrintCommandRunning(jobID, details.Status)
+				if err := ios.PrintCommandRunning(jobID, details.Status); err != nil {
+					return utils.NewExitError("%s", err)
+				}
 				return nil
 			}
 

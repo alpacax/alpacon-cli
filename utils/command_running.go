@@ -22,8 +22,9 @@ type commandRunningJSON struct {
 
 // PrintCommandRunning reports a command that has not finished: a {"status":"running", ...}
 // envelope on stdout under --output json, else the status and a check-later line on stderr.
-// It never exits; the caller keeps exit 0.
-func (s *IOStreams) PrintCommandRunning(commandID, status string) {
+// It returns an error only when stdout took neither the envelope nor its fallback, since
+// exit 0 with an empty stdout would read as a finished command with no output.
+func (s *IOStreams) PrintCommandRunning(commandID, status string) error {
 	// Both are server-supplied and reach the terminal.
 	commandID = SanitizeTerminalText(commandID)
 	status = SanitizeTerminalText(status)
@@ -44,10 +45,13 @@ func (s *IOStreams) PrintCommandRunning(commandID, status string) {
 		}
 		if err := PrintJSONValue(s.Out, envelope); err != nil {
 			// Fall back to a minimal object that still carries the status field.
-			_, _ = fmt.Fprintf(s.Out, `{"ok":true,"status":%q}`+"\n", CommandRunningStatus)
+			if _, ferr := fmt.Fprintf(s.Out, `{"ok":true,"status":%q}`+"\n", CommandRunningStatus); ferr != nil {
+				return fmt.Errorf("write the running status: %w", ferr)
+			}
 		}
-		return
+		return nil
 	}
 
 	_, _ = fmt.Fprintf(s.ErrOut, "command is still running (status: %s).\nRun `%s` again to check later.\n", status, retry)
+	return nil
 }
