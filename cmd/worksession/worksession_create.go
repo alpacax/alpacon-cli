@@ -73,8 +73,8 @@ AI agent running 'exec') can run matching sudo commands in the approved session
 without an MFA prompt. Write each without the leading sudo: "systemctl restart
 nginx" matches 'sudo systemctl restart nginx', and a pattern that begins with
 sudo is refused. --sudo adds 'sudo' to the scopes --scope names and does not
-replace --scope. If a sudo command is later denied, add it with
-'alpacon work-session update <id> --sudo "<command without sudo>"'.
+replace --scope. If a sudo command is later denied, the denial names the
+'alpacon work-session update' that covers it.
 
 When an AI agent drives the CLI, the session is an agent session. The CLI detects
 Claude Code, Codex, Gemini CLI, GitHub Copilot, Cursor, Cline, and Goose; for any
