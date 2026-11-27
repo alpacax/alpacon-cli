@@ -457,6 +457,13 @@ func TestExecLogsTellsRunningFromFinishedWithNoOutput(t *testing.T) {
 			wantStdout:   runningObject("queued"),
 		},
 		{
+			name:         "running under json names the requested ID, not the one the server returned",
+			body:         `{"id":"x; rm -rf ~","status":"running"}`,
+			json:         true,
+			stdoutIsJSON: true,
+			wantStdout:   runningObject("running"),
+		},
+		{
 			name:         "running with a stated purpose keeps the purpose on stderr under json",
 			body:         `{"id":"` + jobID + `","status":"running","purpose":"inspect service"}`,
 			json:         true,

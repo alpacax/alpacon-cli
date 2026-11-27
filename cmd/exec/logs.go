@@ -71,7 +71,7 @@ an error envelope carrying remote_exit_code.`,
 			// detach path's only sight of the demand: SubmitCommand returns before the verdict.
 			if event.IsAwaitingPurposeStatus(details.Status) {
 				ios.PrintPurposeDemand(
-					utils.PurposeDemandLead, details.ID, details.PurposeExpiresAt,
+					utils.PurposeDemandLead, jobID, details.PurposeExpiresAt,
 				)
 				return utils.NewSilentExitError(utils.ExitCodePurposeRequired)
 			}
@@ -84,7 +84,7 @@ an error envelope carrying remote_exit_code.`,
 					fields.Session = details.WorkSession.ID
 				}
 				utils.EmitLocalSignal(localsignal.ApprovalPending, fields, alpaconClient)
-				requestID, lookupErr := approval.FindCommandApprovalRequestID(alpaconClient, details.ID)
+				requestID, lookupErr := approval.FindCommandApprovalRequestID(alpaconClient, jobID)
 				if lookupErr != nil {
 					ios.Warning("failed to read approval request: %s", lookupErr)
 				}
@@ -101,7 +101,7 @@ an error envelope carrying remote_exit_code.`,
 					message,
 					requestID,
 					pending,
-					utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", details.ID)},
+					utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", jobID)},
 				)
 				return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 			}
@@ -142,7 +142,7 @@ an error envelope carrying remote_exit_code.`,
 			}
 
 			if event.IsRunningStatus(details.Status) {
-				ios.PrintCommandRunning(details.ID, details.Status)
+				ios.PrintCommandRunning(jobID, details.Status)
 				return nil
 			}
 
