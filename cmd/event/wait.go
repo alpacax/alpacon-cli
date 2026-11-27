@@ -15,6 +15,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var waitAgainAction = utils.NextAction{Description: "run the same command again to keep waiting, or raise --timeout"}
+
 func newWaitCommand(newClient func() (*client.AlpaconClient, error), ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "wait",
@@ -144,20 +146,18 @@ func runWait(ios *utils.IOStreams, cmd *cobra.Command, newClient func() (*client
 		return utils.NewEnvelopeExitError(opWait, err, "%s.", strip(err.Error()))
 	}
 
-	// PrintPendingApproval, not CliError: exit 4 owes a machine consumer the
-	// pending_approval envelope under --output json, the same as every other surface
-	// that returns it. No retry action: unlike exec's and create's, the only retry here
-	// is the invocation the consumer just ran, so naming it back carries nothing.
+	// PrintPendingApprovalAwaiting, not CliError: exit 4 owes --output json the pending_approval envelope.
+	// The wait is this invocation again, so it is named in prose; event wait has no --wait to suggest.
 	switch outcome {
 	case eventapi.OutcomeTimeout:
-		ios.PrintPendingApproval(
+		ios.PrintPendingApprovalAwaiting(
 			fmt.Sprintf("Timed out after %s with no matching %s event. The outcome is still open.", timeout, displayType),
-			"", utils.NextAction{})
+			"", waitAgainAction, utils.NextAction{})
 		return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 	case eventapi.OutcomeCanceled:
-		ios.PrintPendingApproval(
+		ios.PrintPendingApprovalAwaiting(
 			fmt.Sprintf("Interrupted before a matching %s event arrived. The outcome is still open.", displayType),
-			"", utils.NextAction{})
+			"", waitAgainAction, utils.NextAction{})
 		return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 	}
 

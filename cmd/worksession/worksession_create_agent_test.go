@@ -211,6 +211,8 @@ func newCreateServerAnswering(t *testing.T, createStatus, pollStatus string) *ht
 // An agent session cannot be attached with 'work-session use', so the
 // follow-up for a pending agent session names --work-session <ID> instead,
 // whether the agent was detected or declared and whether or not it waited.
+// Either way the first action waits on the session that exists, since
+// re-running create with --wait would file a second one.
 func TestWorkSessionCreate_PendingFollowUpMatchesRequesterType(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -249,6 +251,10 @@ func TestWorkSessionCreate_PendingFollowUpMatchesRequesterType(t *testing.T) {
 					assert.Equal(t, utils.PendingApprovalStatus, envelope.Status)
 					require.NotEmpty(t, envelope.NextActions)
 					assert.Equal(t, utils.NextAction{
+						Command:     "alpacon event wait --type work_session --target ses-x --timeout 10m",
+						Description: "block until the session is decided: exit 0 approved (use it once it is active), 6 not approved, 4 no decision before the timeout (run it again)",
+					}, envelope.NextActions[0])
+					assert.Equal(t, utils.NextAction{
 						Command:     "alpacon work-session update ses-x --server <server,...>",
 						Description: "add servers to this session; include every server to keep (--server replaces the whole list); an added server may need approval",
 					}, envelope.NextActions[len(envelope.NextActions)-1])
@@ -258,7 +264,9 @@ func TestWorkSessionCreate_PendingFollowUpMatchesRequesterType(t *testing.T) {
 				} else {
 					assert.Contains(t, stderr, "  alpacon work-session update ses-x --server <server,...>  # add servers to this session; include every server to keep (--server replaces the whole list); an added server may need approval\n")
 					assert.Less(t, strings.Index(stderr, "Approve it out of band"), strings.Index(stderr, "alpacon work-session update"))
+					assert.Contains(t, stderr, "  alpacon event wait --type work_session --target ses-x --timeout 10m  # block until the session is decided: exit 0 approved (use it once it is active), 6 not approved, 4 no decision before the timeout (run it again)\n")
 				}
+				assert.NotContains(t, guidance, "on the original command")
 				assert.Contains(t, guidance, tt.want)
 				assert.NotContains(t, guidance, tt.notWant)
 			})

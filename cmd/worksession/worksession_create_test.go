@@ -983,7 +983,8 @@ func TestWorkSessionCreateUseOnAPendingSessionReportsPendingApproval(t *testing.
 				assert.Contains(t, stderr, "--use requires the session to be active, and work session ses-x is pending. A human must approve it in the Alpacon console (web).")
 				assert.Contains(t, stderr, "alpacon work-session use ses-x")
 				assert.Contains(t, stderr, "alpacon work-session update ses-x --server <server,...>")
-				assert.Equal(t, 1, strings.Count(stderr, "--wait-approval"), "stderr: %s", stderr)
+				assert.Contains(t, stderr, "  alpacon event wait --type work_session --target ses-x --timeout 10m  # block until the session is decided: exit 0 approved (use it once it is active), 6 not approved, 4 no decision before the timeout (run it again)\n")
+				assert.NotContains(t, stderr, "on the original command")
 				return
 			}
 			var envelope struct {
@@ -1007,7 +1008,12 @@ func TestWorkSessionCreateUseOnAPendingSessionReportsPendingApproval(t *testing.
 			for _, action := range envelope.NextActions {
 				commands = append(commands, action.Command)
 			}
-			assert.Equal(t, []string{"alpacon work-session use ses-x", "", "alpacon work-session update ses-x --server <server,...>"}, commands)
+			assert.Equal(t, []string{
+				"alpacon event wait --type work_session --target ses-x --timeout 10m",
+				"alpacon work-session use ses-x",
+				"",
+				"alpacon work-session update ses-x --server <server,...>",
+			}, commands)
 		})
 	}
 }
@@ -1112,7 +1118,7 @@ func TestWaitExitErrorReturnsTheExitInsteadOfTakingIt(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			ios, _, errOut := utils.TestIOStreams()
-			err := WaitExitError(ios, opCreate, session, utils.NextAction{}, tc.err)
+			err := WaitExitError(ios, opCreate, session, utils.NextAction{}, utils.NextAction{}, tc.err)
 			stderr := errOut.String()
 
 			var exitErr *utils.ExitError
@@ -1266,4 +1272,34 @@ func createExampleArgs(t *testing.T, example string) [][]string {
 		out = append(out, args)
 	}
 	return out
+}
+
+func TestEventWaitAction_QuotesTheIDOrDropsTheCommand(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		id   string
+		want utils.NextAction
+	}{
+		{"plain uuid", "550e8400-e29b-41d4-a716-446655440000", utils.NextAction{
+			Command:     "alpacon event wait --type work_session --target 550e8400-e29b-41d4-a716-446655440000 --timeout 10m",
+			Description: "block until the session is decided: exit 0 approved (use it once it is active), 6 not approved, 4 no decision before the timeout (run it again)",
+		}},
+		{"shell metacharacters are quoted", "a b$(x)", utils.NextAction{
+			Command:     "alpacon event wait --type work_session --target 'a b$(x)' --timeout 10m",
+			Description: "block until the session is decided: exit 0 approved (use it once it is active), 6 not approved, 4 no decision before the timeout (run it again)",
+		}},
+		{"a quote leaves no command", `a'b`, utils.NextAction{
+			Description: "wait for the decision in the Alpacon console; running create again would file a second session",
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := eventWaitAction(tt.id)
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }

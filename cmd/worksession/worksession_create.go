@@ -68,6 +68,11 @@ or --expires-at are required. The assessor judges each command against the
 purpose; an agent should also pass --purpose on each exec, which skips the
 purpose demand.
 
+Without --wait, create returns once the session exists and prints its ID, so a
+caller can report the ID before blocking; wait on that session later with
+'alpacon event wait --type work_session --target SESSION_ID'. Running create
+again with --wait would file a second session.
+
 --sudo pre-declares sudo command patterns, so a caller with no terminal (e.g. an
 AI agent running 'exec') can run matching sudo commands in the approved session
 without an MFA prompt. Write each without the leading sudo: "systemctl restart
@@ -93,8 +98,9 @@ CLUSTER' create the session itself.`,
   alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "deploy" --wait --use
   alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "deploy" --wait-approval 30m --use
 
-  # AI agent: no --use and no websh scope; name the session on each command instead
-  alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "auto-remediate disk-full alert on web-01: rotate logs, restart rsyslog" --requester-type agent --wait
+  # AI agent: no --use and no websh scope; take the ID first, wait on it, then name it on each command
+  alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "auto-remediate disk-full alert on web-01: rotate logs, restart rsyslog" --requester-type agent
+  alpacon event wait --type work_session --target 550e8400-e29b-41d4-a716-446655440000 --timeout 10m
   alpacon exec --work-session 550e8400-e29b-41d4-a716-446655440000 web-01 -- df -h
   alpacon work-session create --scope command,sudo --server web-01 --expires-in 1h --purpose "restart nginx" --account root
 
@@ -314,7 +320,7 @@ CLUSTER' create the session itself.`,
 				}
 			case useDecisionNeedsApproval:
 				if !shouldWait {
-					return pendingExitError(ios, session, afterApproval, fmt.Sprintf("--use requires the session to be active, and work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID), createUpdateNextActions(clusterName, session)...)
+					return pendingExitError(ios, session, eventWaitAction(session.ID), afterApproval, fmt.Sprintf("--use requires the session to be active, and work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID), createUpdateNextActions(clusterName, session)...)
 				}
 			case useDecisionSettled:
 				if !shouldWait {
@@ -330,7 +336,7 @@ CLUSTER' create the session itself.`,
 			if !shouldWait {
 				// Pending is not success, so a machine consumer can branch on the exit code.
 				if session.Status == wsapi.StatusPending {
-					return pendingExitError(ios, session, afterApproval, fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID), createUpdateNextActions(clusterName, session)...)
+					return pendingExitError(ios, session, eventWaitAction(session.ID), afterApproval, fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID), createUpdateNextActions(clusterName, session)...)
 				}
 				if ios.IsJSON() {
 					return printWorkSessionMutationJSON(ios, newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
@@ -343,7 +349,7 @@ CLUSTER' create the session itself.`,
 			// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
 			finalSession, err := waitForApproval(context.Background(), ios, ac, session.ID, useAfterCreate, ApprovalPollInterval, waitTimeout, approvalSignaled)
 			if err != nil {
-				return WaitExitError(ios, opCreate, session, afterApproval, err, createUpdateNextActions(clusterName, session)...)
+				return WaitExitError(ios, opCreate, session, eventWaitAction(session.ID), afterApproval, err, createUpdateNextActions(clusterName, session)...)
 			}
 
 			if !useAfterCreate {
@@ -393,8 +399,8 @@ CLUSTER' create the session itself.`,
 }
 
 // WaitExitError is a failed wait on session, as 'alpacon event wait' exits: 6 settled, 4 still open
-// (printed here, offering next), 1 for a polling failure, which the caller prints.
-func WaitExitError(ios *utils.IOStreams, operation string, session *wsapi.WorkSession, next utils.NextAction, err error, pendingNext ...utils.NextAction) error {
+// (printed here, offering wait and next), 1 for a polling failure, which the caller prints.
+func WaitExitError(ios *utils.IOStreams, operation string, session *wsapi.WorkSession, wait, next utils.NextAction, err error, pendingNext ...utils.NextAction) error {
 	var terminal *terminalWaitError
 	if errors.As(err, &terminal) {
 		return terminalWaitExitError(ios, operation, terminal, err)
@@ -402,14 +408,14 @@ func WaitExitError(ios *utils.IOStreams, operation string, session *wsapi.WorkSe
 	var pending *pendingWaitError
 	if errors.As(err, &pending) {
 		// The refusal a timed-out wait ended on, if any, adds its hint.
-		return pendingExitError(ios, session, next, fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err), append(utils.RefusalNextActions(err), pendingNext...)...)
+		return pendingExitError(ios, session, wait, next, fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err), append(utils.RefusalNextActions(err), pendingNext...)...)
 	}
 	return utils.NewEnvelopeExitError(operation, err, "%s", err)
 }
 
 // pendingExitError prints the pending approval and returns exit 4.
-func pendingExitError(ios *utils.IOStreams, session *wsapi.WorkSession, next utils.NextAction, message string, extra ...utils.NextAction) error {
-	ios.PrintPendingApproval(message, session.ApprovalRequestID, next, extra...)
+func pendingExitError(ios *utils.IOStreams, session *wsapi.WorkSession, wait, next utils.NextAction, message string, extra ...utils.NextAction) error {
+	ios.PrintPendingApprovalAwaiting(message, session.ApprovalRequestID, wait, next, extra...)
 	return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 }
 
@@ -670,6 +676,19 @@ func ShellWord(value string) (quoted string, ok bool) {
 		return value, true
 	}
 	return "'" + value + "'", true
+}
+
+// eventWaitAction waits on a session that already exists, which re-running create would not:
+// it files a second one. An ID no shell passes on unchanged gets the advice without the command.
+func eventWaitAction(id string) utils.NextAction {
+	quoted, ok := ShellWord(id)
+	if !ok {
+		return utils.NextAction{Description: "wait for the decision in the Alpacon console; running create again would file a second session"}
+	}
+	return utils.NextAction{
+		Command:     fmt.Sprintf("alpacon event wait --type work_session --target %s --timeout 10m", quoted),
+		Description: "block until the session is decided: exit 0 approved (use it once it is active), 6 not approved, 4 no decision before the timeout (run it again)",
+	}
 }
 
 // KubeLoginAction is the follow-up for a cluster session: 'kube login' opens

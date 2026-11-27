@@ -518,7 +518,7 @@ func waitForWorkSession(ios *utils.IOStreams, ac *client.AlpaconClient, in kubeL
 		utils.SanitizeTerminalText(ws.ID), utils.SanitizeTerminalText(ws.Status), in.waitTimeout, utils.SanitizeTerminalText(resume.Command))
 	final, err := worksession.WaitForApproval(ios, ac, ws.ID, true, worksession.ApprovalPollInterval, in.waitTimeout)
 	if err != nil {
-		return workSessionChoice{}, worksession.WaitExitError(ios, opKubeLogin, ws, resume, err)
+		return workSessionChoice{}, worksession.WaitExitError(ios, opKubeLogin, ws, utils.NextAction{}, resume, err)
 	}
 	if !ios.IsJSON() {
 		worksession.PrintSessionAdvisories(ios, final)
