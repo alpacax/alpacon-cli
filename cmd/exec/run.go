@@ -596,7 +596,7 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 	err := runAttempt()
 	var announcedID string
 	defer func() {
-		if _, recoveryFailed := errors.AsType[*utils.ExitError](result); recoveryFailed { // Recovery failed; not a refusal of this request.
+		if _, handled := errors.AsType[*utils.ExitError](result); handled {
 			return
 		}
 		result = utils.WithSignalFields(result, fields, ac)
@@ -703,7 +703,7 @@ func waitForSudoGrant(ios *utils.IOStreams, ac *client.AlpaconClient, run comman
 			ctx, cancel := context.WithDeadline(context.Background(), *deadline)
 			read, err := pollApprovalOnce(ctx, ac, denialErr.CommandID)
 			cancel()
-			if time.Until(*deadline) <= 0 {
+			if read.outcome != outcomeApproved && time.Until(*deadline) <= 0 {
 				return timedOut()
 			}
 			lastRefusal = nil
@@ -762,7 +762,8 @@ func waitForSudoGrant(ios *utils.IOStreams, ac *client.AlpaconClient, run comman
 			case outcomeApproved:
 				spinner.Stop()
 				if time.Until(*deadline) <= 0 {
-					return timedOut()
+					return utils.NewEnvelopeExitErrorWithCode(utils.ExitCodeGeneralError, "command", nil,
+						"Approval was granted. Alpacon did not re-run the command. Re-run the command manually.")
 				}
 				return runAfterApproval(ios, run, lastDeadline)
 			case outcomeRejected, outcomeExpired:

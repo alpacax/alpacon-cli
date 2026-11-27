@@ -1154,7 +1154,7 @@ func TestRunWithApprovalWait_PreservesDetailsWhenStreamTimesOutBeforeReading(t *
 	})
 }
 
-func TestRunWithApprovalWait_AuthorizedReadFinishesAfterDeadline(t *testing.T) {
+func TestRunWithApprovalWait_Result(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		denial := stubApprovalWaitSeams(t, time.Second, "SUDO_APPROVAL_REQUIRED")
 		submits := 0
@@ -1169,8 +1169,18 @@ func TestRunWithApprovalWait_AuthorizedReadFinishesAfterDeadline(t *testing.T) {
 			time.Sleep(time.Second + time.Millisecond)
 			return event.EventDetails{SudoGrantStatus: new("authorized")}, nil
 		}
-		require.ErrorIs(t, runWithApprovalWait(utils.Stdio, nil, run, 2*time.Second, io.Discard), denial)
+		ios, _, stderr := utils.TestIOStreams()
+		err := runWithApprovalWait(ios, nil, run, 2*time.Second, io.Discard)
+
 		assert.Equal(t, 1, submits)
+		var exitErr *utils.ExitError
+		require.ErrorAs(t, err, &exitErr)
+		assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
+		ios.PrintExitError(exitErr)
+		assert.Contains(t, stderr.String(), "Approval was granted.")
+		assert.Contains(t, stderr.String(), "Alpacon did not re-run the command.")
+		assert.Contains(t, stderr.String(), "Re-run the command manually.")
+		assert.NotContains(t, stderr.String(), "still pending")
 	})
 }
 

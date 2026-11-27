@@ -402,7 +402,7 @@ func RemoteExec(ios *utils.IOStreams, newClient clientFactory, stdout, stderr io
 		err = RunExecWithApprovalWait(ios, alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, selection, parsed.Purpose, parsed.WaitTimeout(), out)
 	}
 	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
-		return exitErr // Recovery failed; not a refusal of this request.
+		return exitErr
 	}
 	if file == nil && isLineTooLong(err) {
 		return lineTooLongFailure(ios, stderr, err, parsed)
