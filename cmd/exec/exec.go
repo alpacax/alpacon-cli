@@ -401,6 +401,10 @@ func RemoteExec(ios *utils.IOStreams, newClient clientFactory, stdout, stderr io
 	} else {
 		err = RunExecWithApprovalWait(ios, alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, selection, parsed.Purpose, parsed.WaitTimeout(), out)
 	}
+	if parsed.File != nil && parsed.File.Upload && errors.Is(err, errLateSudoApproval) {
+		return utils.NewEnvelopeExitErrorWithCode(utils.ExitCodeGeneralError, "command", errLateSudoApproval,
+			"%s Re-run the command without --upload and --overwrite to use the script already on the server.", lateSudoApprovalMessage)
+	}
 	if exitErr, ok := errors.AsType[*utils.ExitError](err); ok {
 		return exitErr
 	}

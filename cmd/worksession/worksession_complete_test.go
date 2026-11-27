@@ -266,12 +266,15 @@ func TestEndSessionCancelGuidance(t *testing.T) {
 				session      string
 				refusal      string
 				wantLookups  int32
-				wantAction   utils.NextAction
+				wantActions  []utils.NextAction
 			}{
-				{"pending", http.StatusOK, `{"status":"pending"}`, `{"code":"work_session_not_active"}`, 1, utils.NextAction{Command: "alpacon work-session cancel session", Description: "cancel the pending work session"}},
-				{"closed", http.StatusOK, `{"status":"completed"}`, `{"code":"work_session_not_active"}`, 1, utils.NextAction{}},
-				{"failed lookup", http.StatusNotFound, `{}`, `{"code":"work_session_not_active"}`, 1, utils.NextAction{}},
-				{"server hint", http.StatusOK, `{"status":"pending"}`, `{"code":"work_session_not_active","hint":"Review the session in the console."}`, 0, utils.NextAction{Description: "Review the session in the console."}},
+				{"pending", http.StatusOK, `{"status":"pending"}`, `{"code":"work_session_not_active"}`, 1, []utils.NextAction{{Command: "alpacon work-session cancel session", Description: "cancel the pending work session"}}},
+				{"closed", http.StatusOK, `{"status":"completed"}`, `{"code":"work_session_not_active"}`, 1, nil},
+				{"failed lookup", http.StatusNotFound, `{}`, `{"code":"work_session_not_active"}`, 1, nil},
+				{"server hint", http.StatusOK, `{"status":"pending"}`, `{"code":"work_session_not_active","hint":"Review the session in the console."}`, 1, []utils.NextAction{
+					{Description: "Review the session in the console."},
+					{Command: "alpacon work-session cancel session", Description: "cancel the pending work session"},
+				}},
 			} {
 				t.Run(tt.name, func(t *testing.T) {
 					t.Parallel()
@@ -306,11 +309,7 @@ func TestEndSessionCancelGuidance(t *testing.T) {
 					var result utils.JSONErrorEnvelope[json.RawMessage]
 					require.NoError(t, json.Unmarshal([]byte(stderr), &result))
 					assert.Equal(t, utils.WorkSessionNotActive, result.ErrorCode)
-					if tt.wantAction == (utils.NextAction{}) {
-						assert.Empty(t, result.NextActions)
-					} else {
-						assert.Equal(t, []utils.NextAction{tt.wantAction}, result.NextActions)
-					}
+					assert.Equal(t, tt.wantActions, result.NextActions)
 					if tt.name == "pending" {
 						assert.Regexp(t, "Failed to .* work session: .+\\. Work session session is pending approval", result.Message)
 					}

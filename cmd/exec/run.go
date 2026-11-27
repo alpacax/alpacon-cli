@@ -55,6 +55,10 @@ const (
 
 const approvalWaitMessage = "Waiting for approval in the Alpacon web console..."
 
+const lateSudoApprovalMessage = "Approval was granted. Alpacon did not re-run the command."
+
+var errLateSudoApproval = errors.New("sudo approval observed at the wait deadline")
+
 const (
 	// outcomePending covers every status that is not a decision, the absent
 	// field included: a value nobody can read as an answer must not end a wait.
@@ -585,7 +589,6 @@ func RunFileExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient,
 // runWithApprovalWait is RunExecWithApprovalWait over a commandRun: run is the
 // first attempt and, once a reviewer grants the request, the re-run.
 func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run commandRun, waitTimeout time.Duration, out io.Writer) (result error) {
-	started := time.Now()
 	var fields localsignal.Fields
 	runAttempt := func() error {
 		err := run()
@@ -614,7 +617,8 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 	if waitTimeout <= 0 {
 		return err
 	}
-	deadline := time.Now().Add(waitTimeout)
+	started := time.Now()
+	deadline := started.Add(waitTimeout)
 	budget := utils.NewThrottleBudget(waitTimeout)
 	waitIfHeld := func(current error) error {
 		pending, ok := errors.AsType[*event.PendingApprovalError](current)
@@ -762,8 +766,8 @@ func waitForSudoGrant(ios *utils.IOStreams, ac *client.AlpaconClient, run comman
 			case outcomeApproved:
 				spinner.Stop()
 				if time.Until(*deadline) <= 0 {
-					return utils.NewEnvelopeExitErrorWithCode(utils.ExitCodeGeneralError, "command", nil,
-						"Approval was granted. Alpacon did not re-run the command. Re-run the command manually.")
+					return utils.NewEnvelopeExitErrorWithCode(utils.ExitCodeGeneralError, "command", errLateSudoApproval,
+						"%s Re-run the command manually.", lateSudoApprovalMessage)
 				}
 				return runAfterApproval(ios, run, lastDeadline)
 			case outcomeRejected, outcomeExpired:

@@ -129,7 +129,7 @@ func (e *pendingEndError) ErrorNextAction() utils.NextAction {
 // A pending session can be cancelled instead. A failure to clear the selection only warns.
 func endSession(ios *utils.IOStreams, ac *client.AlpaconClient, id string, end func(*client.AlpaconClient, string) error) (bool, error) {
 	if err := end(ac, id); err != nil {
-		if utils.StructuredErrorCode(err) == utils.WorkSessionNotActive && utils.RefusalHint(err) == "" {
+		if utils.StructuredErrorCode(err) == utils.WorkSessionNotActive {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			if session, lookupErr := wsapi.GetWorkSessionWithContext(ctx, ac, id); lookupErr == nil && session.Status == wsapi.StatusPending {

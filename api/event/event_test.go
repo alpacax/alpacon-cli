@@ -479,7 +479,8 @@ func TestApprovalTimeoutRefreshHasADeadline(t *testing.T) {
 		cmdID := testPathID(t, "cmd-uuid")
 		done := make(chan error, 1)
 		go func() {
-			done <- streamPollErrorWithRefresh(ac, cmdID, known, &ClientTimeoutError{}, &streamApproval{held: &PendingApprovalError{CommandID: "cmd-uuid"}}, nil)
+			details, err := refreshApprovalPoll(ac, cmdID, known, &ClientTimeoutError{}, CommandPollTick, pollSeams{})
+			done <- streamPollError(cmdID, details, err, &streamApproval{held: &PendingApprovalError{CommandID: "cmd-uuid"}}, nil)
 		}()
 		time.Sleep(2 * time.Second)
 		var err error
@@ -503,21 +504,6 @@ func TestApprovalTimeoutRefreshHasADeadline(t *testing.T) {
 	})
 }
 
-func TestApprovalTimeoutDoesNotReportRunningAsPending(t *testing.T) {
-	t.Parallel()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"id":"cmd-uuid","status":"running"}`)
-	}))
-	t.Cleanup(ts.Close)
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	id := testPathID(t, "cmd-uuid")
-	approval := &streamApproval{held: &PendingApprovalError{CommandID: "cmd-uuid"}}
-	timeout := &ClientTimeoutError{}
-	err := streamPollErrorWithRefresh(ac, id, EventDetails{Status: "awaiting_approval"}, timeout, approval, nil)
-	assert.ErrorIs(t, err, timeout)
-}
-
 func TestApprovalTimeoutKeepsConfirmedRejection(t *testing.T) {
 	for _, status := range []string{"denied", "rejected"} {
 		t.Run(status, func(t *testing.T) {
@@ -529,7 +515,8 @@ func TestApprovalTimeoutKeepsConfirmedRejection(t *testing.T) {
 			t.Cleanup(ts.Close)
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 			id := testPathID(t, "cmd-1")
-			err := streamPollErrorWithRefresh(ac, id, EventDetails{Status: "awaiting_approval"}, &ClientTimeoutError{}, &streamApproval{held: &PendingApprovalError{CommandID: "cmd-1"}}, func(EventDetails) error {
+			details, pollErr := refreshApprovalPoll(ac, id, EventDetails{Status: "awaiting_approval"}, &ClientTimeoutError{}, CommandPollTick, pollSeams{})
+			err := streamPollError(id, details, pollErr, &streamApproval{held: &PendingApprovalError{CommandID: "cmd-1"}}, func(EventDetails) error {
 				t.Fatal("a rejected command must skip output retrieval")
 				return nil
 			})
@@ -570,7 +557,8 @@ func TestApprovalPollWithdrawsEarlierSuggestions(t *testing.T) {
 				details, err := pollCommandExecution(ac, id, 3*time.Second, time.Second, true, seams)
 				var timeout *ClientTimeoutError
 				require.ErrorAs(t, err, &timeout)
-				err = streamPollErrorWithRefresh(ac, id, details, err, &streamApproval{held: &PendingApprovalError{CommandID: "cmd-1"}}, nil)
+				details, err = refreshApprovalPoll(ac, id, details, err, time.Second, seams)
+				err = streamPollError(id, details, err, &streamApproval{held: &PendingApprovalError{CommandID: "cmd-1"}}, nil)
 				var pending *PendingApprovalError
 				require.ErrorAs(t, err, &pending)
 				assert.True(t, pending.HasCommandDetails())
@@ -1989,6 +1977,21 @@ func TestStreamApprovedCommand_PollObservesRunningAfterHeldSetup(t *testing.T) {
 	})
 }
 
+func TestStreamApprovedCommand_FinalRefreshStartsExecutionWait(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "11s")
+	synctest.Test(t, func(t *testing.T) {
+		cfg := streamingServerConfig{
+			cmdID: "cmd-uuid", serverID: "srv-uuid",
+			completedBeforeSubscription: true, heldPolls: 2, runningPolls: 1,
+			terminal: EventDetails{Status: "completed", Success: new(true), Result: "finished"},
+		}
+		ac := newStreamingServers(t, cfg)
+		var out bytes.Buffer
+		require.NoError(t, StreamApprovedCommand(ac, &PendingApprovalError{CommandID: cfg.cmdID}, &out, 2*time.Second))
+		assert.Equal(t, "finished", out.String())
+	})
+}
+
 func TestStreamApprovedCommand_SetupReturnsCompletedResult(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -2080,7 +2083,8 @@ func TestStreamPollError_FinalRefreshResult(t *testing.T) {
 			approval := &streamApproval{held: &PendingApprovalError{CommandID: "held-1"}}
 			id := testPathID(t, "held-1")
 			var out bytes.Buffer
-			err := streamPollErrorWithRefresh(ac, id, EventDetails{}, &ClientTimeoutError{}, approval, func(details EventDetails) error {
+			details, pollErr := refreshApprovalPoll(ac, id, EventDetails{}, &ClientTimeoutError{}, CommandPollTick, pollSeams{})
+			err := streamPollError(id, details, pollErr, approval, func(details EventDetails) error {
 				return writePolledResult(ac, id, &out, details)
 			})
 			if tt.phase != "" {

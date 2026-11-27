@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,7 +11,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
+	"time"
 
+	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/cmd/worksession"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,6 +35,55 @@ func TestReRunHint_FileUploadIsNotRepeated(t *testing.T) {
 		},
 	})
 	assert.Equal(t, "alpacon exec -u root --file /opt/deploy.sh --file-from ./deploy.sh prod-web", hint.Command)
+}
+
+type fileApprovalStream struct {
+	execOfferStream
+	denial  error
+	submits int
+}
+
+func (s *fileApprovalStream) RunFileCommand(string, event.FileExecution, string, string, string, string, io.Writer) error {
+	s.submits++
+	return s.denial
+}
+
+func TestExecFileUploadLateApprovalSuggestsSkippingUpload(t *testing.T) {
+	home := t.TempDir()
+	writeExecCommandTestConfig(t, home, "https://workspace.example")
+	t.Setenv("HOME", home)
+	script := filepath.Join(home, "deploy.sh")
+	require.NoError(t, os.WriteFile(script, []byte("echo deploy\n"), 0o600))
+	synctest.Test(t, func(t *testing.T) {
+		stream := &fileApprovalStream{denial: stubApprovalWaitSeams(t, time.Second, "SUDO_APPROVAL_REQUIRED")}
+		originalStream, originalUpload := newCommandStream, uploadContentAs
+		t.Cleanup(func() { newCommandStream, uploadContentAs = originalStream, originalUpload })
+		newCommandStream = func(*client.AlpaconClient) commandStream { return stream }
+		installExecOfferSelection(t, worksession.FileCommand)
+		uploads := 0
+		uploadContentAs = func(*client.AlpaconClient, string, string, []byte, string, string, string, bool) error {
+			uploads++
+			return nil
+		}
+		getCommandByID = func(context.Context, *client.AlpaconClient, string) (event.EventDetails, error) {
+			time.Sleep(time.Second + time.Millisecond)
+			return event.EventDetails{SudoGrantStatus: new("authorized")}, nil
+		}
+		ios, stdout, stderr := utils.TestIOStreams()
+		parsed := ParseRemoteExecArgs(ios, []string{
+			"--wait-approval", "2s", "--upload", "--overwrite", "--file", "/opt/deploy.sh", "--file-from", script, "prod",
+		})
+		require.Empty(t, parsed.Err)
+		err := RemoteExec(ios, testClientFactory("https://workspace.example"), stdout, stderr, parsed)
+		var exitErr *utils.ExitError
+		require.ErrorAs(t, err, &exitErr)
+		assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
+		ios.PrintExitError(exitErr)
+		assert.Equal(t, 1, uploads)
+		assert.Equal(t, 1, stream.submits)
+		assert.Contains(t, stderr.String(), "Approval was granted.")
+		assert.Contains(t, stderr.String(), "Re-run the command without --upload and --overwrite")
+	})
 }
 
 // fileUploadServer answers a one-step --file run: the server lookup, the

@@ -1217,7 +1217,10 @@ func TestRunWithApprovalWait_StalledGrantReadDoesNotResubmit(t *testing.T) {
 func TestRunWithApprovalWait_ReportsRoundedElapsedWait(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		denial := stubApprovalWaitSeams(t, time.Second, "SUDO_APPROVAL_REQUIRED")
-		run := func() error { return &event.PendingApprovalError{CommandID: "held"} }
+		run := func() error {
+			time.Sleep(45 * time.Second)
+			return &event.PendingApprovalError{CommandID: "held"}
+		}
 		streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
 			time.Sleep(3 * time.Second)
 			return denial
