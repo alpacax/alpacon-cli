@@ -3,6 +3,7 @@ package ftp
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -404,6 +405,14 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 				"  • Server name is spelled correctly\n"+
 				"  • Server is registered: alpacon server ls\n"+
 				"  • You have access to this server", serverName)
+		} else if len(sources) == 1 && strings.HasPrefix(errStr, "download failed with client error: ") && utils.HTTPStatusCode(err) == http.StatusNotFound {
+			// The storage holds no file for the transfer: its 404 cannot tell a missing path from
+			// one the account could not read or run as. A bulk archive names no single path.
+			return serverName, utils.NewEnvelopeExitError("download", err, "'%s' was not found on server '%s', or the transfer's account could not read it.\n\n"+
+				"Please check:\n"+
+				"  • The path is correct and the file exists\n"+
+				"  • %s",
+				remotePath, serverName, transferAccountCheck(username, groupname))
 		} else if strings.Contains(errStr, "download failed") && utils.RefusalHint(err) == "" {
 			return serverName, utils.NewExitError("Download failed from server '%s': %s\n\n"+
 				"This might be due to:\n"+
@@ -416,6 +425,20 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 		return serverName, err
 	}
 	return serverName, nil
+}
+
+func transferAccountCheck(username, groupname string) string {
+	account := make([]string, 0, 2)
+	if username != "" {
+		account = append(account, fmt.Sprintf("user '%s'", username))
+	}
+	if groupname != "" {
+		account = append(account, fmt.Sprintf("group '%s'", groupname))
+	}
+	if len(account) == 0 {
+		return "Your account can read the file, or name one that can with -u and -g"
+	}
+	return fmt.Sprintf("The account the transfer ran as (%s) exists on the server and can read the file", strings.Join(account, ", "))
 }
 
 // wantsPermissionAdvice reports whether err is a permission error the run-as-root advice fits:
