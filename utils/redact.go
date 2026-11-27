@@ -74,19 +74,19 @@ func isURLScheme(s string) bool {
 
 var (
 	doubleQuotedURL = regexp.MustCompile(`"[A-Za-z][A-Za-z0-9+.-]*://[^"\n]*"`)
-	textURL         = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s"<>]+`) // an apostrophe can sit in a path
+	urlUserinfo     = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s?#"]*@`)
+	urlQueryToEOL   = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://[^?#\n"]*)[?#][^\n]*`)
 )
 
-// RedactURLsInText applies RedactURL to every URL in s.
+// RedactURLsInText removes the userinfo, query and fragment of every URL in s.
+// A double-quoted URL ends at its closing quote; any other URL's end cannot be told
+// from the text after it, so its query is cut to the end of the line.
 func RedactURLsInText(s string) string {
-	// A double-quoted URL runs to its closing quote on the same line, so a space in its path cannot end it early.
 	s = doubleQuotedURL.ReplaceAllStringFunc(s, func(quoted string) string {
 		return `"` + RedactURL(quoted[1:len(quoted)-1]) + `"`
 	})
-	return textURL.ReplaceAllStringFunc(s, func(match string) string {
-		bare := strings.TrimSuffix(match, "'") // the closing quote of a single-quoted URL
-		return RedactURL(bare) + match[len(bare):]
-	})
+	s = urlUserinfo.ReplaceAllString(s, "$1")
+	return urlQueryToEOL.ReplaceAllString(s, "$1")
 }
 
 // redactedURLError prints a transport error with its URL redacted. Its cause is
