@@ -68,6 +68,9 @@ const (
 	countCapRemedy           = "Remove one you no longer use, or upgrade the plan."
 	serverAxisReregisterHint = "If this host was registered before, delete the old server entry first, then retry."
 	featureLockSentence      = "This action needs a higher plan."
+
+	// genericFieldMessage is the message the server sends when it names only a code.
+	genericFieldMessage = "Invalid input."
 )
 
 // legacyPlanLimitAxis maps a 402's "code" to its axis for a server that predates the "gate"/"axis"
@@ -1296,13 +1299,13 @@ func errorExtraFields(body []byte) map[string]any {
 	if code := stringField(parsed, "code"); code == "command_dangerous_env" || code == "command_invalid_env" {
 		fields, _ := parsed["field_errors"].(map[string]any)
 		clean := make(map[string]any)
-		if message := strings.TrimSpace(stringField(parsed, "message")); message != "" && message != "Invalid input." {
+		if message := strings.TrimSpace(stringField(parsed, "message")); message != "" && message != genericFieldMessage {
 			clean["message"] = message
 		}
 		if messages := fieldErrorMessages(map[string]any{"non_field_errors": fields["non_field_errors"]}); len(messages) > 0 {
 			entries := make([]map[string]string, 0, len(messages))
 			for _, message := range messages {
-				if message == "" || message == "Invalid input." {
+				if message == "" || message == genericFieldMessage {
 					continue
 				}
 				entries = append(entries, map[string]string{"code": code, "message": message})
@@ -1342,14 +1345,14 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 	// Environment refusals name keys and reasons in these messages. Do not render
 	// other validation fields, which may contain environment values.
 	if code == "command_dangerous_env" || code == "command_invalid_env" {
-		if message := strings.TrimSpace(stringField(parsed, "message")); message != "" && message != "Invalid input." {
+		if message := strings.TrimSpace(stringField(parsed, "message")); message != "" && message != genericFieldMessage {
 			return message, code, source, gate, axis, missing, true
 		}
 		if fields, ok := parsed["field_errors"].(map[string]any); ok {
 			if messages := fieldErrorMessages(map[string]any{"non_field_errors": fields["non_field_errors"]}); len(messages) > 0 {
 				var meaningful []string
 				for _, message := range messages {
-					if message != "" && message != "Invalid input." {
+					if message != "" && message != genericFieldMessage {
 						meaningful = append(meaningful, message)
 					}
 				}
@@ -1378,6 +1381,9 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 	}
 
 	if detail := strings.TrimSpace(stringField(parsed, "detail")); detail != "" {
+		if sentence, known := codeSentence(code); known && detail == genericFieldMessage {
+			return sentence, code, source, gate, axis, missing, true
+		}
 		return detail, code, source, gate, axis, missing, true
 	}
 
@@ -1386,7 +1392,8 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 		return codeOnlyMessage(code), code, source, gate, axis, missing, true
 	}
 
-	if messages := fieldErrorMessages(parsed["field_errors"]); len(messages) > 0 {
+	sentences, rest := explainGenericFieldErrors(parsed["field_errors"])
+	if messages := append(sentences, fieldErrorMessages(rest)...); len(messages) > 0 {
 		return strings.Join(messages, "; "), code, source, gate, axis, missing, true
 	}
 
@@ -1501,6 +1508,42 @@ func isStringList(v any) bool {
 	return true
 }
 
+// explainGenericFieldErrors takes out each field error whose message is genericFieldMessage and whose
+// code has a codeSentence, returning those sentences deduplicated and sorted, and the field errors left.
+func explainGenericFieldErrors(raw any) (sentences []string, rest any) {
+	fieldErrors, ok := raw.(map[string]any)
+	if !ok {
+		return nil, raw
+	}
+	seen := make(map[string]bool)
+	remaining := make(map[string]any, len(fieldErrors))
+	for path, value := range fieldErrors {
+		entries, ok := value.([]any)
+		if !ok {
+			remaining[path] = value
+			continue
+		}
+		var kept []any
+		for _, entry := range entries {
+			fields, _ := entry.(map[string]any)
+			sentence, known := codeSentence(stringField(fields, "code"))
+			if !known || stringField(fields, "message") != genericFieldMessage {
+				kept = append(kept, entry)
+				continue
+			}
+			if !seen[sentence] {
+				seen[sentence] = true
+				sentences = append(sentences, sentence)
+			}
+		}
+		if len(kept) > 0 {
+			remaining[path] = kept
+		}
+	}
+	sort.Strings(sentences)
+	return sentences, remaining
+}
+
 // fieldErrorMessages renders a "field_errors" object—{"path": [{"code",
 // "message"}, ...]}—into sorted "path: message" strings, "non_field_errors"
 // bare. A malformed entry contributes nothing.
@@ -1566,6 +1609,12 @@ func codeSentence(code string) (sentence string, known bool) {
 		return "Deleting a home directory is no longer supported. Delete the user, optionally archiving the home directory.", true
 	case "system_home_conflict":
 		return "The home directory belongs to a different UID. Ask a server administrator to resolve its ownership before retrying.", true
+	case utils.ServerUsernameGroupnameInvalid:
+		return "the server account or group is not valid on this server, or you may not use it—where the command takes -u USERNAME or -g GROUPNAME, name another, or use a work session that names an account", true
+	case utils.WebFTPNameTooLong:
+		return "the file or folder name is too long—a file name may be up to 128 characters, and a folder downloaded as an archive up to 124; rename it and try again", true
+	case utils.WebFTPInvalidPath:
+		return "the files are in different folders—transfer files from one folder at a time", true
 	case utils.APINotFound:
 		return "the requested resource was not found", true
 	case utils.APIRateLimited:

@@ -3321,3 +3321,96 @@ func TestRefreshLockedHonorsPinnedLoginAndWorkspace(t *testing.T) {
 		})
 	}
 }
+
+func TestParseAPIError_GenericFieldErrorTakesTheCodesSentence(t *testing.T) {
+	t.Parallel()
+	const (
+		tooLong      = "the file or folder name is too long—a file name may be up to 128 characters, and a folder downloaded as an archive up to 124; rename it and try again"
+		otherFolders = "the files are in different folders—transfer files from one folder at a time"
+		badAccount   = "the server account or group is not valid on this server, or you may not use it—where the command takes -u USERNAME or -g GROUPNAME, name another, or use a work session that names an account"
+	)
+	tests := []struct {
+		name     string
+		body     string
+		wantCode string
+		want     string
+	}{
+		{
+			name:     "non field error",
+			body:     `{"code":"webftp_name_too_long","field_errors":{"non_field_errors":[{"code":"webftp_name_too_long","message":"Invalid input."}]}}`,
+			wantCode: "webftp_name_too_long",
+			want:     tooLong,
+		},
+		{
+			name:     "field error drops the field name",
+			body:     `{"code":"webftp_invalid_path","field_errors":{"path":[{"code":"webftp_invalid_path","message":"Invalid input."}]}}`,
+			wantCode: "webftp_invalid_path",
+			want:     otherFolders,
+		},
+		{
+			name:     "same code on two fields prints once",
+			body:     `{"code":"server_username_groupname_invalid","field_errors":{"username":[{"code":"server_username_groupname_invalid","message":"Invalid input."}],"groupname":[{"code":"server_username_groupname_invalid","message":"Invalid input."}]}}`,
+			wantCode: "server_username_groupname_invalid",
+			want:     badAccount,
+		},
+		{
+			name:     "code without field errors",
+			body:     `{"code":"webftp_invalid_path"}`,
+			wantCode: "webftp_invalid_path",
+			want:     otherFolders,
+		},
+		{
+			name:     "other field errors stay beside the sentence",
+			body:     `{"code":"webftp_invalid_path","field_errors":{"path":[{"code":"webftp_invalid_path","message":"Invalid input."}],"name":[{"code":"required","message":"This field is required."}]}}`,
+			wantCode: "webftp_invalid_path",
+			want:     otherFolders + "; name: This field is required.",
+		},
+		{
+			name:     "same field keeps the entry with its own message",
+			body:     `{"code":"webftp_invalid_path","field_errors":{"path":[{"code":"webftp_invalid_path","message":"Invalid input."},{"code":"invalid","message":"Not a valid path."}]}}`,
+			wantCode: "webftp_invalid_path",
+			want:     otherFolders + "; path: Not a valid path.",
+		},
+		{
+			name:     "two known codes give two sorted sentences",
+			body:     `{"code":"webftp_name_too_long","field_errors":{"non_field_errors":[{"code":"webftp_name_too_long","message":"Invalid input."}],"path":[{"code":"webftp_invalid_path","message":"Invalid input."}]}}`,
+			wantCode: "webftp_name_too_long",
+			want:     tooLong + "; " + otherFolders,
+		},
+		{
+			name:     "generic detail takes the codes sentence",
+			body:     `{"code":"webftp_invalid_path","detail":"Invalid input."}`,
+			wantCode: "webftp_invalid_path",
+			want:     otherFolders,
+		},
+		{
+			name:     "server written detail wins",
+			body:     `{"code":"webftp_invalid_path","detail":"Paths must share one folder."}`,
+			wantCode: "webftp_invalid_path",
+			want:     "Paths must share one folder.",
+		},
+		{
+			name:     "server written message wins",
+			body:     `{"code":"webftp_invalid_path","field_errors":{"path":[{"code":"webftp_invalid_path","message":"Paths must share one folder."}]}}`,
+			wantCode: "webftp_invalid_path",
+			want:     "path: Paths must share one folder.",
+		},
+		{
+			name:     "unknown code keeps the generic message",
+			body:     `{"code":"webftp_something_else","field_errors":{"path":[{"code":"webftp_something_else","message":"Invalid input."}]}}`,
+			wantCode: "webftp_something_else",
+			want:     "path: Invalid input.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := parseAPIError([]byte(tt.body), http.StatusBadRequest)
+
+			require.Error(t, err)
+			assert.Equal(t, tt.want, err.Error())
+			assert.Equal(t, tt.wantCode, utils.StructuredErrorCode(err))
+		})
+	}
+}
