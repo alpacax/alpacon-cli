@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/api/server"
@@ -38,6 +37,8 @@ const (
 	useDecisionUnknownStatus
 )
 
+const bareShellChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.@-"
+
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh", ScopeKube, ScopeKubeExec}
 
 func newWorkSessionCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
@@ -62,53 +63,30 @@ func newWorkSessionCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cob
 		Short: "Create a new work session",
 		Long: `Create a new work session.
 
-The session purpose is what the assessor judges each command against. An agent
-should pass --purpose with each command, which skips the purpose demand entirely.
+Without a terminal, --purpose, --scope, --server (or --cluster) and --expires-in
+or --expires-at are required. The assessor judges each command against the
+purpose; an agent should also pass --purpose on each exec, which skips the
+purpose demand.
 
-Set the session lifetime with --expires-in (relative, e.g. 2h) or --expires-at
-(absolute RFC3339); one is required in non-interactive mode.
-
-Pass --wait to block until the session is approved, for 5 minutes by default.
---wait-approval DURATION does the same with a different timeout and implies --wait.
-Both work for user and agent sessions alike.
-
-Pass --use to set the new session as the workspace's active session. On its own,
---use attaches only sessions that are already active. Add --wait or
---wait-approval DURATION to wait for the active state and then attach the session.
-Subsequent exec/websh/cp/tunnel commands use the attached session without
---work-session. --use is for user sessions only.
-
-If the work needs sudo, pre-declare the command patterns with --sudo. This attaches
-session-authorized sudo policies so a non-interactive caller (e.g. an AI agent
-running 'exec') can run matching sudo commands inside the approved work session
-without an MFA prompt. The 'sudo' scope is added automatically, and the policies are submitted for
-approval together with the session. If a sudo command is later denied, add it to the
-session with 'alpacon work-session update <id> --sudo "<command>"'.
+--sudo pre-declares sudo command patterns, so a caller with no terminal (e.g. an
+AI agent running 'exec') can run matching sudo commands in the approved session
+without an MFA prompt. Write each without the leading sudo: "systemctl restart
+nginx" matches 'sudo systemctl restart nginx', and a pattern that begins with
+sudo is refused. --sudo adds 'sudo' to the scopes --scope names and does not
+replace --scope. If a sudo command is later denied, follow the denial's guidance.
 
 When an AI agent drives the CLI, the session is an agent session. The CLI detects
-Claude Code, Codex, Gemini CLI, GitHub Copilot, Cursor, Cline, and Goose from the
-environment variables they set in the shells they run, and names the agent on every
-request. For an agent the CLI does not detect (for example Aider), set
-AI_AGENT=<name> in the agent's environment. --requester-type agent opens an agent
-session without naming an agent; --requester-type user is refused while an agent is
-detected.
+Claude Code, Codex, Gemini CLI, GitHub Copilot, Cursor, Cline, and Goose; for any
+other agent, set AI_AGENT=<name>. An agent session refuses --use and the websh
+scope and runs only as the --account it names. Pass --work-session SESSION_ID
+before the server on each command: 'alpacon exec --work-session SESSION_ID
+web-01 -- uptime'.
 
-An agent session refuses --use and the websh scope, so pass --work-session SESSION_ID
-before the server on each command instead, as in 'alpacon exec --work-session
-SESSION_ID web-01 -- uptime'.
-
-Pass --account to name the account the work runs as on the servers (for example
-root), so the approver sees it with the request. The session runs only as that
-account, so pass it to later commands with -u <account> (for example 'alpacon exec
--u root web-01 -- uptime').
-
-To reach a Kubernetes cluster, target it with --cluster instead of --server. A
-cluster session holds the kube scope, and kube_exec on top of it for exec,
-attach and port-forward into pods; it takes no other scope, no --account and no
---sudo. Open it with 'alpacon kube login CLUSTER --work-session SESSION_ID', or
-let 'alpacon kube login CLUSTER' create the session itself. An agent session
-cannot hold kube_exec, and a cluster session is never set as the active one, so
---use is refused with --cluster.`,
+--cluster targets a Kubernetes cluster instead of servers. A cluster session takes
+only the kube and kube_exec scopes (kube_exec for exec, attach and port-forward;
+not for an agent session) and refuses --account, --sudo and --use. Open it with
+'alpacon kube login CLUSTER --work-session SESSION_ID', or let 'alpacon kube login
+CLUSTER' create the session itself.`,
 		Example: `  alpacon work-session create --scope command,websh --server web-01 --expires-in 2h --purpose "restart nginx on web-01 to clear 502s"
   alpacon work-session create --scope command --server web-01,db-01 --expires-at 2027-01-15T10:00:00Z --purpose "deploy" --wait
   alpacon work-session create --scope command --server web-01 --expires-in 1h --purpose "hotfix" --use
@@ -120,7 +98,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
   alpacon exec --work-session 550e8400-e29b-41d4-a716-446655440000 web-01 -- df -h
   alpacon work-session create --scope command,sudo --server web-01 --expires-in 1h --purpose "restart nginx" --account root
 
-  alpacon work-session create --server web-01 --expires-in 2h --purpose "nginx hotfix" \
+  alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "nginx hotfix" \
     --sudo "systemctl restart nginx,systemctl reload nginx" --sudo "tail -f /var/log/nginx/*.log"
 
   # Kubernetes: target a cluster, then open it with 'kube login'
@@ -297,7 +275,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 			if approvalSignaled {
 				utils.EmitLocalSignal(localsignal.ApprovalPending, localsignal.Fields{Session: session.ID, ConsoleURL: session.ConsoleURL}, ac)
 			}
-			afterApproval := afterApprovalAction(sessionRequesterType, session.ID, "exec", account)
+			afterApproval := afterApprovalAction(sessionRequesterType, session.ID, pendingAccountRunGuidance("exec", account))
 			if clusterName != "" {
 				afterApproval = KubeLoginAction(clusterName, session.ID)
 			}
@@ -406,9 +384,9 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 	cmd.Flags().BoolVar(&wait, "wait", false, "Poll until the session is approved, then exit (default timeout 5m; does not set as active; combine with --use to attach automatically)")
 	cmd.Flags().StringVar(&waitApproval, "wait-approval", "", "Like --wait with a custom wait timeout (e.g. 30m; default 5m). Implies --wait")
 	cmd.Flags().BoolVar(&useAfterCreate, "use", false, "Set the created session as the workspace's active session (requires status to reach 'active'; combine with --wait when approval is needed; refused with --requester-type agent)")
-	cmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo patterns for non-interactive sudo via 'exec'. Matching commands can run without another interactive MFA prompt. Separate patterns with commas and repeat the flag to add another policy. Literal commas in patterns are unsupported. Wildcards are allowed. Each part of a compound command must match a pattern. Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
+	cmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo patterns for non-interactive sudo via 'exec'. Write each command without its leading sudo. Matching commands can run without another interactive MFA prompt. Separate patterns with commas and repeat the flag to add another policy. Literal commas in patterns are unsupported. Wildcards are allowed. Each part of a compound command must match a pattern. Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
 	cmd.Flags().StringVar(&createSudoReason, "sudo-reason", "", "Justification applied to the sudo policies created via --sudo")
-	cmd.Flags().StringVar(&createAccount, "account", "", "Account the work runs as on the servers (e.g. root); the approver sees it with the request. Pass the same account to later commands with -u <account> (e.g. exec -u root)")
+	cmd.Flags().StringVar(&createAccount, "account", "", "Account the work runs as on the servers (e.g. root); the approver sees it with the request and can change it. Name the approved account in later commands with -u <account> (e.g. exec -u root)")
 	cmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
 	cmd.MarkFlagsMutuallyExclusive("server", "cluster")
 	return cmd
@@ -645,39 +623,53 @@ func resolveRequesterType(flagValue string, flagSet bool, detected aiagent.Detec
 // afterApprovalAction is the follow-up for a session still waiting on approval.
 // A user session is attached with 'work-session use'; an agent session cannot
 // be, so its ID goes to each subsequent command with --work-session instead.
-func afterApprovalAction(requesterType, id, command, account string) utils.NextAction {
-	asAccount := accountRunGuidance(command, account)
-	if asAccount != "" {
-		asAccount = "; " + asAccount
+func afterApprovalAction(requesterType, id, accountGuidance string) utils.NextAction {
+	if accountGuidance != "" {
+		accountGuidance = "; " + accountGuidance
 	}
 	if requesterType == "agent" {
-		return utils.NextAction{Description: fmt.Sprintf("after approval, pass --work-session %s to each subsequent command (exec, cp, tunnel)%s", id, asAccount)}
+		return utils.NextAction{Description: fmt.Sprintf("after approval, pass --work-session %s to each subsequent command (exec, cp, tunnel)%s", id, accountGuidance)}
 	}
-	return utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", id), Description: "after approval" + asAccount}
+	return utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", id), Description: "after approval" + accountGuidance}
 }
 
-// accountRunGuidance tells the user to run command as the account a session was created for.
+// accountRunGuidance tells the user to run command as the account a session was created for;
+// an account ShellWord cannot render is named by role, so the reminder survives.
 func accountRunGuidance(command, account string) string {
+	if account == "" {
+		return ""
+	}
 	quoted, ok := ShellWord(account)
 	if !ok {
-		return ""
+		return fmt.Sprintf("run %s with -u set to the account the session was created for", command)
 	}
 	return fmt.Sprintf("run %s with -u %s, the account the session was created for", command, quoted)
 }
 
-// ShellWord returns value as one word a shell reads back unchanged, quoting it when needed; ok is
-// false for an empty value or one with control characters.
+// pendingAccountRunGuidance is accountRunGuidance for a session not yet approved, whose account can change.
+func pendingAccountRunGuidance(command, account string) string {
+	guidance := accountRunGuidance(command, account)
+	if guidance == "" {
+		return ""
+	}
+	return guidance + "; the approver can change the account"
+}
+
+// printableASCII reports whether value is printable ASCII, which every terminal shows as written.
+func printableASCII(value string) bool {
+	return !strings.ContainsFunc(value, func(r rune) bool { return r < ' ' || r > '~' })
+}
+
+// ShellWord returns value as one word POSIX shells and PowerShell 5.1 and 7 all pass on unchanged; ok is
+// false for an empty or non-printable-ASCII value, a quote or backslash, and a leading dash (pwsh drops '--%').
 func ShellWord(value string) (quoted string, ok bool) {
-	clean, altered := utils.SanitizeTerminalLine(value)
-	if altered || clean == "" {
+	if value == "" || value[0] == '-' || !printableASCII(value) || strings.ContainsAny(value, `'"\`) {
 		return "", false
 	}
-	if !strings.ContainsFunc(clean, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("_.@-", r)
-	}) {
-		return clean, true
+	if value[0] != '@' && strings.Trim(value, bareShellChars) == "" { // a leading @ splats in PowerShell
+		return value, true
 	}
-	return "'" + strings.ReplaceAll(clean, "'", "'\"'\"'") + "'", true
+	return "'" + value + "'", true
 }
 
 // KubeLoginAction is the follow-up for a cluster session: 'kube login' opens

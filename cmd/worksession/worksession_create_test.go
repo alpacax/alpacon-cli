@@ -2,6 +2,7 @@ package worksession
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,8 +18,10 @@ import (
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1169,4 +1172,105 @@ func TestApprovalWaitRefusesAnAnswerForAnotherSession(t *testing.T) {
 	var terminal *terminalWaitError
 	assert.NotErrorAs(t, err, &terminal)
 	assert.Equal(t, int32(1), events.Load())
+}
+
+func TestShellWordReturnsOnlyAWordEveryShellReadsBackUnchanged(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, value, want string
+		ok                bool
+	}{
+		{name: "plain", value: "ubuntu", want: "ubuntu", ok: true},
+		{name: "at_inside", value: "alice@corp", want: "alice@corp", ok: true},
+		{name: "space", value: "dep loy", want: "'dep loy'", ok: true},
+		{name: "leading_at_splats_in_powershell", value: "@foo", want: "'@foo'", ok: true},
+		{name: "command_substitution", value: "root$(touch /tmp/pwned)", want: "'root$(touch /tmp/pwned)'", ok: true},
+		{name: "empty", value: ""},
+		{name: "single_quote_has_no_quoting_both_shells_share", value: "o'brien"},
+		{name: "curly_quote_closes_a_powershell_string", value: "a’;Write-Output INJECTED;#"},
+		{name: "invisible_letter", value: "rootㅤ"},
+		{name: "non_ascii_letter", value: "jörg"},
+		{name: "control_character", value: "root\nx"},
+		{name: "leading_dash_powershell_reads_as_its_own_token", value: "--%"},
+		{name: "leading_dash", value: "-u"},
+		{name: "double_quote_powershell_5_1_strips", value: `dev"ops`},
+		{name: "backslash_powershell_5_1_rewrites_before_a_quote", value: `dev ops\`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			quoted, ok := ShellWord(tt.value)
+
+			assert.Equal(t, tt.ok, ok)
+			assert.Equal(t, tt.want, quoted)
+		})
+	}
+}
+
+const sudoPrefixRefusal = `{"code":"sudo_policy_pattern_has_sudo_prefix","field_errors":{"sudo_policies.0.commands.0":[{"code":"sudo_policy_pattern_has_sudo_prefix","message":"Invalid input."}]}}`
+
+func TestWorkSessionCreateExplainsASudoPatternThatBeginsWithSudo(t *testing.T) {
+	t.Parallel()
+	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+		"GET /api/servers/servers/":         {Status: http.StatusOK, Body: `{"count":1,"results":[{"id":"550e8400-e29b-41d4-a716-446655440000","name":"web-01"}]}`},
+		"POST /api/work-sessions/sessions/": {Status: http.StatusBadRequest, Body: sudoPrefixRefusal},
+	})
+	build := func(ios *utils.IOStreams) *cobra.Command { return newWorkSessionCreateCmd(ts.Factory(), ios) }
+	args := []string{"--scope", "command", "--server", "web-01", "--expires-in", "1h", "--purpose", "restart nginx", "--sudo", "sudo systemctl restart nginx"}
+
+	stdout, stderr, code := cmdtest.RunCaptured(build, args...)
+
+	assert.Equal(t, utils.ExitCodeGeneralError, code)
+	assert.Empty(t, stdout)
+	assert.Equal(t, "Error: Failed to create work session: a --sudo pattern is the command without its leading sudo; remove the leading sudo from each pattern and run it again.\n", stderr)
+}
+
+// Every 'work-session create' line in the help is copied as is, so each must pass the
+// command's own checks with no terminal and stop only at the missing login.
+func TestWorkSessionCreateExamplesPassValidationWithoutATerminal(t *testing.T) {
+	examples := createExampleArgs(t, newWorkSessionCreateCmd(cmdtest.NoClient, utils.Stdio).Example)
+	require.NotEmpty(t, examples)
+	for i, args := range examples {
+		t.Run(fmt.Sprintf("example_%d", i+1), func(t *testing.T) {
+			root := NewWorkSessionCmd(cmdtest.NoClient, utils.Stdio)
+
+			_, stderr, exitCode := runWorkSessionTree(t, root, agentHelperEnv(), utils.OutputFormatTable,
+				"http://127.0.0.1:1", args...)
+
+			assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "args: %q\nstderr: %s", args, stderr)
+			assert.Contains(t, stderr, "Connection to Alpacon API failed", "args: %q", args)
+		})
+	}
+}
+
+func TestCreateExampleArgsJoinsContinuationsAndKeepsQuotedWords(t *testing.T) {
+	t.Parallel()
+	example := "  # a comment\n  alpacon exec web-01 -- uptime\n" +
+		"  alpacon work-session create --purpose \"nginx hotfix\" \\\n    --sudo \"tail -f /var/log/*.log\""
+
+	got := createExampleArgs(t, example)
+
+	assert.Equal(t, [][]string{{"create", "--purpose", "nginx hotfix", "--sudo", "tail -f /var/log/*.log"}}, got)
+}
+
+// createExampleArgs returns the arguments after 'alpacon work-session' of every create line in
+// example, joining backslash continuations and unquoting double-quoted words.
+func createExampleArgs(t *testing.T, example string) [][]string {
+	t.Helper()
+	const prefix = "alpacon work-session create "
+	var out [][]string
+	for line := range strings.SplitSeq(strings.ReplaceAll(example, "\\\n", " "), "\n") {
+		line = strings.TrimSpace(line)
+		require.False(t, strings.HasPrefix(line, "-"), "example line %q is cut off from its command; a backslash is missing", line)
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		r := csv.NewReader(strings.NewReader("create " + strings.TrimPrefix(line, prefix)))
+		r.Comma, r.TrimLeadingSpace = ' ', true
+		args, err := r.Read()
+		require.NoError(t, err, "example line %q", line)
+		out = append(out, args)
+	}
+	return out
 }

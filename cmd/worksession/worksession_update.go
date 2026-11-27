@@ -43,9 +43,11 @@ before the request. To change the expiry of an approved or active session, use
 'alpacon work-session extend'.
 
 --scope and --server replace the whole list (not append). --sudo adds session-authorized
-sudo command patterns to the session's existing policies; this is the recovery
-path when an 'exec' sudo was denied. The additions may require approval before
-they take effect.
+sudo command patterns to a session that holds the 'sudo' scope, or gets it from
+--scope in the same update; this is the recovery path when an 'exec' sudo was
+denied. The additions may require approval before they take effect. Write each
+pattern without the leading sudo: "systemctl restart nginx" matches
+'sudo systemctl restart nginx', and a pattern that begins with sudo is refused.
 
 If SESSION_ID is omitted, the effective work session is resolved from the
 ALPACON_WORK_SESSION environment variable, then the workspace's active session
@@ -173,7 +175,7 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 	cmd.Flags().StringSliceVar(&updateServers, "server", nil, "Replace the target servers by name (repeatable; comma-separated values also accepted; replaces the whole list)")
 	cmd.Flags().StringVar(&updateStartsAt, "starts-at", "", "New scheduled start time (RFC3339; pending sessions only)")
 	cmd.Flags().StringVar(&updateExpiresAt, "expires-at", "", "New absolute expiry time (RFC3339; pending sessions only — use 'extend' for approved/active sessions)")
-	cmd.Flags().StringArrayVar(&updateSudo, "sudo", nil, "Sudo command patterns to add as session-authorized sudo policies (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed)")
+	cmd.Flags().StringArrayVar(&updateSudo, "sudo", nil, "Sudo command patterns to add as session-authorized sudo policies, each the command without its leading sudo (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed)")
 	cmd.Flags().StringVar(&updateSudoReason, "sudo-reason", "", "Justification applied to the sudo policies added via --sudo")
 	return cmd
 }
@@ -194,13 +196,13 @@ func updateTargetSession(ac *client.AlpaconClient, args []string) string {
 func validateSessionForSudoUpdate(session *wsapi.WorkSession, scopes []string) error {
 	if session.Status == wsapi.StatusPending {
 		return fmt.Errorf(
-			"work session %s is pending approval; sudo policies cannot be modified yet. Set them at create time with --sudo, or wait until it is approved",
+			"work session %s is pending approval; sudo policies cannot be modified yet. Set them at create time with --scope and --sudo, or wait until it is approved",
 			session.ID,
 		)
 	}
 	if !slices.Contains(scopes, "sudo") {
 		return fmt.Errorf(
-			"work session %s does not include the 'sudo' scope; sudo policies cannot be added. Include 'sudo' in the scope list via --scope in this same update (note --scope replaces the whole list, so list every scope you want to keep), or create a new session with --sudo (which adds the 'sudo' scope automatically)",
+			"work session %s does not include the 'sudo' scope; sudo policies cannot be added. Include 'sudo' in the scope list via --scope in this same update (note --scope replaces the whole list, so list every scope you want to keep), or create a new session with --sudo (which adds the 'sudo' scope to --scope)",
 			session.ID,
 		)
 	}

@@ -27,6 +27,8 @@ type clientFactory = func() (*client.AlpaconClient, error)
 
 const maxEditPromptSize int64 = 10 * 1024 * 1024
 
+const uploadCommand = "cp" // the alpacon command that uploads the edited copy
+
 var (
 	selectWorkSession = worksession.Select
 	downloadEditFile  = ftpapi.DownloadFileToPath
@@ -92,7 +94,7 @@ redirections, or '&&' will not work.`,
 			if err != nil {
 				return utils.NewExitError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			}
-			sel, err := selectWorkSession(ios, alpaconClient, flagWorkSession, worksession.Need{Operation: worksession.Transfer, Server: target.Server, Account: target.Username})
+			sel, err := selectWorkSession(ios, alpaconClient, flagWorkSession, worksession.Need{Operation: worksession.Transfer, Server: target.Server, Account: target.Username, Command: "edit"})
 			if err != nil {
 				return utils.NewExitError("%s", err)
 			}
@@ -181,7 +183,7 @@ func realEditDeps(ac *client.AlpaconClient, groupname string, sel *worksession.S
 			return downloaded, err
 		},
 		upload: func(target editTarget, localPath string) error {
-			sel.ResumeWith(uploadResumeStep(target, groupname, localPath))
+			sel.ResumeWithCommand(uploadResumeStep(target, groupname, localPath), uploadCommand)
 			err := uploadEditFile(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, sel.ID())
 			if err != nil {
 				err = utils.HandleCommonErrors(err, target.Server, sel.Offer(mfa.ErrorCallbacks(ac, func() error {
@@ -199,23 +201,44 @@ func realEditDeps(ac *client.AlpaconClient, groupname string, sel *worksession.S
 	}
 }
 
-// uploadResumeStep names the edited copy, where 'alpacon cp' uploads it in a form cp reads as
-// remote, and the group the edit wrote as.
+// uploadResumeStep names the edited copy, a destination cp reads as the edit's server and path, and the
+// account and group to upload as. The account goes inline only when cp reads it back unquoted.
 func uploadResumeStep(target editTarget, groupname, localPath string) string {
 	dest := target.Server + ":" + target.RemotePath
-	switch {
-	case target.Username != "":
-		dest = target.Username + "@" + dest
-	case !utils.IsRemoteTarget(dest):
+	account := ""
+	if target.Username != "" {
+		quoted, ok := worksession.ShellWord(target.Username)
+		switch {
+		case ok && quoted == target.Username && cpReadsTarget(target.Username+"@"+dest, target):
+			dest = target.Username + "@" + dest
+		case ok:
+			account = " and -u " + quoted
+		default:
+			account = " and the -u account the edit used"
+		}
+	}
+	keep := ""
+	if !cpReadsTarget(dest, target) {
 		dest = "USER@" + dest
+		if account != "" {
+			keep = ", leaving USER@ as written," // -u replaces only the account; dropping or filling in USER@ changes the target cp reads
+		}
 	}
 	shownPath, _ := utils.SanitizeTerminalLine(localPath)
 	shownDest, _ := utils.SanitizeTerminalLine(dest)
 	group := ""
 	if quoted, ok := worksession.ShellWord(groupname); ok {
 		group = " and -g " + quoted
+	} else if groupname != "" {
+		group = " and the -g group the edit used"
 	}
-	return fmt.Sprintf("upload the edited copy at %s to %s with 'alpacon cp'%s instead of editing again", shownPath, shownDest, group)
+	return fmt.Sprintf("upload the edited copy at %s to %s with 'alpacon %s'%s%s%s instead of editing again", shownPath, shownDest, uploadCommand, account, group, keep)
+}
+
+// cpReadsTarget reports whether cp reads dest as the target's server and path.
+func cpReadsTarget(dest string, target editTarget) bool {
+	parsed := utils.ParseSSHTarget(dest)
+	return utils.IsRemoteTarget(dest) && parsed.Host == target.Server && parsed.Path == target.RemotePath
 }
 
 func parseEditTarget(arg, usernameFlag string) (editTarget, error) {

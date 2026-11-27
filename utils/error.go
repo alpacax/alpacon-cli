@@ -169,6 +169,10 @@ const (
 	WorkSessionTargetAccountNotApplicable = "work_session_target_account_not_applicable"
 	WorkSessionExpiresExceedsMaxTTL       = "work_session_expires_exceeds_max_ttl"
 
+	// SudoPolicyPatternHasSudoPrefix rides a 400 on a work session create or
+	// update whose --sudo pattern begins with sudo, which a pattern leaves out.
+	SudoPolicyPatternHasSudoPrefix = "sudo_policy_pattern_has_sudo_prefix"
+
 	// Refusals of a kube session the server names itself. The cluster's agent
 	// is not connected; the agent did not accept the session, which the server
 	// then closed; the caller's username cannot be the session's identity,
@@ -233,6 +237,10 @@ const (
 	// PurposeRequiredStatus is the stable machine-readable status string emitted
 	// under --output json when a command is parked awaiting its purpose.
 	PurposeRequiredStatus = "purpose_required"
+
+	// CommandRunningStatus is the stable machine-readable status string `exec logs` emits under
+	// --output json for a command that has not finished. It exits 0: nothing failed or is held.
+	CommandRunningStatus = "running"
 
 	// ExitCodeUpdateAvailable is the process exit code for `alpacon update --check` finding a newer
 	// release; a failed check exits ExitCodeGeneralError instead.

@@ -163,7 +163,8 @@ Flags:
                                 command's intrinsic risk.
   --detach                      Submit the command and return immediately without
                                 waiting for completion. Prints the job ID to stdout.
-                                Use 'alpacon exec logs JOB_ID' to retrieve the result.
+                                Use 'alpacon exec logs JOB_ID' to retrieve the result;
+                                its help lists what it prints before the command ends.
                                 Inside an agent-requester work session, a command
                                 the gate holds for its purpose can sit for about a
                                 minute. Without a purpose it is judged again: it
@@ -316,6 +317,7 @@ func RemoteExec(ios *utils.IOStreams, newClient clientFactory, stdout, stderr io
 		Operation: operation,
 		Server:    parsed.Server,
 		Account:   parsed.Username,
+		Command:   strings.TrimPrefix(string(parsed.InvokedAs), "alpacon "), // empty for exec itself
 	})
 	if err != nil {
 		return utils.NewExitError("%s", err)

@@ -35,3 +35,31 @@ func TestFixedNeverAddsAnOffer(t *testing.T) {
 	assert.Equal(t, "session-1", Fixed("session-1").ID())
 	assert.Empty(t, (*Selection)(nil).ID())
 }
+
+func TestResumeWithNamesTheCommandItsStepRunsAndKeepsTheResend(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		resume     func(*Selection)
+		wantResume string
+	}{
+		{name: "no_resume_step", resume: func(*Selection) {}, wantResume: "edit"},
+		{name: "step_that_keeps_the_command", resume: func(s *Selection) { s.ResumeWith("re-run this command without --upload") }, wantResume: "edit"},
+		{name: "step_that_runs_another_command", resume: func(s *Selection) { s.ResumeWithCommand("upload the edited copy", "cp") }, wantResume: "cp"},
+		{name: "later_step_that_keeps_the_command_drops_the_other", resume: func(s *Selection) {
+			s.ResumeWithCommand("upload the edited copy", "cp")
+			s.ResumeWith("re-run this command without --upload")
+		}, wantResume: "edit"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			selection := &Selection{need: Need{Operation: Transfer, Command: "edit"}}
+
+			tt.resume(selection)
+
+			assert.Equal(t, tt.wantResume, selection.resumeCommand())
+			assert.Equal(t, "edit", selection.need.command(), "the resend is still the command the user ran")
+		})
+	}
+}

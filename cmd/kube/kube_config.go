@@ -45,7 +45,7 @@ into your kubeconfig, then make it the current context so kubectl, k9s, and
 other clients use it right away. The session runs under --work-session, or
 the WorkSession ALPACON_WORK_SESSION names, which must target the cluster with
 the kube scope; create one with
-'alpacon work-session create --cluster CLUSTER --scope kube'.
+'alpacon work-session create --cluster CLUSTER --scope kube --purpose "debug crashlooping api pods" --expires-in 1h'.
 'alpacon kube login' finds or creates that session itself and keeps the token
 out of the kubeconfig.
 

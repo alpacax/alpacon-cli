@@ -131,13 +131,13 @@ func TestEditUploadOfferNamesTheEditedCopyToResumeWith(t *testing.T) {
 	}
 
 	cmd := NewEditCmd(func() (*client.AlpaconClient, error) { return ac, nil }, ios)
-	cmd.SetArgs([]string{"web-1:/etc/app.conf"})
+	cmd.SetArgs([]string{"-u", "root", "web-1:/etc/app.conf"})
 	err := cmd.Execute()
 
 	var exitErr *utils.ExitError
 	require.ErrorAs(t, err, &exitErr)
 	assert.Equal(t, utils.ExitCodeNotApproved, exitErr.Code)
-	assert.Contains(t, stderr.String(), "then upload the edited copy at "+edited+" to web-1:/etc/app.conf")
+	assert.Contains(t, stderr.String(), "then upload the edited copy at "+edited+" to root@web-1:/etc/app.conf with 'alpacon cp' instead of editing again (run cp with -u root, the account the session was created for).\n")
 	assert.FileExists(t, edited)
 }
 
@@ -152,6 +152,8 @@ func TestUploadResumeStepNamesADestinationCpReadsAsRemote(t *testing.T) {
 		{name: "account", target: editTarget{Server: "web-1", RemotePath: "/etc/app.conf", Username: "root"}, want: "root@web-1:/etc/app.conf"},
 		{name: "drive-like without an account", target: editTarget{Server: "h", RemotePath: `\app.conf`}, want: `USER@h:\app.conf`},
 		{name: "drive-like with an account", target: editTarget{Server: "h", RemotePath: `\app.conf`, Username: "root"}, want: `root@h:\app.conf`},
+		{name: "server with an at sign", target: editTarget{Server: "node@rack", RemotePath: "/etc/app.conf"}, want: "USER@node@rack:/etc/app.conf"},
+		{name: "server with an at sign and an account", target: editTarget{Server: "node@rack", RemotePath: "/etc/app.conf", Username: "root"}, want: "root@node@rack:/etc/app.conf"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -165,6 +167,34 @@ func TestUploadResumeStepNamesADestinationCpReadsAsRemote(t *testing.T) {
 	}
 }
 
+func TestUploadResumeStepPassesAnAccountCpCannotReadInlineWithTheFlag(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		target editTarget
+		group  string
+		want   string
+	}{
+		{name: "account with an at sign", target: editTarget{Server: "web-1", RemotePath: "/etc/app.conf", Username: "alice@corp"}, want: "to web-1:/etc/app.conf with 'alpacon cp' and -u alice@corp "},
+		{name: "account with a colon", target: editTarget{Server: "web-1", RemotePath: "/etc/app.conf", Username: "a:b"}, want: "to web-1:/etc/app.conf with 'alpacon cp' and -u 'a:b' "},
+		{name: "account a shell would split", target: editTarget{Server: "web-1", RemotePath: "/etc/app.conf", Username: "dev ops"}, want: "to web-1:/etc/app.conf with 'alpacon cp' and -u 'dev ops' "},
+		{name: "account no shell reads back unchanged", target: editTarget{Server: "web-1", RemotePath: "/etc/app.conf", Username: `dev"ops`}, want: "to web-1:/etc/app.conf with 'alpacon cp' and the -u account the edit used "},
+		{name: "account and group", target: editTarget{Server: "web-1", RemotePath: "/etc/app.conf", Username: "dev ops"}, group: "deploy", want: "to web-1:/etc/app.conf with 'alpacon cp' and -u 'dev ops' and -g deploy "},
+		{name: "server with an at sign and an account cp cannot read inline", target: editTarget{Server: "node@rack", RemotePath: "/etc/app.conf", Username: "alice@corp"}, want: "to USER@node@rack:/etc/app.conf with 'alpacon cp' and -u alice@corp, leaving USER@ as written, "},
+		{name: "server with an at sign and an account no shell reads back unchanged", target: editTarget{Server: "node@rack", RemotePath: "/etc/app.conf", Username: `dev"ops`}, want: "to USER@node@rack:/etc/app.conf with 'alpacon cp' and the -u account the edit used, leaving USER@ as written, "},
+		{name: "server with an at sign, a flag account and a group", target: editTarget{Server: "node@rack", RemotePath: "/etc/app.conf", Username: "dev ops"}, group: "deploy", want: "to USER@node@rack:/etc/app.conf with 'alpacon cp' and -u 'dev ops' and -g deploy, leaving USER@ as written, "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			step := uploadResumeStep(tt.target, tt.group, "/tmp/copy")
+
+			assert.Equal(t, "upload the edited copy at /tmp/copy "+tt.want+"instead of editing again", step)
+		})
+	}
+}
+
 func TestUploadResumeStepKeepsTheGroupTheEditWroteAs(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -172,6 +202,7 @@ func TestUploadResumeStepKeepsTheGroupTheEditWroteAs(t *testing.T) {
 	}{
 		{name: "plain group", group: "deploy", want: " and -g deploy "},
 		{name: "group a shell would split", group: "dev ops", want: " and -g 'dev ops' "},
+		{name: "group no shell reads back unchanged", group: "développeurs", want: " and the -g group the edit used "},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -237,6 +268,7 @@ func setupEditOfferWithStatus(t *testing.T, create *wsapi.WorkSessionCreateReque
 	originalEditor := localEditorRunner
 	selectWorkSession = func(gotIOS *utils.IOStreams, gotAC *client.AlpaconClient, _ string, need worksession.Need) (*worksession.Selection, error) {
 		assert.Equal(t, worksession.Transfer, need.Operation)
+		assert.Equal(t, "edit", need.Command)
 		return worksession.OfferedForTest(gotIOS, gotAC, "old-session", need), nil
 	}
 	t.Cleanup(func() {

@@ -67,20 +67,6 @@ func TestLogsCommandOutcome(t *testing.T) {
 			wantExitCode:    0,
 		},
 		{
-			name:               "still running",
-			details:            event.EventDetails{ID: "job-1", Status: "running"},
-			wantStdoutLine:     "",
-			wantStderrContains: []string{"still running", "status: running", "job-1"},
-			wantExitCode:       0,
-		},
-		{
-			name:               "queued",
-			details:            event.EventDetails{ID: "job-2", Status: "queued"},
-			wantStdoutLine:     "",
-			wantStderrContains: []string{"still running", "status: queued", "job-2"},
-			wantExitCode:       0,
-		},
-		{
 			name:               "stuck without phase",
 			details:            event.EventDetails{ID: "job-1", Status: "stuck"},
 			wantStdoutLine:     "",
@@ -195,8 +181,8 @@ func TestLogsCommandOutcome(t *testing.T) {
 }
 
 // The stderr line bypasses the Cli* helpers, so each case injects into the one field the server
-// controls on that branch: Status must equal a known value to reach the running and failed
-// branches, so ID and ErrorPhase carry the payload there, while the unrecognized-status fallback
+// controls on that branch: Status must equal a known value to reach the failed branches, so
+// ErrorPhase carries the payload there, while the unrecognized-status fallback
 // renders Status itself.
 func TestLogsCommandOutcomeSanitizesServerText(t *testing.T) {
 	t.Parallel()
@@ -205,11 +191,6 @@ func TestLogsCommandOutcomeSanitizesServerText(t *testing.T) {
 		details    event.EventDetails
 		wantStderr string
 	}{
-		{
-			name:       "running branch strips escape and bidi in ID",
-			details:    event.EventDetails{ID: "job-1\x1b[2K\u202e", Status: "running"},
-			wantStderr: "command is still running (status: running).\nRun `alpacon exec logs job-1` again to check later.\n",
-		},
 		{
 			name:       "stuck branch strips escape in unknown phase",
 			details:    event.EventDetails{ID: "job-1", Status: "stuck", ErrorPhase: new("boom\x1b[31m\u202e")},
@@ -447,6 +428,102 @@ func TestExecLogsReportsRemoteFailureInJSON(t *testing.T) {
 			assert.Equal(t, 1+strings.Count(tt.prefix, "\n"), strings.Count(stderr, "\n"))
 			assert.True(t, strings.HasPrefix(stderr, tt.prefix), "stderr must begin with %q: %q", tt.prefix, stderr)
 			assert.JSONEq(t, tt.envelope, strings.TrimPrefix(stderr, tt.prefix))
+		})
+	}
+}
+
+func TestExecLogsTellsRunningFromFinishedWithNoOutput(t *testing.T) {
+	t.Parallel()
+	const jobID = "550e8400-e29b-41d4-a716-446655440000"
+	runningObject := func(status string) string {
+		return `{"ok":true,"status":"running","exit_code":0,"message":"command is still running (status: ` + status + `).","command_id":"` + jobID + `","context":{"command_id":"` + jobID + `","command_status":"` + status + `"},"next_actions":[{"command":"alpacon exec logs ` + jobID + `","description":"Read the result once the command finishes; do not re-submit it"}]}`
+	}
+	tests := []struct {
+		name, body, wantStdout, wantStderr string
+		json, stdoutIsJSON, finished       bool
+	}{
+		{
+			name:         "running under json prints the status object",
+			body:         `{"id":"` + jobID + `","status":"running"}`,
+			json:         true,
+			stdoutIsJSON: true,
+			wantStdout:   runningObject("running"),
+		},
+		{
+			name:         "queued under json names the server status",
+			body:         `{"id":"` + jobID + `","status":"queued"}`,
+			json:         true,
+			stdoutIsJSON: true,
+			wantStdout:   runningObject("queued"),
+		},
+		{
+			name:         "running under json names the requested ID, not the one the server returned",
+			body:         `{"id":"x; rm -rf ~","status":"running"}`,
+			json:         true,
+			stdoutIsJSON: true,
+			wantStdout:   runningObject("running"),
+		},
+		{
+			name:         "running with a stated purpose keeps the purpose on stderr under json",
+			body:         `{"id":"` + jobID + `","status":"running","purpose":"inspect service"}`,
+			json:         true,
+			stdoutIsJSON: true,
+			wantStdout:   runningObject("running"),
+			wantStderr:   "Stated purpose: inspect service\n",
+		},
+		{
+			name:       "running in table mode keeps the stderr sentence",
+			body:       `{"id":"` + jobID + `","status":"running"}`,
+			wantStderr: "command is still running (status: running).\nRun `alpacon exec logs " + jobID + "` again to check later.\n",
+		},
+		{
+			name:     "finished with no output under json prints nothing",
+			finished: true,
+			body:     `{"id":"` + jobID + `","status":"completed","success":true,"exit_code":0,"result":""}`,
+			json:     true,
+		},
+		{
+			name:       "finished with output under json prints it raw",
+			finished:   true,
+			body:       `{"id":"` + jobID + `","status":"completed","success":true,"exit_code":0,"result":"{\"status\":\"ok\"}"}`,
+			json:       true,
+			wantStdout: "{\"status\":\"ok\"}\n",
+		},
+		{
+			name:       "finished with output in table mode prints it raw",
+			finished:   true,
+			body:       `{"id":"` + jobID + `","status":"completed","success":true,"exit_code":0,"result":"Packages updated."}`,
+			wantStdout: "Packages updated.\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Given: a running command must not fetch output, and the fake fails any unlisted route.
+			routes := map[string]cmdtest.Reply{
+				"GET /api/events/commands/" + jobID + "/": {Status: http.StatusOK, Body: tt.body},
+			}
+			if tt.finished {
+				routes["GET /api/events/commands/"+jobID+"/chunks/"] = cmdtest.Reply{Status: http.StatusNotFound}
+			}
+			server := cmdtest.Server(t, routes)
+			build := func(ios *utils.IOStreams) *cobra.Command { return newLogsCommand(server.Factory(), ios) }
+
+			// When
+			run := cmdtest.RunCaptured
+			if tt.json {
+				run = cmdtest.RunJSON
+			}
+			stdout, stderr, code := run(build, jobID)
+
+			// Then
+			assert.Equal(t, 0, code)
+			if tt.stdoutIsJSON {
+				assert.JSONEq(t, tt.wantStdout, stdout)
+			} else {
+				assert.Equal(t, tt.wantStdout, stdout)
+			}
+			assert.Equal(t, tt.wantStderr, stderr)
 		})
 	}
 }

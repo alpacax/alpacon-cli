@@ -183,10 +183,10 @@ func TestExecOfferAfterUploadSaysNotToUploadAgain(t *testing.T) {
 	local := t.TempDir() + "/deploy.sh"
 	require.NoError(t, os.WriteFile(local, []byte("echo ok\n"), 0600))
 
-	_, stderr, exitCode := runInProcess(t, server.URL, "", "", []string{"--detach", "--upload", "--file", "/tmp/deploy.sh", "--file-from", local, "prod"})
+	_, stderr, exitCode := runInProcess(t, server.URL, "", "", []string{"--detach", "--upload", "--file", "/tmp/deploy.sh", "--file-from", local, "-u", "root", "prod"})
 
 	assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
-	assert.Contains(t, stderr, "then re-run this command without --upload and --overwrite")
+	assert.Contains(t, stderr, "then re-run this command without --upload and --overwrite, since the script is already on the server (run exec with -u root, the account the session was created for).\n")
 }
 
 func TestExecFromServerOfferResendsWithCreatedFileCommandSession(t *testing.T) {
@@ -211,4 +211,34 @@ func TestExecFromServerOfferResendsWithCreatedFileCommandSession(t *testing.T) {
 	assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
 	assert.Equal(t, []string{"old-session", "new-session"}, ids)
 	assert.ElementsMatch(t, []string{utils.OperationCommand, utils.OperationWebFTP}, scopes)
+}
+
+func TestRemoteExecNamesTheCommandTheUserRanInTheWorkSessionNeed(t *testing.T) {
+	original := selectWorkSession
+	t.Cleanup(func() { selectWorkSession = original })
+	errStop := errors.New("stop after the selection")
+	tests := []struct {
+		name      string
+		invokedAs Invocation
+		want      string
+	}{
+		{name: "exec", want: ""},
+		{name: "websh_command_mode", invokedAs: WebshInvocation, want: "websh"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got worksession.Need
+			selectWorkSession = func(_ *utils.IOStreams, _ *client.AlpaconClient, _ string, need worksession.Need) (*worksession.Selection, error) {
+				got = need
+				return nil, errStop
+			}
+			ios, _, _ := utils.TestIOStreams()
+
+			err := RemoteExec(ios, testClientFactory("https://ws.example.com"), io.Discard, io.Discard, RemoteExecArgs{Server: "prod", Command: "id", InvokedAs: tt.invokedAs})
+
+			require.Error(t, err)
+			require.Equal(t, "prod", got.Server, "the selection must be reached for the row to mean anything")
+			assert.Equal(t, tt.want, got.Command)
+		})
+	}
 }
