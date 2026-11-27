@@ -19,7 +19,19 @@ func newLogsCommand(newClient clientFactory, ios *utils.IOStreams) *cobra.Comman
 		Long: `Fetch the result of a command submitted with --detach.
 
 If the command is still running, prints the current status and exits.
-Run the command again later to check for completion.`,
+Run the command again later to check for completion.
+
+A finished command's output goes to stdout as raw text, under --output json
+too. Under --output json the outcomes that are not a result print a status
+object on stdout instead: {"status":"running", ...} with exit 0 while the
+command is still in progress, {"status":"pending_approval", ...} with exit 4,
+and {"status":"purpose_required", ...} with exit 7. So exit 0 with a running
+object means not finished, and exit 0 with anything else, an empty stdout
+included, is the finished command's output—unless that output is itself such
+an object. A command that failed with a remote exit status exits with it; one
+that ends stuck, error or cancelled, or reports no exit status, exits 1.
+Either way stderr ends with an error envelope, which carries remote_exit_code
+whenever the server reported an exit status.`,
 		Example: `  alpacon exec logs 550e8400-e29b-41d4-a716-446655440000`,
 		Args:    cobra.ExactArgs(1),
 		RunE: utils.WithExitError(func(cmd *cobra.Command, args []string) error {
@@ -61,7 +73,7 @@ Run the command again later to check for completion.`,
 			// detach path's only sight of the demand: SubmitCommand returns before the verdict.
 			if event.IsAwaitingPurposeStatus(details.Status) {
 				ios.PrintPurposeDemand(
-					utils.PurposeDemandLead, details.ID, details.PurposeExpiresAt,
+					utils.PurposeDemandLead, jobID, details.PurposeExpiresAt,
 				)
 				return utils.NewSilentExitError(utils.ExitCodePurposeRequired)
 			}
@@ -74,7 +86,7 @@ Run the command again later to check for completion.`,
 					fields.Session = details.WorkSession.ID
 				}
 				utils.EmitLocalSignal(localsignal.ApprovalPending, fields, alpaconClient)
-				requestID, lookupErr := approval.FindCommandApprovalRequestID(alpaconClient, details.ID)
+				requestID, lookupErr := approval.FindCommandApprovalRequestID(alpaconClient, jobID)
 				if lookupErr != nil {
 					ios.Warning("failed to read approval request: %s", lookupErr)
 				}
@@ -91,7 +103,7 @@ Run the command again later to check for completion.`,
 					message,
 					requestID,
 					pending,
-					utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", details.ID)},
+					utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", jobID)},
 				)
 				return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 			}
@@ -112,8 +124,7 @@ Run the command again later to check for completion.`,
 
 			// Fetch output only for statuses whose outcome prints it. A status-only failure prints a
 			// line of its own, so a hanging chunk store would only cost the wait; a running status
-			// exits 0, so a read error would take the exitCode == 0 gate below and bury the "still
-			// running" line.
+			// prints no output, so the fetch would be wasted.
 			var readErr error
 			if !event.IsRunningStatus(details.Status) && !event.IsStatusOnlyFailure(details.Status) {
 				output, oerr := event.ResolveCommandOutput(alpaconClient, jobID, details.Result)
@@ -130,6 +141,13 @@ Run the command again later to check for completion.`,
 			if details.Purpose != "" {
 				_, _ = fmt.Fprintf(stderr, "Stated purpose: %s\n",
 					utils.SanitizeTerminalText(details.Purpose))
+			}
+
+			if event.IsRunningStatus(details.Status) {
+				if err := ios.PrintCommandRunning(jobID, details.Status); err != nil {
+					return utils.NewExitError("%s", err)
+				}
+				return nil
 			}
 
 			stdoutLine, stderrLine, exitCode := logsCommandOutcome(ios, details)
@@ -217,20 +235,12 @@ func logsAccountFlags(details event.EventDetails) (flags []string, note string) 
 }
 
 // logsCommandOutcome guarantees a non-empty stderrLine ends with \n. Neither the
-// awaiting_purpose demand, the awaiting_approval hold, nor a rejection reaches
-// here: the caller answers all three on their own contracts first.
+// awaiting_purpose demand, the awaiting_approval hold, a rejection, nor a running
+// command reaches here: the caller answers all four on their own contracts first.
 func logsCommandOutcome(ios *utils.IOStreams, details event.EventDetails) (stdoutLine, stderrLine string, exitCode int) {
 	// These lines are written raw, outside the Cli* helpers. A Status that reached a branch equals
-	// the literal it was compared against and needs no strip; the ID, an unknown phase and the
+	// the literal it was compared against and needs no strip; an unknown phase and the
 	// unrecognized-status fallback carry the server's own text and do.
-	if event.IsRunningStatus(details.Status) {
-		stderrLine = fmt.Sprintf(
-			"command is still running (status: %s).\nRun `alpacon exec logs %s` again to check later.\n",
-			details.Status, utils.SanitizeTerminalText(details.ID),
-		)
-		return "", stderrLine, 0
-	}
-
 	if event.IsStatusOnlyFailure(details.Status) {
 		if details.ErrorPhase != nil && *details.ErrorPhase != "" {
 			phase, desc := sanitizedPhaseParts(*details.ErrorPhase)

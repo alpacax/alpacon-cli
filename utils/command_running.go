@@ -1,0 +1,57 @@
+package utils
+
+import "fmt"
+
+// commandRunningCtx carries the server's own status, so a caller can tell queued from running.
+type commandRunningCtx struct {
+	CommandID     string `json:"command_id"`
+	CommandStatus string `json:"command_status"`
+}
+
+// commandRunningJSON is the --output json object for a command still in progress. Its fixed Status
+// tells it apart from a finished command with no output, which prints nothing.
+type commandRunningJSON struct {
+	OK          bool              `json:"ok"`
+	Status      string            `json:"status"`
+	ExitCode    int               `json:"exit_code"`
+	Message     string            `json:"message"`
+	CommandID   string            `json:"command_id"`
+	Context     commandRunningCtx `json:"context"`
+	NextActions []NextAction      `json:"next_actions,omitempty"`
+}
+
+// PrintCommandRunning reports a command that has not finished: a {"status":"running", ...}
+// envelope on stdout under --output json, else the status and a check-later line on stderr.
+// It returns an error only when stdout took neither the envelope nor its fallback, since
+// exit 0 with an empty stdout would read as a finished command with no output.
+func (s *IOStreams) PrintCommandRunning(commandID, status string) error {
+	// Both are server-supplied and reach the terminal.
+	commandID = SanitizeTerminalText(commandID)
+	status = SanitizeTerminalText(status)
+	retry := fmt.Sprintf("alpacon exec logs %s", commandID)
+
+	if s.IsJSON() {
+		envelope := commandRunningJSON{
+			OK:        true,
+			Status:    CommandRunningStatus,
+			ExitCode:  0,
+			Message:   fmt.Sprintf("command is still running (status: %s).", status),
+			CommandID: commandID,
+			Context:   commandRunningCtx{CommandID: commandID, CommandStatus: status},
+			NextActions: []NextAction{{
+				Command:     retry,
+				Description: "Read the result once the command finishes; do not re-submit it",
+			}},
+		}
+		if err := PrintJSONValue(s.Out, envelope); err != nil {
+			// Fall back to a minimal object that still carries the status field.
+			if _, ferr := fmt.Fprintf(s.Out, `{"ok":true,"status":%q}`+"\n", CommandRunningStatus); ferr != nil {
+				return fmt.Errorf("write the running status: %w", ferr)
+			}
+		}
+		return nil
+	}
+
+	_, _ = fmt.Fprintf(s.ErrOut, "command is still running (status: %s).\nRun `%s` again to check later.\n", status, retry)
+	return nil
+}
