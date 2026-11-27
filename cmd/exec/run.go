@@ -38,12 +38,7 @@ const sudoPresenceRequiredCode = "SUDO_PRESENCE_REQUIRED"
 // server's inline-credential gate (utils.CommandInlineCredential).
 const commandInlineCredentialMessage = "server rejected this command—the command line carries a credential"
 
-const (
-	// usernameGroupnameInvalidCode is the code the server answers with when the
-	// command carries no execution user and the server has no default one.
-	usernameGroupnameInvalidCode = "server_username_groupname_invalid"
-	execUserRequiredHint         = "Specify an execution user with -u USERNAME (and optionally -g GROUP), or use USERNAME@SERVER.\n%s"
-)
+const execUserRequiredHint = "Specify an execution user with -u USERNAME (and optionally -g GROUP), or use USERNAME@SERVER.\n%s"
 
 // ExecInvocation and WebshInvocation are the two Invocation values (see the
 // Invocation type below).
@@ -1248,7 +1243,7 @@ func execUserFailure(ios *utils.IOStreams, stderr io.Writer, err error, parsed R
 // One that named a user or group keeps the server's own error, which this hint would contradict.
 func execUserRefusal(ios *utils.IOStreams, err error, parsed RemoteExecArgs) (message, hint string, ok bool) {
 	if parsed.Username != "" || parsed.Groupname != "" ||
-		utils.StructuredErrorCode(err) != usernameGroupnameInvalidCode {
+		utils.StructuredErrorCode(err) != utils.ServerUsernameGroupnameInvalid {
 		return "", "", false
 	}
 	return fmt.Sprintf("no execution user was resolved for '%s' server", utils.SanitizeTerminalText(parsed.Server)),
