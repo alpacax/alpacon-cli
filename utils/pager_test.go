@@ -7,6 +7,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func captureOutput(t *testing.T, fn func(stdout *os.File)) string {
@@ -35,7 +38,7 @@ func TestWriteToPager_NonTerminal(t *testing.T) {
 	got := captureOutput(t, func(stdout *os.File) {
 		w, cleanup := writeToPager(false, nil, stdout)
 		_, _ = fmt.Fprint(w, want)
-		cleanup()
+		require.NoError(t, cleanup())
 	})
 
 	if got != want {
@@ -50,7 +53,7 @@ func TestWriteToPager_TerminalShortOutput(t *testing.T) {
 	got := captureOutput(t, func(stdout *os.File) {
 		w, cleanup := writeToPager(true, func() (int, error) { return 100, nil }, stdout)
 		_, _ = fmt.Fprint(w, want)
-		cleanup()
+		require.NoError(t, cleanup())
 	})
 
 	if got != want {
@@ -70,7 +73,7 @@ func TestWriteToPager_TerminalLongOutput(t *testing.T) {
 	got := captureOutput(t, func(stdout *os.File) {
 		w, cleanup := writeToPager(true, func() (int, error) { return 5, nil }, stdout)
 		_, _ = fmt.Fprint(w, want)
-		cleanup()
+		require.NoError(t, cleanup())
 	})
 
 	if got != want {
@@ -100,7 +103,7 @@ func TestWriteToPager_RecordsWhetherAPagerRan(t *testing.T) {
 			got := captureOutput(t, func(stdout *os.File) {
 				w, cleanup := writeToPager(true, func() (int, error) { return tt.height, nil }, stdout)
 				_, _ = fmt.Fprint(w, long)
-				cleanup()
+				require.NoError(t, cleanup())
 			})
 
 			if got != long {
@@ -111,4 +114,16 @@ func TestWriteToPager_RecordsWhetherAPagerRan(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWriteToPagerReportsFlushFailure(t *testing.T) {
+	t.Parallel()
+	stdout, err := os.CreateTemp(t.TempDir(), "stdout")
+	require.NoError(t, err)
+	require.NoError(t, stdout.Close())
+	writer, flush := writeToPager(false, nil, stdout)
+	_, err = io.WriteString(writer, "approval detail\n")
+	require.NoError(t, err)
+
+	assert.ErrorIs(t, flush(), os.ErrClosed)
 }

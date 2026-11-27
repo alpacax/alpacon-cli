@@ -21,6 +21,11 @@ import (
 //   - Otherwise, pipes through the PAGER environment variable or "less -RSX".
 //   - Falls back to direct stdout if the pager command is not available.
 func WriteToPager() (io.Writer, func()) {
+	writer, flush := writeToStdoutPager()
+	return writer, func() { _ = flush() }
+}
+
+func writeToStdoutPager() (io.Writer, func() error) {
 	return writeToPager(
 		term.IsTerminal(int(os.Stdout.Fd())),
 		func() (int, error) {
@@ -40,23 +45,25 @@ func LastOutputPaged() bool {
 	return lastOutputPaged.Load()
 }
 
-func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.File) (io.Writer, func()) {
+func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.File) (io.Writer, func() error) {
 	var buf bytes.Buffer
 
-	cleanup := func() {
+	flush := func() error {
 		lastOutputPaged.Store(false)
 		output := buf.Bytes()
+		writeDirect := func() error {
+			_, err := stdout.Write(output)
+			return err
+		}
 
 		if !isTerminal {
-			_, _ = stdout.Write(output)
-			return
+			return writeDirect()
 		}
 
 		height, err := getHeight()
 		lineCount := bytes.Count(output, []byte("\n"))
 		if err != nil || lineCount <= height {
-			_, _ = stdout.Write(output)
-			return
+			return writeDirect()
 		}
 
 		pager := os.Getenv("PAGER")
@@ -67,8 +74,7 @@ func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.Fil
 		} else {
 			lessPath, err := exec.LookPath("less")
 			if err != nil {
-				_, _ = stdout.Write(output)
-				return
+				return writeDirect()
 			}
 			cmd = exec.Command(lessPath, "-RSX")
 		}
@@ -78,11 +84,11 @@ func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.Fil
 		cmd.Stderr = StderrForChild()
 
 		if err := cmd.Run(); err != nil {
-			_, _ = stdout.Write(output)
-			return
+			return writeDirect()
 		}
 		lastOutputPaged.Store(true)
+		return nil
 	}
 
-	return &buf, cleanup
+	return &buf, flush
 }
