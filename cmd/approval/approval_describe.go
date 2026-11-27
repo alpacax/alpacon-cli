@@ -2,6 +2,7 @@ package approval
 
 import (
 	"fmt"
+	"io"
 	"net/url"
 	"slices"
 	"strconv"
@@ -39,7 +40,8 @@ For a Kubernetes request, the table identifies the target and describes the
 request. A change set describes the requested edits. The body below the
 table is indented when it is JSON. Only strings in the object's
 kubectl.kubernetes.io/last-applied-configuration annotation that exceed 256
-bytes as sent can be folded. A warning identifies repeated JSON keys.
+bytes as sent can be folded. A JSON Patch with any copy or move operation
+keeps every annotation value visible. A warning identifies repeated JSON keys.
 The server includes the body only for readers who can decide the request or
 open its work session, and clears it after a while. To save the exact bytes,
 use --body and redirect stdout to a file.`,
@@ -83,28 +85,62 @@ use --body and redirect stdout to a file.`,
 				return nil
 			}
 
-			fe := fileExecutionOf(req)
-			evidence, placed := evidenceRows(req)
-			rows := append(describeRows(req, fe), evidence...)
-			if err := ios.PrintTable(rows); err != nil {
-				return err
-			}
-			if fe != nil {
-				script, altered := fileExecutionScript(fe, placed)
-				_, _ = fmt.Fprintln(ios.Out)
-				if altered {
-					warnAboutAlteredDescribeText(ios)
-				}
-				_, _ = fmt.Fprintln(ios.Out, script)
-			}
-			if req.KubeRequest != nil {
-				printKubeBody(ios, req.ID, req.KubeRequest)
+			if err := printApprovalDetail(ios, req); err != nil {
+				return utils.NewExitError("Failed to write approval request: %s.", err)
 			}
 			return nil
 		}),
 	}
 	cmd.Flags().BoolVar(&bodyOnly, "body", false, "Print only the Kubernetes request body; exact bytes when stdout is not a terminal")
 	return cmd
+}
+
+func printApprovalDetail(ios *utils.IOStreams, req *approvalapi.ApprovalRequest) (err error) {
+	writer, flush := ios.PagerWithError()
+	defer func() {
+		if flushErr := flush(); err == nil {
+			err = flushErr
+		}
+	}()
+
+	out := &approvalOutput{writer: writer}
+	paged := *ios
+	paged.Out = out
+	fe := fileExecutionOf(req)
+	evidence, placed := evidenceRows(req)
+	if err := paged.PrintTable(append(describeRows(req, fe), evidence...)); err != nil {
+		return err
+	}
+	if out.err != nil {
+		return out.err
+	}
+	if fe != nil {
+		if err := printFileExecutionScript(out, fe, placed); err != nil {
+			return err
+		}
+	}
+	if req.KubeRequest != nil {
+		return printKubeBody(out, req.ID, req.KubeRequest)
+	}
+	return nil
+}
+
+// approvalOutput retains the first failure, including writes from table and warning helpers.
+type approvalOutput struct {
+	writer io.Writer
+	err    error
+}
+
+func (out *approvalOutput) Write(p []byte) (int, error) {
+	if out.err != nil {
+		return 0, out.err
+	}
+	var n int
+	n, out.err = out.writer.Write(p)
+	if out.err == nil && n < len(p) {
+		out.err = io.ErrShortWrite
+	}
+	return n, out.err
 }
 
 func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecution) []describeRow {
@@ -317,12 +353,20 @@ func fileExecutionScript(fe *approvalapi.FileExecution, numbered bool) (script s
 	return fmt.Sprintf("Script (%d bytes):\n%s", len(*fe.Content), body), altered
 }
 
-func warnAboutAlteredDescribeText(ios *utils.IOStreams) {
-	// The warning stays on Out beside the text it is about, and
-	// ColorEnabled follows ErrOut, so it is written without color.
-	plain := *ios
-	plain.ColorEnabled = false
-	plain.WarnTerminalTextAltered(ios.Out, "")
+func printFileExecutionScript(out *approvalOutput, fe *approvalapi.FileExecution, numbered bool) error {
+	script, altered := fileExecutionScript(fe, numbered)
+	_, _ = fmt.Fprintln(out)
+	if altered {
+		warnAboutAlteredDescribeText(out)
+	}
+	_, _ = fmt.Fprintln(out, script)
+	return out.err
+}
+
+func warnAboutAlteredDescribeText(out io.Writer) {
+	// The warning stays beside the text and is written without color.
+	var plain utils.IOStreams
+	plain.WarnTerminalTextAltered(out, "")
 }
 
 // sanitizeScript keeps tabs, since they are part of the script the request

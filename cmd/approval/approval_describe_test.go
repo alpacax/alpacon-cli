@@ -1,8 +1,11 @@
 package approval
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -1000,4 +1003,43 @@ func TestApprovalDescribeKubeBody(t *testing.T) {
 			tt.check(t, stdout)
 		})
 	}
+}
+
+func TestApprovalDescribeReportsDetailWriteFailure(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, id, response, prefix string
+	}{
+		{"Kubernetes body", kubeApprovalID, fmt.Sprintf(kubeApprovalFixture, `"{\"spec\":{\"replicas\":3}}"`), "Body ("},
+		{"file execution script", "apr-1", fileExecutionFixture, "Script ("},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			route := "GET /api/approvals/approvals/" + tt.id + "/"
+			ts := cmdtest.Server(t, map[string]cmdtest.Reply{route: {Status: http.StatusOK, Body: tt.response}})
+			stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
+				ios.Out = &detailFailWriter{out: ios.Out, prefix: tt.prefix}
+				return newApprovalDescribeCmd(ts.Factory(), ios)
+			}, tt.id)
+
+			assert.Equal(t, utils.ExitCodeGeneralError, code)
+			assert.Contains(t, stderr, "Failed to write approval request: output sink failed.")
+			assert.Contains(t, stdout, tt.id)
+			assert.NotContains(t, stdout, tt.prefix)
+			assert.NotContains(t, stdout, "to save the body exactly as sent")
+		})
+	}
+}
+
+type detailFailWriter struct {
+	out    io.Writer
+	prefix string
+}
+
+func (w *detailFailWriter) Write(p []byte) (int, error) {
+	if bytes.HasPrefix(p, []byte(w.prefix)) {
+		return 0, errors.New("output sink failed")
+	}
+	return w.out.Write(p)
 }

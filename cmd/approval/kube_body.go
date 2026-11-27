@@ -30,24 +30,24 @@ func kubeBodyKind(isChange *bool) string {
 	}
 }
 
-func printKubeBody(ios *utils.IOStreams, id string, kr *approvalapi.KubeRequest) {
-	_, _ = fmt.Fprintln(ios.Out)
+func printKubeBody(out *approvalOutput, id string, kr *approvalapi.KubeRequest) error {
+	_, _ = fmt.Fprintln(out)
 	if kr.Body == nil {
-		_, _ = fmt.Fprintf(ios.Out, "Body: not included in this response. %s.\n", kubeBodyUnavailableReason)
-		return
+		_, _ = fmt.Fprintf(out, "Body: not included in this response. %s.\n", kubeBodyUnavailableReason)
+		return out.err
 	}
 
 	result := foldKubeBody(*kr.Body)
 	body, altered := sanitizeScript(result.body)
 	if altered {
-		warnAboutAlteredDescribeText(ios)
+		warnAboutAlteredDescribeText(out)
 	}
 	shown := min(len(result.duplicateKeys), maxDuplicateKeyWarnings)
 	for _, key := range result.duplicateKeys[:shown] {
-		_, _ = fmt.Fprintf(ios.Out, "Warning: the body repeats the key %q in one object; Kubernetes may apply only the last value.\n", utils.SanitizeTerminalOneLine(key))
+		_, _ = fmt.Fprintf(out, "Warning: the body repeats the key %q in one object; Kubernetes may apply only the last value.\n", utils.SanitizeTerminalOneLine(key))
 	}
 	if more := len(result.duplicateKeys) - shown; more > 0 {
-		_, _ = fmt.Fprintf(ios.Out, "Warning: and %d more repeated keys.\n", more)
+		_, _ = fmt.Fprintf(out, "Warning: and %d more repeated keys.\n", more)
 	}
 
 	details := []string{kubeBodyKind(kr.IsChange), utils.SanitizeTerminalOneLine(kr.ContentType)}
@@ -58,13 +58,14 @@ func printKubeBody(ios *utils.IOStreams, id string, kr *approvalapi.KubeRequest)
 		details = append(details, "folded "+lastAppliedAnnotation)
 	}
 	details = append(details, fmt.Sprintf("%d bytes as sent", len(*kr.Body)))
-	_, _ = fmt.Fprintf(ios.Out, "Body (%s):\n%s", joinNonEmpty(details, ", "), body)
+	_, _ = fmt.Fprintf(out, "Body (%s):\n%s", joinNonEmpty(details, ", "), body)
 	if !strings.HasSuffix(body, "\n") {
-		_, _ = fmt.Fprintln(ios.Out)
+		_, _ = fmt.Fprintln(out)
 	}
 	if result.formatted {
-		_, _ = fmt.Fprintf(ios.Out, "Run 'alpacon approval describe %s --body > FILE' to save the body exactly as sent.\n", utils.SanitizeTerminalOneLine(id))
+		_, _ = fmt.Fprintf(out, "Run 'alpacon approval describe %s --body > FILE' to save the body exactly as sent.\n", utils.SanitizeTerminalOneLine(id))
 	}
+	return out.err
 }
 
 // writeKubeBody writes the original body on redirected stdout and sanitizes it on a terminal.
@@ -203,7 +204,7 @@ func (w *kubeBodyWalker) object(path []string, patchOp bool) error {
 	seen := make(map[string]bool)
 	firstSpan := len(w.spans)
 	var pointer []string
-	var copiesOrMoves, fromAnnotations, ambiguousValue bool
+	var ambiguousValue bool
 	for w.dec.More() {
 		token, err := w.dec.Token()
 		if err != nil {
@@ -238,9 +239,8 @@ func (w *kubeBodyWalker) object(path []string, patchOp bool) error {
 				valuePath = []string{}
 				ambiguousValue = ambiguousValue || repeated
 			case "op":
-				copiesOrMoves = copiesOrMoves || valueText == "copy" || valueText == "move"
-			case "from":
-				fromAnnotations = fromAnnotations || slices.Contains(jsonPointerSegments(valueText), "annotations")
+				// A copy or move can expose a folded annotation through any ancestor.
+				w.preventFolding = w.preventFolding || valueText == "copy" || valueText == "move"
 			}
 		}
 		if err := w.walk(value, before, valuePath, false); err != nil {
@@ -251,7 +251,6 @@ func (w *kubeBodyWalker) object(path []string, patchOp bool) error {
 		return err
 	}
 	if patchOp {
-		w.preventFolding = w.preventFolding || copiesOrMoves && fromAnnotations
 		// Filter in place to keep spans in the order the decoder visited them.
 		kept := slices.DeleteFunc(w.spans[firstSpan:], func(span annotationSpan) bool {
 			needed := span.prefixNeeded

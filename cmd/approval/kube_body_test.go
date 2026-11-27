@@ -83,12 +83,8 @@ func TestFoldKubeBody(t *testing.T) {
 		{name: "patch malformed pointer", body: strings.Replace("["+patch+"]", "/metadata", "/~2/metadata", 1)},
 		{name: "copy from annotations disables all folds", body: "[" + patch + `,{"from":"/metadata/annotations","op":"copy","path":"/spec/test"},` + patch + "]"},
 		{name: "move from annotations disables all folds", body: `[{"path":"/data/test","op":"move","from":"/metadata/annotations/` + pointerKey + `"},` + patch + "]"},
-		{
-			name:   "copy from a differently named segment leaves folding enabled",
-			body:   "[" + patch + `,{"op":"copy","from":"/data/annotations~1key","path":"/data/test"}]`,
-			want:   "[" + strings.Replace(patch, large, marker, 1) + `,{"op":"copy","from":"/data/annotations~1key","path":"/data/test"}]`,
-			folded: 1,
-		},
+		{name: "copy from a parent path disables all folds", body: "[" + patch + `,{"op":"copy","from":"/metadata","path":"/x"}]`},
+		{name: "copy from an unrelated path disables all folds", body: "[" + patch + `,{"op":"copy","from":"/data/annotations~1key","path":"/data/test"}]`},
 		{
 			name:          "duplicate keys across nested objects in first repeat order",
 			body:          `{"z":0,"array":[{"a":1,"\u0061":2,"a":3},{"a":4,"a":5}],"z":1,"only":0,"other":{"only":1}}`,
