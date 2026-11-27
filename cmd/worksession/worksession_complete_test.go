@@ -2,12 +2,15 @@ package worksession
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
@@ -313,6 +316,39 @@ func TestEndSessionCancelGuidance(t *testing.T) {
 					}
 				})
 			}
+		})
+	}
+}
+
+func TestEndSessionDiagnosticLookupUsesTimeout(t *testing.T) {
+	for _, command := range endSessionCommands {
+		t.Run(command.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					switch r.Method {
+					case http.MethodPost:
+						w.WriteHeader(http.StatusForbidden)
+						_, _ = io.WriteString(w, `{"code":"work_session_not_active"}`)
+					case http.MethodGet:
+						time.Sleep(time.Minute)
+						_, _ = io.WriteString(w, `{"status":"pending"}`)
+					default:
+						t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+						http.NotFound(w, r)
+					}
+				}))
+				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+				ios, _, _ := utils.TestIOStreams()
+				start := time.Now()
+				_, err := command.run(ios, ac, "session")
+				elapsed := time.Since(start)
+				time.Sleep(time.Minute) // let the server's stalled handler finish
+				require.Error(t, err)
+				assert.Equal(t, utils.WorkSessionNotActive, utils.StructuredErrorCode(err))
+				assert.Empty(t, utils.RefusalNextActions(err))
+				assert.Equal(t, time.Second, elapsed)
+			})
 		})
 	}
 }

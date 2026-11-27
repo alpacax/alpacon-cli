@@ -172,9 +172,9 @@ Flags:
                                 then), or is refused. Pass --purpose to skip the
                                 hold, or read the result with 'exec logs'; do not
                                 resubmit.
-  --wait                        When a sudo command needs human approval, block and
-                                re-attempt until a reviewer approves it in the Alpacon
-                                console (web), or the wait times out (default 5m).
+  --wait                        Wait for approval in the Alpacon console (web), up to
+                                5m by default. Stream a held command once it starts,
+                                or retry a denied sudo command after approval.
   --wait-approval DURATION      Like --wait with a custom wait timeout (e.g. 30m;
                                 default 5m). Implies --wait.
 
@@ -182,9 +182,11 @@ A command admitted by a standing file-execution grant is marked in the result.
 
 Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.
-Exit code 4 indicates the sudo command is pending human approval (approve it in
-the Alpacon console, then re-run, or pass --wait to block—--wait-approval
-DURATION to block with a longer timeout); --output json emits
+Exit code 4 indicates pending human approval. A held command runs after approval
+and any required WorkSession resume. Check it with 'alpacon exec logs JOB_ID'.
+A sudo command denied pending approval must be run again once approved. Pass
+--wait on the original invocation to wait for approval. A timeout while the
+approved command runs exits 1. With --output json, pending approval emits
 {"status":"pending_approval", ...} on stdout.
 Exit code 7 indicates the verification gate held the command and is asking what
 it is for. Nobody has been notified and no approval request exists: answer with

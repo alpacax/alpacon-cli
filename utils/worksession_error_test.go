@@ -82,6 +82,7 @@ func TestScopeNotAllowedGuidance(t *testing.T) {
 	t.Parallel()
 	for _, operation := range []string{OperationCommand, OperationKube} {
 		t.Run(operation, func(t *testing.T) {
+			t.Parallel()
 			envelope := buildWorkSessionErrorEnvelope(WorkSessionScopeNotAllowed, operation, "target", "Browser login", "", "")
 			assert.Equal(t, "session does not include this scope", envelope.Reason)
 			var descriptions []string

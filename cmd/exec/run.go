@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,7 +77,7 @@ var (
 	runPresenceStepUp     = RunExecWithPresenceStepUp
 	streamApprovedCommand = event.StreamApprovedCommand
 	mfaLinkByServerName   = mfa.GetMFALinkByServerName
-	getCommandByID        = event.GetCommandByID
+	getCommandByID        = event.GetCommandByIDWithContext
 )
 
 // sudoDenialHints maps a non-interactive sudo denial code to guidance. The codes mirror the
@@ -524,8 +525,8 @@ func isApprovalDenial(ios *utils.IOStreams, err error) bool {
 
 // pollApprovalOnce reads the grant the denial left behind. The command it names
 // already ran and was blocked, so this is a status read, not a re-attempt.
-func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalPoll, error) {
-	details, err := getCommandByID(ac, cmdID)
+func pollApprovalOnce(ctx context.Context, ac *client.AlpaconClient, cmdID string) (approvalPoll, error) {
+	details, err := getCommandByID(ctx, ac, cmdID)
 	if err != nil {
 		return approvalPoll{outcome: outcomePending}, err
 	}
@@ -676,15 +677,25 @@ func waitForSudoGrant(ios *utils.IOStreams, ac *client.AlpaconClient, run comman
 	// lastRefusal is the refusal (a 429 in practice) the latest status read got,
 	// if it got one, so a wait that times out on it still prints its hint.
 	var lastRefusal error
+	timedOut := func() error {
+		spinner.Stop()
+		ios.Warning("%s", utils.HintOnly(fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", time.Since(waitStarted).Round(time.Second)), lastRefusal))
+		return pendingWithApprovalDetails(pendingDenial, lastRequestID, lastHeld)
+	}
 	for {
 		select {
 		case <-timer.C:
-			spinner.Stop()
-			// Report only the timeout; the caller's pending-approval message already names --wait-approval.
-			ios.Warning("%s", utils.HintOnly(fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", time.Since(waitStarted).Round(time.Second)), lastRefusal))
-			return pendingWithApprovalDetails(pendingDenial, lastRequestID, lastHeld)
+			return timedOut()
 		case <-poll.C:
-			read, err := pollApprovalOnce(ac, denialErr.CommandID)
+			if time.Until(*deadline) <= 0 {
+				return timedOut()
+			}
+			ctx, cancel := context.WithDeadline(context.Background(), *deadline)
+			read, err := pollApprovalOnce(ctx, ac, denialErr.CommandID)
+			cancel()
+			if time.Until(*deadline) <= 0 {
+				return timedOut()
+			}
 			lastRefusal = nil
 			if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
 				lastRefusal = err
@@ -740,6 +751,9 @@ func waitForSudoGrant(ios *utils.IOStreams, ac *client.AlpaconClient, run comman
 			switch read.outcome {
 			case outcomeApproved:
 				spinner.Stop()
+				if time.Until(*deadline) <= 0 {
+					return timedOut()
+				}
 				return runAfterApproval(ios, run, lastDeadline)
 			case outcomeRejected, outcomeExpired:
 				spinner.Stop()

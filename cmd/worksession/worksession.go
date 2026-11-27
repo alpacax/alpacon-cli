@@ -1,8 +1,10 @@
 package worksession
 
 import (
+	"context"
 	"fmt"
 	"regexp"
+	"time"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
@@ -128,7 +130,9 @@ func (e *pendingEndError) ErrorNextAction() utils.NextAction {
 func endSession(ios *utils.IOStreams, ac *client.AlpaconClient, id string, end func(*client.AlpaconClient, string) error) (bool, error) {
 	if err := end(ac, id); err != nil {
 		if utils.StructuredErrorCode(err) == utils.WorkSessionNotActive && utils.RefusalHint(err) == "" {
-			if session, lookupErr := wsapi.GetWorkSession(ac, id); lookupErr == nil && session.Status == wsapi.StatusPending {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if session, lookupErr := wsapi.GetWorkSessionWithContext(ctx, ac, id); lookupErr == nil && session.Status == wsapi.StatusPending {
 				return false, &pendingEndError{error: err, id: id}
 			}
 		}
