@@ -79,7 +79,7 @@ func (s *IOStreams) Pager() (io.Writer, func()) {
 	return writer, func() { _ = flush() }
 }
 
-// PagerWithError is Pager with a flush function that reports stdout write failures.
+// PagerWithError is Pager with a flush function that reports stdout write errors and unsuccessful pager exits.
 func (s *IOStreams) PagerWithError() (io.Writer, func() error) {
 	if _, ok := s.Out.(stdoutWriter); ok {
 		return writeToStdoutPager()

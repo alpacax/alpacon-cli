@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -19,7 +20,9 @@ import (
 //   - If stdout is not a terminal (e.g. piped), prints directly to stdout.
 //   - If the output fits within the terminal height, prints directly to stdout.
 //   - Otherwise, pipes through the PAGER environment variable or "less -RSX".
-//   - Falls back to direct stdout if the pager fails before reading any output.
+//   - Falls back to direct stdout if the pager cannot start.
+//   - Once the pager starts, it is the sole output path. WriteToPager discards
+//     errors from an unsuccessful pager exit. IOStreams.PagerWithError reports them.
 func WriteToPager() (io.Writer, func()) {
 	writer, flush := writeToStdoutPager()
 	return writer, func() { _ = flush() }
@@ -36,10 +39,10 @@ func writeToStdoutPager() (io.Writer, func() error) {
 	)
 }
 
-// lastOutputPaged records whether the latest WriteToPager cleanup handed its output to a pager.
+// lastOutputPaged records whether the latest flush ran a pager that exited successfully.
 var lastOutputPaged atomic.Bool
 
-// LastOutputPaged reports whether WriteToPager's last flush ran a pager, not a stdout fallback, so
+// LastOutputPaged reports whether the last flush ran a pager that exited successfully, so
 // a caller can repeat on stderr what the pager scrolled away.
 func LastOutputPaged() bool {
 	return lastOutputPaged.Load()
@@ -79,33 +82,15 @@ func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.Fil
 			cmd = exec.Command(lessPath, "-RSX")
 		}
 
-		stdin, pipeWriter, err := os.Pipe()
-		if err != nil {
-			return writeDirect()
-		}
-		defer func() { _ = stdin.Close() }()
-
-		cmd.Stdin = stdin
+		cmd.Stdin = bytes.NewReader(output)
 		cmd.Stdout = stdout
 		cmd.Stderr = StderrForChild()
 
 		if err := cmd.Start(); err != nil {
-			_ = pipeWriter.Close()
 			return writeDirect()
 		}
-		written := make(chan int64, 1)
-		go func() {
-			n, _ := io.Copy(pipeWriter, bytes.NewReader(output))
-			_ = pipeWriter.Close()
-			written <- n
-		}()
-
-		waitErr := cmd.Wait()
-		// Drain the pipe so the writer can finish even when the pager exits
-		// early. Subtract unread bytes to count what the pager consumed.
-		unread, _ := io.Copy(io.Discard, stdin)
-		if consumed := <-written - unread; waitErr != nil && consumed == 0 {
-			return writeDirect()
+		if err := cmd.Wait(); err != nil {
+			return fmt.Errorf("pager %s exited: %w", cmd.Args[0], err)
 		}
 		lastOutputPaged.Store(true)
 		return nil
