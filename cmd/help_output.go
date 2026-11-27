@@ -30,8 +30,9 @@ result or an error object:
 Every other failure under --output json ends stderr with one single-line
 JSON object. Its fields are ok (false), exit_code (the process exit code,
 never 0), error_code, message, context.operation, and usually command.
-Optional fields, only ever added: http_status, retry_after, server,
-next_actions, and partial.count (rows already on stdout).
+Optional fields, only ever added: http_status, retry_after, reason
+(why a work session refused it), server, next_actions, and partial.count
+(rows already on stdout).
 
 error_code is the server's code when it sent one, otherwise the CLI's own:
 usage_error, confirmation_required, not_logged_in, network_error,
