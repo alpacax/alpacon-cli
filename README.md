@@ -657,11 +657,31 @@ Also separate from the work session gate: when you authenticate with an API toke
 
 ## Output contract
 
-Stdout carries data only: tables, or JSON results under `--output json`. Messages, warnings, progress, and help under `--output json` go to stderr. `alpacon help output` prints this contract.
+Stdout carries data only: tables, or JSON results under `--output json`. Messages, warnings, progress, and help under `--output json` go to stderr. `alpacon help output` prints a summary of this contract and the exit codes.
 
-These write raw text to stdout, which `--output json` does not make JSON: `exec`, Websh command mode, and `exec logs` (the remote command's output), interactive Websh, `websh join`, and `websh watch` (the terminal session), `tunnel` (its local command's output), `edit` and other commands that open `$EDITOR` (the editor), `api` (the response body), `work-session recording`, `user create` (a generated password), and `completion` (the script).
+These pass another program's output through to stdout, so `--output json` cannot make it JSON:
 
-Under `--output json` every failure ends stderr with one single-line JSON object, except an outcome that is still open (exit `4` or `7`) or an available update (exit `8`), which is an object on stdout. Two failures print no object: a permission that `alpacon user permission can-i -q` finds denied, and a password prompt ended by Ctrl+C. A `can-i -q` check that itself fails prints one. The fields are `ok` (`false`), `exit_code` (the process exit code: of a remote status, the low 8 bits on Unix and the low 32 bits read unsigned on Windows, and never `0`), `error_code`, `message`, `context.operation`, and usually `command` (the command path with aliases resolved). Optional fields, only ever added: `http_status`, `retry_after` (seconds), `server`, `next_actions` (`[{command, description}]`), `remote_exit_code` (the remote command's own status under `exec`, Websh command mode, and `exec logs`), and `partial.count` (rows already on stdout).
+| Command | What reaches stdout |
+|---|---|
+| `exec`, Websh command mode, `exec logs` | the remote command's output |
+| interactive Websh, `websh join`, `websh watch` | the terminal session |
+| `tunnel` | its local command's output |
+| `edit` and other commands that open `$EDITOR` | the editor |
+| `api` | the response body |
+| `work-session recording` | the recording |
+| `user create` | the generated password |
+| `completion` | the script |
+
+Under `--output json` a few outcomes print one object on stdout instead of a result or an error object:
+
+| Exit | Object | When |
+|---|---|---|
+| `0` | `{"ok":true,"status":"running", ...}` | `exec logs` on a command that is still queued or running |
+| `4` | `{"status":"pending_approval", ...}` | the action is waiting on a human approver |
+| `7` | `{"status":"purpose_required", ...}` | the gate asks what the command is for |
+| `8` | `{"update_available":true, ...}` | `alpacon update --check` found a newer release |
+
+Every other failure under `--output json` ends stderr with one single-line JSON object. Two failures print none: a permission that `alpacon user permission can-i -q` finds denied, and a password prompt ended by Ctrl+C. A `can-i -q` check that itself fails prints one. The fields are `ok` (`false`), `exit_code` (the process exit code: of a remote status, the low 8 bits on Unix and the low 32 bits read unsigned on Windows, and never `0`), `error_code`, `message`, `context.operation`, and usually `command` (the command path with aliases resolved). Optional fields, only ever added: `http_status`, `retry_after` (seconds), `server`, `next_actions` (`[{command, description}]`), `remote_exit_code` (the remote command's own status under `exec`, Websh command mode, and `exec logs`), and `partial.count` (rows already on stdout).
 
 `error_code` is the server's code when it sent one, otherwise the CLI's own: `usage_error`, `confirmation_required`, `not_logged_in`, `network_error`, `not_approved`, `mfa_required`, `cli_error`, `remote_command_failed`, `local_command_failed` (tunnel's command after `--`), `purpose_refused` (`alpacon exec purpose`, which earlier releases reported as a status object on stdout), or `http_<status>`. See [Exit codes](#exit-codes).
 
@@ -669,7 +689,7 @@ Under `--output json` every failure ends stderr with one single-line JSON object
 
 | Code | Meaning |
 |------|---------|
-| `0`  | Success |
+| `0`  | Success, or nothing has failed yet: `exec logs` on a command that is still queued or running exits `0` with a `running` object under `--output json` (see "Output contract") |
 | `1`  | General error (network failure, server error, etc.), and permanent refusals such as a credential on the command line (`command_inline_credential`)—see "When a command is denied". Also: `alpacon user update` when the edit touched `is_staff` or `is_superuser`, which are read-only and are never sent (any other field in the same edit is still applied); and a negative answer from `alpacon user permission can-i -q`, which is indistinguishable from a failed check by exit code alone—drop `-q` and read the `allowed` field of `--output json` when a script has to tell them apart. Also: a list cut short by a failed read—see "Partial list output" below. Also: `alpacon user role history` when the server answers `reach: none`, as it does a service token, since the empty list it sends says nothing about the user (`error_code` `role_audit_reach_none`). Also: an ID in a server response that is not a single path segment ("the server returned an unusable ... ID"), since the command line was valid |
 | `2`  | Usage error—the command line itself was wrong, so editing the flags or arguments and re-running can fix it (`utils.ExitCodeUsageError`). Covers a flag or argument Cobra rejects while parsing (an unknown flag or subcommand, a bad flag value, a wrong argument count, a missing required flag, flags that exclude each other), one a command's own check rejects (an invalid `--output`, a group run without a subcommand, a value a command validates, an ID that is not a single path segment, a name that is blank), `alpacon api`'s own input validation, and the positive-value check behind `--tail`, `--limit`, and `--valid-days`. In a non-interactive run these prompts check for a terminal first and exit `2`: the confirmation `--yes` skips, `server create`'s `--platform` and `--token`, `user invite`'s email, `login`'s HOST, `work-session create`'s `--purpose`, `--scope`, `--server`, and `--expires-in`/`--expires-at`, `work-session extend`'s expiry, `kube login`'s `--purpose`, `--scope`, and `--duration` when it creates a WorkSession, and `edit`'s confirmation for a file over 10 MB (`--force`); any other prompt reads stdin and exits `1` on no input, even where a flag would have answered it. Under `--output json` every usage error emits one error envelope on stderr with `error_code` `usage_error`, except a missing `--yes`, whose `error_code` is `confirmation_required`; a group run without a subcommand also prints its help on stderr before the envelope. That holds for a parse error too, from Cobra or from the flag parsers of `websh` and `exec`, even one that stopped before reading `--output json`: the CLI looks for `--output` before any `--`, while `websh` and `exec` use an `--output` only when their parser read it before the refusal, since the words after the server are the remote command. In table mode a parse error prints the error and a `Run '<command> --help' for usage.` line. A command line that parsed and passed the command's own checks exits `1` when anything else goes wrong: an environment a flag cannot fix (not logged in, a self-hosted or Alpacon Cloud mismatch, a missing permission, a prompt no flag or argument can answer), a name the server does not know, and a server refusal, even one that rewriting the command would fix, such as `command_inline_credential` |
 | `3`  | WorkSession gate denied—the active session does not authorize this action. Also returned by `kube credentials`, which kubectl runs, when no kube session is saved for the cluster or the saved one has ended: run `alpacon kube login <cluster>` again. It exits `3` as well when the server refuses to check the session; the message then names the refusal, and says to run `alpacon login` first when the login itself was rejected |
