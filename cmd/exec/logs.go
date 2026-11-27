@@ -122,8 +122,7 @@ an error envelope carrying remote_exit_code.`,
 
 			// Fetch output only for statuses whose outcome prints it. A status-only failure prints a
 			// line of its own, so a hanging chunk store would only cost the wait; a running status
-			// exits 0, so a read error would take the exitCode == 0 gate below and bury the "still
-			// running" line.
+			// prints no output, so the fetch would be wasted.
 			var readErr error
 			if !event.IsRunningStatus(details.Status) && !event.IsStatusOnlyFailure(details.Status) {
 				output, oerr := event.ResolveCommandOutput(alpaconClient, jobID, details.Result)

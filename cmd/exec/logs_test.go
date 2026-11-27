@@ -432,8 +432,6 @@ func TestExecLogsReportsRemoteFailureInJSON(t *testing.T) {
 	}
 }
 
-// A running command and a finished one with no output used to differ only by a stderr sentence;
-// under --output json the running one now prints a status object, and nothing else changes.
 func TestExecLogsTellsRunningFromFinishedWithNoOutput(t *testing.T) {
 	t.Parallel()
 	const jobID = "550e8400-e29b-41d4-a716-446655440000"

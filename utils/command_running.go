@@ -2,16 +2,14 @@ package utils
 
 import "fmt"
 
-// commandRunningCtx is the machine-readable context for a command that has not finished.
-// CommandStatus is the server's own status, so a caller can tell queued from running.
+// commandRunningCtx carries the server's own status, so a caller can tell queued from running.
 type commandRunningCtx struct {
 	CommandID     string `json:"command_id"`
 	CommandStatus string `json:"command_status"`
 }
 
-// commandRunningJSON is the JSON envelope `exec logs` prints under --output json for a command
-// still in progress. Status is always CommandRunningStatus, so a script tells it apart from a
-// finished command with no output, which prints nothing at all.
+// commandRunningJSON is the --output json object for a command still in progress. Its fixed Status
+// tells it apart from a finished command with no output, which prints nothing.
 type commandRunningJSON struct {
 	OK          bool              `json:"ok"`
 	Status      string            `json:"status"`
@@ -45,8 +43,7 @@ func (s *IOStreams) PrintCommandRunning(commandID, status string) {
 			}},
 		}
 		if err := PrintJSONValue(s.Out, envelope); err != nil {
-			// Fall back to a minimal, still-parseable object so a machine consumer
-			// always sees the status field.
+			// Fall back to a minimal object that still carries the status field.
 			_, _ = fmt.Fprintf(s.Out, `{"ok":true,"status":%q}`+"\n", CommandRunningStatus)
 		}
 		return
