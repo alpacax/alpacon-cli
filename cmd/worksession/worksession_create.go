@@ -79,12 +79,14 @@ Pass --use to set the new session as the workspace's active session. On its own,
 Subsequent exec/websh/cp/tunnel commands use the attached session without
 --work-session. --use is for user sessions only.
 
-If the work needs sudo, pre-declare the command patterns with --sudo. This attaches
+If the work needs sudo, pre-declare the command patterns with --sudo, each written
+without the leading sudo: "systemctl restart nginx" matches
+'sudo systemctl restart nginx', and a pattern that begins with sudo is refused. This attaches
 session-authorized sudo policies so a non-interactive caller (e.g. an AI agent
 running 'exec') can run matching sudo commands inside the approved work session
 without an MFA prompt. The 'sudo' scope is added automatically, and the policies are submitted for
 approval together with the session. If a sudo command is later denied, add it to the
-session with 'alpacon work-session update <id> --sudo "<command>"'.
+session with 'alpacon work-session update <id> --sudo "<command without sudo>"'.
 
 When an AI agent drives the CLI, the session is an agent session. The CLI detects
 Claude Code, Codex, Gemini CLI, GitHub Copilot, Cursor, Cline, and Goose from the
@@ -408,7 +410,7 @@ cannot hold kube_exec, and a cluster session is never set as the active one, so
 	cmd.Flags().BoolVar(&wait, "wait", false, "Poll until the session is approved, then exit (default timeout 5m; does not set as active; combine with --use to attach automatically)")
 	cmd.Flags().StringVar(&waitApproval, "wait-approval", "", "Like --wait with a custom wait timeout (e.g. 30m; default 5m). Implies --wait")
 	cmd.Flags().BoolVar(&useAfterCreate, "use", false, "Set the created session as the workspace's active session (requires status to reach 'active'; combine with --wait when approval is needed; refused with --requester-type agent)")
-	cmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns to run without interactive MFA (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed; literal commas inside a pattern are not supported — pass the flag again for each policy that needs them). Required for non-interactive sudo via 'exec' (e.g. AI agents). Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
+	cmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns to run without interactive MFA, each the command without its leading sudo (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed; literal commas inside a pattern are not supported — pass the flag again for each policy that needs them). Required for non-interactive sudo via 'exec' (e.g. AI agents). Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
 	cmd.Flags().StringVar(&createSudoReason, "sudo-reason", "", "Justification applied to the sudo policies created via --sudo")
 	cmd.Flags().StringVar(&createAccount, "account", "", "Account the work runs as on the servers (e.g. root); the approver sees it with the request and can change it. Name the approved account in later commands with -u <account> (e.g. exec -u root)")
 	cmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
