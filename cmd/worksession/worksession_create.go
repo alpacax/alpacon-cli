@@ -68,10 +68,10 @@ or --expires-at are required. The assessor judges each command against the
 purpose; an agent should also pass --purpose on each exec, which skips the
 purpose demand.
 
-Without --wait, create returns once the session exists and prints its ID, so a
-caller can report the ID before blocking; wait on that session later with
-'alpacon event wait --type work_session --target SESSION_ID'. Running create
-again with --wait would file a second session.
+Without --wait or --wait-approval, create returns once the session exists and
+prints its ID, so a caller can report the ID before blocking; wait on that
+session later with 'alpacon event wait --type work_session --target SESSION_ID
+--until activated'. Running create again with --wait would file a second session.
 
 --sudo pre-declares sudo command patterns, so a caller with no terminal (e.g. an
 AI agent running 'exec') can run matching sudo commands in the approved session
@@ -100,7 +100,7 @@ CLUSTER' create the session itself.`,
 
   # AI agent: no --use and no websh scope; take the ID first, wait on it, then name it on each command
   alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "auto-remediate disk-full alert on web-01: rotate logs, restart rsyslog" --requester-type agent
-  alpacon event wait --type work_session --target 550e8400-e29b-41d4-a716-446655440000 --timeout 10m
+  alpacon event wait --type work_session --target 550e8400-e29b-41d4-a716-446655440000 --until activated --timeout 10m
   alpacon exec --work-session 550e8400-e29b-41d4-a716-446655440000 web-01 -- df -h
   alpacon work-session create --scope command,sudo --server web-01 --expires-in 1h --purpose "restart nginx" --account root
 
@@ -283,7 +283,7 @@ CLUSTER' create the session itself.`,
 			}
 			afterApproval := afterApprovalAction(sessionRequesterType, session.ID, pendingAccountRunGuidance("exec", account))
 			if clusterName != "" {
-				afterApproval = KubeLoginAction(clusterName, session.ID)
+				afterApproval = KubeLoginAction(clusterCommandWord(clusterName), session.ID)
 			}
 
 			if !ios.IsJSON() {
@@ -633,10 +633,17 @@ func afterApprovalAction(requesterType, id, accountGuidance string) utils.NextAc
 	if accountGuidance != "" {
 		accountGuidance = "; " + accountGuidance
 	}
+	quoted, ok := ShellWord(id)
 	if requesterType == "agent" {
-		return utils.NextAction{Description: fmt.Sprintf("after approval, pass --work-session %s to each subsequent command (exec, cp, tunnel)%s", id, accountGuidance)}
+		if !ok {
+			return utils.NextAction{Description: "after approval, pass this session's ID with --work-session to each subsequent command (exec, cp, tunnel)" + accountGuidance}
+		}
+		return utils.NextAction{Description: fmt.Sprintf("after approval, pass --work-session %s to each subsequent command (exec, cp, tunnel)%s", quoted, accountGuidance)}
 	}
-	return utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", id), Description: "after approval" + accountGuidance}
+	if !ok {
+		return utils.NextAction{Description: "after approval, attach this session with alpacon work-session use" + accountGuidance}
+	}
+	return utils.NextAction{Command: "alpacon work-session use " + quoted, Description: "after approval" + accountGuidance}
 }
 
 // accountRunGuidance tells the user to run command as the account a session was created for;
@@ -679,16 +686,24 @@ func ShellWord(value string) (quoted string, ok bool) {
 }
 
 // eventWaitAction waits on a session that already exists, which re-running create would not:
-// it files a second one. An ID no shell passes on unchanged gets the advice without the command.
+// it files a second one. It waits for activation, since an approved session can start later.
 func eventWaitAction(id string) utils.NextAction {
 	quoted, ok := ShellWord(id)
 	if !ok {
 		return utils.NextAction{Description: "wait for the decision in the Alpacon console; running create again would file a second session"}
 	}
 	return utils.NextAction{
-		Command:     fmt.Sprintf("alpacon event wait --type work_session --target %s --timeout 10m", quoted),
-		Description: "block until the session is decided: exit 0 approved (use it once it is active), 6 not approved, 4 no decision before the timeout (run it again)",
+		Command:     fmt.Sprintf("alpacon event wait --type work_session --target %s --until activated --timeout 10m", quoted),
+		Description: "block until the session is active: exit 0 active, 6 not approved, 4 not active before the timeout (run it again)",
 	}
+}
+
+// clusterCommandWord is clusterName as one shell word, or a placeholder when it cannot be one.
+func clusterCommandWord(clusterName string) string {
+	if quoted, ok := ShellWord(clusterName); ok {
+		return quoted
+	}
+	return "<CLUSTER>"
 }
 
 // KubeLoginAction is the follow-up for a cluster session: 'kube login' opens
@@ -696,8 +711,12 @@ func eventWaitAction(id string) utils.NextAction {
 // session by ID for a person and an agent alike, since a cluster session is
 // never attached as the active one.
 func KubeLoginAction(clusterName, id string) utils.NextAction {
+	quoted, ok := ShellWord(id)
+	if !ok {
+		return utils.NextAction{Description: "once the session is active, run alpacon kube login for the cluster with this session's ID in --work-session"}
+	}
 	return utils.NextAction{
-		Command:     fmt.Sprintf("alpacon kube login %s --work-session %s", clusterName, id),
+		Command:     fmt.Sprintf("alpacon kube login %s --work-session %s", clusterName, quoted),
 		Description: "once the session is active",
 	}
 }
@@ -706,15 +725,25 @@ func createUpdateNextActions(clusterName string, session *wsapi.WorkSession) []u
 	if clusterName != "" || (session.Status != wsapi.StatusPending && session.Status != wsapi.StatusApproved && session.Status != wsapi.StatusActive) {
 		return nil
 	}
+	const description = "add servers to this session; include every server to keep (--server replaces the whole list); an added server may need approval"
+	quoted, ok := ShellWord(session.ID)
+	if !ok {
+		return []utils.NextAction{{Description: "with alpacon work-session update and --server, " + description}}
+	}
 	return []utils.NextAction{{
-		Command:     fmt.Sprintf("alpacon work-session update %s --server <server,...>", session.ID),
-		Description: "add servers to this session; include every server to keep (--server replaces the whole list); an added server may need approval",
+		Command:     fmt.Sprintf("alpacon work-session update %s --server <server,...>", quoted),
+		Description: description,
 	}}
 }
 
 func printCreateNext(ios *utils.IOStreams, clusterName string, session *wsapi.WorkSession) {
 	if clusterName != "" {
-		ios.Info("Next: %s", KubeLoginAction(clusterName, session.ID).Command)
+		action := KubeLoginAction(clusterCommandWord(clusterName), session.ID)
+		if action.Command == "" {
+			ios.Info("Next: %s", action.Description)
+			return
+		}
+		ios.Info("Next: %s", action.Command)
 		return
 	}
 	for _, action := range createUpdateNextActions(clusterName, session) {

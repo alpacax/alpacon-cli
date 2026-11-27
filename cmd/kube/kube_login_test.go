@@ -504,3 +504,13 @@ func TestKubeLoginStepsUpOnceWhenTheOpenNeedsMFA(t *testing.T) {
 	assert.Len(t, readKubeconfig(t, path).Contexts, 1)
 	assert.NoFileExists(t, path+".lock")
 }
+
+func TestResumeActionAddsNoFlagsToAnIDWithNoCommand(t *testing.T) {
+	t.Parallel()
+	in := kubeLoginInput{cluster: "prod-east", kubeconfig: "/home/alice/.kube/config", proxyPort: 18443}
+
+	action := resumeAction(in, `ws'1`)
+
+	assert.Empty(t, action.Command)
+	assert.NotEmpty(t, action.Description)
+}

@@ -530,6 +530,9 @@ func waitForWorkSession(ios *utils.IOStreams, ac *client.AlpaconClient, in kubeL
 // the same kubeconfig file through the same local proxy as this run.
 func resumeAction(in kubeLoginInput, id string) utils.NextAction {
 	action := worksession.KubeLoginAction(shellQuote(in.cluster), id)
+	if action.Command == "" {
+		return action
+	}
 	if in.kubeconfig != "" {
 		action.Command += " --kubeconfig " + shellQuote(in.kubeconfig)
 	}

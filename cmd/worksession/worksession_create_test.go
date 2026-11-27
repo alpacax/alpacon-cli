@@ -983,7 +983,7 @@ func TestWorkSessionCreateUseOnAPendingSessionReportsPendingApproval(t *testing.
 				assert.Contains(t, stderr, "--use requires the session to be active, and work session ses-x is pending. A human must approve it in the Alpacon console (web).")
 				assert.Contains(t, stderr, "alpacon work-session use ses-x")
 				assert.Contains(t, stderr, "alpacon work-session update ses-x --server <server,...>")
-				assert.Contains(t, stderr, "  alpacon event wait --type work_session --target ses-x --timeout 10m  # block until the session is decided: exit 0 approved (use it once it is active), 6 not approved, 4 no decision before the timeout (run it again)\n")
+				assert.Contains(t, stderr, "  alpacon event wait --type work_session --target ses-x --until activated --timeout 10m  # block until the session is active: exit 0 active, 6 not approved, 4 not active before the timeout (run it again)\n")
 				assert.NotContains(t, stderr, "on the original command")
 				return
 			}
@@ -1009,7 +1009,7 @@ func TestWorkSessionCreateUseOnAPendingSessionReportsPendingApproval(t *testing.
 				commands = append(commands, action.Command)
 			}
 			assert.Equal(t, []string{
-				"alpacon event wait --type work_session --target ses-x --timeout 10m",
+				"alpacon event wait --type work_session --target ses-x --until activated --timeout 10m",
 				"alpacon work-session use ses-x",
 				"",
 				"alpacon work-session update ses-x --server <server,...>",
@@ -1282,12 +1282,12 @@ func TestEventWaitAction_QuotesTheIDOrDropsTheCommand(t *testing.T) {
 		want utils.NextAction
 	}{
 		{"plain uuid", "550e8400-e29b-41d4-a716-446655440000", utils.NextAction{
-			Command:     "alpacon event wait --type work_session --target 550e8400-e29b-41d4-a716-446655440000 --timeout 10m",
-			Description: "block until the session is decided: exit 0 approved (use it once it is active), 6 not approved, 4 no decision before the timeout (run it again)",
+			Command:     "alpacon event wait --type work_session --target 550e8400-e29b-41d4-a716-446655440000 --until activated --timeout 10m",
+			Description: "block until the session is active: exit 0 active, 6 not approved, 4 not active before the timeout (run it again)",
 		}},
 		{"shell metacharacters are quoted", "a b$(x)", utils.NextAction{
-			Command:     "alpacon event wait --type work_session --target 'a b$(x)' --timeout 10m",
-			Description: "block until the session is decided: exit 0 approved (use it once it is active), 6 not approved, 4 no decision before the timeout (run it again)",
+			Command:     "alpacon event wait --type work_session --target 'a b$(x)' --until activated --timeout 10m",
+			Description: "block until the session is active: exit 0 active, 6 not approved, 4 not active before the timeout (run it again)",
 		}},
 		{"a quote leaves no command", `a'b`, utils.NextAction{
 			Description: "wait for the decision in the Alpacon console; running create again would file a second session",
@@ -1300,6 +1300,42 @@ func TestEventWaitAction_QuotesTheIDOrDropsTheCommand(t *testing.T) {
 			got := eventWaitAction(tt.id)
 
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// Every command create prints names the session as one shell word, or is left out for an ID that cannot be one.
+func TestCreateFollowUps_QuoteTheSessionIDOrDropTheCommand(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		id        string
+		wantQuote string
+	}{
+		{"plain uuid", "550e8400-e29b-41d4-a716-446655440000", "550e8400-e29b-41d4-a716-446655440000"},
+		{"spaces and metacharacters are quoted", "a b$(x)", "'a b$(x)'"},
+		{"a quote leaves no command", `a'b`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			session := &wsapi.WorkSession{ID: tt.id, Status: wsapi.StatusPending}
+
+			actions := append([]utils.NextAction{
+				afterApprovalAction("user", tt.id, ""),
+				afterApprovalAction("agent", tt.id, ""),
+				KubeLoginAction("my-cluster", tt.id),
+			}, createUpdateNextActions("", session)...)
+
+			for _, action := range actions {
+				if tt.wantQuote == "" {
+					assert.Empty(t, action.Command)
+					assert.NotContains(t, action.Description, tt.id)
+					assert.NotEmpty(t, action.Description)
+					continue
+				}
+				assert.Contains(t, action.Command+action.Description, " "+tt.wantQuote)
+			}
 		})
 	}
 }

@@ -251,8 +251,8 @@ func TestWorkSessionCreate_PendingFollowUpMatchesRequesterType(t *testing.T) {
 					assert.Equal(t, utils.PendingApprovalStatus, envelope.Status)
 					require.NotEmpty(t, envelope.NextActions)
 					assert.Equal(t, utils.NextAction{
-						Command:     "alpacon event wait --type work_session --target ses-x --timeout 10m",
-						Description: "block until the session is decided: exit 0 approved (use it once it is active), 6 not approved, 4 no decision before the timeout (run it again)",
+						Command:     "alpacon event wait --type work_session --target ses-x --until activated --timeout 10m",
+						Description: "block until the session is active: exit 0 active, 6 not approved, 4 not active before the timeout (run it again)",
 					}, envelope.NextActions[0])
 					assert.Equal(t, utils.NextAction{
 						Command:     "alpacon work-session update ses-x --server <server,...>",
@@ -264,7 +264,7 @@ func TestWorkSessionCreate_PendingFollowUpMatchesRequesterType(t *testing.T) {
 				} else {
 					assert.Contains(t, stderr, "  alpacon work-session update ses-x --server <server,...>  # add servers to this session; include every server to keep (--server replaces the whole list); an added server may need approval\n")
 					assert.Less(t, strings.Index(stderr, "Approve it out of band"), strings.Index(stderr, "alpacon work-session update"))
-					assert.Contains(t, stderr, "  alpacon event wait --type work_session --target ses-x --timeout 10m  # block until the session is decided: exit 0 approved (use it once it is active), 6 not approved, 4 no decision before the timeout (run it again)\n")
+					assert.Contains(t, stderr, "  alpacon event wait --type work_session --target ses-x --until activated --timeout 10m  # block until the session is active: exit 0 active, 6 not approved, 4 not active before the timeout (run it again)\n")
 				}
 				assert.NotContains(t, guidance, "on the original command")
 				assert.Contains(t, guidance, tt.want)

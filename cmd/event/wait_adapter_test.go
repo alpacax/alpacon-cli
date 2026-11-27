@@ -54,14 +54,29 @@ func TestResolveWaitOptions_NoTargetMeansNoCatchUp(t *testing.T) {
 	assert.Nil(t, opts.CatchUp)
 }
 
-func TestResolveWaitOptions_UntilOverridesButKeepsCatchUp(t *testing.T) {
+// --until replaces the success set only: a refused session still ends the wait with 6, not a timeout.
+func TestResolveWaitOptions_UntilReplacesSuccessButKeepsFailureAndCatchUp(t *testing.T) {
 	t.Parallel()
-	opts, err := resolveWaitOptions(nil, "work_session", "ws-uuid", []string{"activated"}, time.Minute)
+	tests := []struct {
+		name     string
+		until    []string
+		wantFail []string
+	}{
+		{"until activated keeps every failure status", []string{"activated"}, []string{"completed", "expired", "revoked", "rejected", "cancelled"}},
+		{"a failure status named in until becomes a success", []string{"activated", "completed"}, []string{"expired", "revoked", "rejected", "cancelled"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	require.NoError(t, err)
-	assert.Equal(t, []string{"activated"}, opts.OK)
-	assert.Empty(t, opts.Fail, "an explicit --until makes every listed sub type a success")
-	assert.NotNil(t, opts.CatchUp, "overriding the end condition does not remove the race fix")
+			opts, err := resolveWaitOptions(nil, "work_session", "ws-uuid", tt.until, time.Minute)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.until, opts.OK)
+			assert.ElementsMatch(t, tt.wantFail, opts.Fail)
+			assert.NotNil(t, opts.CatchUp, "overriding the end condition does not remove the race fix")
+		})
+	}
 }
 
 func TestResolveWaitOptions_UnregisteredTypeNeedsUntil(t *testing.T) {
