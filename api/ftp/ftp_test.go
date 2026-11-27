@@ -2054,7 +2054,12 @@ func TestCompleteDownloads_StopOnAFailedCommandWithItsResult(t *testing.T) {
 		{
 			name:    "a result naming the presigned URL",
 			outcome: map[string]any{"id": "cmd-1", "status": "completed", "success": false, "result": `Put "` + presignedURL + `": dial tcp: connection refused`},
-			want:    `Put "https://bucket.example.com/obj/file.bin": dial tcp: connection refused`,
+			want:    "download command failed on the server; its output is not shown because it names a URL that may carry credentials",
+		},
+		{
+			name:    "a result naming credentials without a scheme",
+			outcome: map[string]any{"id": "cmd-1", "status": "completed", "success": false, "result": `redirect to "//alice:secret@host/a": invalid URL escape`},
+			want:    "download command failed on the server; its output is not shown because it names a URL that may carry credentials",
 		},
 		{
 			name:    "stuck",

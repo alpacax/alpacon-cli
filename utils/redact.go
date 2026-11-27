@@ -72,27 +72,6 @@ func isURLScheme(s string) bool {
 	return s != ""
 }
 
-var (
-	doubleQuotedURL = regexp.MustCompile(`"[A-Za-z][A-Za-z0-9+.-]*://[^"\n]*"`)
-	urlUserinfo     = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s?#"]*@`)
-	urlQueryToEOL   = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://[^?#\n"]*)[?#][^\n]*`)
-	queryToEOL      = regexp.MustCompile(`\?[A-Za-z0-9_.~%-]+=[^\n]*`)
-)
-
-// RedactURLsInText removes terminal controls from s, then the userinfo, query and
-// fragment of every URL in it. A double-quoted URL ends at its closing quote; any
-// other URL's end cannot be told from the text after it, so its query is cut to the
-// end of the line, as is a query-shaped ?name= whose scheme is not recognizable.
-func RedactURLsInText(s string) string {
-	s = SanitizeTerminalBlockKeepingTabs(s) // redact what the terminal will show
-	s = doubleQuotedURL.ReplaceAllStringFunc(s, func(quoted string) string {
-		return `"` + RedactURL(quoted[1:len(quoted)-1]) + `"`
-	})
-	s = urlUserinfo.ReplaceAllString(s, "$1")
-	s = urlQueryToEOL.ReplaceAllString(s, "$1")
-	return queryToEOL.ReplaceAllString(s, "")
-}
-
 // redactedURLError prints a transport error with its URL redacted. Its cause is
 // the *url.Error with the redacted URL, so errors.Is and errors.As on what went
 // wrong (a deadline, a *net.OpError) still work, and Timeout and Temporary

@@ -26,40 +26,6 @@ func TestRedactURL(t *testing.T) {
 	assert.Equal(t, "https://host", RedactURL("https://user:password@host?token=secret"))
 }
 
-func TestRedactURLsInText(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		text string
-		want string
-	}{
-		{name: "double-quoted", text: `Put "` + signedURL + `": dial tcp: connection refused`, want: `Put "https://bucket.example.com/path/file.zip": dial tcp: connection refused`},
-		{name: "double-quoted with an apostrophe and a space in the path", text: `Put "https://bucket.example.com/bob's file.zip?X-Amz-Signature=secret123": dial tcp`, want: `Put "https://bucket.example.com/bob%27s%20file.zip": dial tcp`},
-		{name: "double-quoted with userinfo", text: `Get "https://user:pw@host/ws?token=secret": EOF`, want: `Get "https://host/ws": EOF`},
-		{name: "double quote left open at the end of the line", text: "Put \"https://bucket.example.com/a?X-Amz-Signature=secret123\npermission denied\"", want: "Put \"https://bucket.example.com/a\npermission denied\""},
-		{name: "unquoted with an apostrophe in the path", text: "upload to https://bucket.example.com/bob's.zip?X-Amz-Signature=secret123 failed", want: "upload to https://bucket.example.com/bob's.zip"},
-		{name: "single-quoted", text: "PUT '" + signedURL + "' failed", want: "PUT 'https://bucket.example.com/path/file.zip"},
-		{name: "single-quoted with an apostrophe in the path", text: "PUT 'https://bucket.example.com/bob's/file?X-Amz-Signature=secret123' failed", want: "PUT 'https://bucket.example.com/bob's/file"},
-		{name: "single-quoted with a space in the path", text: "PUT 'https://host/path with space?X-Amz-Signature=secret123' failed", want: "PUT 'https://host/path with space"},
-		{name: "single-quoted URLs run together", text: "source='https://h/a',target='https://u:pw@h/b?X-Amz-Signature=secret123'", want: "source='https://h/a',target='https://h/b"},
-		{name: "two URLs on one line", text: "a https://h/x?sig=1 b http://u:p@h/y?sig=2", want: "a https://h/x"},
-		{name: "query on a later line is kept", text: "upload to https://h/x?sig=1 failed\nretry? no", want: "upload to https://h/x\nretry? no"},
-		{name: "control character inside the scheme separator", text: "Put \"https:\x00//bucket.example.com/a?X-Amz-Signature=secret123\": dial tcp", want: "Put \"https://bucket.example.com/a\": dial tcp"},
-		{name: "escape sequence that breaks the scheme", text: "Put \"https:\x1b//bucket.example.com/a?X-Amz-Signature=secret123\": dial tcp", want: "Put \"https:ucket.example.com/a"},
-		{name: "query without a scheme", text: "PUT bucket.example.com/a?X-Amz-Signature=secret123 failed", want: "PUT bucket.example.com/a"},
-		{name: "question mark in prose is kept", text: "file exists? no", want: "file exists? no"},
-		{name: "userinfo without a query", text: "dial https://user:pw@host/ws failed", want: "dial https://host/ws failed"},
-		{name: "no URL", text: "no such file or directory", want: "no such file or directory"},
-		{name: "empty", text: "", want: ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, RedactURLsInText(tt.text))
-		})
-	}
-}
-
 func TestRedactURLError(t *testing.T) {
 	t.Parallel()
 	op := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}

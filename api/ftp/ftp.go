@@ -10,6 +10,7 @@ import (
 	"os"
 	pathpkg "path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -1002,6 +1003,10 @@ func completeBulkDownload(ac *client.AlpaconClient, serverID string, respBody []
 	return nil
 }
 
+// mayNameURL is a best-effort sign of a URL whose query or userinfo could hold a credential,
+// such as a presigned URL's signature.
+var mayNameURL = regexp.MustCompile(`//|@|\?[A-Za-z0-9_.~%-]+=`)
+
 // downloadCommandFailure returns why the download's transfer command produced no file,
 // or nil when it did. A completed status alone is not success: success carries the outcome.
 func downloadCommandFailure(status event.EventDetails) error {
@@ -1016,10 +1021,15 @@ func downloadCommandFailure(status event.EventDetails) error {
 		if status.Status != "failed" && (status.Success == nil || *status.Success) {
 			return nil
 		}
-		if result := strings.TrimSpace(utils.RedactURLsInText(status.Result)); result != "" {
+		result := strings.TrimSpace(utils.SanitizeTerminalBlockKeepingTabs(status.Result))
+		switch {
+		case result == "":
+			return errors.New("download command failed on the server")
+		case mayNameURL.MatchString(result):
+			return errors.New("download command failed on the server; its output is not shown because it names a URL that may carry credentials")
+		default:
 			return errors.New(result)
 		}
-		return errors.New("download command failed on the server")
 	default:
 		return fmt.Errorf("unexpected download command status: %s", status.Status)
 	}
