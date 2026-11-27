@@ -42,7 +42,7 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 		{WorkSessionRequired, "no WorkSession selected", "work-session ls", true, true},
 		{WorkSessionNotActive, "not active", "work-session current", true, true},
 		{WorkSessionExpired, "has expired", "work-session create", true, false},
-		{WorkSessionScopeNotAllowed, "does not include this scope", "work-session create", true, false},
+		{WorkSessionScopeNotAllowed, "session does not include this scope", "wait for its approval", true, false},
 		{WorkSessionServerNotAllowed, "target server is not in this session", "work-session create", true, false},
 		{WorkSessionAssigneeMismatch, "assigned to another principal", "work-session use", true, true},
 		{WorkSessionNotUsable, "no longer usable", "work-session create", true, true},
@@ -76,6 +76,22 @@ func TestBuildWorkSessionDiagnostic_APIToken(t *testing.T) {
 	got := buildWorkSessionDiagnostic(WorkSessionRequired, "command", "srv-1", "API token", "", "")
 	assert.Contains(t, got, "API token")
 	assert.NotContains(t, got, "(interactive)")
+}
+
+func TestScopeNotAllowedGuidance(t *testing.T) {
+	t.Parallel()
+	for _, operation := range []string{OperationCommand, OperationKube} {
+		t.Run(operation, func(t *testing.T) {
+			t.Parallel()
+			envelope := buildWorkSessionErrorEnvelope(WorkSessionScopeNotAllowed, operation, "target", "Browser login", "", "")
+			assert.Equal(t, "session does not include this scope", envelope.Reason)
+			var descriptions []string
+			for _, action := range envelope.NextActions {
+				descriptions = append(descriptions, action.Description)
+			}
+			assert.Contains(t, strings.Join(descriptions, " "), "wait for its approval")
+		})
+	}
 }
 
 func TestBuildWorkSessionDiagnostic_TokenNoteMatchesOperation(t *testing.T) {
@@ -318,7 +334,11 @@ func TestBuildWorkSessionDiagnostic_Kube(t *testing.T) {
 			assert.NotContains(t, got, "--server")
 			assert.NotContains(t, got, "work-session use")
 			assert.NotContains(t, got, "the kube operation")
-			assert.Equal(t, tc.want, diagnosticNextCommands(t, got))
+			want := tc.want
+			if tc.code == WorkSessionScopeNotAllowed {
+				want = append([]string{"If the scope change is pending, wait for its approval."}, want...)
+			}
+			assert.Equal(t, want, diagnosticNextCommands(t, got))
 			assert.Equal(t, "Note: Tokens issued by Alpacon (service or personal API token) cannot open a kube session; it needs 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device).", lines[len(lines)-1])
 		})
 	}
@@ -344,7 +364,11 @@ func TestBuildWorkSessionErrorEnvelope_Kube(t *testing.T) {
 			} else if assert.NotNil(t, envelope.Context.CurrentWorksession) {
 				assert.Equal(t, tc.activeWS, *envelope.Context.CurrentWorksession)
 			}
-			assert.Equal(t, tc.want, nextActionCommands(envelope.NextActions))
+			want := tc.want
+			if tc.code == WorkSessionScopeNotAllowed {
+				want = append([]string{""}, want...)
+			}
+			assert.Equal(t, want, nextActionCommands(envelope.NextActions))
 		})
 	}
 }

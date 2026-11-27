@@ -1,6 +1,12 @@
 package worksession
 
 import (
+	"context"
+	"fmt"
+	"regexp"
+	"time"
+
+	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -96,10 +102,40 @@ Run 'alpacon whoami' to check your WorkSession requirement and active session.`,
 	return cmd
 }
 
-// endSession ends the session with end and, when it is the workspace's active one, clears it.
-// The error is the server's alone; a failed clear only warns. Reports whether it cleared.
+var shellSafeSessionID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
+type pendingEndError struct {
+	error
+	id string
+}
+
+func (e *pendingEndError) Error() string {
+	return fmt.Sprintf("%s. Work session %s is pending approval", e.error, e.id)
+}
+
+func (e *pendingEndError) Unwrap() error { return e.error }
+
+func (e *pendingEndError) ErrorNextAction() utils.NextAction {
+	action := utils.NextAction{Description: "cancel the pending work session"}
+	if shellSafeSessionID.MatchString(e.id) {
+		action.Command = "alpacon work-session cancel " + e.id
+	} else {
+		action.Description = "cancel the pending work session with alpacon work-session cancel SESSION_ID"
+	}
+	return action
+}
+
+// endSession ends the session and reports whether it cleared the active selection.
+// A pending session can be cancelled instead. A failure to clear the selection only warns.
 func endSession(ios *utils.IOStreams, ac *client.AlpaconClient, id string, end func(*client.AlpaconClient, string) error) (bool, error) {
 	if err := end(ac, id); err != nil {
+		if utils.StructuredErrorCode(err) == utils.WorkSessionNotActive {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if session, lookupErr := wsapi.GetWorkSessionWithContext(ctx, ac, id); lookupErr == nil && session.Status == wsapi.StatusPending {
+				return false, &pendingEndError{error: err, id: id}
+			}
+		}
 		return false, err
 	}
 	cleared, err := config.ClearActiveWorkSessionFor(ac.WorkspaceName, id)

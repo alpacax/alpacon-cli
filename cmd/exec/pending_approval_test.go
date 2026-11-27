@@ -397,8 +397,9 @@ func TestApprovalWaitKeepsLatestFileGuidance(t *testing.T) {
 				}
 			}))
 			t.Cleanup(ts.Close)
-			stdout, _, code := runExecHelper(t, ts.URL, "--output", "json", "--wait-approval", "1ms", "root@prod", "--", "bash", "/opt/deploy.sh")
+			stdout, _, code := runExecHelper(t, ts.URL, "--output", "json", "--wait-approval", "50ms", "root@prod", "--", "bash", "/opt/deploy.sh")
 			assert.Equal(t, utils.ExitCodePendingApproval, code)
+			assert.GreaterOrEqual(t, reads.Load(), int32(2))
 			var got pendingApprovalSignal
 			require.NoError(t, json.Unmarshal([]byte(stdout), &got))
 			var commands []string

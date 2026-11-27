@@ -1,7 +1,9 @@
 package worksession
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 )
 
 type workSessionMutationOutput struct {
+	PendingApproval   bool               `json:"pending_approval,omitempty"`
 	OK                bool               `json:"ok"`
 	Operation         string             `json:"operation"`
 	Message           string             `json:"message"`
@@ -18,6 +21,7 @@ type workSessionMutationOutput struct {
 	Status            string             `json:"status,omitempty"`
 	ExpiresAt         string             `json:"expires_at,omitempty"`
 	ApprovalRequestID string             `json:"approval_request_id,omitempty"`
+	PendingRequestID  string             `json:"pending_request_id,omitempty"`
 	ActiveWorksession *string            `json:"active_worksession"`
 	WorkSession       *wsapi.WorkSession `json:"work_session,omitempty"`
 }
@@ -99,6 +103,60 @@ func createSuccessMessage(session *wsapi.WorkSession) string {
 func updateSuccessMessage(session *wsapi.WorkSession) string {
 	return fmt.Sprintf("Work session %s updated (status: %s).",
 		utils.SanitizeTerminalText(session.ID), utils.SanitizeTerminalText(session.Status))
+}
+
+func newWorkSessionUpdateOutput(session *wsapi.WorkSession, status int, req wsapi.WorkSessionUpdateRequest, sudo bool) workSessionMutationOutput {
+	output := newWorkSessionMutationOutput(opUpdate, updateSuccessMessage(session), session, nil)
+	if status != http.StatusAccepted {
+		return output
+	}
+	output.PendingApproval = true
+	title := req.Title != ""
+	description := req.Description != ""
+	scopes := req.Scopes
+	servers := len(req.Servers) > 0
+	if pending := session.PendingModificationRequest; pending != nil {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(pending.Changes, &fields) == nil && len(fields) > 0 {
+			scopes = nil
+			if raw, ok := fields["scopes"]; ok {
+				if err := json.Unmarshal(raw, &scopes); err != nil {
+					scopes = req.Scopes
+				}
+			}
+			_, title = fields["title"]
+			_, description = fields["description"]
+			_, servers = fields["servers"]
+			_, sudo = fields["sudo_policies"]
+		}
+	}
+	var changes []string
+	if title {
+		changes = append(changes, "title")
+	}
+	if description {
+		changes = append(changes, "description")
+	}
+	if len(scopes) > 0 {
+		changes = append(changes, "requested scopes ("+joinOrNone(scopes)+")")
+	}
+	if servers {
+		changes = append(changes, "target servers")
+	}
+	if sudo {
+		changes = append(changes, "sudo policies")
+	}
+	change := "update"
+	if len(changes) > 0 {
+		change = strings.Join(changes, ", ")
+	}
+	request := ""
+	if pending := session.PendingModificationRequest; pending != nil && pending.ID != "" {
+		output.PendingRequestID = pending.ID
+		request = " (request " + utils.SanitizeTerminalText(pending.ID) + ")"
+	}
+	output.Message = fmt.Sprintf("Work session %s: %s pending approval%s. Current scopes: %s.", utils.SanitizeTerminalText(session.ID), change, request, joinOrNone(session.Scopes))
+	return output
 }
 
 func activeWorkSessionSetMessage(successPrefix, id, desc string) string {

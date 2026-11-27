@@ -498,7 +498,7 @@ func TestGetWorkSessionTimeline_LeavesRecordingsOutOnAnUnpaginatedServer(t *test
 	}
 }
 
-func TestUpdateWorkSession(t *testing.T) {
+func TestUpdateWorkSessionWithStatus(t *testing.T) {
 	t.Parallel()
 	var gotBody WorkSessionUpdateRequest
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -514,8 +514,9 @@ func TestUpdateWorkSession(t *testing.T) {
 		{ID: "pol-1", Commands: []string{"systemctl restart nginx"}, SessionAuthorized: true},
 		{Commands: []string{"tail -f /var/log/nginx/*.log"}, SessionAuthorized: true},
 	}}
-	session, err := UpdateWorkSession(newTestClient(ts), "ses-abc", req)
+	session, status, err := UpdateWorkSessionWithStatus(newTestClient(ts), "ses-abc", req)
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, status)
 	assert.Equal(t, "ses-abc", session.ID)
 	assert.Len(t, gotBody.SudoPolicies, 2)
 	assert.Equal(t, "pol-1", gotBody.SudoPolicies[0].ID)
@@ -570,8 +571,8 @@ func TestWorkSessionCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 		name string
 		call func(ac *client.AlpaconClient) error
 	}{
-		{"UpdateWorkSession", func(ac *client.AlpaconClient) error {
-			_, err := UpdateWorkSession(ac, badID, WorkSessionUpdateRequest{})
+		{"UpdateWorkSessionWithStatus", func(ac *client.AlpaconClient) error {
+			_, _, err := UpdateWorkSessionWithStatus(ac, badID, WorkSessionUpdateRequest{})
 			return err
 		}},
 		{"GetWorkSession", func(ac *client.AlpaconClient) error {

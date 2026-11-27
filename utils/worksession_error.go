@@ -222,6 +222,9 @@ func buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS
 func workSessionGuidance(code, operation, target, activeWS, hint string) []NextAction {
 	actions := workSessionNextActions(code, operation, target, activeWS)
 	if hint == "" {
+		if code == WorkSessionScopeNotAllowed {
+			return append([]NextAction{{Description: "If the scope change is pending, wait for its approval."}}, actions...)
+		}
 		return actions
 	}
 	for i := range actions {

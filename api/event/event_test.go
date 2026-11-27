@@ -479,7 +479,8 @@ func TestApprovalTimeoutRefreshHasADeadline(t *testing.T) {
 		cmdID := testPathID(t, "cmd-uuid")
 		done := make(chan error, 1)
 		go func() {
-			done <- pendingApprovalAfterTimeout(ac, cmdID, known, &ClientTimeoutError{})
+			details, err := refreshApprovalPoll(ac, cmdID, known, &ClientTimeoutError{}, CommandPollTick, pollSeams{})
+			done <- streamPollError(cmdID, details, err, &streamApproval{held: &PendingApprovalError{CommandID: "cmd-uuid"}}, nil)
 		}()
 		time.Sleep(2 * time.Second)
 		var err error
@@ -503,22 +504,56 @@ func TestApprovalTimeoutRefreshHasADeadline(t *testing.T) {
 	})
 }
 
-func TestApprovalTimeoutDoesNotReportAnotherStatusAsPending(t *testing.T) {
-	for _, status := range []string{"running", "completed", "rejected"} {
-		t.Run(status, func(t *testing.T) {
-			t.Parallel()
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = fmt.Fprintf(w, `{"id":"cmd-uuid","status":%q}`, status)
-			}))
-			t.Cleanup(ts.Close)
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			err := runCommandFallbackWithin(ac, testPathID(t, "cmd-uuid"), io.Discard, time.Millisecond, time.Millisecond, true, errors.New("stream unavailable"))
-			var pending *PendingApprovalError
-			require.Error(t, err)
-			assert.NotErrorAs(t, err, &pending)
-		})
-	}
+func TestApprovalTimeoutRefreshStartsOneExecutionWait(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "350ms")
+	synctest.Test(t, func(t *testing.T) {
+		var reads atomic.Int32
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			status := "running"
+			if reads.Add(1) > 5 {
+				status = "completed"
+			}
+			_ = json.NewEncoder(w).Encode(EventDetails{Status: status})
+		}))
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		id := testPathID(t, "cmd-1")
+
+		start := time.Now()
+		details, err := refreshApprovalPoll(ac, id, EventDetails{Status: "awaiting_approval"}, &ClientTimeoutError{}, 100*time.Millisecond, pollSeams{})
+
+		var timeout *ClientTimeoutError
+		require.ErrorAs(t, err, &timeout)
+		assert.Equal(t, "running", details.Status)
+		assert.Equal(t, 350*time.Millisecond, time.Since(start))
+		assert.Equal(t, int32(5), reads.Load())
+	})
+}
+
+func TestApprovalTimeoutRefreshReadsCompletedAtExecutionDeadline(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "100ms")
+	synctest.Test(t, func(t *testing.T) {
+		var reads atomic.Int32
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if reads.Add(1) == 1 {
+				_, _ = io.WriteString(w, `{"status":"running"}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"status":"completed","success":true,"result":"finished"}`)
+		}))
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		id := testPathID(t, "cmd-1")
+
+		start := time.Now()
+		details, err := refreshApprovalPoll(ac, id, EventDetails{Status: "awaiting_approval"}, &ClientTimeoutError{}, time.Second, pollSeams{})
+
+		require.NoError(t, err)
+		assert.Equal(t, "completed", details.Status)
+		assert.Equal(t, "finished", details.Result)
+		assert.Equal(t, 100*time.Millisecond, time.Since(start))
+		assert.Equal(t, int32(2), reads.Load())
+	})
 }
 
 func TestApprovalTimeoutKeepsConfirmedRejection(t *testing.T) {
@@ -531,7 +566,12 @@ func TestApprovalTimeoutKeepsConfirmedRejection(t *testing.T) {
 			}))
 			t.Cleanup(ts.Close)
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			err := pendingApprovalAfterTimeout(ac, testPathID(t, "cmd-1"), EventDetails{Status: "awaiting_approval"}, &ClientTimeoutError{})
+			id := testPathID(t, "cmd-1")
+			details, pollErr := refreshApprovalPoll(ac, id, EventDetails{Status: "awaiting_approval"}, &ClientTimeoutError{}, CommandPollTick, pollSeams{})
+			err := streamPollError(id, details, pollErr, &streamApproval{held: &PendingApprovalError{CommandID: "cmd-1"}}, func(EventDetails) error {
+				t.Fatal("a rejected command must skip output retrieval")
+				return nil
+			})
 			var rejected *CommandRejectedError
 			require.ErrorAs(t, err, &rejected)
 			assert.Equal(t, "superseded_by_pause", utils.StructuredErrorCode(err))
@@ -569,7 +609,8 @@ func TestApprovalPollWithdrawsEarlierSuggestions(t *testing.T) {
 				details, err := pollCommandExecution(ac, id, 3*time.Second, time.Second, true, seams)
 				var timeout *ClientTimeoutError
 				require.ErrorAs(t, err, &timeout)
-				err = pendingApprovalAfterTimeout(ac, id, details, err)
+				details, err = refreshApprovalPoll(ac, id, details, err, time.Second, seams)
+				err = streamPollError(id, details, err, &streamApproval{held: &PendingApprovalError{CommandID: "cmd-1"}}, nil)
 				var pending *PendingApprovalError
 				require.ErrorAs(t, err, &pending)
 				assert.True(t, pending.HasCommandDetails())
@@ -653,7 +694,7 @@ func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
 			terminal:     EventDetails{Status: "completed", Success: new(true)},
 		})
 
-		err := StreamApprovedCommand(ac, "cmd-uuid", stdoutBuf, 30*time.Second)
+		err := StreamApprovedCommand(ac, &PendingApprovalError{CommandID: "cmd-uuid"}, stdoutBuf, 30*time.Second)
 		require.NoError(t, err)
 		assert.Equal(t, "approved\n", stdoutBuf.String())
 
@@ -689,7 +730,7 @@ func TestStreamApprovedCommand_ServerLookupFailureSkipsFinSubscription(t *testin
 			terminal:    EventDetails{Status: "completed", Success: new(true)},
 		})
 
-		err := StreamApprovedCommand(ac, "cmd-uuid", stdoutBuf, 30*time.Second)
+		err := StreamApprovedCommand(ac, &PendingApprovalError{CommandID: "cmd-uuid"}, stdoutBuf, 30*time.Second)
 		require.NoError(t, err)
 		assert.Equal(t, "approved\n", stdoutBuf.String())
 
@@ -1360,7 +1401,11 @@ func startStream(t *testing.T, ac *client.AlpaconClient, cmdID, serverID string,
 	pathID := testPathID(t, cmdID)
 	done := make(chan error, 1)
 	go func() {
-		done <- streamSubscribed(ac, listener, pathID, serverID, out, 30*time.Second, waitApproval)
+		var approval *streamApproval
+		if waitApproval {
+			approval = &streamApproval{held: &PendingApprovalError{CommandID: cmdID}}
+		}
+		done <- streamSubscribed(ac, listener, pathID, serverID, out, 30*time.Second, approval)
 	}()
 	return done
 }
@@ -1615,7 +1660,7 @@ func TestStreamApprovedCommand_ConnectedHoldPollsAtTheFinDeliverablePace(t *test
 			terminal:  EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
 		})
 
-		err := StreamApprovedCommand(ac, "cmd-uuid", &bytes.Buffer{}, 5*time.Minute)
+		err := StreamApprovedCommand(ac, &PendingApprovalError{CommandID: "cmd-uuid"}, &bytes.Buffer{}, 5*time.Minute)
 		require.NoError(t, err)
 
 		after := gapsAfter(reads.snapshot(), 0)
@@ -1781,7 +1826,7 @@ func runStream(t *testing.T, ac *client.AlpaconClient, out io.Writer) (*CommandO
 	listener.Start()
 	t.Cleanup(listener.Stop)
 	require.True(t, listener.WaitConnected(commandOutputConnectTimeout), "listener should connect")
-	return listener, streamSubscribed(ac, listener, testPathID(t, "cmd-uuid"), "srv-uuid", out, 5*time.Minute, false)
+	return listener, streamSubscribed(ac, listener, testPathID(t, "cmd-uuid"), "srv-uuid", out, 5*time.Minute, nil)
 }
 
 // A run of 5xx on the result read ends no run while the stream can still deliver
@@ -1879,7 +1924,7 @@ func TestStreamSubscribed_WaitTimeoutCarriesTheFileSuggestion(t *testing.T) {
 		pathID := testPathID(t, "cmd-uuid")
 		done := make(chan error, 1)
 		go func() {
-			done <- streamSubscribed(ac, listener, pathID, "srv-uuid", &bytes.Buffer{}, 5*time.Second, true)
+			done <- streamSubscribed(ac, listener, pathID, "srv-uuid", &bytes.Buffer{}, 5*time.Second, &streamApproval{held: &PendingApprovalError{CommandID: "cmd-uuid"}})
 		}()
 
 		var pending *PendingApprovalError
@@ -1907,13 +1952,319 @@ func TestStreamSubscribed_WaitTimeoutCarriesTheScriptBodySuggestion(t *testing.T
 		pathID := testPathID(t, "cmd-uuid")
 		done := make(chan error, 1)
 		go func() {
-			done <- streamSubscribed(ac, listener, pathID, "srv-uuid", &bytes.Buffer{}, 5*time.Second, true)
+			done <- streamSubscribed(ac, listener, pathID, "srv-uuid", &bytes.Buffer{}, 5*time.Second, &streamApproval{held: &PendingApprovalError{CommandID: "cmd-uuid"}})
 		}()
 
 		var pending *PendingApprovalError
 		require.ErrorAs(t, awaitStream(t, done), &pending)
 		assert.Equal(t, &ScriptBodySuggestion{Signal: "embedded_script"}, pending.ScriptBodySuggestion)
 		assert.Nil(t, pending.FileSuggestion)
+	})
+}
+
+func TestStreamApprovedCommand_UsesRemainingWait(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name      string
+		setup     time.Duration
+		timeout   time.Duration
+		wantReads int32
+	}{
+		{"setup spends most of the remaining wait", 1900 * time.Millisecond, 2 * time.Second, 3},
+		{"poll receives the remaining wait", time.Second, 5 * time.Second, 3},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				var reads atomic.Int32
+				cfg := streamingServerConfig{
+					cmdID: "cmd-uuid", serverID: "srv-uuid",
+					firstDetailDelay: tt.setup,
+					onDetail:         func() { reads.Add(1) },
+					heldPolls:        8,
+					heldFields:       `,"username":"alice","file_execution_suggestion":{"path":"/opt/run.sh"}`,
+				}
+				ac := newStreamingServers(t, cfg)
+				start := time.Now()
+				err := StreamApprovedCommand(ac, &PendingApprovalError{CommandID: cfg.cmdID}, io.Discard, tt.timeout)
+				var pending *PendingApprovalError
+				require.ErrorAs(t, err, &pending)
+				assert.Equal(t, "alice", pending.Username)
+				assert.Equal(t, &FileExecutionSuggestion{Path: "/opt/run.sh"}, pending.FileSuggestion)
+				assert.Equal(t, tt.timeout, time.Since(start))
+				assert.Equal(t, tt.wantReads, reads.Load())
+			})
+		})
+	}
+}
+
+func TestStreamApprovedCommand_SetupReadUsesApprovalDeadline(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		ac := newStreamingServers(t, streamingServerConfig{
+			cmdID: "cmd-uuid", serverID: "srv-uuid", firstDetailDelay: 4 * time.Second, heldPolls: 8,
+			completedBeforeSubscription: true,
+		})
+		start := time.Now()
+		err := StreamApprovedCommand(ac, &PendingApprovalError{CommandID: "cmd-uuid"}, io.Discard, 2*time.Second)
+		var pending *PendingApprovalError
+		require.ErrorAs(t, err, &pending)
+		assert.LessOrEqual(t, time.Since(start), 2*time.Second+approvalRefreshTimeout)
+		time.Sleep(4 * time.Second) // let the delayed handler finish
+	})
+}
+
+func TestStreamApprovedCommand_PollObservesRunningAfterHeldSetup(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "11s")
+	synctest.Test(t, func(t *testing.T) {
+		cfg := streamingServerConfig{
+			cmdID: "cmd-uuid", serverID: "srv-uuid",
+			firstDetailDelay: 2 * time.Second, heldPolls: 1, runningPolls: 1,
+			terminal: EventDetails{Status: "completed", Success: new(true), Result: "finished"},
+		}
+		ac := newStreamingServers(t, cfg)
+		var out bytes.Buffer
+		require.NoError(t, StreamApprovedCommand(ac, &PendingApprovalError{CommandID: cfg.cmdID}, &out, 11*time.Second))
+		assert.Equal(t, "finished", out.String())
+	})
+}
+
+func TestStreamApprovedCommand_FinalRefreshStartsExecutionWait(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "11s")
+	synctest.Test(t, func(t *testing.T) {
+		cfg := streamingServerConfig{
+			cmdID: "cmd-uuid", serverID: "srv-uuid",
+			completedBeforeSubscription: true, heldPolls: 2, runningPolls: 1,
+			terminal: EventDetails{Status: "completed", Success: new(true), Result: "finished"},
+		}
+		ac := newStreamingServers(t, cfg)
+		var out bytes.Buffer
+		require.NoError(t, StreamApprovedCommand(ac, &PendingApprovalError{CommandID: cfg.cmdID}, &out, 2*time.Second))
+		assert.Equal(t, "finished", out.String())
+	})
+}
+
+func TestStreamApprovedCommand_SetupReturnsCompletedResult(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		cfg := streamingServerConfig{
+			cmdID: "cmd-uuid", serverID: "srv-uuid",
+			firstDetailDelay: 1900 * time.Millisecond, completedBeforeSubscription: true,
+			terminal: EventDetails{Status: "completed", Success: new(true), Result: "finished"},
+		}
+		ac := newStreamingServers(t, cfg)
+		var out bytes.Buffer
+		require.NoError(t, StreamApprovedCommand(ac, &PendingApprovalError{CommandID: cfg.cmdID}, &out, 2*time.Second))
+		assert.Equal(t, "finished", out.String())
+	})
+}
+
+func TestStreamApprovedCommand_SetupReadsRunningNearDeadline(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "11s")
+	synctest.Test(t, func(t *testing.T) {
+		cfg := streamingServerConfig{
+			cmdID: "cmd-uuid", serverID: "srv-uuid",
+			firstDetailDelay: 1900 * time.Millisecond, runningPolls: 2,
+			terminal: EventDetails{Status: "completed", Success: new(true), Result: "finished"},
+		}
+		ac := newStreamingServers(t, cfg)
+		var out bytes.Buffer
+		require.NoError(t, StreamApprovedCommand(ac, &PendingApprovalError{CommandID: cfg.cmdID}, &out, 2*time.Second))
+		assert.Equal(t, "finished", out.String())
+	})
+}
+
+func TestStreamPollError(t *testing.T) {
+	t.Parallel()
+	timeout := &ClientTimeoutError{}
+	failed := errors.New("read failed")
+	original := &PendingApprovalError{CommandID: "cmd-1", FileSuggestion: &FileExecutionSuggestion{Path: "/example"}}
+	for _, tt := range []struct {
+		name        string
+		approval    *streamApproval
+		status      string
+		cause       error
+		wantPending bool
+	}{
+		{"nil detail", nil, "", timeout, false},
+		{"only setup detail", &streamApproval{setup: EventDetails{Status: "awaiting_approval", Username: "alice"}}, "", timeout, true},
+		{"both empty", &streamApproval{held: original}, "", timeout, true},
+		{"non-timeout error", &streamApproval{}, "", failed, false},
+		{"error status", &streamApproval{}, "error", timeout, true},
+		{"running", &streamApproval{setup: EventDetails{Status: "awaiting_approval"}}, "running", timeout, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := streamPollError(testPathID(t, "cmd-1"), EventDetails{Status: tt.status}, tt.cause, tt.approval, nil)
+			if tt.wantPending {
+				var pending *PendingApprovalError
+				require.ErrorAs(t, err, &pending)
+				assert.Equal(t, "cmd-1", pending.CommandID)
+				assert.Equal(t, tt.approval.setup.Username, pending.Username)
+				if tt.approval.held != nil {
+					assert.Same(t, original, pending)
+				}
+			} else {
+				assert.ErrorIs(t, err, tt.cause)
+			}
+		})
+	}
+}
+
+func TestStreamPollError_FinalRefreshResult(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name  string
+		body  string
+		phase string
+	}{
+		{"terminal error", `{"status":"error","error_phase":"file_too_large"}`, "file_too_large"},
+		{"completed", `{"status":"completed","success":true,"result":"finished"}`, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/api/events/commands/held-1/" {
+					_, _ = io.WriteString(w, tt.body)
+					return
+				}
+				http.NotFound(w, r)
+			}))
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			approval := &streamApproval{held: &PendingApprovalError{CommandID: "held-1"}}
+			id := testPathID(t, "held-1")
+			var out bytes.Buffer
+			details, pollErr := refreshApprovalPoll(ac, id, EventDetails{}, &ClientTimeoutError{}, CommandPollTick, pollSeams{})
+			err := streamPollError(id, details, pollErr, approval, func(details EventDetails) error {
+				return writePolledResult(ac, id, &out, details)
+			})
+			if tt.phase != "" {
+				var statusErr *CommandStatusError
+				require.ErrorAs(t, err, &statusErr)
+				assert.Equal(t, tt.phase, statusErr.ErrorPhase)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, "finished", out.String())
+			}
+		})
+	}
+}
+
+func TestPollingFallback_TerminalPhaseEndsApprovalWait(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"status":"error","error_phase":"file_too_large"}`)
+		}))
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		start := time.Now()
+		approval := &streamApproval{held: &PendingApprovalError{CommandID: "held-1"}}
+		err := runCommandFallbackFromID(ac, testPathID(t, "held-1"), io.Discard, 2*time.Second, time.Second, approval, errors.New("no stream"))
+		var statusErr *CommandStatusError
+		require.ErrorAs(t, err, &statusErr)
+		assert.Equal(t, "file_too_large", statusErr.ErrorPhase)
+		assert.Zero(t, time.Since(start))
+	})
+}
+
+func TestPollingFallback_ExpiredReadKeepsKnownHold(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"failed GET", http.StatusNotFound, "{}"},
+		{"invalid body", http.StatusOK, "{"},
+		{"missing status", http.StatusOK, "{}"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				var reads atomic.Int32
+				ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					reads.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(tt.status)
+					_, _ = io.WriteString(w, tt.body)
+				}))
+				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+				held := &PendingApprovalError{CommandID: "held-1", WorkSessionStatus: "paused"}
+				err := runCommandFallbackFromID(ac, testPathID(t, "held-1"), io.Discard, 0, time.Second, &streamApproval{held: held}, errors.New("no stream"))
+				assert.Same(t, held, err)
+				assert.Equal(t, int32(1), reads.Load())
+			})
+		})
+	}
+}
+
+func TestPollingFallback_FinishedDuringApprovalWait(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		var reads atomic.Int32
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/events/commands/held-1/" {
+				reads.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"status":"completed","success":true,"result":"finished"}`)
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		var out bytes.Buffer
+		err := runCommandFallbackFromID(ac, testPathID(t, "held-1"), &out, time.Nanosecond, time.Second, &streamApproval{held: &PendingApprovalError{CommandID: "held-1"}}, errors.New("no stream"))
+		require.NoError(t, err)
+		assert.Equal(t, "finished", out.String())
+		assert.Equal(t, int32(1), reads.Load())
+	})
+}
+
+func TestPollingFallback_ErrorAfterRunningEndsExecution(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		var reads atomic.Int32
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/events/commands/held-1/" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if reads.Add(1) == 1 {
+				_, _ = io.WriteString(w, `{"status":"running"}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"status":"error"}`)
+		}))
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		approval := &streamApproval{held: &PendingApprovalError{CommandID: "held-1"}}
+		err := runCommandFallbackFromID(ac, testPathID(t, "held-1"), io.Discard, time.Second, time.Second, approval, errors.New("no stream"))
+		var commandError *CommandStatusError
+		require.ErrorAs(t, err, &commandError)
+		assert.Equal(t, "error", commandError.Status)
+		assert.Equal(t, int32(2), reads.Load())
+	})
+}
+
+func TestPollingFallback_HeldCommandUsesRemainingWait(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		reads := 0
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reads++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"status":"awaiting_approval","username":"alice"}`)
+		}))
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		started := time.Now()
+		err := runCommandFallbackFromID(ac, testPathID(t, "held-1"), io.Discard, 1500*time.Millisecond, time.Second, &streamApproval{held: &PendingApprovalError{CommandID: "held-1"}}, errors.New("no stream"))
+		var pending *PendingApprovalError
+		require.ErrorAs(t, err, &pending)
+		assert.Equal(t, "alice", pending.Username)
+		assert.Equal(t, 1500*time.Millisecond, time.Since(started))
+		assert.Equal(t, 3, reads)
 	})
 }
 
@@ -2305,7 +2656,8 @@ type streamingServerConfig struct {
 	// subscription; a reconnect stays open and sends nothing.
 	dropAfter time.Duration
 	// firstDetailDelay holds the first detail response that long before answering it.
-	firstDetailDelay time.Duration
+	firstDetailDelay            time.Duration
+	completedBeforeSubscription bool
 	// firstDetailRetryAfter, when set, answers the first detail request 429 with it.
 	firstDetailRetryAfter string
 }
@@ -2328,7 +2680,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		if wsConns.Add(1) > 1 && cfg.dropAfter > 0 {
+		if (wsConns.Add(1) > 1 && cfg.dropAfter > 0) || cfg.completedBeforeSubscription {
 			for {
 				if _, _, err := conn.ReadMessage(); err != nil {
 					return
@@ -2501,7 +2853,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"running","server":{"id":"` + cfg.serverID + `"}}`))
 				return
 			}
-			if cfg.sessionStatus == 0 { // a refused session never opens the WS
+			if cfg.sessionStatus == 0 && !cfg.completedBeforeSubscription { // wait for any live output
 				select {
 				case <-delivered:
 				case <-wsGone:
@@ -3202,7 +3554,7 @@ func TestRunCommandFallbackFromID_ChunkFetchFailure(t *testing.T) {
 				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 				var out bytes.Buffer
-				err := runCommandFallbackFromID(ac, testPathID(t, cmdID), &out, CommandPollTick, false, fmt.Errorf("websocket dial failed"))
+				err := runCommandFallbackFromID(ac, testPathID(t, cmdID), &out, execTimeout(), CommandPollTick, nil, fmt.Errorf("websocket dial failed"))
 
 				assert.Equal(t, tt.wantOut, out.String())
 				switch {
@@ -3238,7 +3590,7 @@ func TestRunCommandFallbackFromIDNamesTheCheckedIDWhenTheServerEchoesAnUnusableO
 		}))
 		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-		err := runCommandFallbackFromID(ac, testPathID(t, cmdID), io.Discard, CommandPollTick, false, fmt.Errorf("websocket dial failed"))
+		err := runCommandFallbackFromID(ac, testPathID(t, cmdID), io.Discard, execTimeout(), CommandPollTick, nil, fmt.Errorf("websocket dial failed"))
 
 		var rejected *CommandRejectedError
 		require.ErrorAs(t, err, &rejected)
@@ -3369,7 +3721,7 @@ func TestStreamApprovedCommand_RefusesACommandIDThatIsNotOneSegment(t *testing.T
 	ts := testutil.NewNoRequestServer(t)
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	err := StreamApprovedCommand(ac, "../x", io.Discard, time.Second)
+	err := StreamApprovedCommand(ac, &PendingApprovalError{CommandID: "../x"}, io.Discard, time.Second)
 
 	require.ErrorIs(t, err, utils.ErrInvalidID)
 }
@@ -3462,7 +3814,7 @@ func TestSuccessfulCommandWithPendingSudoApprovalSignals(t *testing.T) {
 					}))
 					ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 					for range 2 {
-						require.NoError(t, runCommandFallbackFromID(ac, testPathID(t, "cmd-1"), &out, time.Millisecond, false, errors.New("no stream")))
+						require.NoError(t, runCommandFallbackFromID(ac, testPathID(t, "cmd-1"), &out, execTimeout(), time.Millisecond, nil, errors.New("no stream")))
 					}
 				})
 			})

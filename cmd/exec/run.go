@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,6 +55,10 @@ const (
 
 const approvalWaitMessage = "Waiting for approval in the Alpacon web console..."
 
+const lateSudoApprovalMessage = "Approval was granted. Alpacon did not re-run the command."
+
+var errLateSudoApproval = errors.New("sudo approval observed at the wait deadline")
+
 const (
 	// outcomePending covers every status that is not a decision, the absent
 	// field included: a value nobody can read as an answer must not end a wait.
@@ -76,7 +81,7 @@ var (
 	runPresenceStepUp     = RunExecWithPresenceStepUp
 	streamApprovedCommand = event.StreamApprovedCommand
 	mfaLinkByServerName   = mfa.GetMFALinkByServerName
-	getCommandByID        = event.GetCommandByID
+	getCommandByID        = event.GetCommandByIDWithContext
 )
 
 // sudoDenialHints maps a non-interactive sudo denial code to guidance. The codes mirror the
@@ -132,7 +137,7 @@ var sudoDenialHints = []struct {
 		guidance: "sudo was denied: your work session does not include the 'sudo' scope, the ceiling checked before any policy.\n" +
 			"Add it and re-run (--scope replaces the whole list, so name every scope you keep; omit SESSION_ID to use the active session):\n" +
 			"  alpacon work-session update [SESSION_ID] --scope command,sudo\n" +
-			"Adding a scope may require approval before it takes effect.\n",
+			"Adding a scope may require approval before it takes effect. If this scope change is already pending, wait for its approval before rerunning the command. A new session created with --sudo gets the scope on its own.\n",
 	},
 	{
 		// A command with no requesting user, i.e. a service-token submission, which this deployment
@@ -524,8 +529,8 @@ func isApprovalDenial(ios *utils.IOStreams, err error) bool {
 
 // pollApprovalOnce reads the grant the denial left behind. The command it names
 // already ran and was blocked, so this is a status read, not a re-attempt.
-func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalPoll, error) {
-	details, err := getCommandByID(ac, cmdID)
+func pollApprovalOnce(ctx context.Context, ac *client.AlpaconClient, cmdID string) (approvalPoll, error) {
+	details, err := getCommandByID(ctx, ac, cmdID)
 	if err != nil {
 		return approvalPoll{outcome: outcomePending}, err
 	}
@@ -584,79 +589,95 @@ func RunFileExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient,
 // runWithApprovalWait is RunExecWithApprovalWait over a commandRun: run is the
 // first attempt and, once a reviewer grants the request, the re-run.
 func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run commandRun, waitTimeout time.Duration, out io.Writer) (result error) {
-	err := run()
-	err = utils.WithSignalFields(err, utils.SignalFields(err), ac)
-	announced := false
+	var fields localsignal.Fields
+	runAttempt := func() error {
+		err := run()
+		err = utils.WithSignalFields(err, utils.SignalFields(err), ac)
+		fields = utils.SignalFields(err)
+		return err
+	}
+	err := runAttempt()
+	var announcedID string
 	defer func() {
-		if _, recoveryFailed := errors.AsType[*utils.ExitError](result); recoveryFailed { // Recovery failed; not a refusal of this request.
+		if _, handled := errors.AsType[*utils.ExitError](result); handled {
 			return
 		}
-		fields := utils.SignalFields(err)
 		result = utils.WithSignalFields(result, fields, ac)
 		utils.SignalRefusal(result)
-		if announced {
+		if announcedID == "" {
+			return
+		}
+		pending, _ := errors.AsType[*event.PendingApprovalError](result)
+		denial, _ := errors.AsType[*event.RemoteCommandError](result)
+		if (pending != nil && pending.CommandID == announcedID) || (denial != nil && denial.CommandID == announcedID) {
 			result = utils.MarkApprovalSignaled(result)
 		}
 	}()
 
-	// A status hold never ran. Follow the same job with --wait to avoid submitting
-	// it twice; without --wait, let pendingApprovalFailure report it.
-	var pendingErr *event.PendingApprovalError
-	if errors.As(err, &pendingErr) {
-		if waitTimeout <= 0 {
-			return err
-		}
-		utils.SignalApprovalPending(err, utils.SignalFields(err))
-		announced = true
-		waiting := "Waiting for approval in the Alpacon web console (output streams once approved)..."
-		if pendingErr.AssigneeConfirms() {
-			waiting = "Waiting for your confirmation in the Alpacon web console (output streams once confirmed)..."
-		}
-		if pendingErr.WorkSessionStatus == apiworksession.StatusPaused {
-			action := "approval"
-			if pendingErr.AssigneeConfirms() {
-				action = "your confirmation"
-			}
-			waiting = fmt.Sprintf("Waiting for %s in the Alpacon web console; an authorized person must also use Resume on the paused work session...", action)
-		} else if apiworksession.IsEndedStatus(pendingErr.WorkSessionStatus) {
-			waiting = "Waiting for the command's final status; its work session has ended and the command cannot run in that session..."
-		}
-		spinner := utils.NewSpinner(waiting)
-		spinner.Start()
-		defer spinner.Stop()
-		// The wait is inside the stream call, so the spinner has to survive it—
-		// StopWriter retires it the moment the approved command's output starts.
-		streamErr := streamApprovedCommand(ac, pendingErr.CommandID, spinner.StopWriter(out), waitTimeout)
-		var stillPending *event.PendingApprovalError
-		if errors.As(streamErr, &stillPending) {
-			mergePendingApprovalMetadata(stillPending, pendingErr)
-		}
-		return streamErr
-	}
-
-	if waitTimeout <= 0 || !isApprovalDenial(ios, err) {
+	if waitTimeout <= 0 {
 		return err
 	}
-
-	var denialErr *event.RemoteCommandError
-	if !errors.As(err, &denialErr) || denialErr.CommandID == "" {
-		// Nothing to poll: fall back to reporting the denial as it stands.
-		return err
+	started := time.Now()
+	deadline := started.Add(waitTimeout)
+	budget := utils.NewThrottleBudget(waitTimeout)
+	waitIfHeld := func(current error) error {
+		pending, ok := errors.AsType[*event.PendingApprovalError](current)
+		if !ok || time.Until(deadline) <= 0 {
+			return current
+		}
+		utils.SignalApprovalPending(current, fields)
+		announcedID = pending.CommandID
+		return waitForHeldCommand(ac, pending, out, deadline)
 	}
-	utils.SignalApprovalPending(err, utils.SignalFields(err))
-	announced = true
-	cmdID := denialErr.CommandID
 
+	current := waitIfHeld(err)
+	denial, ok := errors.AsType[*event.RemoteCommandError](current)
+	if !ok || denial.CommandID == "" || !isApprovalDenial(ios, current) || time.Until(deadline) <= 0 {
+		return current
+	}
+	utils.SignalApprovalPending(current, fields)
+	announcedID = denial.CommandID
+	current = waitForSudoGrant(ios, ac, runAttempt, current, denial, started, &deadline, budget)
+	return waitIfHeld(current)
+}
+
+func waitForHeldCommand(ac *client.AlpaconClient, pending *event.PendingApprovalError, out io.Writer, deadline time.Time) error {
+	waiting := "Waiting for approval in the Alpacon web console (output streams once approved)..."
+	if pending.AssigneeConfirms() {
+		waiting = "Waiting for your confirmation in the Alpacon web console (output streams once confirmed)..."
+	}
+	if pending.WorkSessionStatus == apiworksession.StatusPaused {
+		action := "approval"
+		if pending.AssigneeConfirms() {
+			action = "your confirmation"
+		}
+		waiting = fmt.Sprintf("Waiting for %s in the Alpacon web console; an authorized person must also use Resume on the paused work session...", action)
+	} else if apiworksession.IsEndedStatus(pending.WorkSessionStatus) {
+		waiting = "Waiting for the command's final status; its work session has ended and the command cannot run in that session..."
+	}
+	spinner := utils.NewSpinner(waiting)
+	spinner.Start()
+	defer spinner.Stop()
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return pending
+	}
+	streamErr := streamApprovedCommand(ac, pending, spinner.StopWriter(out), remaining)
+	if latest, ok := errors.AsType[*event.PendingApprovalError](streamErr); ok && latest != pending {
+		mergePendingApprovalMetadata(latest, pending)
+	}
+	return streamErr
+}
+
+func waitForSudoGrant(ios *utils.IOStreams, ac *client.AlpaconClient, run commandRun, pendingDenial error, denialErr *event.RemoteCommandError, waitStarted time.Time, deadline *time.Time, budget *utils.ThrottleBudget) error {
 	spinner := utils.NewSpinner(approvalWaitMessage)
 	spinner.Start()
 	// Every return below stops the spinner before it writes, for output ordering; this backstops
 	// paths added later. Stop on a stopped spinner is a no-op.
 	defer spinner.Stop()
 
-	pendingDenial := err
 	started := time.Now()
-	deadline := started.Add(waitTimeout)
-	timer := time.NewTimer(waitTimeout)
+	timer := time.NewTimer(time.Until(*deadline))
 	defer timer.Stop()
 	poll := time.NewTimer(approvalWaitPollInterval)
 	defer poll.Stop()
@@ -667,19 +688,28 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 	// latest non-null hold for the post-approval re-run.
 	lastHeld := denialErr.Held
 	lastDeadline := denialErr.Held
-	budget := utils.NewThrottleBudget(waitTimeout)
 	// lastRefusal is the refusal (a 429 in practice) the latest status read got,
 	// if it got one, so a wait that times out on it still prints its hint.
 	var lastRefusal error
+	timedOut := func() error {
+		spinner.Stop()
+		ios.Warning("%s", utils.HintOnly(fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", time.Since(waitStarted).Round(time.Second)), lastRefusal))
+		return pendingWithApprovalDetails(pendingDenial, lastRequestID, lastHeld)
+	}
 	for {
 		select {
 		case <-timer.C:
-			spinner.Stop()
-			// Report only the timeout; the caller's pending-approval message already names --wait-approval.
-			ios.Warning("%s", utils.HintOnly(fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", waitTimeout), lastRefusal))
-			return pendingWithApprovalDetails(pendingDenial, lastRequestID, lastHeld)
+			return timedOut()
 		case <-poll.C:
-			read, err := pollApprovalOnce(ac, cmdID)
+			if time.Until(*deadline) <= 0 {
+				return timedOut()
+			}
+			ctx, cancel := context.WithDeadline(context.Background(), *deadline)
+			read, err := pollApprovalOnce(ctx, ac, denialErr.CommandID)
+			cancel()
+			if read.outcome != outcomeApproved && time.Until(*deadline) <= 0 {
+				return timedOut()
+			}
 			lastRefusal = nil
 			if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
 				lastRefusal = err
@@ -692,13 +722,13 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 					delay := utils.NextPollBackoff(approvalWaitPollInterval, throttles, utils.RetryAfter(err))
 					throttles++
 					budget.WarnThrottled(delay)
-					if newDeadline, extended := budget.Extend(deadline, delay); extended {
-						deadline = newDeadline
+					if newDeadline, extended := budget.Extend(*deadline, delay); extended {
+						*deadline = newDeadline
 						// No drain before Reset: under this module's Go 1.23+ timer
 						// semantics the channel is unbuffered and a receive after Stop
 						// is guaranteed to block, so the drain could only hang.
 						timer.Stop()
-						timer.Reset(time.Until(deadline))
+						timer.Reset(time.Until(*deadline))
 					}
 					poll.Reset(delay)
 					continue
@@ -735,6 +765,10 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 			switch read.outcome {
 			case outcomeApproved:
 				spinner.Stop()
+				if time.Until(*deadline) <= 0 {
+					return utils.NewEnvelopeExitErrorWithCode(utils.ExitCodeGeneralError, "command", errLateSudoApproval,
+						"%s Re-run the command manually.", lateSudoApprovalMessage)
+				}
 				return runAfterApproval(ios, run, lastDeadline)
 			case outcomeRejected, outcomeExpired:
 				spinner.Stop()
@@ -752,16 +786,13 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 // or been spent by another attempt.
 func runAfterApproval(ios *utils.IOStreams, run commandRun, held *utils.HeldRequest) error {
 	err := run()
-	// Each shape gets the sentence its way out needs: a repeated denial needs a fresh request,
-	// while a parked job runs on its own once approved, so advising a re-run would contradict the
-	// pending text pendingApprovalFailure prints next.
-	var pendingErr *event.PendingApprovalError
+	_, pending := errors.AsType[*event.PendingApprovalError](err)
 	switch {
 	case isApprovalDenial(ios, err) && held.Expired():
 		ios.Warning("The approval deadline (%s) has passed and the command was denied again. Re-run the command to request a new approval.", held.ExpiresAt.Format(time.RFC3339))
 	case isApprovalDenial(ios, err):
 		ios.Warning("The approval was granted but the command was denied again; the grant appears already used or expired. Re-run the command to request approval again.")
-	case errors.As(err, &pendingErr):
+	case pending:
 		ios.Warning("The approval was granted but the grant did not carry this run; the server is holding the command for a fresh approval.")
 	}
 	return err

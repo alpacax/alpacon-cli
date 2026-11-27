@@ -2,16 +2,22 @@ package worksession
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -245,6 +251,103 @@ func TestWorkSessionCompleteCmd_InvalidSessionIDIsRefusedBeforeAnyRequest(t *tes
 			assert.Equal(t, utils.ExitCodeUsageError, exitCode)
 			assertCommandFailure(t, format, opComplete, stdout, stderr, utils.ExitCodeUsageError,
 				utils.ErrorCodeUsage, "must be a single path segment")
+		})
+	}
+}
+
+func TestEndSessionCancelGuidance(t *testing.T) {
+	t.Parallel()
+	for _, command := range endSessionCommands {
+		t.Run(command.name, func(t *testing.T) {
+			t.Parallel()
+			for _, tt := range []struct {
+				name         string
+				lookupStatus int
+				session      string
+				refusal      string
+				wantLookups  int32
+				wantActions  []utils.NextAction
+			}{
+				{"pending", http.StatusOK, `{"status":"pending"}`, `{"code":"work_session_not_active"}`, 1, []utils.NextAction{{Command: "alpacon work-session cancel session", Description: "cancel the pending work session"}}},
+				{"closed", http.StatusOK, `{"status":"completed"}`, `{"code":"work_session_not_active"}`, 1, nil},
+				{"failed lookup", http.StatusNotFound, `{}`, `{"code":"work_session_not_active"}`, 1, nil},
+				{"server hint", http.StatusOK, `{"status":"pending"}`, `{"code":"work_session_not_active","hint":"Review the session in the console."}`, 1, []utils.NextAction{
+					{Description: "Review the session in the console."},
+					{Command: "alpacon work-session cancel session", Description: "cancel the pending work session"},
+				}},
+			} {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
+					var lookups atomic.Int32
+					ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						switch {
+						case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/session/":
+							lookups.Add(1)
+							w.WriteHeader(tt.lookupStatus)
+							_, _ = w.Write([]byte(tt.session))
+						case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/session/"+command.action+"/":
+							w.WriteHeader(http.StatusForbidden)
+							_, _ = w.Write([]byte(tt.refusal))
+						default:
+							t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+							http.NotFound(w, r)
+						}
+					}))
+					t.Cleanup(ts.Close)
+					build := func(ios *utils.IOStreams) *cobra.Command {
+						factory := func() (*client.AlpaconClient, error) { return newTestClient(ts), nil }
+						if command.name == "revoke" {
+							return newWorkSessionRevokeCmd(factory, ios)
+						}
+						return newWorkSessionCompleteCmd(factory, ios)
+					}
+					stdout, stderr, code := cmdtest.RunJSON(build, "session")
+					assert.Empty(t, stdout)
+					assert.Equal(t, tt.wantLookups, lookups.Load())
+					assert.Equal(t, utils.ExitCodeGeneralError, code)
+					var result utils.JSONErrorEnvelope[json.RawMessage]
+					require.NoError(t, json.Unmarshal([]byte(stderr), &result))
+					assert.Equal(t, utils.WorkSessionNotActive, result.ErrorCode)
+					assert.Equal(t, tt.wantActions, result.NextActions)
+					if tt.name == "pending" {
+						assert.Regexp(t, "Failed to .* work session: .+\\. Work session session is pending approval", result.Message)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestEndSessionDiagnosticLookupUsesTimeout(t *testing.T) {
+	for _, command := range endSessionCommands {
+		t.Run(command.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					switch r.Method {
+					case http.MethodPost:
+						w.WriteHeader(http.StatusForbidden)
+						_, _ = io.WriteString(w, `{"code":"work_session_not_active"}`)
+					case http.MethodGet:
+						time.Sleep(time.Minute)
+						_, _ = io.WriteString(w, `{"status":"pending"}`)
+					default:
+						t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+						http.NotFound(w, r)
+					}
+				}))
+				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+				ios, _, _ := utils.TestIOStreams()
+				start := time.Now()
+				_, err := command.run(ios, ac, "session")
+				elapsed := time.Since(start)
+				time.Sleep(time.Minute) // let the server's stalled handler finish
+				require.Error(t, err)
+				assert.Equal(t, utils.WorkSessionNotActive, utils.StructuredErrorCode(err))
+				assert.Empty(t, utils.RefusalNextActions(err))
+				assert.Equal(t, time.Second, elapsed)
+			})
 		})
 	}
 }

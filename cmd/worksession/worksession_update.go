@@ -153,7 +153,7 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 				req.Servers = ids
 			}
 
-			updated, err := applyWorkSessionUpdate(ac, sessionID, req, newSudo, ios)
+			updated, status, err := applyWorkSessionUpdate(ac, sessionID, req, newSudo, ios)
 			if err != nil {
 				if hint := TargetErrorHint(err); hint != "" {
 					return utils.NewEnvelopeExitError(opUpdate, err, "Failed to update work session: %s.", hint)
@@ -161,14 +161,11 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 				return utils.NewEnvelopeExitError(opUpdate, err, "%s.", err)
 			}
 
-			message := updateSuccessMessage(updated)
+			output := newWorkSessionUpdateOutput(updated, status, req, len(newSudo) > 0)
 			if ios.IsJSON() {
-				return printWorkSessionMutationJSON(ios, newWorkSessionMutationOutput(opUpdate, message, updated, nil))
+				return printWorkSessionMutationJSON(ios, output)
 			}
-			ios.Success("%s", message)
-			if len(newSudo) > 0 {
-				ios.Info("Added sudo policies may require approval before they take effect. Re-run your command once the session reflects the change.")
-			}
+			ios.Success("%s", output.Message)
 			return nil
 		}),
 	}
@@ -205,7 +202,7 @@ func validateSessionForSudoUpdate(session *wsapi.WorkSession, scopes []string) e
 	}
 	if !slices.Contains(scopes, "sudo") {
 		return fmt.Errorf(
-			"work session %s does not include the 'sudo' scope; sudo policies cannot be added. Include 'sudo' in the scope list via --scope in this same update (note --scope replaces the whole list, so list every scope you want to keep), or create a new session with --scope and --sudo",
+			"work session %s does not include the 'sudo' scope; sudo policies cannot be added. Include 'sudo' in the scope list via --scope in this same update (note --scope replaces the whole list, so list every scope you want to keep), or create a new session with --sudo (which adds the 'sudo' scope to --scope)",
 			session.ID,
 		)
 	}
@@ -226,18 +223,18 @@ func validateSessionForTimeUpdate(session *wsapi.WorkSession, req wsapi.WorkSess
 
 // applyWorkSessionUpdate sends req. sudo_policies replaces the whole set, so existing policies are
 // sent back with newSudo, or adding would delete them.
-func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsapi.WorkSessionUpdateRequest, newSudo []wsapi.SudoPolicyInline, ios *utils.IOStreams) (*wsapi.WorkSession, error) {
+func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsapi.WorkSessionUpdateRequest, newSudo []wsapi.SudoPolicyInline, ios *utils.IOStreams) (*wsapi.WorkSession, int, error) {
 	checkTime := req.StartsAt != "" || req.ExpiresAt != ""
 	if len(newSudo) == 0 && !checkTime {
-		return wsapi.UpdateWorkSession(ac, sessionID, req)
+		return wsapi.UpdateWorkSessionWithStatus(ac, sessionID, req)
 	}
 	session, err := wsapi.GetWorkSession(ac, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load work session %s: %w", sessionID, err)
+		return nil, 0, fmt.Errorf("failed to load work session %s: %w", sessionID, err)
 	}
 	if checkTime {
 		if err := validateSessionForTimeUpdate(session, req); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
 	if len(newSudo) > 0 {
@@ -246,7 +243,7 @@ func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsap
 			effectiveScopes = req.Scopes
 		}
 		if err := validateSessionForSudoUpdate(session, effectiveScopes); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		desired := make([]wsapi.SudoPolicyInline, 0, len(session.SudoPolicies)+len(newSudo))
 		desired = append(desired, session.SudoPolicies...)
@@ -255,7 +252,7 @@ func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsap
 	}
 	updated, status, err := wsapi.UpdateWorkSessionWithStatus(ac, sessionID, req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if len(newSudo) > 0 {
 		warnUpdatedSudoPolicies(ios, session.SudoPolicies, updated, status == http.StatusAccepted)
@@ -263,17 +260,17 @@ func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsap
 	if checkTime {
 		if stored := unappliedTimes(updated, req); len(stored) > 0 {
 			if updated.Status == wsapi.StatusPending {
-				return nil, fmt.Errorf("work session %s is still pending, but the server stored different times than sent: %s; the other fields in this update were still sent", updated.ID, strings.Join(stored, ", "))
+				return nil, 0, fmt.Errorf("work session %s is still pending, but the server stored different times than sent: %s; the other fields in this update were still sent", updated.ID, strings.Join(stored, ", "))
 			}
 			flags := sentTimeFlags(req)
 			verb := "was"
 			if len(flags) > 1 {
 				verb = "were"
 			}
-			return nil, fmt.Errorf("work session %s became %s before the update reached it, so %s %s not applied; the other fields in this update were still sent", updated.ID, updated.Status, strings.Join(flags, " and "), verb)
+			return nil, 0, fmt.Errorf("work session %s became %s before the update reached it, so %s %s not applied; the other fields in this update were still sent", updated.ID, updated.Status, strings.Join(flags, " and "), verb)
 		}
 	}
-	return updated, nil
+	return updated, status, nil
 }
 
 func sentTimeFlags(req wsapi.WorkSessionUpdateRequest) []string {

@@ -91,7 +91,7 @@ func TestSudoDenialHint(t *testing.T) {
 			// would have the user silently drop every other scope.
 			name:         "scope-not-allowed names the sudo scope and the replace caveat",
 			code:         "WORK_SESSION_SCOPE_NOT_ALLOWED",
-			wantContains: []string{"'sudo' scope", "work-session update [SESSION_ID] --scope", "replaces the whole list"},
+			wantContains: []string{"'sudo' scope", "work-session update [SESSION_ID] --scope", "replaces the whole list", "already pending"},
 		},
 		{
 			name:            "command-not-authorized points to signing in and re-running",
