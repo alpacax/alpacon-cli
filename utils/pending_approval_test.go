@@ -102,3 +102,43 @@ func TestPrintPendingApproval_CarriesARefusalHint(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(out), &got), "stdout: %s", out)
 	assert.Contains(t, got.NextActions, NextAction{Description: hint})
 }
+
+func TestPrintPendingApprovalAwaiting_LeadsWithTheWaitAndDropsTheRerunAdvice(t *testing.T) {
+	t.Parallel()
+	wait := NextAction{Command: "alpacon event wait --type work_session --target s-1 --timeout 10m"}
+	retry := NextAction{Command: "alpacon work-session use s-1", Description: "after approval"}
+	extra := NextAction{Command: "alpacon work-session update s-1 --server <server,...>"}
+	for _, format := range []string{OutputFormatJSON, OutputFormatTable} {
+		t.Run(format, func(t *testing.T) {
+			t.Parallel()
+			ios, out, errOut := TestIOStreams()
+			require.NoError(t, ios.SetOutputFormat(format))
+
+			ios.PrintPendingApprovalAwaiting("needs approval", "apr-1", wait, retry, extra)
+
+			want := []NextAction{wait, retry, {Description: "Approve it out of band in the Alpacon console (web/Slack)."}, extra}
+			if format == OutputFormatJSON {
+				var got struct {
+					NextActions []NextAction `json:"next_actions"`
+				}
+				require.NoError(t, json.Unmarshal(out.Bytes(), &got), "output: %s", out)
+				assert.Equal(t, want, got.NextActions)
+				return
+			}
+			var lines strings.Builder
+			for _, action := range want {
+				lines.WriteString("  " + action.PlainText() + "\n")
+			}
+			assert.Contains(t, errOut.String(), lines.String())
+		})
+	}
+}
+
+func TestPrintPendingApproval_WithoutAWaitKeepsTheRerunAdvice(t *testing.T) {
+	t.Parallel()
+	ios, _, errOut := TestIOStreams()
+
+	ios.PrintPendingApproval("needs approval", "apr-1", NextAction{Command: "alpacon exec srv -- sudo reboot"})
+
+	assert.Contains(t, errOut.String(), "Where supported, pass --wait (or --wait-approval DURATION for a longer timeout) on the original command to block until approval.")
+}

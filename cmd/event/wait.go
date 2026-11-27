@@ -15,6 +15,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var waitAgainAction = utils.NextAction{Description: "run the same command again to keep waiting, or raise --timeout"}
+
 func newWaitCommand(newClient func() (*client.AlpaconClient, error), ios *utils.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "wait",
@@ -30,8 +32,9 @@ The outcome is carried by the exit code, so a script never has to parse prose:
   4  timed out or interrupted—the outcome is still open
   6  an event in the failure set arrived. Only a type with a built-in end
      condition has a failure set (work_session's is rejected, expired,
-     revoked, cancelled, or completed), so this cannot happen when --until
-     names the end condition instead
+     revoked, cancelled, or completed). It still applies when --until names
+     the success condition, less any sub type --until lists, so
+     '--until activated' ends on a refused session instead of timing out
 
 One line is written to stdout, in the same shape 'alpacon event watch' uses:
 with --output json the server frame compacted to a single line, otherwise four
@@ -49,13 +52,14 @@ event channel has no history to replay. No other type gets that read.
 Run 'alpacon work-session ls' or the Alpacon console to find a target ID.`,
 		Example: `  alpacon event wait --type work_session --target 550e8400-e29b-41d4-a716-446655440000
   alpacon event wait --type work_session --target 550e8400-e29b-41d4-a716-446655440000 --timeout 30m
+  alpacon event wait --type work_session --target 550e8400-e29b-41d4-a716-446655440000 --until activated
   alpacon event wait --type notification --until created`,
 		Args: cobra.NoArgs,
 		RunE: utils.WithExitError(func(cmd *cobra.Command, _ []string) error { return runWait(ios, cmd, newClient) }),
 	}
 	cmd.Flags().String("type", "", "Event type to subscribe to, e.g. work_session (required)")
 	cmd.Flags().String("target", "", "Target resource ID; omit where the server allows a subscription without one")
-	cmd.Flags().StringSlice("until", nil, "Sub types that end the wait (comma-separated). Overrides the built-in condition, and is required for a type this CLI has none for")
+	cmd.Flags().StringSlice("until", nil, "Sub types that end the wait (comma-separated). Replaces the built-in success condition, while a type with one still fails on its failure statuses; required for a type this CLI has none for")
 	cmd.Flags().Duration("timeout", utils.DefaultApprovalWaitTimeout, "How long to wait before giving up")
 	return cmd
 }
@@ -144,20 +148,18 @@ func runWait(ios *utils.IOStreams, cmd *cobra.Command, newClient func() (*client
 		return utils.NewEnvelopeExitError(opWait, err, "%s.", strip(err.Error()))
 	}
 
-	// PrintPendingApproval, not CliError: exit 4 owes a machine consumer the
-	// pending_approval envelope under --output json, the same as every other surface
-	// that returns it. No retry action: unlike exec's and create's, the only retry here
-	// is the invocation the consumer just ran, so naming it back carries nothing.
+	// PrintPendingApprovalAwaiting, not CliError: exit 4 owes --output json the pending_approval envelope.
+	// The wait is this invocation again, so it is named in prose; event wait has no --wait to suggest.
 	switch outcome {
 	case eventapi.OutcomeTimeout:
-		ios.PrintPendingApproval(
+		ios.PrintPendingApprovalAwaiting(
 			fmt.Sprintf("Timed out after %s with no matching %s event. The outcome is still open.", timeout, displayType),
-			"", utils.NextAction{})
+			"", waitAgainAction, utils.NextAction{})
 		return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 	case eventapi.OutcomeCanceled:
-		ios.PrintPendingApproval(
+		ios.PrintPendingApprovalAwaiting(
 			fmt.Sprintf("Interrupted before a matching %s event arrived. The outcome is still open.", displayType),
-			"", utils.NextAction{})
+			"", waitAgainAction, utils.NextAction{})
 		return utils.NewSilentExitError(utils.ExitCodePendingApproval)
 	}
 

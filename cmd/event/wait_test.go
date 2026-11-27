@@ -212,3 +212,24 @@ func waitGoroutines(signal bool) []string {
 	}
 	return found
 }
+
+// event wait has no --wait flag, so its exit 4 must not suggest one.
+func TestRunWait_TimeoutNamesRunningTheWaitAgain(t *testing.T) {
+	t.Parallel()
+	const sessionID = "550e8400-e29b-41d4-a716-446655440000"
+	ts := newEventServer(t, http.StatusCreated, `{}`)
+	ts.Config.Handler.(*http.ServeMux).HandleFunc("GET /api/work-sessions/sessions/"+sessionID+"/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"` + sessionID + `","status":"pending"}`))
+	})
+	newClient := func() (*client.AlpaconClient, error) {
+		return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, nil
+	}
+
+	_, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return newWaitCommand(newClient, ios) },
+		"--type", "work_session", "--target", sessionID, "--timeout", "1s")
+
+	assert.Equal(t, utils.ExitCodePendingApproval, code)
+	assert.Contains(t, stderr, "  run the same command again to keep waiting, or raise --timeout\n")
+	assert.NotContains(t, stderr, "on the original command")
+}

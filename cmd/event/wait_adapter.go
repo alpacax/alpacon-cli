@@ -3,6 +3,7 @@ package event
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	eventapi "github.com/alpacax/alpacon-cli/api/event"
@@ -65,6 +66,9 @@ func resolveWaitOptions(ac *client.AlpaconClient, eventType eventapi.EventType, 
 	switch {
 	case len(until) > 0:
 		opts.OK = until
+		if registered { // a settled resource never reaches the status --until names
+			opts.Fail = slices.DeleteFunc(slices.Clone(adapter.fail), func(status string) bool { return slices.Contains(until, status) })
+		}
 	case registered:
 		opts.OK, opts.Fail = adapter.ok, adapter.fail
 	default:

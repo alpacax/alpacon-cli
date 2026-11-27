@@ -300,7 +300,7 @@ func (s *Selection) settle(ctx context.Context, session *wsapi.WorkSession, wait
 		if err != nil {
 			resumeAction.Description = strings.TrimPrefix(resumeAction.Description, "after approval")
 			resumeAction.Description = "set this session active, then " + s.resumeStep() + resumeAction.Description
-			return false, WaitExitError(s.ios, opCreate, session, resumeAction, err)
+			return false, WaitExitError(s.ios, opCreate, session, utils.NextAction{}, resumeAction, err)
 		}
 		session = final
 		PrintSessionAdvisories(s.ios, final)
