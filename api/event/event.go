@@ -855,16 +855,7 @@ func errorFromDetails(id api.PathID, d EventDetails) error {
 		return rejected
 	}
 	if IsStatusOnlyFailure(d.Status) {
-		phase := ""
-		if d.ErrorPhase != nil {
-			phase = *d.ErrorPhase
-		}
-		return &CommandStatusError{
-			Status:           d.Status,
-			ErrorPhase:       phase,
-			Output:           d.Result,
-			ReportedExitCode: d.ExitCode,
-		}
+		return d.StatusError()
 	}
 	switch d.Status {
 	case "completed", "success", "failed":
