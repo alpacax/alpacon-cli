@@ -3384,6 +3384,18 @@ func TestParseAPIError_GenericFieldErrorTakesTheCodesSentence(t *testing.T) {
 			want:     otherFolders,
 		},
 		{
+			name:     "generic detail keeps the field errors beside it",
+			body:     `{"code":"webftp_invalid_path","detail":"Invalid input.","field_errors":{"name":[{"code":"required","message":"This field is required."}]}}`,
+			wantCode: "webftp_invalid_path",
+			want:     otherFolders + "; name: This field is required.",
+		},
+		{
+			name:     "generic detail and field error of one code print once",
+			body:     `{"code":"webftp_invalid_path","detail":"Invalid input.","field_errors":{"path":[{"code":"webftp_invalid_path","message":"Invalid input."}],"non_field_errors":[{"code":"webftp_name_too_long","message":"Invalid input."}]}}`,
+			wantCode: "webftp_invalid_path",
+			want:     otherFolders + "; " + tooLong,
+		},
+		{
 			name:     "server written detail wins",
 			body:     `{"code":"webftp_invalid_path","detail":"Paths must share one folder."}`,
 			wantCode: "webftp_invalid_path",

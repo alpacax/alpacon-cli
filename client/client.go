@@ -1382,7 +1382,15 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 
 	if detail := strings.TrimSpace(stringField(parsed, "detail")); detail != "" {
 		if sentence, known := codeSentence(code); known && detail == genericFieldMessage {
-			return sentence, code, source, gate, axis, missing, true
+			messages := []string{sentence}
+			fieldSentences, rest := explainGenericFieldErrors(parsed["field_errors"])
+			for _, s := range fieldSentences {
+				if s != sentence {
+					messages = append(messages, s)
+				}
+			}
+			messages = append(messages, fieldErrorMessages(rest)...)
+			return strings.Join(messages, "; "), code, source, gate, axis, missing, true
 		}
 		return detail, code, source, gate, axis, missing, true
 	}
