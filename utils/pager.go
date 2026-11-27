@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -19,8 +20,15 @@ import (
 //   - If stdout is not a terminal (e.g. piped), prints directly to stdout.
 //   - If the output fits within the terminal height, prints directly to stdout.
 //   - Otherwise, pipes through the PAGER environment variable or "less -RSX".
-//   - Falls back to direct stdout if the pager command is not available.
+//   - Falls back to direct stdout if the pager cannot start.
+//   - Once the pager starts, it is the sole output path. WriteToPager discards
+//     errors from an unsuccessful pager exit. IOStreams.PagerWithError reports them.
 func WriteToPager() (io.Writer, func()) {
+	writer, flush := writeToStdoutPager()
+	return writer, func() { _ = flush() }
+}
+
+func writeToStdoutPager() (io.Writer, func() error) {
 	return writeToPager(
 		term.IsTerminal(int(os.Stdout.Fd())),
 		func() (int, error) {
@@ -31,32 +39,34 @@ func WriteToPager() (io.Writer, func()) {
 	)
 }
 
-// lastOutputPaged records whether the latest WriteToPager cleanup handed its output to a pager.
+// lastOutputPaged records whether the last flush ran a pager rather than falling back to stdout.
 var lastOutputPaged atomic.Bool
 
-// LastOutputPaged reports whether WriteToPager's last flush ran a pager, not a stdout fallback, so
-// a caller can repeat on stderr what the pager scrolled away.
+// LastOutputPaged reports whether the last flush ran a pager rather than falling
+// back to stdout, so a caller can repeat on stderr what the pager scrolled away.
 func LastOutputPaged() bool {
 	return lastOutputPaged.Load()
 }
 
-func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.File) (io.Writer, func()) {
+func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.File) (io.Writer, func() error) {
 	var buf bytes.Buffer
 
-	cleanup := func() {
+	flush := func() error {
 		lastOutputPaged.Store(false)
 		output := buf.Bytes()
+		writeDirect := func() error {
+			_, err := stdout.Write(output)
+			return err
+		}
 
 		if !isTerminal {
-			_, _ = stdout.Write(output)
-			return
+			return writeDirect()
 		}
 
 		height, err := getHeight()
 		lineCount := bytes.Count(output, []byte("\n"))
 		if err != nil || lineCount <= height {
-			_, _ = stdout.Write(output)
-			return
+			return writeDirect()
 		}
 
 		pager := os.Getenv("PAGER")
@@ -67,8 +77,7 @@ func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.Fil
 		} else {
 			lessPath, err := exec.LookPath("less")
 			if err != nil {
-				_, _ = stdout.Write(output)
-				return
+				return writeDirect()
 			}
 			cmd = exec.Command(lessPath, "-RSX")
 		}
@@ -77,12 +86,15 @@ func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.Fil
 		cmd.Stdout = stdout
 		cmd.Stderr = StderrForChild()
 
-		if err := cmd.Run(); err != nil {
-			_, _ = stdout.Write(output)
-			return
+		if err := cmd.Start(); err != nil {
+			return writeDirect()
 		}
 		lastOutputPaged.Store(true)
+		if err := cmd.Wait(); err != nil {
+			return fmt.Errorf("pager %s exited: %w", cmd.Args[0], err)
+		}
+		return nil
 	}
 
-	return &buf, cleanup
+	return &buf, flush
 }

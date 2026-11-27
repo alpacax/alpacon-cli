@@ -51,6 +51,12 @@ func (s *IOStreams) OutputFormat() string { return *s.format }
 // IsJSON reports whether these streams print --output json.
 func (s *IOStreams) IsJSON() bool { return *s.format == OutputFormatJSON }
 
+// OutIsTerminal reports whether Out writes to a terminal.
+func (s *IOStreams) OutIsTerminal() bool {
+	_, ok := s.Out.(stdoutWriter)
+	return ok && term.IsTerminal(int(os.Stdout.Fd()))
+}
+
 // SetOutputFormat applies an --output value, refusing anything but table or json as a usage error.
 func (s *IOStreams) SetOutputFormat(value string) error {
 	if value != OutputFormatTable && value != OutputFormatJSON {
@@ -69,10 +75,16 @@ func (stdoutWriter) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
 // Pager returns where a table goes: through the process pager when Out is the process's stdout
 // writer, and straight to Out for any other writer.
 func (s *IOStreams) Pager() (io.Writer, func()) {
+	writer, flush := s.PagerWithError()
+	return writer, func() { _ = flush() }
+}
+
+// PagerWithError is Pager with a flush function that reports stdout write errors and unsuccessful pager exits.
+func (s *IOStreams) PagerWithError() (io.Writer, func() error) {
 	if _, ok := s.Out.(stdoutWriter); ok {
-		return WriteToPager()
+		return writeToStdoutPager()
 	}
-	return s.Out, func() {}
+	return s.Out, func() error { return nil }
 }
 
 // isProcessStderr reports whether w is the process's stderr, where a spinner or a

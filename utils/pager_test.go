@@ -7,6 +7,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func captureOutput(t *testing.T, fn func(stdout *os.File)) string {
@@ -35,7 +38,7 @@ func TestWriteToPager_NonTerminal(t *testing.T) {
 	got := captureOutput(t, func(stdout *os.File) {
 		w, cleanup := writeToPager(false, nil, stdout)
 		_, _ = fmt.Fprint(w, want)
-		cleanup()
+		require.NoError(t, cleanup())
 	})
 
 	if got != want {
@@ -50,7 +53,7 @@ func TestWriteToPager_TerminalShortOutput(t *testing.T) {
 	got := captureOutput(t, func(stdout *os.File) {
 		w, cleanup := writeToPager(true, func() (int, error) { return 100, nil }, stdout)
 		_, _ = fmt.Fprint(w, want)
-		cleanup()
+		require.NoError(t, cleanup())
 	})
 
 	if got != want {
@@ -70,7 +73,7 @@ func TestWriteToPager_TerminalLongOutput(t *testing.T) {
 	got := captureOutput(t, func(stdout *os.File) {
 		w, cleanup := writeToPager(true, func() (int, error) { return 5, nil }, stdout)
 		_, _ = fmt.Fprint(w, want)
-		cleanup()
+		require.NoError(t, cleanup())
 	})
 
 	if got != want {
@@ -78,37 +81,55 @@ func TestWriteToPager_TerminalLongOutput(t *testing.T) {
 	}
 }
 
-// Serial: it sets PAGER and reads the package-level record of the last flush.
-func TestWriteToPager_RecordsWhetherAPagerRan(t *testing.T) {
+// This test runs serially because it sets PAGER and checks the package-level record of the last flush.
+func TestWriteToPager_FlushResult(t *testing.T) {
 	long := strings.Repeat("line\n", 20)
 	tests := []struct {
-		name   string
-		pager  string
-		height int
-		want   bool
+		name       string
+		pager      string
+		height     int
+		wantOutput string
+		wantPaged  bool
+		wantError  bool
 	}{
-		{name: "a pager that runs", pager: "cat", height: 5, want: true},
-		{name: "a pager that fails falls back to stdout", pager: "alpacon-no-such-pager", height: 5, want: false},
-		{name: "output that fits is not paged", pager: "cat", height: 100, want: false},
+		{name: "a pager that exits successfully", pager: "cat", height: 5, wantOutput: long, wantPaged: true},
+		{name: "a pager that exits nonzero after printing", pager: "cat - .", height: 5, wantOutput: long, wantPaged: true, wantError: true},
+		{name: "a pager that exits nonzero without printing", pager: "cat ./alpacon-no-such-file", height: 5, wantPaged: true, wantError: true},
+		{name: "a pager that cannot start falls back to stdout", pager: "alpacon-no-such-pager", height: 5, wantOutput: long},
+		{name: "output that fits is written directly", pager: "cat", height: 100, wantOutput: long},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("PAGER", tt.pager)
-			lastOutputPaged.Store(!tt.want)
+			lastOutputPaged.Store(!tt.wantPaged)
 
+			var flushErr error
 			got := captureOutput(t, func(stdout *os.File) {
-				w, cleanup := writeToPager(true, func() (int, error) { return tt.height, nil }, stdout)
+				w, flush := writeToPager(true, func() (int, error) { return tt.height, nil }, stdout)
 				_, _ = fmt.Fprint(w, long)
-				cleanup()
+				flushErr = flush()
 			})
 
-			if got != long {
-				t.Errorf("output = %q, want it written once", got)
-			}
-			if LastOutputPaged() != tt.want {
-				t.Errorf("LastOutputPaged() = %v, want %v", LastOutputPaged(), tt.want)
+			assert.Equal(t, tt.wantOutput, got)
+			assert.Equal(t, tt.wantPaged, LastOutputPaged())
+			if tt.wantError {
+				assert.ErrorContains(t, flushErr, "pager cat exited")
+			} else {
+				assert.NoError(t, flushErr)
 			}
 		})
 	}
+}
+
+func TestWriteToPagerReportsFlushFailure(t *testing.T) {
+	t.Parallel()
+	stdout, err := os.CreateTemp(t.TempDir(), "stdout")
+	require.NoError(t, err)
+	require.NoError(t, stdout.Close())
+	writer, flush := writeToPager(false, nil, stdout)
+	_, err = io.WriteString(writer, "approval detail\n")
+	require.NoError(t, err)
+
+	assert.ErrorIs(t, flush(), os.ErrClosed)
 }

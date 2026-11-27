@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -73,11 +74,13 @@ func TestValidateTypeFilter(t *testing.T) {
 		{"command_exec", false},
 		{"discovered_account_accept", false},
 		{"api_token_scope_expand", false},
+		{"kube_mutation", false},
 		{"bad_type", true},
 		{"WorkSession", true},
 	}
 	for _, tc := range cases {
 		t.Run(filterCaseName(tc.input), func(t *testing.T) {
+			t.Parallel()
 			err := validateTypeFilter(tc.input)
 			if tc.wantErr {
 				assert.Error(t, err)
@@ -86,6 +89,37 @@ func TestValidateTypeFilter(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestApprovalListKubeMutation(t *testing.T) {
+	t.Parallel()
+	const summary = "delete deployments in default with labelSelector=app%3Dweb"
+	const listBody = `{"count":1,"results":[{
+		"id":"550e8400-e29b-41d4-a716-446655440000",
+		"request_type":"kube_mutation",
+		"request_data":"` + summary + `",
+		"status":"pending",
+		"kube_request":{"verb":"delete","resource":"deployments","namespace":"default"}
+	}]}`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/approvals/approvals/", r.URL.Path)
+		assert.Equal(t, "kube_mutation", r.URL.Query().Get("request_type"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(listBody))
+	}))
+	t.Cleanup(ts.Close)
+
+	stdout, stderr, code := cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command {
+		return newApprovalListCmd(cmdtest.ClientFactory(ts), ios)
+	}, "--type", "kube_mutation")
+
+	require.Equal(t, 0, code, stderr)
+	assert.Empty(t, stderr)
+	assert.Contains(t, stdout, "kube_mutation")
+	assert.Contains(t, stdout, summary[:50]+"...")
+	assert.NotContains(t, stdout, summary)
+	assert.Len(t, strings.Split(strings.TrimSuffix(stdout, "\n"), "\n"), 2)
 }
 
 func TestListRequestsEndpoint(t *testing.T) {
