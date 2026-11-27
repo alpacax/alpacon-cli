@@ -72,6 +72,13 @@ func isURLScheme(s string) bool {
 	return s != ""
 }
 
+var textURL = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]+`)
+
+// RedactURLsInText applies RedactURL to every URL in s.
+func RedactURLsInText(s string) string {
+	return textURL.ReplaceAllStringFunc(s, RedactURL)
+}
+
 // redactedURLError prints a transport error with its URL redacted. Its cause is
 // the *url.Error with the redacted URL, so errors.Is and errors.As on what went
 // wrong (a deadline, a *net.OpError) still work, and Timeout and Temporary

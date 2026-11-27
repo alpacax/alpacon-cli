@@ -26,6 +26,29 @@ func TestRedactURL(t *testing.T) {
 	assert.Equal(t, "https://host", RedactURL("https://user:password@host?token=secret"))
 }
 
+func TestRedactURLsInText(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "quoted", text: `Put "` + signedURL + `": dial tcp: connection refused`, want: `Put "https://bucket.example.com/path/file.zip": dial tcp: connection refused`},
+		{name: "single-quoted", text: "PUT '" + signedURL + "' failed", want: "PUT 'https://bucket.example.com/path/file.zip' failed"},
+		{name: "unquoted at the end", text: "upload to " + signedURL, want: "upload to https://bucket.example.com/path/file.zip"},
+		{name: "two URLs", text: "a https://h/x?sig=1 b http://u:p@h/y?sig=2", want: "a https://h/x b http://h/y"},
+		{name: "userinfo without a query", text: "dial https://user:pw@host/ws failed", want: "dial https://host/ws failed"},
+		{name: "no URL", text: "no such file or directory", want: "no such file or directory"},
+		{name: "empty", text: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, RedactURLsInText(tt.text))
+		})
+	}
+}
+
 func TestRedactURLError(t *testing.T) {
 	t.Parallel()
 	op := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
