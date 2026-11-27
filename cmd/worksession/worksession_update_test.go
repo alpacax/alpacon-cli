@@ -11,7 +11,9 @@ import (
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -384,4 +386,28 @@ func TestUpdateTargetSession_PicksTheArgumentOrTheClientWorkspaceSession(t *test
 			assert.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func TestWorkSessionUpdateExplainsASudoPatternThatBeginsWithSudo(t *testing.T) {
+	t.Parallel()
+	const sessionRoute = "/api/work-sessions/sessions/550e8400-e29b-41d4-a716-446655440000/"
+	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+		"GET " + sessionRoute:   {Status: http.StatusOK, Body: `{"id":"550e8400-e29b-41d4-a716-446655440000","status":"active","scopes":["command","sudo"]}`},
+		"PATCH " + sessionRoute: {Status: http.StatusBadRequest, Body: sudoPrefixRefusal},
+	})
+	build := func(ios *utils.IOStreams) *cobra.Command { return newWorkSessionUpdateCmd(ts.Factory(), ios) }
+
+	stdout, stderr, code := cmdtest.RunJSON(build, "550e8400-e29b-41d4-a716-446655440000", "--sudo", "sudo systemctl restart nginx")
+
+	assert.Equal(t, utils.ExitCodeGeneralError, code)
+	assert.Empty(t, stdout)
+	assert.JSONEq(t, `{
+		"ok": false,
+		"exit_code": 1,
+		"error_code": "sudo_policy_pattern_has_sudo_prefix",
+		"message": "Failed to update work session: a --sudo pattern is the command without its leading sudo; remove the leading sudo from each pattern and run it again.",
+		"context": {"operation": "update"},
+		"http_status": 400,
+		"server": {"field_errors": {"sudo_policies.0.commands.0": [{"code": "sudo_policy_pattern_has_sudo_prefix", "message": "Invalid input."}]}}
+	}`, stderr)
 }

@@ -76,8 +76,8 @@ func validateClusterSession(scopes []string, flags clusterSessionFlags) ([]strin
 	return NormalizeClusterScopes(scopes)
 }
 
-// TargetErrorHint says what to do about the server's refusal of a work
-// session's targets, scopes or lifetime, or returns "" for any other error.
+// TargetErrorHint says what to do about the server's refusal of a work session's
+// targets, scopes, lifetime or sudo patterns, or returns "" for any other error.
 func TargetErrorHint(err error) string {
 	code, _ := utils.ParseErrorResponse(err)
 	switch code {
@@ -95,6 +95,8 @@ func TargetErrorHint(err error) string {
 		return "a cluster session acts as your own user name, so it takes no account"
 	case utils.WorkSessionExpiresExceedsMaxTTL:
 		return "the requested lifetime is longer than this workspace allows; ask for a shorter one"
+	case utils.SudoPolicyPatternHasSudoPrefix:
+		return "a --sudo pattern is the command without its leading sudo; remove the leading sudo from each pattern and run it again"
 	}
 	return ""
 }
