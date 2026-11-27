@@ -514,3 +514,22 @@ func TestResumeActionAddsNoFlagsToAnIDWithNoCommand(t *testing.T) {
 	assert.Empty(t, action.Command)
 	assert.NotEmpty(t, action.Description)
 }
+
+func TestWaitForWorkSession_AnIDWithNoResumeCommandIsDescribedNotRun(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws'1","status":"rejected"}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	ws := &wsapi.WorkSession{ID: `ws'1`, Status: "pending"}
+	in := kubeLoginInput{cluster: "prod-east", waitTimeout: time.Minute}
+	ios, _, errOut := utils.TestIOStreams()
+
+	_, err := waitForWorkSession(ios, ac, in, ws, true)
+
+	require.Error(t, err)
+	assert.NotContains(t, errOut.String(), "run ''")
+	assert.Contains(t, errOut.String(), "press Ctrl+C and once the session is active, run alpacon kube login for the cluster with this session's ID in --work-session.")
+}

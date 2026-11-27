@@ -39,6 +39,9 @@ const (
 
 const bareShellChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.@-"
 
+// kubeLoginFallback is the kube login follow-up without a command, for a cluster name or ID no shell word carries.
+var kubeLoginFallback = utils.NextAction{Description: "once the session is active, run alpacon kube login for the cluster with this session's ID in --work-session"}
+
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh", ScopeKube, ScopeKubeExec}
 
 func newWorkSessionCreateCmd(newClient clientFactory, ios *utils.IOStreams) *cobra.Command {
@@ -283,7 +286,7 @@ CLUSTER' create the session itself.`,
 			}
 			afterApproval := afterApprovalAction(sessionRequesterType, session.ID, pendingAccountRunGuidance("exec", account))
 			if clusterName != "" {
-				afterApproval = KubeLoginAction(clusterCommandWord(clusterName), session.ID)
+				afterApproval = clusterKubeLoginAction(clusterName, session.ID)
 			}
 
 			if !ios.IsJSON() {
@@ -698,12 +701,13 @@ func eventWaitAction(id string) utils.NextAction {
 	}
 }
 
-// clusterCommandWord is clusterName as one shell word, or a placeholder when it cannot be one.
-func clusterCommandWord(clusterName string) string {
-	if quoted, ok := ShellWord(clusterName); ok {
-		return quoted
+// clusterKubeLoginAction is KubeLoginAction for an unquoted cluster name.
+func clusterKubeLoginAction(clusterName, id string) utils.NextAction {
+	quoted, ok := ShellWord(clusterName)
+	if !ok {
+		return kubeLoginFallback
 	}
-	return "<CLUSTER>"
+	return KubeLoginAction(quoted, id)
 }
 
 // KubeLoginAction is the follow-up for a cluster session: 'kube login' opens
@@ -713,7 +717,7 @@ func clusterCommandWord(clusterName string) string {
 func KubeLoginAction(clusterName, id string) utils.NextAction {
 	quoted, ok := ShellWord(id)
 	if !ok {
-		return utils.NextAction{Description: "once the session is active, run alpacon kube login for the cluster with this session's ID in --work-session"}
+		return kubeLoginFallback
 	}
 	return utils.NextAction{
 		Command:     fmt.Sprintf("alpacon kube login %s --work-session %s", clusterName, quoted),
@@ -738,7 +742,7 @@ func createUpdateNextActions(clusterName string, session *wsapi.WorkSession) []u
 
 func printCreateNext(ios *utils.IOStreams, clusterName string, session *wsapi.WorkSession) {
 	if clusterName != "" {
-		action := KubeLoginAction(clusterCommandWord(clusterName), session.ID)
+		action := clusterKubeLoginAction(clusterName, session.ID)
 		if action.Command == "" {
 			ios.Info("Next: %s", action.Description)
 			return

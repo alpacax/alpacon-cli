@@ -514,8 +514,12 @@ func createClusterWorkSession(ios *utils.IOStreams, ac *client.AlpaconClient, in
 // to it, since Ctrl+C or the timeout leaves it waiting on approval.
 func waitForWorkSession(ios *utils.IOStreams, ac *client.AlpaconClient, in kubeLoginInput, ws *wsapi.WorkSession, created bool) (workSessionChoice, error) {
 	resume := resumeAction(in, ws.ID)
-	ios.Info("WorkSession %s is %s; waiting up to %s for it to become active. To stop and come back later, press Ctrl+C and run '%s'.",
-		utils.SanitizeTerminalText(ws.ID), utils.SanitizeTerminalText(ws.Status), in.waitTimeout, utils.SanitizeTerminalText(resume.Command))
+	comeBack := "run '" + resume.Command + "'"
+	if resume.Command == "" {
+		comeBack = resume.Description
+	}
+	ios.Info("WorkSession %s is %s; waiting up to %s for it to become active. To stop and come back later, press Ctrl+C and %s.",
+		utils.SanitizeTerminalText(ws.ID), utils.SanitizeTerminalText(ws.Status), in.waitTimeout, utils.SanitizeTerminalText(comeBack))
 	final, err := worksession.WaitForApproval(ios, ac, ws.ID, true, worksession.ApprovalPollInterval, in.waitTimeout)
 	if err != nil {
 		return workSessionChoice{}, worksession.WaitExitError(ios, opKubeLogin, ws, utils.NextAction{}, resume, err)

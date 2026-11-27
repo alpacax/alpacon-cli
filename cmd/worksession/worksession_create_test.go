@@ -1339,3 +1339,33 @@ func TestCreateFollowUps_QuoteTheSessionIDOrDropTheCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestClusterKubeLoginAction_QuotesTheClusterOrDropsTheCommand(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		cluster string
+		id      string
+		want    utils.NextAction
+	}{
+		{"plain names", "prod-east", "550e8400-e29b-41d4-a716-446655440000", utils.NextAction{
+			Command:     "alpacon kube login prod-east --work-session 550e8400-e29b-41d4-a716-446655440000",
+			Description: "once the session is active",
+		}},
+		{"a cluster with a space is quoted", "prod east", "550e8400-e29b-41d4-a716-446655440000", utils.NextAction{
+			Command:     "alpacon kube login 'prod east' --work-session 550e8400-e29b-41d4-a716-446655440000",
+			Description: "once the session is active",
+		}},
+		{"a quote in the cluster leaves no command", `prod'east`, "550e8400-e29b-41d4-a716-446655440000", kubeLoginFallback},
+		{"a quote in the ID leaves no command", "prod-east", `ws'1`, kubeLoginFallback},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := clusterKubeLoginAction(tt.cluster, tt.id)
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
