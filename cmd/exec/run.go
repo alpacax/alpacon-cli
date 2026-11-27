@@ -586,17 +586,27 @@ func RunFileExecWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient,
 // first attempt and, once a reviewer grants the request, the re-run.
 func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run commandRun, waitTimeout time.Duration, out io.Writer) (result error) {
 	started := time.Now()
-	err := run()
-	err = utils.WithSignalFields(err, utils.SignalFields(err), ac)
-	announced := false
+	var fields localsignal.Fields
+	runAttempt := func() error {
+		err := run()
+		err = utils.WithSignalFields(err, utils.SignalFields(err), ac)
+		fields = utils.SignalFields(err)
+		return err
+	}
+	err := runAttempt()
+	var announcedID string
 	defer func() {
 		if _, recoveryFailed := errors.AsType[*utils.ExitError](result); recoveryFailed { // Recovery failed; not a refusal of this request.
 			return
 		}
-		fields := utils.SignalFields(err)
 		result = utils.WithSignalFields(result, fields, ac)
 		utils.SignalRefusal(result)
-		if announced {
+		if announcedID == "" {
+			return
+		}
+		pending, _ := errors.AsType[*event.PendingApprovalError](result)
+		denial, _ := errors.AsType[*event.RemoteCommandError](result)
+		if (pending != nil && pending.CommandID == announcedID) || (denial != nil && denial.CommandID == announcedID) {
 			result = utils.MarkApprovalSignaled(result)
 		}
 	}()
@@ -611,8 +621,8 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 		if !ok || time.Until(deadline) <= 0 {
 			return current
 		}
-		utils.SignalApprovalPending(current, utils.SignalFields(err))
-		announced = true
+		utils.SignalApprovalPending(current, fields)
+		announcedID = pending.CommandID
 		return waitForHeldCommand(ac, pending, out, deadline)
 	}
 
@@ -621,9 +631,9 @@ func runWithApprovalWait(ios *utils.IOStreams, ac *client.AlpaconClient, run com
 	if !ok || denial.CommandID == "" || !isApprovalDenial(ios, current) || time.Until(deadline) <= 0 {
 		return current
 	}
-	utils.SignalApprovalPending(current, utils.SignalFields(err))
-	announced = true
-	current = waitForSudoGrant(ios, ac, run, current, denial, started, &deadline, budget)
+	utils.SignalApprovalPending(current, fields)
+	announcedID = denial.CommandID
+	current = waitForSudoGrant(ios, ac, runAttempt, current, denial, started, &deadline, budget)
 	return waitIfHeld(current)
 }
 

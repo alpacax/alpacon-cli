@@ -18,6 +18,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
+	"github.com/alpacax/alpacon-cli/pkg/localsignal"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -1080,33 +1081,59 @@ func TestRunWithApprovalWait_HeldRerunDenialEndsTheWait(t *testing.T) {
 	})
 }
 
-func TestRunWithApprovalWait_DeadlineReachedDuringHeldRerun(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		denial := stubApprovalWaitSeams(t, time.Second, "SUDO_APPROVAL_REQUIRED")
-		pending := &event.PendingApprovalError{CommandID: "held-rerun"}
-		submits := 0
-		run := func() error {
-			submits++
-			if submits == 1 {
-				return denial
-			}
-			time.Sleep(4 * time.Second)
-			return pending
-		}
-		getCommandByID = func(context.Context, *client.AlpaconClient, string) (event.EventDetails, error) {
-			return event.EventDetails{SudoGrantStatus: new("authorized")}, nil
-		}
-		streamApprovedCommand = func(*client.AlpaconClient, *event.PendingApprovalError, io.Writer, time.Duration) error {
-			t.Fatal("the rerun used the remaining wait")
-			return nil
-		}
-		ios, _, stderr := utils.TestIOStreams()
-		err := runWithApprovalWait(ios, nil, run, 5*time.Second, io.Discard)
-		require.ErrorIs(t, err, pending)
-		assert.Equal(t, 2, submits)
-		assert.Contains(t, stderr.String(), "holding the command for a fresh approval")
-		assert.NotContains(t, stderr.String(), "Re-run the command")
-	})
+func TestRunWithApprovalWait_AnnouncesNewHeldRetryOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		retryDelay time.Duration
+		stream     bool
+	}{
+		{name: "retry uses remaining time", retryDelay: 4 * time.Second},
+		{name: "retry has time to stream", stream: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			banners := captureStderr(t, func() {
+				synctest.Test(t, func(t *testing.T) {
+					denial := stubApprovalWaitSeams(t, time.Second, "SUDO_APPROVAL_REQUIRED")
+					pending := &event.PendingApprovalError{CommandID: "held-rerun", WorkSessionPaused: true}
+					submits := 0
+					run := func() error {
+						submits++
+						if submits == 1 {
+							return utils.WithSignalFields(denial, localsignal.Fields{Session: "original-session"})
+						}
+						time.Sleep(tc.retryDelay)
+						return utils.WithSignalFields(pending, localsignal.Fields{Session: "retry-session"})
+					}
+					getCommandByID = func(context.Context, *client.AlpaconClient, string) (event.EventDetails, error) {
+						return event.EventDetails{SudoGrantStatus: new("authorized")}, nil
+					}
+					streamCalls := 0
+					streamApprovedCommand = func(_ *client.AlpaconClient, held *event.PendingApprovalError, _ io.Writer, _ time.Duration) error {
+						streamCalls++
+						return held
+					}
+
+					ios, _, stderr := utils.TestIOStreams()
+					err := runWithApprovalWait(ios, nil, run, 5*time.Second, io.Discard)
+					require.ErrorIs(t, err, pending)
+					assert.Equal(t, 2, submits)
+					if tc.stream {
+						assert.Equal(t, 1, streamCalls)
+					} else {
+						assert.Zero(t, streamCalls)
+					}
+					assert.Contains(t, stderr.String(), "holding the command for a fresh approval")
+					assert.NotContains(t, stderr.String(), "Re-run the command")
+					var exitErr *utils.ExitError
+					require.ErrorAs(t, pendingApprovalFailure(ios, stderr, err, RemoteExecArgs{}), &exitErr)
+					assert.Equal(t, utils.ExitCodePendingApproval, exitErr.Code)
+				})
+			})
+			assert.Equal(t, 2, strings.Count(banners, "==== ALPACON: APPROVAL PENDING ===="))
+			assert.Equal(t, 1, strings.Count(banners, "==== ALPACON: SESSION PAUSED ===="))
+			assert.Contains(t, banners, "retry-session")
+		})
+	}
 }
 
 func TestRunWithApprovalWait_PreservesDetailsWhenStreamTimesOutBeforeReading(t *testing.T) {
