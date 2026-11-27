@@ -39,11 +39,11 @@ func writeToStdoutPager() (io.Writer, func() error) {
 	)
 }
 
-// lastOutputPaged records whether the latest flush ran a pager that exited successfully.
+// lastOutputPaged records whether the last flush ran a pager rather than falling back to stdout.
 var lastOutputPaged atomic.Bool
 
-// LastOutputPaged reports whether the last flush ran a pager that exited successfully, so
-// a caller can repeat on stderr what the pager scrolled away.
+// LastOutputPaged reports whether the last flush ran a pager rather than falling
+// back to stdout, so a caller can repeat on stderr what the pager scrolled away.
 func LastOutputPaged() bool {
 	return lastOutputPaged.Load()
 }
@@ -89,10 +89,10 @@ func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.Fil
 		if err := cmd.Start(); err != nil {
 			return writeDirect()
 		}
+		lastOutputPaged.Store(true)
 		if err := cmd.Wait(); err != nil {
 			return fmt.Errorf("pager %s exited: %w", cmd.Args[0], err)
 		}
-		lastOutputPaged.Store(true)
 		return nil
 	}
 

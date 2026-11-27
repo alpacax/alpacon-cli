@@ -93,8 +93,8 @@ func TestWriteToPager_FlushResult(t *testing.T) {
 		wantError  bool
 	}{
 		{name: "a pager that exits successfully", pager: "cat", height: 5, wantOutput: long, wantPaged: true},
-		{name: "a pager that exits nonzero after printing", pager: "cat - .", height: 5, wantOutput: long, wantError: true},
-		{name: "a pager that exits nonzero without printing", pager: "cat ./alpacon-no-such-file", height: 5, wantError: true},
+		{name: "a pager that exits nonzero after printing", pager: "cat - .", height: 5, wantOutput: long, wantPaged: true, wantError: true},
+		{name: "a pager that exits nonzero without printing", pager: "cat ./alpacon-no-such-file", height: 5, wantPaged: true, wantError: true},
 		{name: "a pager that cannot start falls back to stdout", pager: "alpacon-no-such-pager", height: 5, wantOutput: long},
 		{name: "output that fits is written directly", pager: "cat", height: 100, wantOutput: long},
 	}
