@@ -83,9 +83,11 @@ func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.Fil
 		cmd.Stdout = stdout
 		cmd.Stderr = StderrForChild()
 
-		if err := cmd.Run(); err != nil {
+		if err := cmd.Start(); err != nil {
 			return writeDirect()
 		}
+		// The pager may have displayed output even if it exits nonzero.
+		_ = cmd.Wait()
 		lastOutputPaged.Store(true)
 		return nil
 	}
