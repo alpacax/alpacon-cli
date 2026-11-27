@@ -17,10 +17,11 @@ const accountRefusalSentence = "the server account or group is not valid on this
 // Serial: runExecHelper sets HOME.
 func TestExecAccountRefusalNamesTheRemedy(t *testing.T) {
 	tests := []struct {
-		name      string
-		target    string
-		wantTable string
-		wantJSON  string
+		name        string
+		target      string
+		wantTable   string
+		wantJSON    string
+		wantActions []utils.NextAction
 	}{
 		{
 			name:      "named account takes the server sentence",
@@ -35,7 +36,8 @@ func TestExecAccountRefusalNamesTheRemedy(t *testing.T) {
 				"Hint: Specify an execution user with -u USERNAME (and optionally -g GROUP), or use USERNAME@SERVER.\n" +
 				"  alpacon exec -u USERNAME SERVER -- COMMAND\n" +
 				"  alpacon exec USERNAME@SERVER -- COMMAND\n",
-			wantJSON: "failed to execute command on 'my-server' server: " + accountRefusalSentence,
+			wantJSON:    "no execution user was resolved for 'my-server' server.",
+			wantActions: []utils.NextAction{{Description: "Specify an execution user with -u USERNAME (and optionally -g GROUP), or use USERNAME@SERVER."}},
 		},
 	}
 	for _, tt := range tests {
@@ -70,6 +72,7 @@ func TestExecAccountRefusalNamesTheRemedy(t *testing.T) {
 				require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), stderr)
 				assert.Equal(t, utils.ServerUsernameGroupnameInvalid, envelope.ErrorCode)
 				assert.Equal(t, tt.wantJSON, envelope.Message)
+				assert.Equal(t, tt.wantActions, envelope.NextActions)
 				assert.Equal(t, http.StatusBadRequest, envelope.HTTPStatus)
 				assert.Equal(t, map[string]any{"non_field_errors": []any{map[string]any{"code": "server_username_groupname_invalid", "message": "Invalid input."}}}, envelope.Server["field_errors"])
 			})

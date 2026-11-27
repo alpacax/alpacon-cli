@@ -1227,14 +1227,15 @@ func remoteCommandOutcome(ios *utils.IOStreams, remoteErr *event.RemoteCommandEr
 }
 
 // execUserFailure reports the missing execution user and returns exit 1, or nil when err is
-// something else. Under --output json it returns nil, leaving the generic error envelope.
+// something else. Both formats name the same failure; the envelope states the remedy in next_actions.
 func execUserFailure(ios *utils.IOStreams, stderr io.Writer, err error, parsed RemoteExecArgs) error {
-	if ios.IsJSON() {
-		return nil
-	}
 	message, hint, ok := execUserRefusal(ios, err, parsed)
 	if !ok {
 		return nil
+	}
+	if ios.IsJSON() {
+		remedy := utils.NextAction{Description: strings.TrimSuffix(execUserRequiredHint, "\n%s")}
+		return codedRefusalWithExit(ios, stderr, utils.ExitCodeGeneralError, "command", err, message, "", []utils.NextAction{remedy})
 	}
 	return codedRefusal(ios, stderr, "command", err, message, hint)
 }
