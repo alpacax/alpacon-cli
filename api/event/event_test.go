@@ -504,6 +504,58 @@ func TestApprovalTimeoutRefreshHasADeadline(t *testing.T) {
 	})
 }
 
+func TestApprovalTimeoutRefreshStartsOneExecutionWait(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "350ms")
+	synctest.Test(t, func(t *testing.T) {
+		var reads atomic.Int32
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			status := "running"
+			if reads.Add(1) > 5 {
+				status = "completed"
+			}
+			_ = json.NewEncoder(w).Encode(EventDetails{Status: status})
+		}))
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		id := testPathID(t, "cmd-1")
+
+		start := time.Now()
+		details, err := refreshApprovalPoll(ac, id, EventDetails{Status: "awaiting_approval"}, &ClientTimeoutError{}, 100*time.Millisecond, pollSeams{})
+
+		var timeout *ClientTimeoutError
+		require.ErrorAs(t, err, &timeout)
+		assert.Equal(t, "running", details.Status)
+		assert.Equal(t, 350*time.Millisecond, time.Since(start))
+		assert.Equal(t, int32(5), reads.Load())
+	})
+}
+
+func TestApprovalTimeoutRefreshReadsCompletedAtExecutionDeadline(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "100ms")
+	synctest.Test(t, func(t *testing.T) {
+		var reads atomic.Int32
+		ts := testutil.NewPipeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if reads.Add(1) == 1 {
+				_, _ = io.WriteString(w, `{"status":"running"}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"status":"completed","success":true,"result":"finished"}`)
+		}))
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		id := testPathID(t, "cmd-1")
+
+		start := time.Now()
+		details, err := refreshApprovalPoll(ac, id, EventDetails{Status: "awaiting_approval"}, &ClientTimeoutError{}, time.Second, pollSeams{})
+
+		require.NoError(t, err)
+		assert.Equal(t, "completed", details.Status)
+		assert.Equal(t, "finished", details.Result)
+		assert.Equal(t, 100*time.Millisecond, time.Since(start))
+		assert.Equal(t, int32(2), reads.Load())
+	})
+}
+
 func TestApprovalTimeoutKeepsConfirmedRejection(t *testing.T) {
 	for _, status := range []string{"denied", "rejected"} {
 		t.Run(status, func(t *testing.T) {

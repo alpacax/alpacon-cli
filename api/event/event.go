@@ -73,8 +73,9 @@ type commandSubmitter func() (CommandResponse, error)
 // it by an in-flight request, and a test swapping a var would swap it under a
 // loop still running.
 type pollSeams struct {
-	initialDeadline time.Time // setup may have spent part of the initial wait
-	cancel          <-chan struct{}
+	initialDeadline  time.Time // setup may have spent part of the initial wait
+	executionStarted bool      // the final approval read already observed execution
+	cancel           <-chan struct{}
 	// finAtRisk, for a poll beside a stream, closes once that stream may have lost
 	// the fin. Until then the poll reads every finDeliverablePollTick.
 	finAtRisk <-chan struct{}
@@ -409,6 +410,8 @@ func isApprovalWaitStatus(details EventDetails) bool {
 // the poll with errPollCancelled.
 func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, tick time.Duration, waitApproval bool, seams pollSeams) (EventDetails, error) {
 	var response EventDetails
+	seenRunning := seams.executionStarted
+	executionAfterApproval := seenRunning
 
 	started := seams.Now()
 	deadline := seams.initialDeadline
@@ -458,22 +461,32 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 		if readFirst {
 			readTimeout = max(readTimeout, seams.firstReadGrace)
 		}
-		if readTimeout <= 0 {
-			return response, &ClientTimeoutError{hint: lastRefusalHint}
+		finalRead := readTimeout <= 0
+		if finalRead {
+			if !executionAfterApproval {
+				return response, &ClientTimeoutError{hint: lastRefusalHint}
+			}
+			// Give the last status read its own bound after the execution deadline.
+			readTimeout = approvalRefreshTimeout
 		}
 		readFirst = false
 
 		ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
-		responseBody, err := ac.SendGetRequestWithContext(ctx, api.IDURL(getEventURL, pathID, "", nil))
+		current, err := getCommandByPathIDWithContext(ctx, ac, pathID)
 		timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
 		cancel()
 		if err != nil && timedOut {
+			if executionAfterApproval && !finalRead {
+				continue
+			}
 			return response, &ClientTimeoutError{hint: lastRefusalHint}
 		}
 		lastRefusalHint = ""
 		switch {
 		case err != nil && !utils.IsTransientRequestError(err):
 			return response, err
+		case err != nil && finalRead:
+			return response, &ClientTimeoutError{hint: utils.RefusalHint(err)}
 		case err != nil && utils.HTTPStatusCode(err) == http.StatusTooManyRequests:
 			lastRefusalHint = utils.RefusalHint(err) // kept for a timeout that ends while throttled
 			delay, lost = utils.NextPollBackoff(tick, throttles, utils.RetryAfter(err)), nil
@@ -497,25 +510,22 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 			continue
 		}
 		failures, throttles = 0, 0
-		var current EventDetails
-		if err = json.Unmarshal(responseBody, &current); err != nil {
-			return response, err
-		}
 		response = current
 
-		if IsRunningStatus(response.Status) {
+		if !seenRunning && IsRunningStatus(response.Status) {
+			seenRunning = true
+			executionAfterApproval = waitApproval
 			waitApproval = false
 			deadline = seams.Now().Add(timeout)
 			budget = utils.NewThrottleBudget(timeout)
-			delay, lost = pace()
-			continue
 		}
-		// Running is handled above, so what is left here is the approval hold.
-		if isPollWaitStatus(response, waitApproval) {
-			delay, lost = pace()
-			continue
+		if !isPollWaitStatus(response, waitApproval) {
+			return response, nil
 		}
-		return response, nil
+		if finalRead {
+			return response, &ClientTimeoutError{}
+		}
+		delay, lost = pace()
 	}
 }
 
@@ -797,6 +807,7 @@ func refreshApprovalPoll(ac *client.AlpaconClient, cmdID api.PathID, details Eve
 	}
 
 	seams.initialDeadline = time.Time{}
+	seams.executionStarted = true
 	seams.readFirst = false
 	seams.firstReadGrace = 0
 	details, err = pollCommandExecution(ac, cmdID, execTimeout(), tick, false, seams)
