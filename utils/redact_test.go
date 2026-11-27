@@ -34,6 +34,7 @@ func TestRedactURLsInText(t *testing.T) {
 		want string
 	}{
 		{name: "quoted", text: `Put "` + signedURL + `": dial tcp: connection refused`, want: `Put "https://bucket.example.com/path/file.zip": dial tcp: connection refused`},
+		{name: "double-quoted with an apostrophe in the path", text: `Put "https://bucket.example.com/bob's file.zip?X-Amz-Signature=secret123": dial tcp`, want: `Put "https://bucket.example.com/bob%27s%20file.zip": dial tcp`},
 		{name: "single-quoted", text: "PUT '" + signedURL + "' failed", want: "PUT 'https://bucket.example.com/path/file.zip' failed"},
 		{name: "unquoted at the end", text: "upload to " + signedURL, want: "upload to https://bucket.example.com/path/file.zip"},
 		{name: "two URLs", text: "a https://h/x?sig=1 b http://u:p@h/y?sig=2", want: "a https://h/x b http://h/y"},

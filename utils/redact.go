@@ -76,6 +76,10 @@ var textURL = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]+`)
 
 // RedactURLsInText applies RedactURL to every URL in s.
 func RedactURLsInText(s string) string {
+	// A quoted URL runs to its closing quote, so an apostrophe or space in its path cannot end it early.
+	s = quotedURL.ReplaceAllStringFunc(s, func(quoted string) string {
+		return `"` + RedactURL(quoted[1:len(quoted)-1]) + `"`
+	})
 	return textURL.ReplaceAllStringFunc(s, RedactURL)
 }
 
