@@ -475,8 +475,8 @@ func IsDeniedStatus(status string) bool {
 }
 
 // IsStatusOnlyFailure reports the terminal failures whose whole outcome is a
-// line about the status: the command never reached a result worth printing. The polling and
-// detach paths both read it, so a new status-only terminal state goes here, not at either caller.
+// line about the status: the command never reached a result worth printing. A new
+// status-only terminal state goes here, not at a caller.
 func IsStatusOnlyFailure(status string) bool {
 	return status == "stuck" || status == "error" || status == "cancelled"
 }
@@ -524,6 +524,15 @@ func (d EventDetails) WorkSessionStatus() string {
 		return d.WorkSession.Status
 	}
 	return ""
+}
+
+// StatusError returns d's status-only failure; the caller checks IsStatusOnlyFailure first.
+func (d EventDetails) StatusError() *CommandStatusError {
+	phase := ""
+	if d.ErrorPhase != nil {
+		phase = *d.ErrorPhase
+	}
+	return &CommandStatusError{Status: d.Status, ErrorPhase: phase, Output: d.Result, ReportedExitCode: d.ExitCode}
 }
 
 func (e *RemoteCommandError) ErrorFields() map[string]any {

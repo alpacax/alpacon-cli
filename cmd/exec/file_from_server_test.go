@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -175,7 +176,7 @@ func newFileDownloadServer(s *fileDownloadServer, content []byte, failure string
 				return
 			}
 			if failure != "" {
-				_ = json.NewEncoder(w).Encode(map[string]any{"id": "cmd-dl-1", "status": "failed", "result": failure})
+				_ = json.NewEncoder(w).Encode(map[string]any{"id": "cmd-dl-1", "status": "completed", "success": false, "result": failure})
 				return
 			}
 			_, _ = w.Write([]byte(`{"id":"cmd-dl-1","status":"completed","success":true}`))
@@ -241,6 +242,7 @@ func TestExecFileFromServerRefusalsNeverSubmit(t *testing.T) {
 		content []byte
 		failure string
 		want    string
+		fetched bool
 	}{
 		{
 			name:    "unreadable",
@@ -251,11 +253,13 @@ func TestExecFileFromServerRefusalsNeverSubmit(t *testing.T) {
 			name:    "empty",
 			content: []byte{},
 			want:    "'prod:/opt/deploy.sh' is empty; a verified file needs content to hash",
+			fetched: true,
 		},
 		{
 			name:    "over the ceiling",
 			content: []byte(strings.Repeat("#", FileContentMaxBytes+1)),
 			want:    "'prod:/opt/deploy.sh' exceeds 65536 bytes (64 KB), the ceiling for a verified file",
+			fetched: true,
 		},
 	}
 	for _, tt := range tests {
@@ -272,6 +276,7 @@ func TestExecFileFromServerRefusalsNeverSubmit(t *testing.T) {
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			assert.NotContains(t, s.steps, "command-submit")
+			assert.Equal(t, tt.fetched, slices.Contains(s.steps, "download-fetch"))
 		})
 	}
 }
