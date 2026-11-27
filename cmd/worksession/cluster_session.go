@@ -96,7 +96,7 @@ func TargetErrorHint(err error) string {
 	case utils.WorkSessionExpiresExceedsMaxTTL:
 		return "the requested lifetime is longer than this workspace allows; ask for a shorter one"
 	case utils.SudoPolicyPatternHasSudoPrefix:
-		return `a --sudo pattern is the command without its leading sudo; pass "systemctl restart nginx", not "sudo systemctl restart nginx"`
+		return "a --sudo pattern is the command without its leading sudo; remove the leading sudo from each pattern and run it again"
 	}
 	return ""
 }

@@ -1215,5 +1215,5 @@ func TestWorkSessionCreateExplainsASudoPatternThatBeginsWithSudo(t *testing.T) {
 
 	assert.Equal(t, utils.ExitCodeGeneralError, code)
 	assert.Empty(t, stdout)
-	assert.Equal(t, "Error: Failed to create work session: a --sudo pattern is the command without its leading sudo; pass \"systemctl restart nginx\", not \"sudo systemctl restart nginx\".\n", stderr)
+	assert.Equal(t, "Error: Failed to create work session: a --sudo pattern is the command without its leading sudo; remove the leading sudo from each pattern and run it again.\n", stderr)
 }

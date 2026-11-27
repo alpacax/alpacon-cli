@@ -405,7 +405,7 @@ func TestWorkSessionUpdateExplainsASudoPatternThatBeginsWithSudo(t *testing.T) {
 		"ok": false,
 		"exit_code": 1,
 		"error_code": "sudo_policy_pattern_has_sudo_prefix",
-		"message": "Failed to update work session: a --sudo pattern is the command without its leading sudo; pass \"systemctl restart nginx\", not \"sudo systemctl restart nginx\".",
+		"message": "Failed to update work session: a --sudo pattern is the command without its leading sudo; remove the leading sudo from each pattern and run it again.",
 		"context": {"operation": "update"},
 		"http_status": 400,
 		"server": {"field_errors": {"sudo_policies.0.commands.0": [{"code": "sudo_policy_pattern_has_sudo_prefix", "message": "Invalid input."}]}}
