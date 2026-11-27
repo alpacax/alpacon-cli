@@ -164,8 +164,7 @@ Flags:
   --detach                      Submit the command and return immediately without
                                 waiting for completion. Prints the job ID to stdout.
                                 Use 'alpacon exec logs JOB_ID' to retrieve the result;
-                                under --output json it prints {"status":"running"}
-                                with exit 0 until the command finishes.
+                                its help lists what it prints before the command ends.
                                 Inside an agent-requester work session, a command
                                 the gate holds for its purpose can sit for about a
                                 minute. Without a purpose it is judged again: it
