@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const accountRefusalSentence = "the server account or group is not valid on this server, or you may not use it—where the command takes -u USERNAME or -g GROUPNAME, name another, or use a work session that names an account"
+const accountRefusalSentence = "the server account or group is not valid on this server, or you may not use it—name one with -u USERNAME or -g GROUPNAME where the command takes them, or use a work session that names an account"
 
 // Serial: runExecHelper sets HOME.
 func TestExecAccountRefusalNamesTheRemedy(t *testing.T) {

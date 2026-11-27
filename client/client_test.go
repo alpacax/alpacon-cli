@@ -3327,7 +3327,7 @@ func TestParseAPIError_GenericFieldErrorTakesTheCodesSentence(t *testing.T) {
 	const (
 		tooLong      = "the file or folder name is too long—a file name may be up to 128 characters, and a folder downloaded as an archive up to 124; rename it and try again"
 		otherFolders = "the files are in different folders—transfer files from one folder at a time"
-		badAccount   = "the server account or group is not valid on this server, or you may not use it—where the command takes -u USERNAME or -g GROUPNAME, name another, or use a work session that names an account"
+		badAccount   = "the server account or group is not valid on this server, or you may not use it—name one with -u USERNAME or -g GROUPNAME where the command takes them, or use a work session that names an account"
 	)
 	tests := []struct {
 		name     string
