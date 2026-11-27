@@ -2,6 +2,7 @@ package worksession
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1218,8 +1219,8 @@ func TestWorkSessionCreateExplainsASudoPatternThatBeginsWithSudo(t *testing.T) {
 	assert.Equal(t, "Error: Failed to create work session: a --sudo pattern is the command without its leading sudo; remove the leading sudo from each pattern and run it again.\n", stderr)
 }
 
-// Every 'work-session create' line in the help is one an agent copies as is, so each must
-// pass the command's own checks with no terminal and stop only at the missing login.
+// Every 'work-session create' line in the help is copied as is, so each must pass the
+// command's own checks with no terminal and stop only at the missing login.
 func TestWorkSessionCreateExamplesPassValidationWithoutATerminal(t *testing.T) {
 	examples := createExampleArgs(t, newWorkSessionCreateCmd(cmdtest.NoClient, utils.Stdio).Example)
 	require.NotEmpty(t, examples)
@@ -1257,25 +1258,10 @@ func createExampleArgs(t *testing.T, example string) [][]string {
 		if !strings.HasPrefix(line, prefix) {
 			continue
 		}
-		var args []string
-		var word strings.Builder
-		inWord, quoted := false, false
-		for _, r := range "create " + strings.TrimPrefix(line, prefix) + " " {
-			switch {
-			case r == '"':
-				quoted, inWord = !quoted, true
-			case r == ' ' && !quoted:
-				if inWord {
-					args = append(args, word.String())
-					word.Reset()
-				}
-				inWord = false
-			default:
-				word.WriteRune(r)
-				inWord = true
-			}
-		}
-		require.False(t, quoted, "unbalanced quote in example line %q", line)
+		r := csv.NewReader(strings.NewReader("create " + strings.TrimPrefix(line, prefix)))
+		r.Comma, r.TrimLeadingSpace = ' ', true
+		args, err := r.Read()
+		require.NoError(t, err, "example line %q", line)
 		out = append(out, args)
 	}
 	return out
