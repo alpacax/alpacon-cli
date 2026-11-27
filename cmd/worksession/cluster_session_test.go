@@ -81,6 +81,7 @@ func TestTargetErrorHint(t *testing.T) {
 		{utils.ClusterNotFound, "'alpacon kube ls'"},
 		{utils.WorkSessionTargetAccountNotApplicable, "takes no account"},
 		{utils.WorkSessionExpiresExceedsMaxTTL, "shorter"},
+		{utils.SudoPolicyPatternHasSudoPrefix, `pass "systemctl restart nginx", not "sudo systemctl restart nginx"`},
 		{utils.WorkSessionScopeNotAllowed, ""},
 	}
 	for _, tt := range tests {

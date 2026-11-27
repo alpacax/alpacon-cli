@@ -17,8 +17,10 @@ import (
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1196,4 +1198,22 @@ func TestShellWordReturnsOnlyAWordEveryShellReadsBackUnchanged(t *testing.T) {
 			assert.Equal(t, tt.want, quoted)
 		})
 	}
+}
+
+const sudoPrefixRefusal = `{"code":"sudo_policy_pattern_has_sudo_prefix","field_errors":{"sudo_policies.0.commands.0":[{"code":"sudo_policy_pattern_has_sudo_prefix","message":"Invalid input."}]}}`
+
+func TestWorkSessionCreateExplainsASudoPatternThatBeginsWithSudo(t *testing.T) {
+	t.Parallel()
+	ts := cmdtest.Server(t, map[string]cmdtest.Reply{
+		"GET /api/servers/servers/":         {Status: http.StatusOK, Body: `{"count":1,"results":[{"id":"550e8400-e29b-41d4-a716-446655440000","name":"web-01"}]}`},
+		"POST /api/work-sessions/sessions/": {Status: http.StatusBadRequest, Body: sudoPrefixRefusal},
+	})
+	build := func(ios *utils.IOStreams) *cobra.Command { return newWorkSessionCreateCmd(ts.Factory(), ios) }
+	args := []string{"--scope", "command", "--server", "web-01", "--expires-in", "1h", "--purpose", "restart nginx", "--sudo", "sudo systemctl restart nginx"}
+
+	stdout, stderr, code := cmdtest.RunCaptured(build, args...)
+
+	assert.Equal(t, utils.ExitCodeGeneralError, code)
+	assert.Empty(t, stdout)
+	assert.Equal(t, "Error: Failed to create work session: a --sudo pattern is the command without its leading sudo; pass \"systemctl restart nginx\", not \"sudo systemctl restart nginx\".\n", stderr)
 }
