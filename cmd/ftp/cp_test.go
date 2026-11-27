@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"testing/synctest"
@@ -18,6 +20,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+const storageNotFoundBody = `<?xml version="1.0" encoding="UTF-8"?><Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error>`
 
 func TestReportDownloadRejectionExitsSixInEitherFormat(t *testing.T) {
 	t.Parallel()
@@ -535,6 +539,223 @@ func TestDownloadObject_FetchRefusalWithAHintSkipsTheChecklist(t *testing.T) {
 			assert.Equal(t, "my-server", serverName)
 			assert.Contains(t, err.Error(), "download failed")
 			assert.Equal(t, tt.hint, utils.RefusalHint(err))
+		})
+	}
+}
+
+type createdDownload struct{ Username, Groupname string }
+
+// downloadClientAnswering serves a download that answers path with status and body; an empty
+// path fails no request.
+func downloadClientAnswering(t *testing.T, path string, status int, body string) (*client.AlpaconClient, *createdDownload) {
+	t.Helper()
+	created := &createdDownload{}
+	return &client.AlpaconClient{
+		BaseURL:       testutil.StubBaseURL,
+		WorkspaceName: "my-workspace",
+		HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
+			switch {
+			case r.URL.Path == path:
+				return status, body
+			case r.URL.Path == "/api/servers/servers/":
+				return http.StatusOK, `{"count": 1, "results": [{"id": "srv-id", "name": "my-server"}]}`
+			case r.Method == http.MethodPost && (r.URL.Path == "/api/webftp/downloads/" || r.URL.Path == "/api/webftp/downloads/bulk/"):
+				if err := json.NewDecoder(r.Body).Decode(created); err != nil {
+					t.Errorf("decode the download create: %v", err)
+				}
+				return http.StatusCreated, `{"id": "t-1", "command": "cmd-1", "download_url": "http://stub.invalid/blob"}`
+			case r.URL.Path == "/api/events/commands/cmd-1/":
+				return http.StatusOK, `{"id": "cmd-1", "status": "completed", "success": true}`
+			case r.URL.Path == "/api/webftp/downloads/t-1/status/":
+				return http.StatusOK, `{"success": true, "message": "done"}`
+			case r.URL.Path == "/blob":
+				return http.StatusOK, "content"
+			default:
+				return http.StatusNotImplemented, `{}`
+			}
+		}),
+	}, created
+}
+
+func TestDownloadObject_SingleFileArrivesInDest(t *testing.T) {
+	t.Parallel()
+	ac, created := downloadClientAnswering(t, "", 0, "")
+	dest := t.TempDir()
+
+	var serverName string
+	var err error
+	synctest.Test(t, func(t *testing.T) {
+		serverName, err = downloadObject(ac, []string{"my-server:/tmp/a.txt"}, dest, "alice", "staff", false, "")
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "my-server", serverName)
+	assert.Equal(t, createdDownload{Username: "alice", Groupname: "staff"}, *created)
+	got, readErr := os.ReadFile(filepath.Join(dest, "a.txt"))
+	require.NoError(t, readErr)
+	assert.Equal(t, "content", string(got))
+}
+
+func TestDownloadObject_FetchNotFoundNamesTheRemotePathInsteadOfTheGenericChecklist(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                string
+		remotePath          string
+		username, groupname string
+		recursive           bool
+		entry               string
+		accountLine         string
+	}{
+		{
+			name:        "no account flags",
+			remotePath:  "/tmp/no-such-file.txt",
+			entry:       "file",
+			accountLine: "Your account can read the file, or name one that can with -u and -g",
+		},
+		{
+			name:        "both account flags",
+			remotePath:  "/tmp/no-such-file.txt",
+			entry:       "file",
+			username:    "alice",
+			groupname:   "staff",
+			accountLine: "The account the transfer ran as (user 'alice', group 'staff') exists on the server and can read the file",
+		},
+		{
+			name:        "only a group",
+			remotePath:  "/tmp/no-such-file.txt",
+			entry:       "file",
+			groupname:   "staff",
+			accountLine: "The account the transfer ran as (group 'staff') exists on the server and can read the file",
+		},
+		{
+			name:        "recursive folder",
+			remotePath:  "/tmp/no-such-dir",
+			recursive:   true,
+			entry:       "folder",
+			accountLine: "Your account can read the folder, or name one that can with -u and -g",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ac, created := downloadClientAnswering(t, "/blob", http.StatusNotFound, storageNotFoundBody)
+			dest := t.TempDir()
+
+			var serverName string
+			var err error
+			synctest.Test(t, func(t *testing.T) { // the fake clock spends the command poll's wait at once
+				serverName, err = downloadObject(ac, []string{"my-server:" + tt.remotePath}, dest, tt.username, tt.groupname, tt.recursive, "")
+			})
+
+			assert.Equal(t, "my-server", serverName)
+			assert.Equal(t, createdDownload{Username: tt.username, Groupname: tt.groupname}, *created)
+			var exitErr *utils.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, utils.ExitCodeGeneralError, exitErr.Code)
+			ios, _, _ := utils.TestIOStreams()
+			var output bytes.Buffer
+			ios.FprintExitError(&output, exitErr)
+			assert.Contains(t, output.String(), "'"+tt.remotePath+"' was not found on server 'my-server', or the transfer's account could not read it.\n\n"+
+				"Please check:\n"+
+				"  • The path is correct and the "+tt.entry+" exists\n"+
+				"  • "+tt.accountLine+"\n")
+			assert.NotContains(t, output.String(), "This might be due to")
+		})
+	}
+}
+
+func TestDownloadObject_FetchNotFoundKeepsItsStatusInTheJSONEnvelope(t *testing.T) {
+	t.Parallel()
+	ac, _ := downloadClientAnswering(t, "/blob", http.StatusNotFound, storageNotFoundBody)
+	dest := t.TempDir()
+
+	var err error
+	synctest.Test(t, func(t *testing.T) {
+		_, err = downloadObject(ac, []string{"my-server:/tmp/no-such-file.txt"}, dest, "", "", false, "")
+	})
+
+	var exitErr *utils.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	ios, _, _ := utils.TestIOStreams()
+	require.NoError(t, ios.SetOutputFormat(utils.OutputFormatJSON))
+	var output bytes.Buffer
+	ios.FprintExitError(&output, exitErr)
+	var envelope map[string]any
+	require.NoError(t, json.Unmarshal(output.Bytes(), &envelope), "output: %s", output.String())
+	assert.Equal(t, "http_404", envelope["error_code"])
+	assert.InDelta(t, http.StatusNotFound, envelope["http_status"], 0)
+	assert.Contains(t, envelope["message"], "'/tmp/no-such-file.txt' was not found on server 'my-server'")
+}
+
+func TestDownloadObject_NotFoundFromAnotherRequestIsNotReportedAsAMissingFile(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, path, body string
+	}{
+		{name: "the download create", path: "/api/webftp/downloads/", body: `{"code": "not_found"}`},
+		{name: "the download create saying the download failed", path: "/api/webftp/downloads/", body: `{"detail": "download failed"}`},
+		{name: "the command poll", path: "/api/events/commands/cmd-1/", body: `{"code": "not_found"}`},
+		{name: "the transfer status after the file arrived", path: "/api/webftp/downloads/t-1/status/", body: `{"detail": "download failed"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ac, _ := downloadClientAnswering(t, tt.path, http.StatusNotFound, tt.body)
+			dest := t.TempDir()
+
+			var err error
+			synctest.Test(t, func(t *testing.T) {
+				_, err = downloadObject(ac, []string{"my-server:/tmp/a.txt"}, dest, "", "", false, "")
+			})
+
+			require.Error(t, err)
+			assert.Equal(t, http.StatusNotFound, utils.HTTPStatusCode(err), "the 404 must come from %s: %v", tt.path, err)
+			assert.NotContains(t, err.Error(), "was not found on server")
+		})
+	}
+}
+
+// A bulk archive names no single path, and another status, such as an expired URL's 403, says
+// nothing about the file.
+func TestDownloadObject_OtherStorageRefusalsKeepTheGenericChecklist(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		sources []string
+		status  int
+		body    string
+	}{
+		{
+			name:    "a bulk archive that is not found",
+			sources: []string{"my-server:/tmp/a.txt", "my-server:/tmp/b.txt"},
+			status:  http.StatusNotFound,
+			body:    storageNotFoundBody,
+		},
+		{
+			name:    "an expired download URL",
+			sources: []string{"my-server:/tmp/a.txt"},
+			status:  http.StatusForbidden,
+			body:    `<?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>Request has expired</Message></Error>`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ac, _ := downloadClientAnswering(t, "/blob", tt.status, tt.body)
+			dest := t.TempDir()
+
+			var err error
+			synctest.Test(t, func(t *testing.T) {
+				_, err = downloadObject(ac, tt.sources, dest, "", "", false, "")
+			})
+
+			var exitErr *utils.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			ios, _, _ := utils.TestIOStreams()
+			var output bytes.Buffer
+			ios.FprintExitError(&output, exitErr)
+			assert.Contains(t, output.String(), fmt.Sprintf("download failed with client error: %d\n\nThis might be due to", tt.status))
+			assert.NotContains(t, output.String(), "was not found on server")
 		})
 	}
 }
