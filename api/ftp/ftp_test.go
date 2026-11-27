@@ -1999,62 +1999,177 @@ func noDownloadRequestClient(t *testing.T) *client.AlpaconClient {
 
 func TestCompleteDownloads_DoNotFetchARefusedCommand(t *testing.T) {
 	t.Parallel()
-	statuses := []string{"rejected", "denied"}
-	for _, status := range statuses {
-		t.Run("single "+status, func(t *testing.T) {
-			t.Parallel()
-			ac := commandOutcomeClient(t, status, nil)
-			fetched := false
+	for _, status := range []string{"rejected", "denied"} {
+		for _, mode := range []downloadMode{singleDownload, bulkDownload} {
+			t.Run(string(mode)+" "+status, func(t *testing.T) {
+				t.Parallel()
 
-			var err error
-			synctest.Test(t, func(t *testing.T) {
-				_, err = completeSingleDownloadWith(ac, "server-1", []byte(`{"id":"download-1","command":"cmd-1","download_url":"https://files.example/a"}`), func(string) (int64, error) {
-					fetched = true
-					return 0, nil
-				})
+				dest := t.TempDir()
+
+				fetched, err := runCompleteDownload(t, mode, refusedOutcome(status), dest)
+
+				var rejected *event.CommandRejectedError
+				require.ErrorAs(t, err, &rejected)
+				assert.False(t, fetched, "a refused command must not fetch the file")
+				entries, readErr := os.ReadDir(dest)
+				require.NoError(t, readErr)
+				assert.Empty(t, entries, "a refused download leaves nothing in dest")
 			})
-
-			var rejected *event.CommandRejectedError
-			require.ErrorAs(t, err, &rejected)
-			assert.False(t, fetched, "a refused command must not fetch the file")
-		})
-		t.Run("bulk "+status, func(t *testing.T) {
-			t.Parallel()
-			var fetched atomic.Bool
-			ac := commandOutcomeClient(t, status, func() { fetched.Store(true) })
-
-			dest := t.TempDir()
-
-			var err error
-			synctest.Test(t, func(t *testing.T) {
-				err = completeBulkDownload(ac, "server-1", []byte(`{"id":"download-1","command":"cmd-1","download_url":"`+ac.BaseURL+`/download"}`), []string{"/a", "/b"}, dest)
-			})
-
-			var rejected *event.CommandRejectedError
-			require.ErrorAs(t, err, &rejected)
-			assert.False(t, fetched.Load(), "a refused command must not fetch the archive")
-		})
+		}
 	}
 }
 
-func commandOutcomeClient(t *testing.T, status string, fetched func()) *client.AlpaconClient {
+func TestCompleteDownloads_StopOnAFailedCommandWithItsResult(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		outcome map[string]any
+		want    string
+	}{
+		{
+			name:    "completed with success false",
+			outcome: map[string]any{"id": "cmd-1", "status": "completed", "success": false, "result": "there is no corresponding alice groupname in this server\n"},
+			want:    "there is no corresponding alice groupname in this server",
+		},
+		{
+			name:    "completed with success false and no result",
+			outcome: map[string]any{"id": "cmd-1", "status": "completed", "success": false, "result": ""},
+			want:    "download command failed on the server",
+		},
+		{
+			name:    "completed with success false and a blank result",
+			outcome: map[string]any{"id": "cmd-1", "status": "completed", "success": false, "result": " \n"},
+			want:    "download command failed on the server",
+		},
+		{
+			name:    "success status with success false",
+			outcome: map[string]any{"id": "cmd-1", "status": "success", "success": false, "result": "permission denied"},
+			want:    "permission denied",
+		},
+		{
+			name:    "failed without success",
+			outcome: map[string]any{"id": "cmd-1", "status": "failed", "result": "/a: No such file or directory"},
+			want:    "/a: No such file or directory",
+		},
+		{
+			name:    "a result naming the presigned URL",
+			outcome: map[string]any{"id": "cmd-1", "status": "completed", "success": false, "result": `Put "` + presignedURL + `": dial tcp: connection refused`},
+			want:    `Put "https://bucket.example.com/obj/file.bin": dial tcp: connection refused`,
+		},
+		{
+			name:    "stuck",
+			outcome: map[string]any{"id": "cmd-1", "status": "stuck", "result": ""},
+			want:    "command failed with status: stuck",
+		},
+		{
+			name:    "error",
+			outcome: map[string]any{"id": "cmd-1", "status": "error", "result": ""},
+			want:    "command failed with status: error",
+		},
+		{
+			name:    "cancelled",
+			outcome: map[string]any{"id": "cmd-1", "status": "cancelled", "result": ""},
+			want:    "command failed with status: cancelled",
+		},
+		{
+			name:    "stuck with a phase",
+			outcome: map[string]any{"id": "cmd-1", "status": "stuck", "error_phase": "agent_disconnected", "result": ""},
+			want:    "command failed: [agent_disconnected] agent never acknowledged the command (likely disconnected) (status=stuck)",
+		},
+		{
+			name:    "a status the CLI does not know",
+			outcome: map[string]any{"id": "cmd-1", "status": "awaiting_approval", "result": ""},
+			want:    "unexpected download command status: awaiting_approval",
+		},
+	}
+	for _, tt := range tests {
+		for _, mode := range []downloadMode{singleDownload, bulkDownload} {
+			t.Run(string(mode)+" "+tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				dest := t.TempDir()
+
+				fetched, err := runCompleteDownload(t, mode, tt.outcome, dest)
+
+				require.EqualError(t, err, tt.want)
+				assert.False(t, fetched, "a failed command produced nothing to fetch")
+				entries, readErr := os.ReadDir(dest)
+				require.NoError(t, readErr)
+				assert.Empty(t, entries, "a failed download leaves nothing in dest")
+			})
+		}
+	}
+}
+
+func TestCompleteDownloads_FetchAfterASuccessfulCommand(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		outcome map[string]any
+	}{
+		{name: "completed with success true", outcome: map[string]any{"id": "cmd-1", "status": "completed", "success": true}},
+		{name: "completed without a success field", outcome: map[string]any{"id": "cmd-1", "status": "completed", "result": "done"}},
+		{name: "success status", outcome: map[string]any{"id": "cmd-1", "status": "success", "success": true}},
+	}
+	for _, tt := range tests {
+		for _, mode := range []downloadMode{singleDownload, bulkDownload} {
+			t.Run(string(mode)+" "+tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				dest := t.TempDir()
+
+				fetched, err := runCompleteDownload(t, mode, tt.outcome, dest)
+
+				require.NoError(t, err)
+				assert.True(t, fetched, "a successful command's file must be fetched")
+				assert.FileExists(t, filepath.Join(dest, "a"))
+			})
+		}
+	}
+}
+
+type downloadMode string
+
+const (
+	singleDownload downloadMode = "single"
+	bulkDownload   downloadMode = "bulk"
+)
+
+func runCompleteDownload(t *testing.T, mode downloadMode, outcome map[string]any, dest string) (fetched bool, err error) {
+	t.Helper()
+	var hit atomic.Bool
+	ac := commandOutcomeClient(t, outcome, func() { hit.Store(true) })
+	postBody := []byte(`{"id":"download-1","command":"cmd-1","download_url":"` + ac.BaseURL + `/download"}`)
+	synctest.Test(t, func(t *testing.T) {
+		if mode == singleDownload {
+			_, err = completeSingleDownload(ac, "server-1", postBody, remoteFile{path: "/a", name: "a"}, dest, false)
+			return
+		}
+		err = completeBulkDownload(ac, "server-1", postBody, []string{"/a", "/b"}, dest)
+	})
+	return hit.Load(), err
+}
+
+func refusedOutcome(status string) map[string]any {
+	outcome := map[string]any{"id": "cmd-1", "status": status, "result": "account denied"}
+	if status == "denied" {
+		outcome["denial_code"] = "account_not_resolved"
+	} else {
+		outcome["rejection_cause"] = "risk_denied"
+	}
+	return outcome
+}
+
+func commandOutcomeClient(t *testing.T, outcome map[string]any, fetched func()) *client.AlpaconClient {
 	t.Helper()
 	zipBody := createTestZip(t, map[string]string{"a": "content"})
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/events/commands/cmd-1/":
-			outcome := map[string]any{"id": "cmd-1", "status": status, "result": "account denied"}
-			if status == "denied" {
-				outcome["denial_code"] = "account_not_resolved"
-			} else {
-				outcome["rejection_cause"] = "risk_denied"
-			}
 			_ = json.NewEncoder(w).Encode(outcome)
 		case "/download":
-			if fetched != nil {
-				fetched()
-			}
+			fetched()
 			w.Header().Set("Content-Type", "application/zip")
 			_, _ = w.Write(zipBody)
 		default:

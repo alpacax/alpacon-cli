@@ -13,8 +13,10 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/cmdtest"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -471,9 +473,9 @@ func TestWantsPermissionAdvice(t *testing.T) {
 	}
 }
 
-// refusedDownloadClient serves a download whose final fetch is answered with
-// status and body.
-func refusedDownloadClient(status int, body string) *client.AlpaconClient {
+// downloadClient serves a single-file download from my-server whose command
+// detail is detail and whose final fetch is answered with blobStatus and blobBody.
+func downloadClient(detail string, blobStatus int, blobBody string) *client.AlpaconClient {
 	return &client.AlpaconClient{
 		BaseURL:       testutil.StubBaseURL,
 		WorkspaceName: "my-workspace",
@@ -484,16 +486,20 @@ func refusedDownloadClient(status int, body string) *client.AlpaconClient {
 			case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/downloads/":
 				return http.StatusCreated, `{"id": "t-1", "command": "cmd-1", "download_url": "http://stub.invalid/blob"}`
 			case r.URL.Path == "/api/events/commands/cmd-1/":
-				return http.StatusOK, `{"id": "cmd-1", "status": "completed", "success": true}`
+				return http.StatusOK, detail
 			case r.URL.Path == "/api/webftp/downloads/t-1/status/":
 				return http.StatusOK, `{"success": true, "message": "done"}`
 			case r.URL.Path == "/blob":
-				return status, body
+				return blobStatus, blobBody
 			default:
 				return http.StatusOK, `{}`
 			}
 		}),
 	}
+}
+
+func refusedDownloadClient(status int, body string) *client.AlpaconClient {
+	return downloadClient(`{"id": "cmd-1", "status": "completed", "success": true}`, status, body)
 }
 
 // A hinted fetch refusal keeps its hint instead of using the download checklist,
@@ -548,22 +554,7 @@ func TestDownloadObject_DeniedCommandSkipsTheChecklists(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			detail := fmt.Sprintf(`{"id": "cmd-1", "status": "denied", "denial_code": "future_reason", "result": %q}`, tc.result)
-			ac := &client.AlpaconClient{
-				BaseURL:       testutil.StubBaseURL,
-				WorkspaceName: "my-workspace",
-				HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
-					switch {
-					case r.URL.Path == "/api/servers/servers/":
-						return http.StatusOK, `{"count": 1, "results": [{"id": "srv-id", "name": "my-server"}]}`
-					case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/downloads/":
-						return http.StatusCreated, `{"id": "t-1", "command": "cmd-1", "download_url": "http://stub.invalid/blob"}`
-					case r.URL.Path == "/api/events/commands/cmd-1/":
-						return http.StatusOK, detail
-					default:
-						return http.StatusOK, `{}`
-					}
-				}),
-			}
+			ac := downloadClient(detail, http.StatusOK, `{}`)
 
 			var err error
 			synctest.Test(t, func(t *testing.T) {
@@ -573,6 +564,47 @@ func TestDownloadObject_DeniedCommandSkipsTheChecklists(t *testing.T) {
 			var rejected *event.CommandRejectedError
 			require.ErrorAs(t, err, &rejected)
 			assert.Equal(t, utils.ExitCodeNotApproved, rejected.ExitCode())
+		})
+	}
+}
+
+// Serial: it sets HOME, which the WorkSession lookup reads.
+func TestCp_FailedTransferCommandReportsItsResultInsteadOfTheFetch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir reads it on Windows
+	t.Setenv("ALPACON_WORK_SESSION", "")
+	tests := []struct {
+		name   string
+		result string
+		want   string
+	}{
+		{
+			name:   "plain result",
+			result: `there is no corresponding alice groupname in this server\n`,
+			want:   "there is no corresponding alice groupname in this server",
+		},
+		{
+			name:   "result with a terminal escape sequence",
+			result: `\u001b[2Jno such group: alice`,
+			want:   "no such group: alice",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ac := downloadClient(`{"id": "cmd-1", "status": "completed", "success": false, "result": "`+tt.result+`"}`, http.StatusNotFound, `{}`)
+			newClient := func() (*client.AlpaconClient, error) { return ac, nil }
+
+			var stderr string
+			var code int
+			synctest.Test(t, func(t *testing.T) {
+				_, stderr, code = cmdtest.RunCaptured(func(ios *utils.IOStreams) *cobra.Command { return NewCpCmd(newClient, ios) }, "alice@my-server:/tmp/a.txt", t.TempDir())
+			})
+
+			assert.Equal(t, utils.ExitCodeGeneralError, code)
+			assert.Contains(t, stderr, tt.want)
+			assert.NotContains(t, stderr, "404")
+			assert.NotContains(t, stderr, "\x1b", "server text must not reach the terminal as a control sequence")
 		})
 	}
 }
