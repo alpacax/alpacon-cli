@@ -2,6 +2,7 @@ package worksession
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1216,4 +1217,53 @@ func TestWorkSessionCreateExplainsASudoPatternThatBeginsWithSudo(t *testing.T) {
 	assert.Equal(t, utils.ExitCodeGeneralError, code)
 	assert.Empty(t, stdout)
 	assert.Equal(t, "Error: Failed to create work session: a --sudo pattern is the command without its leading sudo; remove the leading sudo from each pattern and run it again.\n", stderr)
+}
+
+// Every 'work-session create' line in the help is copied as is, so each must pass the
+// command's own checks with no terminal and stop only at the missing login.
+func TestWorkSessionCreateExamplesPassValidationWithoutATerminal(t *testing.T) {
+	examples := createExampleArgs(t, newWorkSessionCreateCmd(cmdtest.NoClient, utils.Stdio).Example)
+	require.NotEmpty(t, examples)
+	for i, args := range examples {
+		t.Run(fmt.Sprintf("example_%d", i+1), func(t *testing.T) {
+			root := NewWorkSessionCmd(cmdtest.NoClient, utils.Stdio)
+
+			_, stderr, exitCode := runWorkSessionTree(t, root, agentHelperEnv(), utils.OutputFormatTable,
+				"http://127.0.0.1:1", args...)
+
+			assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "args: %q\nstderr: %s", args, stderr)
+			assert.Contains(t, stderr, "Connection to Alpacon API failed", "args: %q", args)
+		})
+	}
+}
+
+func TestCreateExampleArgsJoinsContinuationsAndKeepsQuotedWords(t *testing.T) {
+	t.Parallel()
+	example := "  # a comment\n  alpacon exec web-01 -- uptime\n" +
+		"  alpacon work-session create --purpose \"nginx hotfix\" \\\n    --sudo \"tail -f /var/log/*.log\""
+
+	got := createExampleArgs(t, example)
+
+	assert.Equal(t, [][]string{{"create", "--purpose", "nginx hotfix", "--sudo", "tail -f /var/log/*.log"}}, got)
+}
+
+// createExampleArgs returns the arguments after 'alpacon work-session' of every create line in
+// example, joining backslash continuations and unquoting double-quoted words.
+func createExampleArgs(t *testing.T, example string) [][]string {
+	t.Helper()
+	const prefix = "alpacon work-session create "
+	var out [][]string
+	for line := range strings.SplitSeq(strings.ReplaceAll(example, "\\\n", " "), "\n") {
+		line = strings.TrimSpace(line)
+		require.False(t, strings.HasPrefix(line, "-"), "example line %q is cut off from its command; a backslash is missing", line)
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		r := csv.NewReader(strings.NewReader("create " + strings.TrimPrefix(line, prefix)))
+		r.Comma, r.TrimLeadingSpace = ' ', true
+		args, err := r.Read()
+		require.NoError(t, err, "example line %q", line)
+		out = append(out, args)
+	}
+	return out
 }

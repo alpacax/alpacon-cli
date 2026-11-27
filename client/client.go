@@ -343,7 +343,7 @@ func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 	case utils.SudoVerifyCredentialCannotProveMFA:
 		return "this credential cannot complete sudo MFA—sign in with 'alpacon login' to complete sudo MFA", true
 	case utils.SudoPolicyBypassAgentSessionNeedsPresence, utils.SudoPolicySessionAuthorizedAgentSessionNeedsPresence:
-		return "an AI agent session cannot be given session-authorized sudo (--sudo) unless a person is present, which the server reads from a sign-in that completed MFA shortly before—run 'alpacon login' again from your own terminal, completing MFA, then retry right away; or drop --sudo, and each sudo command asks for MFA", true
+		return "an AI agent session cannot be given session-authorized sudo (--sudo) unless a person is present, which the server reads from a sign-in that completed MFA shortly before—run 'alpacon login' again from your own terminal, completing MFA, then retry right away", true
 	case utils.SudoPolicyBypassAgentSessionNeedsApproval, utils.SudoPolicySessionAuthorizedAgentSessionNeedsApproval:
 		return "session-authorized sudo cannot be bound to an AI agent session directly—request it on the work session with 'alpacon work-session update <ID> --sudo \"<command without sudo>\"', and a person approves the change", true
 	case utils.AuthTokenMissing, utils.AuthAuthenticationFailed:
