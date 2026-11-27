@@ -602,16 +602,20 @@ func TestDownloadObject_FetchNotFoundNamesTheRemotePathInsteadOfTheGenericCheckl
 		name                string
 		remotePath          string
 		username, groupname string
+		recursive           bool
+		entry               string
 		accountLine         string
 	}{
 		{
 			name:        "no account flags",
 			remotePath:  "/tmp/no-such-file.txt",
+			entry:       "file",
 			accountLine: "Your account can read the file, or name one that can with -u and -g",
 		},
 		{
 			name:        "both account flags",
 			remotePath:  "/tmp/no-such-file.txt",
+			entry:       "file",
 			username:    "alice",
 			groupname:   "staff",
 			accountLine: "The account the transfer ran as (user 'alice', group 'staff') exists on the server and can read the file",
@@ -619,8 +623,16 @@ func TestDownloadObject_FetchNotFoundNamesTheRemotePathInsteadOfTheGenericCheckl
 		{
 			name:        "only a group",
 			remotePath:  "/tmp/no-such-file.txt",
+			entry:       "file",
 			groupname:   "staff",
 			accountLine: "The account the transfer ran as (group 'staff') exists on the server and can read the file",
+		},
+		{
+			name:        "recursive folder",
+			remotePath:  "/tmp/no-such-dir",
+			recursive:   true,
+			entry:       "folder",
+			accountLine: "Your account can read the folder, or name one that can with -u and -g",
 		},
 	}
 	for _, tt := range tests {
@@ -632,7 +644,7 @@ func TestDownloadObject_FetchNotFoundNamesTheRemotePathInsteadOfTheGenericCheckl
 			var serverName string
 			var err error
 			synctest.Test(t, func(t *testing.T) { // the fake clock spends the command poll's wait at once
-				serverName, err = downloadObject(ac, []string{"my-server:" + tt.remotePath}, dest, tt.username, tt.groupname, false, "")
+				serverName, err = downloadObject(ac, []string{"my-server:" + tt.remotePath}, dest, tt.username, tt.groupname, tt.recursive, "")
 			})
 
 			assert.Equal(t, "my-server", serverName)
@@ -645,7 +657,7 @@ func TestDownloadObject_FetchNotFoundNamesTheRemotePathInsteadOfTheGenericCheckl
 			ios.FprintExitError(&output, exitErr)
 			assert.Contains(t, output.String(), "'"+tt.remotePath+"' was not found on server 'my-server', or the transfer's account could not read it.\n\n"+
 				"Please check:\n"+
-				"  • The path is correct and the file exists\n"+
+				"  • The path is correct and the "+tt.entry+" exists\n"+
 				"  • "+tt.accountLine+"\n")
 			assert.NotContains(t, output.String(), "This might be due to")
 		})
