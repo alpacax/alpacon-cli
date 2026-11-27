@@ -72,15 +72,21 @@ func isURLScheme(s string) bool {
 	return s != ""
 }
 
-var textURL = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]+`)
+var (
+	doubleQuotedURL = regexp.MustCompile(`"[A-Za-z][A-Za-z0-9+.-]*://[^"\n]*"`)
+	textURL         = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s"<>]+`) // an apostrophe can sit in a path
+)
 
 // RedactURLsInText applies RedactURL to every URL in s.
 func RedactURLsInText(s string) string {
-	// A quoted URL runs to its closing quote, so an apostrophe or space in its path cannot end it early.
-	s = quotedURL.ReplaceAllStringFunc(s, func(quoted string) string {
+	// A double-quoted URL runs to its closing quote on the same line, so a space in its path cannot end it early.
+	s = doubleQuotedURL.ReplaceAllStringFunc(s, func(quoted string) string {
 		return `"` + RedactURL(quoted[1:len(quoted)-1]) + `"`
 	})
-	return textURL.ReplaceAllStringFunc(s, RedactURL)
+	return textURL.ReplaceAllStringFunc(s, func(match string) string {
+		bare := strings.TrimSuffix(match, "'") // the closing quote of a single-quoted URL
+		return RedactURL(bare) + match[len(bare):]
+	})
 }
 
 // redactedURLError prints a transport error with its URL redacted. Its cause is
