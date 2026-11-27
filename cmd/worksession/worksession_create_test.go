@@ -1255,6 +1255,7 @@ func createExampleArgs(t *testing.T, example string) [][]string {
 	var out [][]string
 	for line := range strings.SplitSeq(strings.ReplaceAll(example, "\\\n", " "), "\n") {
 		line = strings.TrimSpace(line)
+		require.False(t, strings.HasPrefix(line, "-"), "example line %q is cut off from its command; a backslash is missing", line)
 		if !strings.HasPrefix(line, prefix) {
 			continue
 		}
