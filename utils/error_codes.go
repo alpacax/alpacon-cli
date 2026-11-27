@@ -15,6 +15,11 @@ import (
 const (
 	ServiceTokenAccountNotOwn     = "service_token_account_not_own"
 	ApplicationSystemUserNotFound = "application_system_user_not_found"
+
+	// Validation codes the server may send with only the generic "Invalid input." message.
+	ServerUsernameGroupnameInvalid = "server_username_groupname_invalid"
+	WebFTPNameTooLong              = "webftp_name_too_long"
+	WebFTPInvalidPath              = "webftp_invalid_path"
 )
 
 // Synthetic error_code values: the CLI's own, for failures the server sent no code for.
